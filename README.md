@@ -1,175 +1,110 @@
-<div align="center">
-  <h1>BenchFlow</h1>
-  <p>The universal environment framework — a benchmark is just a frozen environment.</p>
-  <a href="https://pypi.org/project/benchflow/" target="_blank">
-    <img src="https://img.shields.io/badge/PyPI-benchflow-3775A9?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI package">
-  </a>
-  <a href="https://discord.gg/mZ9Rc8q8W3" target="_blank">
-    <img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord">
-  </a>
-</div>
+# SkillsBench 统一 Benchmark Executor
 
-## What
+本仓库是课题组共享的 SkillsBench **task rollout 执行器**。SkillGen、
+SkillRevise、SkillHone 等方法可以在仓库外实现各自的诊断、修复与 refinement，
+但凡需要让模型真正执行一次 task，都应调用这一份 executor，以统一 OpenHands、
+Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier 和结果证据。
 
-BenchFlow is a universal environment framework: it runs AI agents against task environments and scores them through one hardened contract. **A benchmark is just a frozen environment** — point BenchFlow at any of them, drive it with *any* ACP agent, and run single-agent, multi-agent, or multi-round patterns over the same Scene-based lifecycle.
+> 第一次拿到交付 ZIP，请从
+> [DELIVERY_GUIDE.md](./DELIVERY_GUIDE.md#0-第一次使用从解压到一条有效-rollout)
+> 开始，不要按上游 BenchFlow 的普通安装教程操作。
 
-- **Run any benchmark** — three-layer routing runs supported frameworks natively, translates unknown formats and proves equivalence with a parity gate, or runs a bespoke harness as-is; every layer emits one scored-trajectory contract. See [Run any benchmark](./docs/running-any-benchmark.md)
-- **Any ACP agent** — Gemini CLI, Claude Code, Codex, OpenCode, OpenHands, Pi, or your own
-- **Single + multi + progressive** — single-agent / multi-agent (coder + reviewer, simulated user) / multi-round with a Python `BaseUser` callback
-- **Loop strategies** — wrap any agent in a `--loop-strategy` (`verify-retry`, `self-review`); every rollout captures a per-iteration reward + token trajectory, so you can plot capability against cost (can a cheap model + loops match an expensive one at equal token spend?)
-- **`task.md` tasks** — one file (YAML frontmatter + prompt body) replaces the split `task.toml` + `instruction.md` layout; author with `bench tasks init` / `check` / `migrate` / `export`
-- **Hosted environments** — run external PrimeIntellect / Verifiers environments through `--source-env`, without converting them to BenchFlow tasks
-- **Sandboxes** — Docker locally, Apple Container on Apple Silicon Macs, Daytona for parallel cloud runs (orphaned sandboxes auto-reaped at eval start), Modal for serverless/GPU-backed task environments, and AgentCore for AWS-hosted runtimes
-- **Hardened verifier** — defaults block BenchJack/Meerkat-style reward-hacking; tasks opt out per-feature
-- **Training-ready output** — scored rollouts emit a Verifiers/ORS reward record and best-effort ATIF (`trainer/atif.json`) / ADP (`trainer/adp.jsonl`) conversions; ATIF is omitted when the trajectory is empty, and conversion errors are reported in the rollout result
+## 文档导航
 
-## Quickstart
+| 你要做什么 | 阅读位置 |
+|---|---|
+| 第一次安装并跑通一条任务 | [DELIVERY_GUIDE.md：第一次使用](./DELIVERY_GUIDE.md#0-第一次使用从解压到一条有效-rollout) |
+| 手动运行 no-skill / original-skill / method-skill | [DELIVERY_GUIDE.md：人工或调试运行](./DELIVERY_GUIDE.md#4-入口-a人工或调试运行) |
+| 在 SkillRevise、SkillHone 等算法中调用 rollout | [DELIVERY_GUIDE.md：修复算法自动调用](./DELIVERY_GUIDE.md#5-入口-b修复算法自动调用) |
+| 配置 WSL、Linux 服务器或临时 SSH 代理 | [DELIVERY_GUIDE.md：网络与代理](./DELIVERY_GUIDE.md#21-先分清四条网络链路) |
+| 判断结果能否进入方法比较 | [DELIVERY_GUIDE.md：返回结果](./DELIVERY_GUIDE.md#7-返回结果与判定规则) |
+| 理解固定协议、Skill 预载和 iteration 定义 | [BENCHMARK_EXECUTOR.md](./BENCHMARK_EXECUTOR.md) |
+| 查看机器可读的固定版本 | [BENCHMARK_EXECUTOR_VERSION.json](./BENCHMARK_EXECUTOR_VERSION.json) |
 
-```bash
-# Install or upgrade to the latest stable BenchFlow CLI
-uv tool install --python 3.12 --upgrade benchflow
+## 交付包包含什么
 
-# Run a benchmark: any task source, any ACP agent, any sandbox
-export GEMINI_API_KEY=...            # or claude auth login / codex login for subscription auth
-bench eval run \
-    --source-repo benchflow-ai/skillsbench --source-path tasks \
-    --agent gemini --model gemini-3.1-flash-lite-preview \
-    --sandbox docker
-```
+- 固定版本的 BenchFlow 源码及锁定依赖；
+- OpenHands benchmark adapter；
+- `skillrepair-v1` 公共 Python API；
+- no-skill、original-skill、method-skill 三种条件；
+- 每个 BenchFlow execution Step 最多 60 次根 Agent iteration；
+- persistent `AgentContext` 中的完整 `SKILL.md` 预载与证据；
+- 动态 LiteLLM、本机 Docker/原生 Linux host-gateway 适配和容器内健康检查；
+- result、trajectory、verifier 与 Skill exposure 的统一结果契约。
 
-Each run writes a per-task `result.json` (rewards, trajectory summary, and token usage), full events under `trajectory/`, and a job `summary.json` (pass-rate, cost, and — for looped runs — a pass@iteration convergence curve). New here? Start with [Getting started](./docs/getting-started.md), or paste the [agent quickstart prompt](./docs/agent-quickstart.md) into Claude Code / Codex / Gemini CLI and let it drive the whole thing.
+交付包**不包含**：
 
-## Install
+- SkillsBench task 仓库或 Core-25 任务副本；
+- GPT-5.2、DeepSeek 等供应商的 API key；
+- 各方法自己的 diagnosis、repair、refinement 或候选选择代码；
+- 已有实验轨迹和运行结果。
 
-Install or upgrade to the latest stable release from PyPI with `uv`:
+这些内容必须由实验协调者或各方法负责人另行提供。正式比较时，所有同学必须使用
+同一 SkillsBench commit、Core-25 清单、模型路由和 reasoning effort。
 
-```bash
-uv tool install --python 3.12 --upgrade benchflow
-```
+## 第一次使用的最短路径
 
-- Confirm with `bench --version`.
-- BenchFlow CLI releases require Python 3.12 or newer. Keep `--python 3.12`
-  in the install command so `uv` does not resolve an older Python-compatible
-  package that lacks the CLI entrypoints.
-- If you see `Executables already exist: bench, benchflow`, re-run with `uv tool install --python 3.12 --upgrade --force benchflow` to replace stale entrypoints from an older install.
-- For Daytona, Modal, or AgentCore extras, install the relevant optional package, for example `uv tool install --python 3.12 --upgrade 'benchflow[sandbox-daytona]'`.
+1. 从课题组 GitHub 固定 commit/tag 获取源码，或在 Linux、macOS、WSL2 中解压
+   对应 release ZIP；Windows 原生 Python 不受支持。
+2. 启动 Docker，并确认 `docker version` 能同时看到 Client 和 Server。
+3. 在本仓库运行 `uv sync --extra dev --locked`，不要安装 PyPI 版 BenchFlow。
+4. 获取课题组冻结的 SkillsBench task source，并核对 commit。
+5. 从 `.env.sample` 创建本机 `.env`，填写模型路由和对应供应商的 key。
+6. 运行不调用模型的离线测试。
+7. 明确付费后，只运行一条 original-skill smoke rollout。
+8. 只有 `comparable == true` 的结果才能进入方法比较。
 
-Internal users wanting the newest preview from `main` install the [internal preview channel](./docs/release.md) (`uv tool install --python 3.12 --prerelease allow --upgrade benchflow`).
+完整命令、结果判定和排错方法都在
+[DELIVERY_GUIDE.md](./DELIVERY_GUIDE.md) 中。
 
-**Requirements & auth.** Install [uv](https://docs.astral.sh/uv/); the
-`--python 3.12` flag lets it provision a compatible interpreter for the tool
-install. Set `DAYTONA_API_KEY` for Daytona or configure Modal auth for Modal;
-export an agent API key (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, …) or use
-subscription auth (`claude auth login` / `codex login`). Provider-prefixed models
-may need provider-specific credentials; Azure Foundry uses `AZURE_API_KEY` +
-`AZURE_API_ENDPOINT`.
+## 三种评测条件
 
-## Documentation
+| 条件 | Skill 来源 | 主要用途 |
+|---|---|---|
+| `no-skill` | 不向 Agent 暴露 task 官方 Skill | 基础模型能力与 Skill 增量的参照 |
+| `original-skill` | task 自带的完整官方 bundle | Skill 修复方法的基线 |
+| `method-skill` | 方法提交的完整、冻结 bundle | 测量生成或修复后的效果 |
 
-Start with [Getting started](./docs/getting-started.md), then [Concepts](./docs/concepts.md) for the mental model. Prefer to have an AI coding agent run the whole quickstart for you? Paste the [agent quickstart prompt](./docs/agent-quickstart.md) into Claude Code, Codex CLI, or Gemini CLI. Then by goal:
+`method-skill` 的输入必须是完整 bundle，不是只包含本轮改动的 patch。执行器不会替
+方法自动 merge 官方 Skill 与修改文件。
 
-| If you want to… | Read |
-|------------------|------|
-| Run an eval on an existing task | [Getting started](./docs/getting-started.md) |
-| Understand how BenchFlow runs *any* benchmark (the three-layer model) | [Run any benchmark](./docs/running-any-benchmark.md) |
-| Have an AI agent install + run the quickstart end to end | [Agent quickstart prompt](./docs/agent-quickstart.md) |
-| Run an agent from the public agents repo (goose, qwen-code, prime-agent, …) | [Running external agents](./docs/external-agents.md) |
-| Understand Rollout / Scene / Role / Verifier | [Concepts](./docs/concepts.md) |
-| Author a new task | [Task authoring](./docs/task-authoring.md) |
-| Author a task in the native `task.md` format | [Native task.md authoring](./docs/task-authoring-task-md.md) |
-| Run a hosted PrimeIntellect / Verifiers environment | [CLI reference](./docs/reference/cli.md) |
-| Multi-agent: coder + reviewer, simulated user, BYOS, stateful envs | [Use cases](./docs/use-cases.md) |
-| Multi-round single-agent (progressive disclosure, oracle access) | [Progressive disclosure](./docs/progressive-disclosure.md) |
-| Skill evaluation (when the artifact is a skill, not a workspace) | [Skill eval](./docs/skill-eval.md) |
-| Understand the security model | [Sandbox hardening](./docs/sandbox-hardening.md) |
-| Use public vs internal preview SDK releases | [Release channels](./docs/release.md) |
-| CLI flags + commands | [CLI reference](./docs/reference/cli.md) |
-| Python API surface | [Python API reference](./docs/reference/python-api.md) |
+## 两个入口
 
-Notebooks and runnable example scripts live under [`docs/examples/`](./docs/examples/) so examples stay versioned with the docs that explain them.
+- 人工查看原生 rollout 或单条调试：使用仓库内的 `uv run --locked bench eval run ...`。
+- 修复算法正式接入：使用 `from benchmark_executor import BenchmarkExecutor`。
 
-> **`bench agent` vs `bench eval adopt`.** `bench agent list` / `bench agent show`
-> inspect **registered AI agents** (the solver programs like Claude Code or
-> Gemini CLI). Onboarding a third-party benchmark into `benchmarks/<name>/` is a
-> separate workflow — `bench eval adopt <source>` scaffolds and drives the
-> conversion, and `bench eval adopt <name> --verify` parity-gates it. (The legacy
-> `bench agent create|run|verify` commands still work as deprecated aliases.)
-> See the [CLI reference](./docs/reference/cli.md#bench-eval-adopt) for details.
+首次机器验收和正式方法接入都推荐 Python API：它会额外生成
+`benchmark_result.json` 并给出 `comparable`。不要在算法内部拼接 shell 命令。
 
-## Benchmark task sources
+## 不能改变的比较条件
 
-Benchmark datasets live in external Git repos and are referenced with two fields:
+- 不要执行 `uv tool install benchflow` 或 `pip install -U benchflow` 覆盖本仓库。
+- 不要为每种方法复制并修改一套 BenchFlow。
+- 不要把同一组方法放到不同模型、供应商路由、reasoning effort 或 task commit 上比较。
+- 不要把 `task_passed == false` 当作基础设施故障；先检查 `execution_ok` 和 `comparable`。
+- verifier 依赖安装失败时，即使脚本留下 `reward.txt=0`，该结果也是
+  `verifier_dep_install` / `non-comparable`，不能算作方法失败。
+- 不要因为 `artifacts/` 为空就认定任务失败；许多 task 不向 `/logs/artifacts` 写文件。
+- 不要覆盖已有 rollout 目录；每次运行使用唯一的 `rollout_id`。
 
-```yaml
-# benchmarks/harvey-lab/harvey-lab-gemini-flash-lite.yaml
-source:
-  repo: benchflow-ai/benchmarks    # GitHub org/repo
-  path: datasets/harvey-lab/tasks  # optional subpath within repo
-  ref: main                         # optional branch/tag
-agent: gemini
-model: gemini/gemini-3.1-flash-lite-preview
-```
+## 版本与上游关系
 
-Run any benchmark via the CLI:
+本项目基于 BenchFlow `v0.6.7` / commit
+`aadad44acf27f193df98f438443116d514f51fb8`，但包含课题组评测所需的 adapter 和
+执行协议约束。仓库中的 `docs/` 保留上游 BenchFlow 参考资料；它们用于理解底层
+框架，不替代本项目的交付指南。
 
-```bash
-# From a YAML config (shipped with the repo)
-bench eval run --config benchmarks/harvey-lab/harvey-lab-gemini-flash-lite.yaml
+课题组当前项目仓库为
+[linyouxue/skill-repair-benchmark](https://github.com/linyouxue/skill-repair-benchmark)
+（私有仓库，需要仓库权限）。正式实验应 checkout 协调者公布的 commit 或 release
+tag，不要无条件跟随持续变化的默认分支。
 
-# Inline — mirrors the YAML source fields
-bench eval run \
-    --source-repo benchflow-ai/skillsbench --source-path tasks \
-    --agent gemini --model gemini-3.1-flash-lite-preview --sandbox daytona --concurrency 64
-```
-
-Repos are cloned and cached locally under `.cache/datasets/` on first use.
-
-Hosted environments are another source type. Instead of a repo, pass
-`--source-env` with the environment's pinned source version to run an external
-PrimeIntellect / Verifiers environment on its own native harness — BenchFlow
-preserves the hosted identity (`env_uid`, `hub_url`) and still writes the shared
-rollout output contract. See the [CLI reference](./docs/reference/cli.md) for
-the full hosted-environment command shape.
-
-Downstream projects should depend on the public PyPI release by default. For
-internal validation before the next public release, install or lock the internal
-preview channel with prereleases enabled; see [Release channels](./docs/release.md).
-
-## Authoring tasks
-
-A task is one `task.md` (YAML frontmatter for config + a markdown prompt body)
-plus `environment/` and `verifier/` sidecars. The `bench tasks` commands cover
-the authoring lifecycle:
-
-```bash
-bench tasks init my-task                 # scaffold a task.md package under tasks/
-bench tasks check tasks/my-task          # validate (default --level structural)
-bench tasks migrate legacy-task/ --remove-legacy  # convert old split packages to task.md
-bench tasks export tasks/my-task out/             # write a compatibility export + loss report
-```
-
-See [Native task.md authoring](./docs/task-authoring-task-md.md) and the
-[task standard](./docs/task-standard.md).
-
-## Featured
-
-- **Progressive disclosure on SWE-bench Pro** — the `BaseUser` abstraction drives a multi-round rollout: terse round-0 prompt → failing-test hints → full spec. 5/5 oracle on Daytona, runnable demo at [`docs/examples/swebench_pro_progressive_disclosure.ipynb`](./docs/examples/swebench_pro_progressive_disclosure.ipynb). See [Progressive disclosure](./docs/progressive-disclosure.md).
-
-## Audience
-
-- **Eval researchers / paper writers** → [Getting started](./docs/getting-started.md) → [Concepts](./docs/concepts.md) → [Use cases](./docs/use-cases.md)
-- **Task authors** → [Task authoring](./docs/task-authoring.md) → [Sandbox hardening](./docs/sandbox-hardening.md)
-- **Agent builders integrating with benchflow** → [Concepts](./docs/concepts.md) → [Python API reference](./docs/reference/python-api.md) → [`benchflow.agents.registry`](./src/benchflow/agents/registry.py)
-- **External benchmark adapters** → [Task authoring](./docs/task-authoring.md) → [Progressive disclosure](./docs/progressive-disclosure.md#comparison-with-multi-agent-simulated-user)
-
-## Contributing
-
-PRs welcome. Open against `main`. CI runs ruff + tests on every PR; please run `ruff check .` and `pytest tests/` locally first.
-
-Release channels are documented in [Release channels](./docs/release.md). In
-short: merges to `main` publish an internal preview after CI passes, while a
-matching release tag publishes the public release.
+SkillsBench 官方仓库为
+[benchflow-ai/skillsbench](https://github.com/benchflow-ai/skillsbench)。本指南当前
+示例使用 tag `v1.1` 对应的 commit
+`b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af`。若课题组协调者另行发布冻结版本，
+以协调者通知为准，但同一轮正式实验不得混用不同 commit。
 
 ## License
 
-Apache-2.0.
+BenchFlow 上游及本交付代码遵循仓库中的 Apache-2.0 License。

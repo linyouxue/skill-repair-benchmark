@@ -53,6 +53,8 @@ def hard_deadline_sec(cfg: RolloutConfig) -> float | None:
     to read the task's budgets, falls back to a conservative constant rather
     than running unbounded.
     """
+    from benchflow.benchmark_executor import EXECUTOR_AGENT
+
     raw = os.environ.get(HARD_DEADLINE_ENV, "").strip().lower()
     if raw in {"off", "none"}:
         return None
@@ -64,7 +66,24 @@ def hard_deadline_sec(cfg: RolloutConfig) -> float | None:
                 f"{HARD_DEADLINE_ENV}={raw!r} is not a number; using computed deadline"
             )
         else:
-            return value if value > 0 else None
+            if value <= 0:
+                return None
+            if cfg.primary_agent != EXECUTOR_AGENT:
+                return value
+            try:
+                computed = _computed_deadline_sec(cfg)
+            except Exception as e:
+                logger.debug(
+                    "hard-deadline: could not compute canonical OpenHands floor "
+                    f"for {cfg.task_path.name}: {e}"
+                )
+                computed = _FALLBACK_SEC
+            if value < computed:
+                logger.warning(
+                    f"{HARD_DEADLINE_ENV}={value:g}s is below the canonical "
+                    f"OpenHands safety floor; using {computed:g}s"
+                )
+            return max(value, computed)
     try:
         return _computed_deadline_sec(cfg)
     except Exception as e:
@@ -82,6 +101,7 @@ def _computed_deadline_sec(cfg: RolloutConfig) -> float:
     source of truth for the install budget — per distinct agent.
     """
     from benchflow.agents.install import effective_install_timeout
+    from benchflow.benchmark_executor import executor_wall_clock_timeout
     from benchflow.task import Task
 
     tcfg = Task(cfg.task_path).config
@@ -90,21 +110,23 @@ def _computed_deadline_sec(cfg: RolloutConfig) -> float:
     build_sec = float(tcfg.sandbox.build_timeout_sec or 600.0)
 
     scenes = cfg.effective_scenes
-    role_budget = {
-        role.name: float(role.timeout_sec)
-        for scene in scenes
-        for role in scene.roles
-        if role.timeout_sec
-    }
-    agent_total = sum(
-        role_budget.get(turn.role, agent_default)
-        for scene in scenes
-        for turn in scene.turns
+    turn_budgets: list[float] = []
+    for scene in scenes:
+        roles = {role.name: role for role in scene.roles}
+        for turn in scene.turns:
+            role = roles[turn.role]
+            requested = float(role.timeout_sec or agent_default)
+            turn_budgets.append(
+                float(executor_wall_clock_timeout(role.agent, int(requested)))
+            )
+    primary_default = float(
+        executor_wall_clock_timeout(cfg.primary_agent, int(agent_default))
     )
-    agent_total = max(agent_total, agent_default)
+    agent_total = max(sum(turn_budgets), primary_default)
     if cfg.user is not None:
+        round_budget = max(turn_budgets, default=primary_default)
         agent_total = max(
-            agent_total, cfg.max_user_rounds * (agent_default + verifier_sec)
+            agent_total, cfg.max_user_rounds * (round_budget + verifier_sec)
         )
 
     agents = {role.agent for scene in scenes for role in scene.roles} or {cfg.agent}

@@ -1,9 +1,10 @@
 """Tests for verifier dependency-install classification (PR #540 / #572).
 
-PR #540 made dep-install failures classifiable: a missing reward file whose
-``test-stdout.txt`` shows a resolver failure surfaces a diagnostic through
+PR #540 made dep-install failures classifiable: when ``test-stdout.txt`` shows
+a resolver failure, the verifier surfaces a diagnostic through
 ``RewardFileNotFoundError`` so ``classify_verifier_error`` returns
-``VERIFIER_DEP_INSTALL``.
+``VERIFIER_DEP_INSTALL``.  This also overrides an untrustworthy reward file
+written after the failed bootstrap command.
 
 PR #572 review hardened this: the raw stdout is NEVER persisted into
 ``verifier_error`` (it can carry env dumps / tokens / credentialed install
@@ -75,6 +76,7 @@ class TestHasDepInstallFailure:
             "Installing...\nx No solution found when resolving torch==2.1.2+cpu\n",
             "Could not find a version that satisfies the requirement foo==9.9\n",
             "ERROR: dependency install failed\n",
+            "uvx: command not found\n",
             "resolution impossible for package bar\n",
             (
                 "  x Failed to download `azure-identity==1.25.3`\n"
@@ -138,9 +140,9 @@ class TestHasDepInstallFailure:
 # (PR #572 finding 2 — exercise the real verifier, not synthesized strings)
 
 
-def _make_verifier(tmp_path, *, stdout_text):
+def _make_verifier(tmp_path, *, stdout_text, reward_text=None):
     """Build a Verifier over a fake mounted sandbox whose test.sh writes the
-    given stdout and produces NO reward file."""
+    given stdout and optionally produces a reward file."""
     verifier_dir = tmp_path / "verifier"
     verifier_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,11 +171,13 @@ def _make_verifier(tmp_path, *, stdout_text):
 
     async def fake_exec(*args, **kwargs):
         cmd = _cmd(args, kwargs)
-        # Setup commands (chmod/mkdir) succeed; the test.sh run writes stdout,
-        # produces no reward file, and exits nonzero.
+        # Setup commands (chmod/mkdir) succeed; the test.sh run writes stdout
+        # and optionally a reward file, then exits nonzero.
         if "chmod" in cmd or cmd.startswith("mkdir"):
             return MagicMock(exit_code=0, returncode=0)
         rollout_paths.test_stdout_path.write_text(stdout_text)
+        if reward_text is not None:
+            rollout_paths.reward_text_path.write_text(reward_text)
         return MagicMock(exit_code=1, returncode=1)
 
     sandbox.exec = AsyncMock(side_effect=fake_exec)
@@ -202,6 +206,28 @@ async def test_verify_test_script_surfaces_classifiable_dep_install(tmp_path):
     assert "AIzaSyFAKEKEYFORTESTSONLYxxxxxxxxxxxxxxx" not in msg
     assert "p4ssw0rd" not in msg
     assert "PIP_INDEX_URL" not in msg
+
+
+@pytest.mark.asyncio
+async def test_dep_install_failure_overrides_untrustworthy_zero_reward(tmp_path):
+    """A bootstrap failure must not become a comparable task failure merely
+    because cleanup code writes ``reward.txt=0`` before the script exits."""
+    verifier = _make_verifier(
+        tmp_path,
+        stdout_text=(
+            "curl: failed to download `uv`\n"
+            "/root/.local/bin/env: No such file or directory\n"
+            "uvx: command not found\n"
+        ),
+        reward_text="0",
+    )
+
+    with pytest.raises(RewardFileNotFoundError) as exc:
+        await verifier._verify_test_script()
+
+    msg = str(exc.value)
+    assert classify_verifier_error(f"verifier crashed: {msg}") == VERIFIER_DEP_INSTALL
+    assert "any reward output from this invocation is ignored" in msg
 
 
 @pytest.mark.asyncio

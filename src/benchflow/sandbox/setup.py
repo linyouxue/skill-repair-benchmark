@@ -550,7 +550,11 @@ def _inject_skills_into_dockerfile(
     # Refuse to follow symlinks under skills_dir (#411). A symlink baked
     # into the image would otherwise serve attacker-chosen content to every
     # agent for the lifetime of the build.
-    shutil.copytree(skills_dir, dest, symlinks=False, ignore=_stage_ignore)
+    # The canonical executor fingerprints every regular bundle file. Preserve
+    # that exact tree in the image so the sandbox-side digest cannot diverge
+    # merely because a directory name matched the generic dependency filter.
+    # Symlinks remain excluded for the same host-file escape protection.
+    shutil.copytree(skills_dir, dest, symlinks=False, ignore=ignore_symlinks)
 
     lines = [
         "",

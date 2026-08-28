@@ -35,6 +35,7 @@ from benchflow.agents.providers import (
     strip_provider_prefix,
 )
 from benchflow.agents.registry import AGENTS, OPENCODE_PROXY_PROVIDER_ID
+from benchflow.benchmark_executor import MAX_PARENT_ITERATIONS_PER_STEP
 from benchflow.diagnostics import (
     AgentPromptTimeoutDiagnostic,
     AgentPromptTimeoutError,
@@ -69,7 +70,6 @@ _ACP_CONNECT_BASE_DELAY = 2.0
 _PROMPT_CANCEL_DRAIN_TIMEOUT_SEC = 0.25
 _ACP_HANDSHAKE_TIMEOUT_ENV = "BENCHFLOW_ACP_HANDSHAKE_TIMEOUT"
 _ACP_HANDSHAKE_TIMEOUT_DEFAULT_SEC = 60.0
-_OPENHANDS_DISABLE_SUBAGENTS_ENV = "BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS"
 
 
 def _acp_handshake_timeout_sec() -> float:
@@ -86,65 +86,6 @@ def _acp_handshake_timeout_sec() -> float:
         _ACP_HANDSHAKE_TIMEOUT_ENV,
         _ACP_HANDSHAKE_TIMEOUT_DEFAULT_SEC,
     )
-
-
-async def _prepare_openhands_direct_execution(
-    env,
-    *,
-    agent: str,
-    agent_env: dict[str, str],
-) -> dict[str, str]:
-    """Patch OpenHands as root before a sandbox-user privilege drop.
-
-    OpenHands is installed under ``/root/.local/share/uv/tools`` and exposed to
-    the sandbox user through a read-only symlink.  Running the opt-in patch from
-    the launch command only worked for tasks whose workspace was ``/root``,
-    because sandbox-user setup happened to chown that whole directory.  Tasks
-    rooted elsewhere (for example ``/app``) exited before ACP initialization.
-
-    Apply the same narrow patch through the environment's root execution plane,
-    then disable the duplicate launch-time patch for this process.  The caller's
-    environment mapping is copied so recorded run provenance still reflects the
-    requested opt-in value.
-    """
-    if agent != "openhands" or agent_env.get(_OPENHANDS_DISABLE_SUBAGENTS_ENV) != "1":
-        return agent_env
-
-    patch_cmd = (
-        'export PATH="$HOME/.local/bin:$PATH"; '
-        'OH_BIN="$(command -v openhands)"; '
-        '[ -n "$OH_BIN" ] || { echo "Cannot locate OpenHands executable" >&2; exit 127; }; '
-        'OH_PY="$(dirname "$(readlink -f "$OH_BIN")")/python"; '
-        '[ -x "$OH_PY" ] || { '
-        'echo "Cannot locate OpenHands tool interpreter" >&2; exit 127; }; '
-        '"$OH_PY" -c \'from pathlib import Path; '
-        "import openhands_cli.utils as u; "
-        "p=Path(u.__file__); s=p.read_text(); "
-        'old="        Tool(name=task_tool_name),\\n"; '
-        'new="        # BenchFlow: delegation disabled for this run.\\n"; '
-        "assert old in s or new in s; "
-        "p.write_text(s.replace(old,new,1)) if old in s else None; "
-        "assert new in p.read_text()'"
-    )
-    result = await env.exec(patch_cmd, user="root", timeout_sec=30)
-    return_code = getattr(
-        result,
-        "return_code",
-        getattr(result, "exit_code", 1),
-    )
-    if return_code != 0:
-        stdout = (getattr(result, "stdout", "") or "").strip()
-        stderr = (getattr(result, "stderr", "") or "").strip()
-        detail = stderr or stdout or "no output"
-        raise RuntimeError(
-            "Failed to prepare OpenHands direct-execution mode as root "
-            f"(exit code {return_code}): {detail[:2000]}"
-        )
-
-    launch_env = dict(agent_env)
-    launch_env[_OPENHANDS_DISABLE_SUBAGENTS_ENV] = "0"
-    logger.info("Prepared OpenHands direct-execution mode before privilege drop")
-    return launch_env
 
 
 async def _wait_for_acp_handshake(awaitable, *, phase: str):
@@ -554,12 +495,6 @@ async def connect_acp(
 
     Retries with exponential backoff on ConnectionError (Daytona SSH storms).
     """
-    agent_env = await _prepare_openhands_direct_execution(
-        env,
-        agent=agent,
-        agent_env=agent_env,
-    )
-
     # Resolve agent binary path for non-docker environments
     if environment != "docker":
         which_result = await env.exec(
@@ -698,6 +633,82 @@ async def execute_prompts(
                 e.executed_prompts = prompts[: i + 1]
                 raise
         session.mark_prompt_end()
+        field_meta = getattr(prompt_result, "field_meta", None)
+        executor_outcome = (
+            field_meta.get("benchmark_executor")
+            if isinstance(field_meta, dict)
+            else None
+        )
+        if isinstance(executor_outcome, dict):
+            stop_reason = executor_outcome.get("stop_reason")
+            acp_stop_reason = executor_outcome.get("acp_stop_reason")
+            execution_status = executor_outcome.get("execution_status")
+            error_code = executor_outcome.get("error_code")
+            iterations_used = executor_outcome.get("iterations_used")
+            max_iterations = executor_outcome.get("max_iterations")
+            skill_context_preloaded = executor_outcome.get("skill_context_preloaded")
+            skill_bundle_sha256 = executor_outcome.get("skill_bundle_sha256")
+            preloaded_skill_count = executor_outcome.get("preloaded_skill_count")
+            if (
+                isinstance(stop_reason, str)
+                and isinstance(acp_stop_reason, str)
+                and isinstance(iterations_used, int)
+                and not isinstance(iterations_used, bool)
+                and iterations_used >= 0
+                and isinstance(max_iterations, int)
+                and not isinstance(max_iterations, bool)
+                and max_iterations > 0
+                and isinstance(skill_context_preloaded, bool)
+                and isinstance(preloaded_skill_count, int)
+                and not isinstance(preloaded_skill_count, bool)
+                and preloaded_skill_count >= 0
+                and (
+                    skill_bundle_sha256 is None
+                    or (
+                        isinstance(skill_bundle_sha256, str)
+                        and len(skill_bundle_sha256) == len("sha256:") + 64
+                        and skill_bundle_sha256.startswith("sha256:")
+                    )
+                )
+            ):
+                if max_iterations != MAX_PARENT_ITERATIONS_PER_STEP:
+                    raise RuntimeError(
+                        "OpenHands adapter reported a non-canonical iteration cap: "
+                        f"{max_iterations}"
+                    )
+                if (
+                    stop_reason == "max_iterations"
+                    and iterations_used != max_iterations
+                ):
+                    raise RuntimeError(
+                        "OpenHands adapter reported an inconsistent iteration cutoff: "
+                        f"{iterations_used}/{max_iterations}"
+                    )
+                if skill_context_preloaded != bool(skill_bundle_sha256):
+                    raise RuntimeError(
+                        "OpenHands adapter reported inconsistent skill preload evidence"
+                    )
+                if skill_context_preloaded != (preloaded_skill_count > 0):
+                    raise RuntimeError(
+                        "OpenHands adapter reported inconsistent preloaded skill count"
+                    )
+                session.record_agent_iteration_outcome(
+                    stop_reason=stop_reason,
+                    acp_stop_reason=acp_stop_reason,
+                    execution_status=(
+                        execution_status if isinstance(execution_status, str) else None
+                    ),
+                    error_code=error_code if isinstance(error_code, str) else None,
+                    iterations_used=iterations_used,
+                    max_iterations=max_iterations,
+                    skill_context_preloaded=skill_context_preloaded,
+                    skill_bundle_sha256=skill_bundle_sha256,
+                    preloaded_skill_count=preloaded_skill_count,
+                )
+            else:
+                raise RuntimeError(
+                    "OpenHands adapter returned malformed benchmark-executor metadata"
+                )
         # SDK ``PromptResponse.stop_reason`` is a plain string (e.g. "end_turn").
         logger.info(
             f"  → {prompt_result.stop_reason}, "

@@ -8,7 +8,6 @@ test_registry_invariants.py — search there for the consolidated tripwire.
 import json
 import os
 import subprocess
-import sys
 
 import pytest
 
@@ -133,6 +132,15 @@ class TestEnvMappingField:
 
 
 class TestOpenHandsConfig:
+    @staticmethod
+    def _settings_only_cmd() -> str:
+        """Return the config-writing prefix without launching the ACP adapter."""
+
+        command = AGENTS["openhands"].launch_cmd
+        marker = ' && OH_BIN="$(command -v openhands)" && '
+        assert marker in command
+        return command.split(marker, 1)[0]
+
     def test_openhands_uses_agentskills_paths(self):
         cfg = AGENTS["openhands"]
         assert "$HOME/.agents/skills" in cfg.skill_paths
@@ -217,8 +225,7 @@ class TestOpenHandsConfig:
 
     def test_openhands_launch_cmd_keeps_minimal_out_of_typed_effort(self, tmp_path):
         """Guards PR #921: OpenHands' typed effort enum rejects minimal."""
-        cfg = AGENTS["openhands"]
-        settings_cmd = cfg.launch_cmd.split(" && openhands acp", 1)[0]
+        settings_cmd = self._settings_only_cmd()
         env = {
             **os.environ,
             "HOME": str(tmp_path),
@@ -240,7 +247,7 @@ class TestOpenHandsConfig:
         assert 'case "$LLM_REASONING_EFFORT" in ' in cfg.launch_cmd
         assert "max) printf" in cfg.launch_cmd
         assert ',"litellm_extra_body":{"reasoning":{"effort":"max"}}' in cfg.launch_cmd
-        settings_cmd = cfg.launch_cmd.split(" && openhands acp", 1)[0]
+        settings_cmd = self._settings_only_cmd()
         env = {
             **os.environ,
             "HOME": str(tmp_path),
@@ -262,7 +269,7 @@ class TestOpenHandsConfig:
         cfg = AGENTS["openhands"]
         assert 'if [ -n "$LLM_TIMEOUT" ]' in cfg.launch_cmd
         assert ',"timeout":%s' in cfg.launch_cmd
-        settings_cmd = cfg.launch_cmd.split(" && openhands acp", 1)[0]
+        settings_cmd = self._settings_only_cmd()
         env = {
             **os.environ,
             "HOME": str(tmp_path),
@@ -276,54 +283,18 @@ class TestOpenHandsConfig:
         )
         assert settings["llm"]["timeout"] == 115200
 
-    def test_openhands_launch_cmd_can_disable_subagents(self, tmp_path):
-        """Guards PR #921 against the OpenHands post-tool delegation deadlock."""
-        cfg = AGENTS["openhands"]
-        settings_cmd = cfg.launch_cmd.split(" && openhands acp", 1)[0]
-        tool_root = tmp_path / "tools"
-        package_root = tool_root / "openhands" / "site-packages"
-        package_dir = package_root / "openhands_cli"
-        package_dir.mkdir(parents=True)
-        (package_dir / "__init__.py").write_text("")
-        utils_path = package_dir / "utils.py"
-        utils_path.write_text(
-            "def get_default_cli_tools():\n"
-            "    return [\n"
-            "        Tool(name=task_tool_name),\n"
-            "    ]\n"
-        )
-        bin_dir = tool_root / "openhands" / "bin"
-        bin_dir.mkdir(parents=True)
-        python_wrapper = bin_dir / "python"
-        python_wrapper.write_text(
-            f'#!/bin/sh\nPYTHONPATH={package_root} exec {sys.executable} "$@"\n'
-        )
-        python_wrapper.chmod(0o755)
-        openhands = bin_dir / "openhands"
-        openhands.write_text("#!/bin/sh\nexit 0\n")
-        openhands.chmod(0o755)
-        fake_bin = tmp_path / "bin"
-        fake_bin.mkdir()
-        (fake_bin / "openhands").symlink_to(openhands)
-        env = {
-            **os.environ,
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-            "HOME": str(tmp_path),
-            "LLM_MODEL": "openai/gpt-5.6-sol",
-            "LLM_API_KEY": "proxy-key",
-            "BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS": "1",
-        }
+    def test_openhands_launch_cmd_does_not_rewrite_third_party_source(self):
+        """Delegation is disabled by the in-memory adapter, not site-package edits."""
+        command = AGENTS["openhands"].launch_cmd
 
-        subprocess.run(["bash", "-c", settings_cmd], env=env, check=True)
-
-        patched = utils_path.read_text()
-        assert "Tool(name=task_tool_name)" not in patched
-        assert "BenchFlow: delegation disabled for this run." in patched
+        assert "openhands-benchmark-executor" in command
+        assert "openhands_cli.utils" not in command
+        assert "u.__file__" not in command
+        assert "p.write_text(s.replace" not in command
 
     def test_openhands_launch_cmd_rejects_non_numeric_llm_timeout(self, tmp_path):
         """Guards PR #921 against malformed timeout JSON in agent settings."""
-        cfg = AGENTS["openhands"]
-        settings_cmd = cfg.launch_cmd.split(" && openhands acp", 1)[0]
+        settings_cmd = self._settings_only_cmd()
         env = {
             **os.environ,
             "HOME": str(tmp_path),

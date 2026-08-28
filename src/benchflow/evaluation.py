@@ -1712,6 +1712,9 @@ class Evaluation:
                 f"({', '.join(detail_parts)}). Refusing to publish an "
                 "empty 0/0 summary."
             )
+        from benchflow.benchmark_executor import validate_method_skill_task_count
+
+        validate_method_skill_task_count(self._config.skills_dir, len(task_dirs))
         completed = self._get_completed_tasks()
         remaining = [d for d in task_dirs if d.name not in completed]
 

@@ -28,6 +28,7 @@ from benchflow._utils.result_metadata import (
 from benchflow._utils.reward_events import build_rewards_jsonl_events
 from benchflow._utils.scoring import classify_error, classify_verifier_error
 from benchflow._utils.source_provenance import artifact_source_provenance
+from benchflow.benchmark_executor import executor_result_metadata
 from benchflow.contracts import (
     BaseUser,
     DocumentNudgeUser,
@@ -161,6 +162,7 @@ def _write_config(
     environment_manifest: EnvironmentManifest | None = None,
     config_override: dict | None = None,
     loop_strategy: LoopStrategySpec | None = None,
+    executor_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Write config.json to rollout_dir with secrets filtered out."""
     from benchflow.acp.selection import selected_acp_transport
@@ -204,6 +206,8 @@ def _write_config(
         "scenes": _scene_metadata(scenes or []),
         "loop": loop_block(loop_strategy),
     }
+    if executor_metadata is not None:
+        config_data["executor"] = executor_metadata
     if usage_tracking is not None:
         config_data["usage_tracking"] = usage_tracking.to_config_artifact()
     if artifact_source is not None:
@@ -294,6 +298,7 @@ def _build_rollout_result(
     skill_policy: TaskSkillPolicy | None = None,
     sandbox_id: str | None = None,
     loop: dict[str, Any] | None = None,
+    executor_metadata: dict[str, Any] | None = None,
 ) -> RolloutResult:
     """Build RolloutResult and write result.json, timing.json, prompts.json, trajectory.
 
@@ -375,6 +380,36 @@ def _build_rollout_result(
         partial_trajectory=partial_trajectory,
         trajectory_source=trajectory_source,
     )
+    observed_executor = executor_result_metadata(executor_metadata, trajectory)
+    if observed_executor is not None:
+        if error is not None and observed_executor.get("stop_reason") not in {
+            "wall_clock_timeout",
+        }:
+            prompt_count = sum(
+                1 for event in trajectory if event.get("type") == "user_message"
+            )
+            completed_count = len(observed_executor.get("prompt_runs") or [])
+            observed_executor["stop_reason"] = (
+                "conversation_error"
+                if prompt_count > completed_count
+                else "infrastructure_error"
+            )
+            observed_executor["iteration_accounting_complete"] = False
+        agent_result["executor"] = observed_executor
+        prompt_runs = observed_executor.get("prompt_runs") or []
+        agent_result["stop_reason"] = observed_executor.get("stop_reason")
+        agent_result["acp_stop_reason"] = (
+            prompt_runs[-1].get("acp_stop_reason") if prompt_runs else None
+        )
+        agent_result["iterations_used"] = (
+            sum(run.get("iterations_used") or 0 for run in prompt_runs)
+            if prompt_runs
+            else None
+        )
+        agent_result["max_iterations_per_run"] = observed_executor.get(
+            "max_parent_iterations_per_step"
+        )
+        agent_result["prompt_runs"] = prompt_runs
     traj_dir = rollout_dir / "trajectory"
     traj_dir.mkdir(parents=True, exist_ok=True)
     # Final write — overwrites whatever the live streaming writer left
@@ -412,6 +447,7 @@ def _build_rollout_result(
         "timing": timing,
         "scenes": _scene_metadata(scenes or []),
         "loop": loop or loop_block(None),
+        **({"executor": observed_executor} if observed_executor is not None else {}),
         **(
             {"source": artifact_source_provenance(source_provenance)}
             if source_provenance is not None

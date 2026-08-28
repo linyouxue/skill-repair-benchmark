@@ -1224,15 +1224,14 @@ class TestConnectAcpModelSelection:
         mock_acp.set_model.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_openhands_direct_execution_patches_before_privilege_drop(
+    async def test_openhands_delegation_env_reaches_in_memory_adapter(
         self, tmp_path
     ):
-        """Guards the PR #921 follow-up for OpenHands tasks rooted outside /root."""
+        """OpenHands startup must not rewrite its installed site-package."""
         from benchflow.acp.runtime import connect_acp
 
         mock_acp = self._make_mocks()
         mock_env = AsyncMock()
-        mock_env.exec.return_value = MagicMock(return_code=0, stdout="", stderr="")
 
         with (
             patch(
@@ -1253,11 +1252,9 @@ class TestConnectAcpModelSelection:
                 agent_cwd="/app",
             )
 
-        patch_call = mock_env.exec.await_args_list[0]
-        assert "openhands_cli.utils" in patch_call.args[0]
-        assert patch_call.kwargs == {"user": "root", "timeout_sec": 30}
+        mock_env.exec.assert_not_awaited()
         transport_env = mock_transport.call_args.kwargs["env"]
-        assert transport_env["BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS"] == "0"
+        assert transport_env["BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS"] == "1"
         transport_command = mock_transport.call_args.kwargs["command"]
         assert "--reuid=agent" in transport_command
 

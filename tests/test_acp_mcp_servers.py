@@ -384,7 +384,8 @@ async def test_connect_threads_task_mcp_servers_into_connect_acp(tmp_path) -> No
 @pytest.mark.asyncio
 async def test_connect_as_omits_openhands_mcp_servers_from_acp(tmp_path) -> None:
     """Guards the role execution path used by single-shot OpenHands scenes."""
-    cfg = RolloutConfig(task_path=tmp_path / "task", agent="openhands", model="qwen")
+    model = "openrouter/openai/gpt-5.2"
+    cfg = RolloutConfig(task_path=tmp_path / "task", agent="openhands", model=model)
     trial = Rollout.__new__(Rollout)
     trial._config = cfg
     trial._env = {}
@@ -406,6 +407,6 @@ async def test_connect_as_omits_openhands_mcp_servers_from_acp(tmp_path) -> None
     trial._planes.upload_subscription_auth = AsyncMock()
     trial._planes.apply_web_tool_policy = AsyncMock()
 
-    await trial.connect_as(Role(name="agent", agent="openhands", model="qwen"))
+    await trial.connect_as(Role(name="agent", agent="openhands", model=model))
 
     assert trial._planes.connect_acp.await_args.kwargs["mcp_servers"] == []

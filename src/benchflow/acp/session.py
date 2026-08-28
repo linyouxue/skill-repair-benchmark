@@ -322,6 +322,43 @@ class ACPSession:
         )
         self._notify_change()
 
+    def record_agent_iteration_outcome(
+        self,
+        *,
+        stop_reason: str,
+        acp_stop_reason: str,
+        execution_status: str | None,
+        error_code: str | None,
+        max_iterations: int,
+        iterations_used: int,
+        skill_context_preloaded: bool,
+        skill_bundle_sha256: str | None,
+        preloaded_skill_count: int,
+    ) -> None:
+        """Record the adapter's exact parent-agent count for one ACP prompt."""
+
+        self._events_active = True
+        self._flush_agent_text()
+        prompt_ordinal = sum(
+            1 for event in self.events if event.get("type") == "user_message"
+        )
+        self.events.append(
+            {
+                "type": "agent_iteration_outcome",
+                "prompt_ordinal": prompt_ordinal,
+                "stop_reason": stop_reason,
+                "acp_stop_reason": acp_stop_reason,
+                "execution_status": execution_status,
+                "error_code": error_code,
+                "max_iterations": max_iterations,
+                "iterations_used": iterations_used,
+                "skill_context_preloaded": skill_context_preloaded,
+                "skill_bundle_sha256": skill_bundle_sha256,
+                "preloaded_skill_count": preloaded_skill_count,
+            }
+        )
+        self._notify_change()
+
     def record_prompt_usage(self, usage: object | None) -> None:
         """Record cumulative ACP token usage returned by session/prompt."""
         snapshot = normalize_acp_usage(usage)

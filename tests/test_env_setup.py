@@ -141,7 +141,8 @@ class TestInjectSkillsIntoDockerfile:
         assert (task_path / "environment" / "Dockerfile").read_text() == original
         assert not (task_path / "environment" / "_deps" / "skills").exists()
 
-    def test_ignores_venv_and_pycache(self, tmp_path):
+    def test_preserves_every_regular_bundle_file_for_digest_parity(self, tmp_path):
+        """Guards protocol v1 on base aadad44 against host/sandbox hash drift."""
         task_path = _make_task(tmp_path)
         skills_dir = _make_skills_dir(tmp_path)
         # Add dirs that should be ignored
@@ -153,8 +154,8 @@ class TestInjectSkillsIntoDockerfile:
         _inject_skills_into_dockerfile(task_path, skills_dir)
 
         deps = task_path / "environment" / "_deps" / "skills"
-        assert not (deps / "__pycache__").exists()
-        assert not (deps / ".venv").exists()
+        assert (deps / "__pycache__" / "foo.pyc").is_file()
+        assert (deps / ".venv" / "bin").is_dir()
 
     def test_overwrites_existing_deps_skills(self, tmp_path):
         task_path = _make_task(tmp_path)

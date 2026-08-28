@@ -35,6 +35,36 @@ class FakeLiteLLMServer:
 
 
 @pytest.mark.asyncio
+async def test_failed_docker_host_probe_stops_proxy_before_agent(monkeypatch):
+    servers = []
+
+    async def fake_start(**kwargs):
+        server = FakeLiteLLMServer("http://host.docker.internal:32123", kwargs["route"])
+        servers.append(server)
+        return server
+
+    async def fail_probe(sandbox, *, base_url, timeout_sec):
+        raise RuntimeError("container cannot reach proxy")
+
+    monkeypatch.setattr(runtime_mod, "_start_host_litellm", fake_start)
+    monkeypatch.setattr(runtime_mod, "_probe_host_litellm_from_sandbox", fail_probe)
+
+    with pytest.raises(RuntimeError, match="container cannot reach proxy"):
+        await ensure_litellm_runtime(
+            agent="openhands",
+            agent_env={"OPENAI_API_KEY": "sk-test"},
+            model="openai/gpt-4.1-mini",
+            runtime=None,
+            environment="docker",
+            session_id="failed-host-probe",
+            sandbox=object(),
+        )
+
+    assert len(servers) == 1
+    assert servers[0].stopped is True
+
+
+@pytest.mark.asyncio
 async def test_host_litellm_rewrites_codex_env(monkeypatch):
     async def fake_start(**kwargs):
         return FakeLiteLLMServer("http://host.docker.internal:32123", kwargs["route"])

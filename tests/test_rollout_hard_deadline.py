@@ -27,8 +27,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from benchflow._utils.scoring import INFRA_ERROR
+from benchflow.benchmark_executor import WALL_CLOCK_SAFETY_TIMEOUT_SEC
 from benchflow.evaluation import Evaluation, EvaluationConfig, RetryConfig
-from benchflow.rollout import Rollout, RolloutConfig, _deadline
+from benchflow.rollout import Role, Rollout, RolloutConfig, Scene, Turn, _deadline
 from benchflow.rollout._deadline import hard_deadline_sec
 
 
@@ -92,6 +93,51 @@ class TestDeadlineComputation:
         deadline = hard_deadline_sec(cfg)
         assert deadline is not None
         assert deadline >= 10 * (60 + 60) + 1800
+
+    def test_openhands_uses_executor_safety_watchdog(self, tmp_path, monkeypatch):
+        """Guards protocol v1 on base aadad44: time is only a high watchdog."""
+        monkeypatch.delenv("BENCHFLOW_ROLLOUT_HARD_DEADLINE", raising=False)
+        _write_task(tmp_path / "t")
+        cfg = RolloutConfig.from_legacy(task_path=tmp_path / "t", agent="openhands")
+
+        deadline = hard_deadline_sec(cfg)
+
+        assert deadline is not None
+        assert deadline > WALL_CLOCK_SAFETY_TIMEOUT_SEC
+
+    def test_small_env_override_cannot_shorten_openhands_watchdog(
+        self, tmp_path, monkeypatch
+    ):
+        """Guards protocol v1 on base aadad44 against hidden shorter budgets."""
+        _write_task(tmp_path / "t")
+        monkeypatch.setenv("BENCHFLOW_ROLLOUT_HARD_DEADLINE", "123.5")
+        cfg = RolloutConfig.from_legacy(task_path=tmp_path / "t", agent="openhands")
+
+        deadline = hard_deadline_sec(cfg)
+
+        assert deadline is not None
+        assert deadline > WALL_CLOCK_SAFETY_TIMEOUT_SEC
+
+    def test_openhands_multi_turn_deadline_covers_each_step(
+        self, tmp_path, monkeypatch
+    ):
+        """Guards protocol v1 on base aadad44: hard deadline covers every Step."""
+        monkeypatch.delenv("BENCHFLOW_ROLLOUT_HARD_DEADLINE", raising=False)
+        _write_task(tmp_path / "t")
+        cfg = RolloutConfig(
+            task_path=tmp_path / "t",
+            scenes=[
+                Scene(
+                    roles=[Role(name="solver", agent="openhands")],
+                    turns=[Turn(role="solver"), Turn(role="solver")],
+                )
+            ],
+        )
+
+        deadline = hard_deadline_sec(cfg)
+
+        assert deadline is not None
+        assert deadline > 2 * WALL_CLOCK_SAFETY_TIMEOUT_SEC
 
     def test_unreadable_task_falls_back_conservative(self, tmp_path, monkeypatch):
         monkeypatch.delenv("BENCHFLOW_ROLLOUT_HARD_DEADLINE", raising=False)

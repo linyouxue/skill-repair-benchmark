@@ -463,9 +463,16 @@ def needs_litellm_runtime(agent: str, model: str | None) -> bool:
     return bool(model) and agent not in _NATIVE_PROTOCOL_AGENTS
 
 
-def _find_free_port() -> int:
+def _find_free_port(bind_address: str = "127.0.0.1") -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
+        try:
+            sock.bind((bind_address, 0))
+        except OSError as exc:
+            raise RuntimeError(
+                "Cannot bind the host LiteLLM proxy to "
+                f"{bind_address!r}. The executor and Docker daemon must run "
+                "on the same machine."
+            ) from exc
         return int(sock.getsockname()[1])
 
 
@@ -516,11 +523,25 @@ def _host_litellm_executable() -> str:
     )
 
 
-def _docker_host_address() -> str:
-    import platform
+def _docker_server_is_desktop() -> bool:
+    """Whether the active daemon is Docker Desktop, including from WSL2."""
 
-    if platform.system().lower() != "linux":
-        return "host.docker.internal"
+    try:
+        operating_system = subprocess.check_output(
+            ["docker", "info", "--format", "{{.OperatingSystem}}"],
+            text=True,
+            timeout=10,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        logger.debug("Could not identify the Docker server", exc_info=True)
+        return False
+    return "docker desktop" in operating_system.casefold()
+
+
+def _docker_bridge_gateway_address() -> str | None:
+    """Return the native Linux default bridge gateway when Docker reports it."""
+
     try:
         out = subprocess.check_output(
             [
@@ -533,30 +554,50 @@ def _docker_host_address() -> str:
             ],
             text=True,
             timeout=10,
+            stderr=subprocess.DEVNULL,
         ).strip()
         if out:
             return out
     except Exception:
         logger.debug("Could not detect Docker bridge gateway", exc_info=True)
+    return None
+
+
+def _docker_host_address() -> str:
+    """Stable hostname advertised to task containers for host services."""
+
     return "host.docker.internal"
 
 
 def _host_bind_address(environment: str) -> str:
     """Interface the host LiteLLM proxy binds to.
 
-    Local runs need no off-box reachability -> loopback only. Docker runs must be
-    reachable from the agent container, so bind the concrete bridge-gateway IP
-    (Linux) — reachable from containers but not the public network — falling back
-    to 0.0.0.0 only when the gateway resolves to a hostname (e.g.
-    host.docker.internal on macOS) that cannot be bound directly.
+    Local runs use loopback only. Docker containers always receive the stable
+    ``host.docker.internal`` endpoint. Docker Desktop needs an all-interface
+    listener so its host forwarding can reach a WSL/macOS host process. Native
+    Linux instead binds only the default bridge gateway when available, which
+    avoids exposing the ephemeral proxy on public server interfaces.
     """
+
+    import platform
+
     if environment != "docker":
         return "127.0.0.1"
-    address = _docker_host_address()
+    if platform.system().lower() != "linux" or _docker_server_is_desktop():
+        return "0.0.0.0"
+    address = _docker_bridge_gateway_address()
+    if address is None:
+        raise RuntimeError(
+            "Cannot determine the native Linux Docker bridge gateway; refusing "
+            "to expose LiteLLM on 0.0.0.0. Ensure the executor uses a local "
+            "Docker Engine with its default bridge network."
+        )
     try:
         socket.inet_aton(address)
-    except OSError:
-        return "0.0.0.0"
+    except OSError as exc:
+        raise RuntimeError(
+            f"Docker reported an invalid IPv4 bridge gateway: {address!r}"
+        ) from exc
     return address
 
 
@@ -564,7 +605,7 @@ def _agent_endpoint_for_environment(
     port: int, environment: str, bind: str
 ) -> LiteLLMEndpoint:
     if environment == "docker":
-        agent_host = bind if bind != "0.0.0.0" else _docker_host_address()
+        agent_host = _docker_host_address()
         health_host = "127.0.0.1" if bind == "0.0.0.0" else bind
     else:
         agent_host = health_host = "127.0.0.1"
@@ -658,8 +699,8 @@ async def _start_host_litellm(
     log_path = runtime_dir / "callback.jsonl"
     stdout_path = runtime_dir / "stdout.log"
     stderr_path = runtime_dir / "stderr.log"
-    port = _find_free_port()
     bind = await asyncio.to_thread(_host_bind_address, environment)
+    port = _find_free_port(bind)
     config = litellm_proxy_config(route, master_key=master_key)
     config_path, _, _ = _write_runtime_files(runtime_dir, config=config)
     env = dict(os.environ)
@@ -690,6 +731,11 @@ async def _start_host_litellm(
             stdout=stdout,
             stderr=stderr,
             env=env,
+            # A rollout may stage/build from a temporary directory that is
+            # removed before LiteLLM finishes importing. LiteLLM calls
+            # os.getcwd() during startup, so give it the stable per-run runtime
+            # directory instead of inheriting a potentially deleted cwd.
+            cwd=runtime_dir,
         )
     finally:
         stdout.close()
@@ -730,6 +776,41 @@ async def _start_host_litellm(
         raise
     logger.info("LiteLLM proxy listening on %s", runner.base_url)
     return runner
+
+
+async def _probe_host_litellm_from_sandbox(
+    sandbox: Any,
+    *,
+    base_url: str,
+    timeout_sec: int = 30,
+) -> None:
+    """Fail before provider traffic when a Docker task cannot reach LiteLLM."""
+
+    health_url = base_url.rstrip("/") + "/health/liveliness"
+    fallback_url = base_url.rstrip("/") + "/health"
+    quoted_url = shlex.quote(health_url)
+    quoted_fallback = shlex.quote(fallback_url)
+    command = (
+        "command -v curl >/dev/null 2>&1 || { "
+        "echo 'curl is required for the LiteLLM host reachability probe' >&2; "
+        "exit 127; }; "
+        'attempt=0; while [ "$attempt" -lt 5 ]; do '
+        f"( curl -fsS --connect-timeout 2 --max-time 3 {quoted_url} >/dev/null "
+        f"2>&1 || curl -fsS --connect-timeout 2 --max-time 3 {quoted_fallback} "
+        ">/dev/null 2>&1 ) && exit 0; "
+        "attempt=$((attempt + 1)); sleep 1; "
+        "done; exit 1"
+    )
+    result = await sandbox.exec(command, timeout_sec=timeout_sec)
+    if result.return_code == 0:
+        return
+    detail = ((result.stderr or result.stdout or "").strip())[-1000:]
+    suffix = f" ({detail})" if detail else ""
+    raise RuntimeError(
+        "Docker task container cannot reach the host LiteLLM proxy at "
+        f"{health_url}{suffix}. Check host.docker.internal/host-gateway, "
+        "WSL port forwarding, or run the executor beside the Docker daemon."
+    )
 
 
 def _sandbox_launcher_source() -> str:
@@ -1487,6 +1568,7 @@ async def ensure_litellm_runtime(
                 )
         await stop_litellm_runtime(runtime)
 
+    server: LiteLLMProcess | None = None
     try:
         proxy_env = _litellm_proxy_env(
             agent=agent,
@@ -1512,9 +1594,18 @@ async def ensure_litellm_runtime(
                 session_id=session_id,
                 agent_name=agent,
             )
+            if environment == "docker" and sandbox is not None:
+                await _probe_host_litellm_from_sandbox(
+                    sandbox,
+                    base_url=server.base_url,
+                    timeout_sec=min(max(int(sandbox_setup_timeout), 30), 120),
+                )
     except BedrockPatchPreflightError:
         raise
     except Exception as exc:
+        if server is not None:
+            with contextlib.suppress(Exception):
+                await server.stop()
         await _raise_litellm_unavailable(
             runtime=None,
             error=(
@@ -1525,6 +1616,7 @@ async def ensure_litellm_runtime(
 
     from benchflow.providers.runtime import ProviderRuntime
 
+    assert server is not None
     new_runtime = ProviderRuntime(
         kind="litellm",
         agent_base_url=server.base_url,

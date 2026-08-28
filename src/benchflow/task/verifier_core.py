@@ -493,6 +493,21 @@ class Verifier:
                     e,
                 )
 
+        # A verifier can continue after a failed bootstrap command and still
+        # write ``reward.txt=0`` (for example, ``curl | sh`` fails, ``uvx`` is
+        # then missing, and an unconditional final ``echo 0`` succeeds).  Such
+        # a reward is not evidence that the official tests ran.  Fail closed
+        # before accepting or parsing either reward format so the rollout is
+        # classified as verifier_dep_install / non-comparable rather than as
+        # an honest task failure.  Surface only the fixed redacted diagnostic;
+        # raw stdout remains in verifier/test-stdout.txt.
+        if _has_dep_install_failure(self._rollout_paths.test_stdout_path):
+            raise RewardFileNotFoundError(
+                "Verifier dependency installation failed before trustworthy "
+                "scoring; any reward output from this invocation is ignored.\n"
+                f"{_DEP_INSTALL_DIAGNOSTIC}"
+            )
+
         if test_return_code != 0 and (
             self._rollout_paths.reward_text_path.exists()
             or self._rollout_paths.reward_json_path.exists()
@@ -528,13 +543,6 @@ class Verifier:
                     f"No reward file found at {self._rollout_paths.reward_text_path} or "
                     f"{self._rollout_paths.reward_json_path}"
                 )
-            # Surface ONLY a fixed, secret-free dep-install diagnostic (never
-            # any scanned stdout) so classify_verifier_error can return
-            # VERIFIER_DEP_INSTALL without leaking untrusted subprocess output
-            # into result metadata (#572). Raw resolver output remains in the
-            # downloaded verifier/test-stdout.txt artifact.
-            if _has_dep_install_failure(self._rollout_paths.test_stdout_path):
-                msg += f"\n{_DEP_INSTALL_DIAGNOSTIC}"
             raise RewardFileNotFoundError(msg)
 
         return VerifierResult(rewards=rewards)

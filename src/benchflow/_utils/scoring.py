@@ -96,6 +96,7 @@ VERIFIER_DEP_INSTALL_MARKERS: tuple[str, ...] = (
     "failed to fetch:",
     "error sending request for url",
     "failed to lookup address information",
+    "uvx: command not found",
     "no solution found",
     "could not find a version",
     "resolution impossible",

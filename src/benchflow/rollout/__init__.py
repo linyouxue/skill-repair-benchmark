@@ -77,6 +77,18 @@ from benchflow._utils.scoring import classify_error as classify_error
 from benchflow.acp.types import McpServerSpec
 from benchflow.agents.credentials import upload_credential
 from benchflow.agents.registry import AGENTS
+from benchflow.benchmark_executor import (
+    EXECUTOR_AGENT,
+    SkillBundleManifest,
+    apply_openhands_executor_env,
+    executor_idle_timeout,
+    executor_metadata,
+    executor_wall_clock_timeout,
+    snapshot_skill_bundle,
+    validate_openhands_executor_agent_env,
+    validate_openhands_executor_model,
+    validate_openhands_executor_scenes,
+)
 from benchflow.contracts import (
     AgentProtocolError,
     AskUserRequest,
@@ -659,6 +671,8 @@ class Rollout:
         self._effective_task_path: Path = config.task_path
         self._task_tmp: Path | None = None
         self._task_skill_policy: TaskSkillPolicy | None = None
+        self._executor_skill_manifest: SkillBundleManifest | None = None
+        self._executor_metadata: dict[str, Any] | None = None
         self._usage_runtime: Any = None
         self._usage_metrics: dict[str, Any] = self._planes.extract_usage(None)
         self._native_usage_metrics: dict[str, Any] = _zero_native_acp_usage_metrics()
@@ -907,6 +921,28 @@ class Rollout:
     async def setup(self) -> None:
         """Resolve config, create environment object (not yet started)."""
         cfg = self._config
+        scenes = cfg.effective_scenes
+        has_openhands_role = any(
+            role.agent == EXECUTOR_AGENT for scene in scenes for role in scene.roles
+        )
+        if cfg.agent == EXECUTOR_AGENT or has_openhands_role:
+            if cfg.agent != EXECUTOR_AGENT:
+                raise ValueError(
+                    "task document selects OpenHands but the caller did not select "
+                    "the canonical OpenHands executor"
+                )
+            validate_openhands_executor_model(cfg.agent, cfg.model)
+            validate_openhands_executor_agent_env(cfg.agent, cfg.agent_env)
+            if cfg.skip_agent_install:
+                raise ValueError(
+                    "benchmark-executor OpenHands rollouts cannot skip the pinned "
+                    "agent and adapter installation"
+                )
+            validate_openhands_executor_scenes(
+                scenes,
+                expected_model=cfg.model,
+                expected_reasoning_effort=cfg.reasoning_effort,
+            )
 
         if cfg.sandbox_user is None:
             logger.warning(
@@ -999,6 +1035,15 @@ class Rollout:
             and effective_task_path != cfg.task_path
         ):
             effective_skills_dir = task_bundled_skills_dir(effective_task_path)
+        # Freeze exactly the bundle used by an OpenHands rollout.  The adapter
+        # later recomputes the same digest inside the sandbox before the first
+        # task prompt, catching partial copies or caller-side mutation.
+        if effective_skills_dir is not None and cfg.primary_agent == EXECUTOR_AGENT:
+            snapshot_dir = self._require_rollout_dir() / "inputs" / "skills"
+            self._executor_skill_manifest = snapshot_skill_bundle(
+                effective_skills_dir, snapshot_dir
+            )
+            effective_skills_dir = snapshot_dir
         if effective_skills_dir is not None and not _environment_uses_prebuilt_image(
             env_config, cfg.environment_manifest
         ):
@@ -1022,6 +1067,19 @@ class Rollout:
             if effective_skills_dir is not None
             else ()
         )
+        self._agent_env = apply_openhands_executor_env(
+            cfg.primary_agent,
+            self._agent_env,
+            skill_policy=task_skill_policy,
+            manifest=self._executor_skill_manifest,
+        )
+        self._executor_metadata = executor_metadata(
+            agent=cfg.primary_agent,
+            model=cfg.primary_model,
+            skill_policy=task_skill_policy,
+            manifest=self._executor_skill_manifest,
+            resolved_agent_env=self._agent_env,
+        )
 
         # Honour an externally-supplied sandbox (use_prebuilt_env, set by
         # Runtime.execute() when the caller passes a live Environment).
@@ -1044,6 +1102,7 @@ class Rollout:
             self._timeout = int(cfg.timeout)
         else:
             self._timeout = int(self._task.config.agent.timeout_sec or 0)
+        self._timeout = executor_wall_clock_timeout(cfg.primary_agent, self._timeout)
         # Look on the type, not via instance getattr: permissive proxies and
         # AsyncMock-based test sandboxes manufacture arbitrary attributes,
         # which would turn this optional synchronous hook into an un-awaited
@@ -1072,13 +1131,16 @@ class Rollout:
             base_image_override=cfg.base_image_override,
             usage_tracking=cfg.usage_tracking.with_env_defaults(),
             concurrency=cfg.concurrency,
-            agent_idle_timeout=cfg.agent_idle_timeout,
+            agent_idle_timeout=executor_idle_timeout(
+                cfg.primary_agent, cfg.agent_idle_timeout
+            ),
             scenes=cfg.effective_scenes,
             source_provenance=cfg.source_provenance,
             dataset=cfg.dataset,
             task_digest=cfg.task_digest,
             config_override=cfg.config_override,
             loop_strategy=cfg.loop_strategy_spec,
+            executor_metadata=self._executor_metadata,
         )
 
         self._phase = "setup"
@@ -1289,6 +1351,12 @@ class Rollout:
             required_skill_names=getattr(self, "_required_skill_names", ()),
             live_trajectory_path=rollout_dir / "trajectory" / "llm_trajectory.jsonl",
             force_sandbox_local=getattr(self, "_disallow_web_tools", False),
+        )
+        self._agent_env = apply_openhands_executor_env(
+            cfg.primary_agent,
+            self._agent_env,
+            skill_policy=getattr(self, "_task_skill_policy", None),
+            manifest=getattr(self, "_executor_skill_manifest", None),
         )
         sf_entrypoint = self._session_factory_entrypoint(cfg.primary_agent)
         self._is_session_factory = sf_entrypoint is not None
@@ -1579,6 +1647,11 @@ class Rollout:
             if active_role and active_role.idle_timeout_sec is not None
             else self._config.agent_idle_timeout
         )
+        active_agent = (
+            active_role.agent if active_role is not None else self._config.primary_agent
+        )
+        timeout = executor_wall_clock_timeout(active_agent, timeout)
+        idle_timeout = executor_idle_timeout(active_agent, idle_timeout)
 
         try:
             if getattr(self, "_is_session_factory", False):
@@ -2239,6 +2312,7 @@ class Rollout:
         Updates _agent_launch so disconnect() kills the correct process.
         """
         cfg = self._config
+        validate_openhands_executor_model(role.agent, role.model)
         rollout_dir = self._require_rollout_dir()
         t0 = datetime.now()
 
@@ -2273,6 +2347,12 @@ class Rollout:
             required_skill_names=getattr(self, "_required_skill_names", ()),
             live_trajectory_path=rollout_dir / "trajectory" / "llm_trajectory.jsonl",
             force_sandbox_local=disallow_web_tools,
+        )
+        agent_env = apply_openhands_executor_env(
+            role.agent,
+            agent_env,
+            skill_policy=getattr(self, "_task_skill_policy", None),
+            manifest=getattr(self, "_executor_skill_manifest", None),
         )
 
         role_agent_differs = role.agent != cfg.primary_agent
@@ -2672,6 +2752,7 @@ class Rollout:
                 self._config.loop_strategy_spec,
                 self._loop_strategy_metadata(),
             ),
+            executor_metadata=getattr(self, "_executor_metadata", None),
             **self._usage_metrics,
         )
 

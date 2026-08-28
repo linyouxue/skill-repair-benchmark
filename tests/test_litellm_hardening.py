@@ -179,16 +179,52 @@ def test_host_bind_address_local_is_loopback():
     assert runtime_mod._host_bind_address("modal") == "127.0.0.1"
 
 
+def test_docker_server_is_desktop_uses_daemon_metadata(monkeypatch):
+    def fake_check_output(command, **kwargs):
+        assert command == ["docker", "info", "--format", "{{.OperatingSystem}}"]
+        return "Docker Desktop\n"
+
+    monkeypatch.setattr(runtime_mod.subprocess, "check_output", fake_check_output)
+
+    assert runtime_mod._docker_server_is_desktop() is True
+
+
+def test_docker_bridge_gateway_reads_default_bridge(monkeypatch):
+    def fake_check_output(command, **kwargs):
+        assert command[:3] == ["docker", "network", "inspect"]
+        return "172.17.0.1\n"
+
+    monkeypatch.setattr(runtime_mod.subprocess, "check_output", fake_check_output)
+
+    assert runtime_mod._docker_bridge_gateway_address() == "172.17.0.1"
+
+
+def test_docker_host_address_is_stable_across_platforms():
+    assert runtime_mod._docker_host_address() == "host.docker.internal"
+
+
 def test_host_bind_address_docker_uses_bridge_ip(monkeypatch):
-    monkeypatch.setattr(runtime_mod, "_docker_host_address", lambda: "172.17.0.1")
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr(runtime_mod, "_docker_server_is_desktop", lambda: False)
+    monkeypatch.setattr(
+        runtime_mod, "_docker_bridge_gateway_address", lambda: "172.17.0.1"
+    )
     assert runtime_mod._host_bind_address("docker") == "172.17.0.1"
 
 
-def test_host_bind_address_docker_hostname_falls_back_to_all_ifaces(monkeypatch):
-    monkeypatch.setattr(
-        runtime_mod, "_docker_host_address", lambda: "host.docker.internal"
-    )
+def test_host_bind_address_docker_desktop_uses_all_ifaces(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr(runtime_mod, "_docker_server_is_desktop", lambda: True)
     assert runtime_mod._host_bind_address("docker") == "0.0.0.0"
+
+
+def test_host_bind_address_native_linux_fails_closed_without_bridge(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr(runtime_mod, "_docker_server_is_desktop", lambda: False)
+    monkeypatch.setattr(runtime_mod, "_docker_bridge_gateway_address", lambda: None)
+
+    with pytest.raises(RuntimeError, match="refusing to expose LiteLLM"):
+        runtime_mod._host_bind_address("docker")
 
 
 def test_agent_endpoint_docker_health_uses_loopback_when_all_ifaces(monkeypatch):
@@ -202,8 +238,93 @@ def test_agent_endpoint_docker_health_uses_loopback_when_all_ifaces(monkeypatch)
 
 def test_agent_endpoint_docker_bridge_ip_is_used_for_both():
     endpoint = runtime_mod._agent_endpoint_for_environment(4000, "docker", "172.17.0.1")
-    assert endpoint.agent_base_url == "http://172.17.0.1:4000"
+    assert endpoint.agent_base_url == "http://host.docker.internal:4000"
     assert endpoint.local_base_url == "http://172.17.0.1:4000"
+
+
+def test_docker_compose_maps_stable_host_name_to_host_gateway():
+    compose = (
+        Path(runtime_mod.__file__).parents[1]
+        / "sandbox"
+        / "_compose_files"
+        / "docker-compose-base.yaml"
+    ).read_text()
+    assert '"host.docker.internal:host-gateway"' in compose
+
+
+@pytest.mark.asyncio
+async def test_host_litellm_probe_runs_inside_task_container():
+    class FakeSandbox:
+        def __init__(self):
+            self.calls = []
+
+        async def exec(self, command, *, timeout_sec):
+            self.calls.append((command, timeout_sec))
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    sandbox = FakeSandbox()
+    await runtime_mod._probe_host_litellm_from_sandbox(
+        sandbox, base_url="http://host.docker.internal:43123"
+    )
+
+    command, timeout_sec = sandbox.calls[0]
+    assert "host.docker.internal:43123/health/liveliness" in command
+    assert timeout_sec == 30
+
+
+@pytest.mark.asyncio
+async def test_host_litellm_probe_fails_closed_before_agent_start():
+    class FakeSandbox:
+        async def exec(self, command, *, timeout_sec):
+            return SimpleNamespace(
+                return_code=1, stdout="", stderr="connection refused"
+            )
+
+    with pytest.raises(RuntimeError, match="cannot reach the host LiteLLM proxy"):
+        await runtime_mod._probe_host_litellm_from_sandbox(
+            FakeSandbox(), base_url="http://host.docker.internal:43123"
+        )
+
+
+@pytest.mark.asyncio
+async def test_host_litellm_process_uses_stable_runtime_cwd(monkeypatch, tmp_path):
+    runtime_dir = tmp_path / "litellm-runtime"
+    captured = {}
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(command, **kwargs):
+        captured.update(kwargs)
+        return FakeProcess()
+
+    async def healthy(process):
+        return None
+
+    monkeypatch.setattr(
+        runtime_mod.tempfile, "mkdtemp", lambda **kwargs: str(runtime_dir)
+    )
+    monkeypatch.setattr(runtime_mod, "_find_free_port", lambda bind: 43123)
+    monkeypatch.setattr(
+        runtime_mod, "_host_bind_address", lambda environment: "127.0.0.1"
+    )
+    monkeypatch.setattr(runtime_mod, "_host_litellm_executable", lambda: "litellm")
+    monkeypatch.setattr(runtime_mod.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(runtime_mod, "_poll_host_health", healthy)
+    route = resolve_litellm_route("openai/gpt-4.1-mini", {"OPENAI_API_KEY": "test-key"})
+
+    await runtime_mod._start_host_litellm(
+        route=route,
+        master_key="test-master-key",
+        agent_env={"OPENAI_API_KEY": "test-key"},
+        environment="local",
+        session_id="stable-cwd",
+        agent_name="openhands",
+    )
+
+    assert captured["cwd"] == runtime_dir
+    assert runtime_dir.is_dir()
 
 
 # #

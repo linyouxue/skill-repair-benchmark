@@ -53,6 +53,12 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from benchflow.benchmark_executor import (
+    OPENHANDS_CLI_COMMIT,
+    OPENHANDS_SDK_VERSION,
+    OPENHANDS_TOOLS_VERSION,
+)
+
 
 def _install_python_script(container_path: str, source: str) -> str:
     """Shell snippet that ensures python3 and writes `source` to container_path.
@@ -117,9 +123,9 @@ _BENCHFLOW_BIN_PREFIX = "/opt/benchflow/bin"
 # OpenCode routes through the chat-completions path. Shared with
 # ``benchflow.acp.runtime._format_acp_model`` so set_model targets the same id.
 OPENCODE_PROXY_PROVIDER_ID = "benchflow"
-_OPENHANDS_CLI_GIT_REV = "2df8a2835d3f1bd2f2eadf5a7a2e1ad0dfb0d271"
-_OPENHANDS_SDK_VERSION = "1.28.1"
-_OPENHANDS_TOOLS_VERSION = "1.28.1"
+_OPENHANDS_CLI_GIT_REV = OPENHANDS_CLI_COMMIT
+_OPENHANDS_SDK_VERSION = OPENHANDS_SDK_VERSION
+_OPENHANDS_TOOLS_VERSION = OPENHANDS_TOOLS_VERSION
 _JS_AGENT_PATH = (
     f"{_BENCHFLOW_BIN_PREFIX}:{_BENCHFLOW_JS_AGENT_PREFIX}/bin:"
     f"{_BENCHFLOW_NODE_PREFIX}/bin:$PATH"
@@ -291,6 +297,13 @@ _HARVEY_LAB_SHIM = (Path(__file__).parent / "harvey_lab_acp_shim.py").read_text(
 
 # Path to the deepagents ACP shim (runs LangChain's create_deep_agent as an ACP agent)
 _DEEPAGENTS_SHIM = (Path(__file__).parent / "deepagents_acp_shim.py").read_text()
+
+# Shared SkillsBench executor adapter.  It runs under the pinned OpenHands
+# uv-tool interpreter and patches the in-memory conversation construction path;
+# no third-party site-package files are rewritten.
+_OPENHANDS_BENCHMARK_ADAPTER = (
+    Path(__file__).parent / "openhands_benchmark_adapter.py"
+).read_text()
 
 
 def _json_settings_merge(path: str, mutator: str) -> str:
@@ -917,13 +930,18 @@ AGENTS: dict[str, AgentConfig] = {
             "openhands --python 3.12 && "
             "  uv tool list | grep -q '^openhands\\b' ) && "
             # Let sandbox user traverse to uv-managed Python interpreter path.
-            "chmod o+x /root /root/.local /root/.local/share "
-            "/root/.local/share/uv /root/.local/share/uv/tools 2>/dev/null; "
+            "( chmod o+x /root /root/.local /root/.local/share "
+            "/root/.local/share/uv /root/.local/share/uv/tools "
+            "2>/dev/null || true ) && "
             # Seed config so OpenHands ACP auth check passes before env override.
             "mkdir -p ~/.openhands && "
             'echo \'{"llm":{"model":"placeholder","api_key":"placeholder"}}\' '
             "> ~/.openhands/agent_settings.json && "
-            "command -v openhands >/dev/null 2>&1"
+            "command -v openhands >/dev/null 2>&1 && "
+            + _install_python_script(
+                f"{_BENCHFLOW_BIN_PREFIX}/openhands-benchmark-executor",
+                _OPENHANDS_BENCHMARK_ADAPTER,
+            )
         ),
         launch_cmd=(
             'export PATH="$HOME/.local/bin:$PATH" && '
@@ -951,20 +969,12 @@ AGENTS: dict[str, AgentConfig] = {
             '"$LLM_REASONING_EFFORT" ;; '
             "esac; "
             "printf '}}'; } > ~/.openhands/agent_settings.json && "
-            'if [ "${BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS:-0}" = "1" ]; then '
-            'OH_BIN="$(command -v openhands)"; '
-            'OH_PY="$(dirname "$(readlink -f "$OH_BIN")")/python"; '
+            'OH_BIN="$(command -v openhands)" && '
+            'OH_PY="$(dirname "$(readlink -f "$OH_BIN")")/python" && '
             '[ -x "$OH_PY" ] || { '
-            'echo "Cannot locate OpenHands tool interpreter" >&2; exit 127; }; '
-            '"$OH_PY" -c \'from pathlib import Path; '
-            "import openhands_cli.utils as u; "
-            "p=Path(u.__file__); s=p.read_text(); "
-            'old="        Tool(name=task_tool_name),\\n"; '
-            'new="        # BenchFlow: delegation disabled for this run.\\n"; '
-            "assert old in s or new in s; "
-            "p.write_text(s.replace(old,new,1))'; "
-            "fi && "
-            "openhands acp --always-approve --override-with-envs"
+            'echo "Cannot locate OpenHands tool interpreter" >&2; exit 127; } && '
+            f'exec "$OH_PY" {_BENCHFLOW_BIN_PREFIX}/openhands-benchmark-executor '
+            "acp --always-approve --override-with-envs"
         ),
         protocol="acp",
         requires_env=["LLM_API_KEY"],
