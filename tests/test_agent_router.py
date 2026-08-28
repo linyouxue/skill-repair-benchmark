@@ -878,7 +878,8 @@ def test_cli_verify_nonexistent_roundtrip_task_no_traceback(tmp_path: Path) -> N
     # Collapse rich's line-wrapping before substring checks.
     out = " ".join(click.unstyle(result.output).split())
     assert "round-trip: error" in out
-    assert bad.name in out  # names the --roundtrip-task value the user passed
+    # Rich may wrap a long path in the middle of the final filename.
+    assert bad.name in out.replace(" ", "")
     assert "Traceback" not in out
     assert "FileNotFoundError" not in out
 

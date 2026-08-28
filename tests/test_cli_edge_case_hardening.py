@@ -731,7 +731,8 @@ def test_tasks_generate_output_is_file_clean_error(tmp_path):
     )
     assert res.exit_code == 1
     assert not isinstance(res.exception, OSError), res.exception
-    assert "is not a directory" in res.output
+    out = " ".join(res.output.split())
+    assert "is not a directory" in out
 
 
 def test_tasks_generate_zero_results_exits_nonzero(tmp_path):

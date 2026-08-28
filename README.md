@@ -78,7 +78,7 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 
 ## 不能改变的比较条件
 
-- 不要执行 `uv tool install benchflow` 或 `pip install -U benchflow` 覆盖本仓库。
+- 不要从 PyPI 安装上游 BenchFlow 覆盖本仓库。
 - 不要为每种方法复制并修改一套 BenchFlow。
 - 不要把同一组方法放到不同模型、供应商路由、reasoning effort 或 task commit 上比较。
 - 不要把 `task_passed == false` 当作基础设施故障；先检查 `execution_ok` 和 `comparable`。

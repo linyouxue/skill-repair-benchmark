@@ -20,7 +20,7 @@ from benchflow.providers.litellm_config import resolve_litellm_route
 def test_deepseek_routes_via_native_litellm_provider():
     """deepseek/<model>, not openai/<model>: LiteLLM's deepseek integration
     declares thinking + reasoning_effort supported, so drop_params keeps them;
-    the openai/ passthrough drops both (the pinned 1.89.0 has no
+    the openai/ passthrough drops both (the pinned LiteLLM release has no
     allowed_openai_params escape)."""
     env = {
         "DEEPSEEK_API_KEY": "sk-test",

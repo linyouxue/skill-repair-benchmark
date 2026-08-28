@@ -87,9 +87,7 @@ def test_release_gate_rejects_crlf_shebang(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="requires Linux shebang execution")
-def test_release_zip_script_runs_directly_on_linux(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_release_zip_script_runs_directly_on_linux(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     probe = repo / "bin" / "probe.sh"
     probe.parent.mkdir(parents=True)

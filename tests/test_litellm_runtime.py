@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import tomllib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +16,21 @@ from benchflow.providers.runtime import (
     ensure_litellm_runtime,
     stop_provider_runtime,
 )
+
+
+def test_sandbox_litellm_pin_matches_project_dependency():
+    pyproject = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    declared = [
+        dependency
+        for dependency in pyproject["project"]["dependencies"]
+        if dependency.startswith("litellm[proxy]")
+    ]
+
+    assert declared == [runtime_mod.LITELLM_VERSION_SPEC]
 
 
 class FakeLiteLLMServer:

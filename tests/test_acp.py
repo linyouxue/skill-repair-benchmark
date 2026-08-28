@@ -1224,9 +1224,7 @@ class TestConnectAcpModelSelection:
         mock_acp.set_model.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_openhands_delegation_env_reaches_in_memory_adapter(
-        self, tmp_path
-    ):
+    async def test_openhands_delegation_env_reaches_in_memory_adapter(self, tmp_path):
         """OpenHands startup must not rewrite its installed site-package."""
         from benchflow.acp.runtime import connect_acp
 

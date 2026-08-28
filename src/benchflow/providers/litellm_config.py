@@ -325,7 +325,7 @@ def _route_registered_provider(
         # declare those params supported (deepseek does for both), so routing
         # through the provider's own prefix forwards them while drop_params
         # keeps protecting genuinely unsupported fields. (The pinned LiteLLM
-        # 1.89.0 has no per-deployment allowed_openai_params escape, so the
+        # release has no per-deployment allowed_openai_params escape, so the
         # provider prefix is the only faithful route.)
         upstream = f"{provider_name}/{bare}"
     else:
