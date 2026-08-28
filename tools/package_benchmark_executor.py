@@ -30,6 +30,18 @@ SECRET_PATTERNS = (
     re.compile(rb"sk-or-v1-[A-Za-z0-9]{20,}"),
     re.compile(rb"sk-[A-Fa-f0-9]{32,}"),
 )
+MATERIALIZED_DIRECTORY_ALIASES = {
+    Path(".claude/skills"): Path(".agents/skills"),
+    Path(
+        "docs/examples/task-md/real-skillsbench/citation-check-network/environment"
+    ): Path("docs/examples/task-md/real-skillsbench/citation-check/environment"),
+    Path("docs/examples/task-md/real-skillsbench/citation-check-network/oracle"): Path(
+        "docs/examples/task-md/real-skillsbench/citation-check/oracle"
+    ),
+    Path(
+        "docs/examples/task-md/real-skillsbench/citation-check-network/verifier"
+    ): Path("docs/examples/task-md/real-skillsbench/citation-check/verifier"),
+}
 
 
 def _source_files() -> list[tuple[Path, Path]]:
@@ -39,7 +51,9 @@ def _source_files() -> list[tuple[Path, Path]]:
         check=True,
         stdout=subprocess.PIPE,
     )
+    index_modes = _git_index_modes()
     selected: list[tuple[Path, Path]] = []
+    aliases: list[tuple[Path, Path]] = []
     for raw in process.stdout.split(b"\0"):
         if not raw:
             continue
@@ -48,10 +62,31 @@ def _source_files() -> list[tuple[Path, Path]]:
             part in DENIED_PARTS for part in relative.parts
         ):
             continue
+        if index_modes.get(relative) == "120000":
+            target = MATERIALIZED_DIRECTORY_ALIASES.get(relative)
+            if target is None:
+                raise RuntimeError(f"unsafe release source path: {relative}")
+            aliases.append((relative, target))
+            continue
         source = (ROOT / relative).resolve(strict=True)
         if not source.is_relative_to(ROOT.resolve()) or not source.is_file():
             raise RuntimeError(f"unsafe release source path: {relative}")
         selected.append((relative, source))
+    for alias, target in aliases:
+        target_root = (ROOT / target).resolve(strict=True)
+        if not target_root.is_relative_to(ROOT.resolve()) or not target_root.is_dir():
+            raise RuntimeError(f"unsafe release alias target: {alias} -> {target}")
+        target_files = [
+            (relative, source)
+            for relative, source in selected
+            if relative.is_relative_to(target)
+        ]
+        if not target_files:
+            raise RuntimeError(f"empty release alias target: {alias} -> {target}")
+        selected.extend(
+            (alias / relative.relative_to(target), source)
+            for relative, source in target_files
+        )
     return sorted(selected, key=lambda item: item[0].as_posix())
 
 
@@ -87,6 +122,17 @@ def _archive_body(relative: Path, source: Path) -> bytes:
     return body
 
 
+def _index_mode(relative: Path, index_modes: dict[Path, str]) -> str | None:
+    mode = index_modes.get(relative)
+    if mode is not None:
+        return mode
+    for alias, target in MATERIALIZED_DIRECTORY_ALIASES.items():
+        if relative.is_relative_to(alias):
+            source_relative = target / relative.relative_to(alias)
+            return index_modes.get(source_relative)
+    return None
+
+
 def _validate_archive(output: Path) -> None:
     invalid_entries: list[str] = []
     with zipfile.ZipFile(output) as archive:
@@ -113,7 +159,9 @@ def _write_archive(
         output, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=9
     ) as archive:
         for relative, source in files:
-            permissions = 0o755 if index_modes.get(relative) == "100755" else 0o644
+            permissions = (
+                0o755 if _index_mode(relative, index_modes) == "100755" else 0o644
+            )
             info = zipfile.ZipInfo.from_file(
                 source, f"{ARCHIVE_ROOT}/{relative.as_posix()}"
             )

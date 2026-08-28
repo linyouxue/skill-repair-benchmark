@@ -86,6 +86,78 @@ def test_release_gate_rejects_crlf_shebang(tmp_path: Path) -> None:
         packager._validate_archive(output)
 
 
+def test_release_zip_materializes_known_directory_alias(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    skill = repo / ".agents" / "skills" / "demo" / "SKILL.md"
+    helper = repo / ".agents" / "skills" / "demo" / "run.sh"
+    alias = repo / ".claude" / "skills"
+    skill.parent.mkdir(parents=True)
+    alias.parent.mkdir(parents=True)
+    skill.write_text("# Demo\n", encoding="utf-8")
+    helper.write_bytes(b"#!/bin/sh\nprintf 'ok\\n'\n")
+    alias.write_text("../.agents/skills", encoding="utf-8")
+
+    subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "add",
+            "--",
+            ".agents/skills/demo/SKILL.md",
+            ".agents/skills/demo/run.sh",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "update-index", "--chmod=+x", "--", ".agents/skills/demo/run.sh"],
+        cwd=repo,
+        check=True,
+    )
+    target_object = (
+        subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=repo,
+            input=b"../.agents/skills",
+            check=True,
+            stdout=subprocess.PIPE,
+        )
+        .stdout.decode("ascii")
+        .strip()
+    )
+    subprocess.run(
+        [
+            "git",
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"120000,{target_object},.claude/skills",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    monkeypatch.setattr(packager, "ROOT", repo)
+
+    output = tmp_path / "release.zip"
+    packager._write_archive(
+        output, packager._source_files(), packager._git_index_modes()
+    )
+
+    with zipfile.ZipFile(output) as archive:
+        names = set(archive.namelist())
+        assert "benchmark-executor/.claude/skills" not in names
+        assert (
+            archive.read("benchmark-executor/.claude/skills/demo/SKILL.md")
+            == b"# Demo\n"
+        )
+        helper_info = archive.getinfo("benchmark-executor/.claude/skills/demo/run.sh")
+        helper_mode = (helper_info.external_attr >> 16) & 0xFFFF
+        assert stat.S_ISREG(helper_mode)
+        assert stat.S_IMODE(helper_mode) == 0o755
+
+
 @pytest.mark.skipif(os.name == "nt", reason="requires Linux shebang execution")
 def test_release_zip_script_runs_directly_on_linux(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
