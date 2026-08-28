@@ -16,7 +16,7 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 | 第一次安装并跑通一条任务 | [DELIVERY_GUIDE.md：第一次使用](./DELIVERY_GUIDE.md#0-第一次使用从解压到一条有效-rollout) |
 | 手动运行 no-skill / original-skill / method-skill | [DELIVERY_GUIDE.md：人工或调试运行](./DELIVERY_GUIDE.md#4-入口-a人工或调试运行) |
 | 在 SkillRevise、SkillHone 等算法中调用 rollout | [DELIVERY_GUIDE.md：修复算法自动调用](./DELIVERY_GUIDE.md#5-入口-b修复算法自动调用) |
-| 配置 WSL、Linux 服务器或临时 SSH 代理 | [DELIVERY_GUIDE.md：网络与代理](./DELIVERY_GUIDE.md#21-先分清四条网络链路) |
+| 配置 WSL、Linux 服务器或临时 SSH 代理 | [DELIVERY_GUIDE.md：网络与代理](./DELIVERY_GUIDE.md#21-先分清五条网络链路) |
 | 判断结果能否进入方法比较 | [DELIVERY_GUIDE.md：返回结果](./DELIVERY_GUIDE.md#7-返回结果与判定规则) |
 | 理解固定协议、Skill 预载和 iteration 定义 | [BENCHMARK_EXECUTOR.md](./BENCHMARK_EXECUTOR.md) |
 | 查看机器可读的固定版本 | [BENCHMARK_EXECUTOR_VERSION.json](./BENCHMARK_EXECUTOR_VERSION.json) |

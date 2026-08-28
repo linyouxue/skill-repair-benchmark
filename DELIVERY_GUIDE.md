@@ -287,7 +287,7 @@ executor 管理。
 指向远程 Docker 宿主机而非本地 runner；这种拓扑不受支持，请直接在 Docker
 服务器上运行 executor，或另行把 LiteLLM 部署到任务容器可访问的网络中。
 
-### 2.1 先分清四条网络链路
+### 2.1 先分清五条网络链路
 
 “浏览器能访问供应商”不能证明一次 Docker rollout 的全部网络都正常。正式排错前，
 先确定失败属于哪一层：
@@ -295,15 +295,18 @@ executor 管理。
 | 网络链路 | 谁发起请求 | 本执行器是否自动处理 | 应在哪里配置 |
 |---|---|---|---|
 | Docker daemon → 镜像仓库 | Docker daemon | 否 | Docker Desktop 或 Linux daemon 的代理/镜像源 |
+| task container → GitHub/PyPI（安装 OpenHands） | Agent 启动前的任务容器 | 只固定版本，不提供出站网络 | 服务器的容器出站、透明代理或内部镜像 |
 | host LiteLLM → 模型供应商 | 启动 executor 的 Linux/WSL 进程 | 继承 runner 环境 | runner 的 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` |
 | task container → host LiteLLM | OpenHands 所在任务容器 | 是 | 动态端口、`host.docker.internal` 与 Linux `host-gateway` 由 executor 管理 |
 | verifier → apt、uv、PyPI 等 | 最终官方 verifier 子进程 | 可选、默认关闭 | 管理员批准的容器代理；按第 2.4 节显式启用 |
 
-第三条链路只承载模型请求。第四条链路是独立的：部分官方 verifier 会在
+第四条链路只承载模型请求。第五条链路是独立的：部分官方 verifier 会在
 `test.sh` 中执行 `apt-get`、`curl`、`uv` 或 `pip`。执行器默认不会复制 runner
 代理；显式启用 verifier-only 模式后，也只把过滤后的代理变量临时注入最终 verifier
 子进程，不写入 Agent、容器 PID 1 或 task 的 persistent environment。反过来，
-Docker daemon 能拉取镜像，也不表示运行中的 verifier 一定能访问 PyPI。
+Docker daemon 能拉取镜像，也不表示任务容器能从 GitHub 安装 OpenHands，
+更不表示运行中的 verifier 一定能访问 PyPI。verifier-only 接口只处理
+第五条链路，不会代替同学或服务器管理员配置前四条链路。
 
 无论是否使用代理，都建议保留：
 
