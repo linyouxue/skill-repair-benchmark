@@ -50,6 +50,34 @@ def _env_with_probe_output(stdout: str):
 
 
 @pytest.mark.asyncio
+async def test_default_off_preserves_strict_legacy_verifier_factory(tmp_path):
+    """Guards verifier-proxy opt-in against a default-off custom-plane break."""
+    verifier = SimpleNamespace(
+        verify=AsyncMock(return_value=SimpleNamespace(rewards={"reward": 1.0}))
+    )
+    planes = SimpleNamespace()
+    planes.harden_before_verify = AsyncMock()
+
+    def strict_verifier(*, task, rollout_paths, sandbox):
+        return verifier
+
+    planes.verifier = strict_verifier
+
+    rewards, verifier_error, timeout = await _verify_rollout(
+        _env_with_probe_output("0\n"),
+        _mk_task(),
+        _mk_paths(tmp_path),
+        {},
+        planes,
+        verifier_env_overlay=None,
+    )
+
+    assert rewards == {"reward": 1.0}
+    assert verifier_error is None
+    assert timeout is None
+
+
+@pytest.mark.asyncio
 async def test_zero_output_timeout_retries_once_and_scores(tmp_path):
     attempts = []
 

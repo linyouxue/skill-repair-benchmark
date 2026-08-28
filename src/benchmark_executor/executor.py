@@ -26,8 +26,15 @@ from benchflow.benchmark_executor import (
 from benchflow.evaluation import _environment_manifest_from_task_document
 from benchflow.rollout import RolloutConfig
 from benchflow.skill_policy import SKILL_MODE_NO_SKILL, SKILL_MODE_WITH_SKILL
+from benchflow.task import Task
+from benchflow.task.verifier_document import load_verifier_document
 from benchflow.usage_tracking import UsageTrackingConfig
 from benchmark_executor.result import BenchmarkResult
+from benchmark_executor.verifier_proxy import (
+    VerifierProxyPreflight,
+    VerifierProxySettings,
+    resolve_verifier_proxy_settings,
+)
 
 EvaluationCondition = Literal["no-skill", "original-skill", "method-skill"]
 _CONDITIONS = frozenset({"no-skill", "original-skill", "method-skill"})
@@ -73,6 +80,7 @@ class BenchmarkExecutor:
         model: str,
         reasoning_effort: str | None = None,
         protocol: str = EXECUTOR_PROTOCOL_ID,
+        verifier_proxy_mode: str | None = None,
     ) -> None:
         if protocol != EXECUTOR_PROTOCOL_ID:
             raise ValueError(
@@ -91,6 +99,12 @@ class BenchmarkExecutor:
         self.provider_route = provider_route_for_model(model)
         self.reasoning_effort = normalize_reasoning_effort(reasoning_effort)
         self.protocol = protocol
+        # Resolve once per executor instance so every rollout uses the same
+        # infrastructure setting. The default is always off, even if the runner
+        # itself has HTTP_PROXY/HTTPS_PROXY configured for the model provider.
+        self.verifier_proxy: VerifierProxySettings = resolve_verifier_proxy_settings(
+            mode=verifier_proxy_mode
+        )
 
     def _task_path(self, task_id: str) -> Path:
         task_id = _path_component(task_id, field="task_id")
@@ -154,6 +168,9 @@ class BenchmarkExecutor:
             "rollout_id": rollout_id,
             "skill_bundle": str(bundle) if bundle is not None else None,
             "skill_bundle_manifest": bundle_metadata,
+            # Safe metadata only: proxy URLs, ports, userinfo, and credentials
+            # never enter executor_request.json.
+            "verifier_proxy": dict(self.verifier_proxy.metadata),
         }
 
     async def run_async(
@@ -177,6 +194,21 @@ class BenchmarkExecutor:
             condition, skill_bundle
         )
         task_digest_value = task_digest(task_path)
+        verifier_service = "main"
+        if self.verifier_proxy.enabled:
+            task = Task(task_path)
+            verifier_document = load_verifier_document(task.paths.tests_dir)
+            effective_verifier_type = (
+                verifier_document.selected_strategy.type
+                if verifier_document is not None
+                else task.config.verifier.type
+            )
+            if effective_verifier_type not in {"test-script", "script"}:
+                raise ValueError(
+                    "verifier proxy is supported only for sandbox test-script "
+                    "verifiers; it is never forwarded to host-side verifier judges"
+                )
+            verifier_service = task.config.verifier.service
 
         job_dir = self.jobs_root / method_id
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -221,6 +253,20 @@ class BenchmarkExecutor:
             jobs_dir=self.jobs_root,
             source_provenance=source,
             task_digest=task_digest_value,
+            verifier_env_overlay=(
+                dict(self.verifier_proxy.env) if self.verifier_proxy.enabled else None
+            ),
+            verifier_proxy_metadata=dict(self.verifier_proxy.metadata),
+            pre_agent_hooks=(
+                [
+                    VerifierProxyPreflight(
+                        self.verifier_proxy.endpoints,
+                        service=verifier_service,
+                    )
+                ]
+                if self.verifier_proxy.enabled
+                else None
+            ),
         )
         result_json = rollout_dir / "result.json"
         try:

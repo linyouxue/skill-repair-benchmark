@@ -338,6 +338,7 @@ def executor_metadata(
     skill_policy: TaskSkillPolicy,
     manifest: SkillBundleManifest | None,
     resolved_agent_env: dict[str, str] | None = None,
+    verifier_proxy_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build auditable config/result metadata for canonical OpenHands runs."""
 
@@ -380,6 +381,15 @@ def executor_metadata(
         "llm_request_safety_timeout_sec": LLM_REQUEST_SAFETY_TIMEOUT_SEC,
         "delegation_disabled": True,
         "skill_context_preloaded": bool(skill_policy.enabled),
+        "verifier_proxy": dict(
+            verifier_proxy_metadata
+            or {
+                "mode": "off",
+                "enabled": False,
+                "scope": "verifier-process-only",
+                "preflight": "disabled",
+            }
+        ),
     }
     if manifest is not None:
         data.update(manifest.to_metadata())
@@ -425,6 +435,11 @@ def protocol_descriptor() -> dict[str, Any]:
         "evaluation_conditions": ["no-skill", "original-skill", "method-skill"],
         "verifier_dependency_install_policy": (
             "fail closed before reward parsing; classify as non-comparable"
+        ),
+        "verifier_proxy_policy": (
+            "default off; explicit opt-in; environment variables on final verifier "
+            "exec only; shared network namespace unchanged; container loopback "
+            "rejected; TCP preflight before agent execution"
         ),
         "task_identity": "live task digest recorded per rollout",
     }

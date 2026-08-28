@@ -297,12 +297,13 @@ executor 管理。
 | Docker daemon → 镜像仓库 | Docker daemon | 否 | Docker Desktop 或 Linux daemon 的代理/镜像源 |
 | host LiteLLM → 模型供应商 | 启动 executor 的 Linux/WSL 进程 | 继承 runner 环境 | runner 的 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` |
 | task container → host LiteLLM | OpenHands 所在任务容器 | 是 | 动态端口、`host.docker.internal` 与 Linux `host-gateway` 由 executor 管理 |
-| task/verifier container → apt、uv、PyPI 等 | 任务或官方 verifier 容器 | 否 | Docker bridge 的直接出站网络，或管理员批准的容器代理 |
+| verifier → apt、uv、PyPI 等 | 最终官方 verifier 子进程 | 可选、默认关闭 | 管理员批准的容器代理；按第 2.4 节显式启用 |
 
 第三条链路只承载模型请求。第四条链路是独立的：部分官方 verifier 会在
-`test.sh` 中执行 `apt-get`、`curl`、`uv` 或 `pip`。runner 上的代理不会自动复制到
-容器里，因为这可能把带凭据的代理暴露给不受信任的 task/agent。反过来，Docker
-daemon 能拉取镜像，也不表示运行中的容器一定能访问 PyPI。
+`test.sh` 中执行 `apt-get`、`curl`、`uv` 或 `pip`。执行器默认不会复制 runner
+代理；显式启用 verifier-only 模式后，也只把过滤后的代理变量临时注入最终 verifier
+子进程，不写入 Agent、容器 PID 1 或 task 的 persistent environment。反过来，
+Docker daemon 能拉取镜像，也不表示运行中的 verifier 一定能访问 PyPI。
 
 无论是否使用代理，都建议保留：
 
@@ -378,10 +379,62 @@ bridge 容器不可见，因此不能据此认定 verifier 的 `apt`/`uv` 网络
 出站网络、内部镜像源或受控的容器代理。容器代理地址必须从容器内可达；宿主机的
 `127.0.0.1`、WSL 的临时地址和个人 VPN IP 都不能写死进 executor。
 
-当前协议不会自动把 runner 的 `HTTP_PROXY`/`HTTPS_PROXY` 注入 task 或 verifier。
-这是有意的凭据隔离。若某轮实验必须增加容器代理，应由协调者统一发布同一配置，
-先在所有机器上验证，并记录为实验环境的一部分；不能由不同方法负责人各自改
-BenchFlow。Docker daemon 的镜像代理仍需管理员单独配置。
+执行器提供三种 verifier 代理模式，默认始终为 `off`。仓库、GitHub 和交付 ZIP
+不包含任何人的实际代理地址。以下变量由公共 `BenchmarkExecutor` Python 接口读取，
+可以写入每位同学自己的 `.env`（process export 优先），但不要提交该 `.env`：
+
+```bash
+# 默认；即使 runner 自己设置了 HTTP_PROXY，也不会传给 verifier
+export BENCHMARK_EXECUTOR_VERIFIER_PROXY_MODE=off
+
+# 显式继承本机 runner 代理；仅当该地址从 Docker 容器可达时使用
+export BENCHMARK_EXECUTOR_VERIFIER_PROXY_MODE=inherit
+
+# 推荐的服务器方式：单独填写容器可达、无 URL 凭据的受控 relay
+export BENCHMARK_EXECUTOR_VERIFIER_PROXY_MODE=explicit
+export BENCHMARK_EXECUTOR_VERIFIER_HTTP_PROXY="http://host.docker.internal:<relay-port>"
+export BENCHMARK_EXECUTOR_VERIFIER_HTTPS_PROXY="$BENCHMARK_EXECUTOR_VERIFIER_HTTP_PROXY"
+export BENCHMARK_EXECUTOR_VERIFIER_NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"
+```
+
+`inherit` 只是一个显式开关，不是默认行为。检测到 `localhost`、`127.0.0.1`、`::1`
+或 `0.0.0.0` 时执行器会在建模调用前拒绝运行；它不会把地址机械替换成
+`host.docker.internal`，因为宿主代理可能只监听 loopback。`explicit` 模式所指向的
+relay 应只允许 Docker bridge 访问，不得监听公网，也不得把用户名和密码写进 URL。
+
+启用后，执行器会在 OpenHands 启动和首次 provider 请求之前，从实际 task 容器对
+每个代理 endpoint 做一次 TCP reachability preflight；不通就作为基础设施错误停止，
+不产生模型费用。这个 preflight 能发现地址、DNS、端口和 Docker 路由错误，但不能
+保证所有第三方下载站永不宕机。最终依赖下载仍失败时继续 fail closed，标记为
+`verifier_dep_install` / `non-comparable`。
+
+代理变量只进入最终 verifier 的 `test-script` `sandbox.exec`（若框架重试 verifier，
+每次仍保持相同作用域），执行后临时环境文件会被删除；
+task/Agent 不获得这些变量，代理值也不会写入 `executor_request.json`、`config.json`
+或 `result.json`。若官方 verifier 自己打印环境，执行器会在保存 stdout 时替换代理
+endpoint。代理模式和是否启用会作为脱敏元数据记录，以便不同方法保持同一基础设施
+条件。若官方 verifier 把 endpoint 写入 stdout 或 canonical
+`reward.json`/`reward-details.json`，执行器会在解析和保存结果前脱敏。Docker daemon
+的镜像代理仍需管理员单独配置。
+
+该 overlay 只支持在 sandbox 中运行的 `test-script` verifier；`llm-judge` 等宿主侧
+judge 不会继承它。若对这类 task 启用 verifier proxy，执行器会在模型调用前拒绝，
+避免把依赖代理误传给 judge provider。
+
+这里的“verifier-only”指**进程环境变量的作用域**，不代表独立网络 namespace。对于
+本身为 `network_mode: public` 的 task，Agent 和 verifier 仍共享容器网络，理论上 Agent
+可以探测一个已经开放的 relay；因此 relay 不得使用 URL 内嵌凭据，并必须用防火墙/ACL
+限制为 Docker bridge。需要“Agent 物理不可达、verifier 可达”的强隔离时，应部署独立
+verifier 容器，不能只靠本功能。
+
+若 task 的网络策略为 `network_mode: no-network`，执行器不会为了 verifier 临时解除 task
+隔离；共享容器无法同时满足“Agent 完全无网、verifier 独立有网”。这种任务需要单独
+的 verifier 容器/网络命名空间，否则代理 preflight 会提前失败。不能静默把 task 改成
+public。
+
+原生调试入口 `bench eval run` 不会自动读取这些专用变量；需要 verifier 定向代理的
+正式或诊断 rollout 应通过第 5 节公共 `BenchmarkExecutor` 接口运行，以免手工修改
+官方 task 的 `verifier.env`。
 
 如果 verifier 因依赖下载失败而没有真正执行测试，执行器会将其标记为
 `verifier_dep_install`、`task_passed=None`、`comparable=False`。不要把留下的
@@ -597,6 +650,10 @@ result = executor.run(
     rollout_id="manufacturing-codebook-normalization-r2",
 )
 ```
+
+`BenchmarkExecutor` 构造时会读取第 2.4 节的专用变量；未配置 mode 时固定为 `off`，
+不会因为 runner 恰好存在普通 `HTTP_PROXY` 而自动给 verifier 开代理。代理配置在实例
+创建时冻结，后续单次 `run()` 不能修改，避免 refinement 各轮基础设施漂移。
 
 `tasks_root` 通常指向 SkillsBench 的 `tasks/` 父目录；`task_id` 再选择其中一个
 子目录。同步脚本或普通工作线程使用 `run()`。在 Jupyter、FastAPI 或其他当前

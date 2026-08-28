@@ -69,7 +69,6 @@ def test_secret_env_keys_are_redacted(name: str) -> None:
         "USER",
         "LANG",
         "NORMAL_VAR",
-        "HTTP_PROXY",
         "PYTHONPATH",
     ],
 )
@@ -162,3 +161,41 @@ def test_write_config_drops_litellm_secret_base_urls(tmp_path: Path) -> None:
     assert "OPENAI_BASE_URL" not in recorded
     assert "__benchflow/secret-prefix" not in raw
     assert recorded["NORMAL_VAR"] == "keep-me"
+
+
+def test_write_config_drops_all_conventional_proxy_values(
+    tmp_path: Path,
+) -> None:
+    """Guards this verifier-proxy change against endpoint artifact leakage."""
+    credentialed_proxy = "http://proxy-user:proxy-password@proxy.example:8080"
+    plain_proxy = "http://proxy.example:8080"
+    agent_env = {
+        "HTTP_PROXY": credentialed_proxy,
+        "HTTPS_PROXY": plain_proxy,
+        "NO_PROXY": "internal-service.example,localhost",
+    }
+
+    _write_config(
+        tmp_path,
+        task_path=tmp_path / "task",
+        agent="codex-acp",
+        model="gpt-4.1-mini",
+        environment="docker",
+        skill_policy=_no_skill_policy(tmp_path / "task"),
+        sandbox_user=None,
+        context_root=None,
+        timeout=300,
+        started_at=datetime(2026, 1, 1),
+        agent_env=agent_env,
+    )
+
+    raw = (tmp_path / "config.json").read_text()
+    recorded = json.loads(raw)["agent_env"]
+
+    assert "HTTP_PROXY" not in recorded
+    assert "HTTPS_PROXY" not in recorded
+    assert "NO_PROXY" not in recorded
+    assert "proxy-user" not in raw
+    assert "proxy-password" not in raw
+    assert plain_proxy not in raw
+    assert "internal-service.example" not in raw

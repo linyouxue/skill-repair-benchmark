@@ -1079,6 +1079,7 @@ class Rollout:
             skill_policy=task_skill_policy,
             manifest=self._executor_skill_manifest,
             resolved_agent_env=self._agent_env,
+            verifier_proxy_metadata=cfg.verifier_proxy_metadata,
         )
 
         # Honour an externally-supplied sandbox (use_prebuilt_env, set by
@@ -1910,6 +1911,7 @@ class Rollout:
             self._planes,
             sandbox_user=cfg.sandbox_user,
             workspace=self._agent_cwd,
+            verifier_env_overlay=cfg.verifier_env_overlay,
         )
         if verifier_timeout_diag is not None:
             self._diagnostics.set(verifier_timeout_diag)

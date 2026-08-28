@@ -162,6 +162,17 @@ verifier reward 采用失败闭锁语义：若本次 `test-stdout.txt` 显示依
 `task_passed=None`、`comparable=False`。这是 verifier 基础设施错误，不是方法失败。
 修复和 verifier-only diagnostic retest 的边界见交付指南第 7.1 节。
 
+verifier 依赖代理属于统一执行基础设施，默认关闭，只能在
+`BenchmarkExecutor` 实例创建时按本机环境显式选择 `inherit` 或 `explicit`。解析后的
+代理值只进入 sandbox 内最终 `test-script` 子进程，不进入 Agent、task persistent
+environment、宿主侧 LLM/agent judge 或结果
+文件；容器 loopback 地址会被拒绝，并在首次模型请求前从 task 容器做 TCP preflight。
+结果只记录脱敏的 mode/scope，不记录 endpoint。该机制不会解除 task 自己的网络隔离，
+也不负责 Docker daemon 拉镜像或 Dockerfile build 的网络。这里保证的是**进程环境变量
+定向注入**，不是独立的网络 namespace：对本来就是 `network_mode: public` 的 task，
+Agent 与 verifier 仍处于同一容器网络，因此 relay 必须无 URL 凭据并限制为 Docker
+bridge 可访问；需要物理网络隔离时必须使用独立 verifier 容器。
+
 每个 rollout 的 `config.json` 和 `result.json` 都包含 `executor`。`config.json`
 记录固定协议和预期预载状态；任务结束后，`result.json` 在同一块中追加 observed
 计数、停止原因和 sandbox 侧预载证明，例如：

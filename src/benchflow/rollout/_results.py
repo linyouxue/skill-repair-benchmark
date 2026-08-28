@@ -110,6 +110,11 @@ def _is_secret_env_key(name: str) -> bool:
 def _is_secret_env_value(name: str, value: str) -> bool:
     """Return True if a normally public env value embeds a runtime secret."""
     upper = name.upper()
+    if upper in {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}:
+        # Even a credential-free proxy reveals local infrastructure hostnames,
+        # ports, and bypass domains. It has no value in a shared rollout
+        # artifact, so fail closed for the exact conventional proxy keys.
+        return True
     if not upper.endswith("BASE_URL"):
         return False
     return any(marker in value for marker in _SECRET_URL_PATH_MARKERS)

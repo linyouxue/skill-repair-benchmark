@@ -10,9 +10,11 @@ PR #572 review hardened this: the raw stdout is NEVER persisted into
 ``verifier_error`` (it can carry env dumps / tokens / credentialed install
 URLs). Instead the verifier scans stdout for dep-install markers and, on a
 hit, appends only a FIXED secret-free diagnostic. The raw resolver output
-stays in the downloaded ``verifier/test-stdout.txt`` artifact.
+stays in the downloaded ``verifier/test-stdout.txt`` artifact except for
+harness-injected proxy configuration, which is local infrastructure evidence.
 """
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -182,6 +184,80 @@ def _make_verifier(tmp_path, *, stdout_text, reward_text=None):
 
     sandbox.exec = AsyncMock(side_effect=fake_exec)
     return Verifier(task=task, rollout_paths=rollout_paths, sandbox=sandbox)
+
+
+@pytest.mark.asyncio
+async def test_verifier_proxy_redaction_survives_exec_exception(tmp_path):
+    """Guards this verifier-proxy change on exception and persisted-error paths."""
+    endpoint = "http://host.docker.internal:18080"
+    bypass = "internal-service.example,localhost"
+    verifier = _make_verifier(tmp_path, stdout_text="unused")
+    verifier._task.config.verifier.env = {
+        "HTTP_PROXY": endpoint,
+        "NO_PROXY": bypass,
+    }
+
+    async def failing_exec(*args, **kwargs):
+        command = args[0] if args else kwargs.get("command", "")
+        if "chmod" in command:
+            return MagicMock(exit_code=0, returncode=0)
+        verifier._rollout_paths.test_stdout_path.write_text(
+            f"HTTP_PROXY={endpoint}\nNO_PROXY={bypass}\n"
+            "bypass_target=internal-service.example\n"
+        )
+        raise RuntimeError(
+            "verifier process failed while connecting to host.docker.internal:18080"
+        )
+
+    verifier._sandbox.exec = AsyncMock(side_effect=failing_exec)
+
+    with pytest.raises(RuntimeError) as exc:
+        await verifier._verify_test_script()
+
+    saved = verifier._rollout_paths.test_stdout_path.read_text()
+    assert endpoint not in saved
+    assert bypass not in saved
+    assert "internal-service.example" not in saved
+    assert endpoint not in str(exc.value)
+    assert "host.docker.internal" not in str(exc.value)
+    assert "18080" not in str(exc.value)
+    assert "[REDACTED_VERIFIER_PROXY]" in saved
+    assert "[REDACTED_VERIFIER_PROXY]" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_verifier_proxy_is_redacted_from_structured_reward(tmp_path):
+    """Guards this proxy change: reward evidence cannot leak the endpoint."""
+    endpoint = "http://host.docker.internal:18080"
+    verifier = _make_verifier(tmp_path, stdout_text="ok", reward_text="1")
+    verifier._task.config.verifier.env = {"HTTP_PROXY": endpoint}
+
+    async def reward_exec(*args, **kwargs):
+        command = args[0] if args else kwargs.get("command", "")
+        if "chmod" in command:
+            return MagicMock(exit_code=0, returncode=0)
+        verifier._rollout_paths.test_stdout_path.write_text("ok")
+        verifier._rollout_paths.reward_text_path.write_text("1")
+        verifier._rollout_paths.reward_json_path.write_text(
+            json.dumps(
+                {
+                    "reward": 1,
+                    "metadata": {"dependency_proxy": endpoint},
+                }
+            )
+        )
+        return MagicMock(exit_code=0, returncode=0)
+
+    verifier._sandbox.exec = AsyncMock(side_effect=reward_exec)
+
+    result = await verifier._verify_test_script()
+
+    raw_reward = verifier._rollout_paths.reward_json_path.read_text()
+    assert endpoint not in raw_reward
+    assert endpoint not in repr(result.rewards)
+    assert result.rewards["metadata"]["dependency_proxy"] == (
+        "[REDACTED_VERIFIER_PROXY]"
+    )
 
 
 @pytest.mark.asyncio

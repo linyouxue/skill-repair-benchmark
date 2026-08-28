@@ -117,6 +117,18 @@ class RolloutConfig:
     # C-axis overlay (parsed dict) deep-merged into the task's resolved config
     # at rollout setup. None => no overlay (default).
     config_override: dict | None = None
+    # Trusted harness-only environment overlay for the final test-script process.
+    # It is deliberately separate from agent_env, task environment variables,
+    # config_override, and the task's general verifier.env: values may contain
+    # local proxy endpoints and must not be persisted, exposed to the agent, or
+    # forwarded to host-side LLM/agent judges.
+    verifier_env_overlay: dict[str, str] | None = field(
+        default=None, repr=False, compare=False
+    )
+    # Safe, already-redacted executor metadata corresponding to the overlay.
+    verifier_proxy_metadata: dict[str, Any] | None = field(
+        default=None, repr=False, compare=False
+    )
     # Abort the prompt if no tool call arrives for this many seconds.
     # Catches agents that hung silently while the local process is alive
     # (e.g. gemini-cli not responding). None disables idle detection.
@@ -191,6 +203,22 @@ class RolloutConfig:
                     "base_image_override must be a non-empty image reference"
                 )
             self.base_image_override = base_image
+        if self.verifier_env_overlay is not None:
+            if not isinstance(self.verifier_env_overlay, dict) or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in self.verifier_env_overlay.items()
+            ):
+                raise TypeError("verifier_env_overlay must be a string mapping")
+            if any(
+                "\x00" in key or "\x00" in value
+                for key, value in self.verifier_env_overlay.items()
+            ):
+                raise ValueError("verifier_env_overlay cannot contain NUL bytes")
+            self.verifier_env_overlay = dict(self.verifier_env_overlay)
+        if self.verifier_proxy_metadata is not None:
+            if not isinstance(self.verifier_proxy_metadata, dict):
+                raise TypeError("verifier_proxy_metadata must be a mapping")
+            self.verifier_proxy_metadata = dict(self.verifier_proxy_metadata)
         if self.skills_dir is not None and not isinstance(self.skills_dir, Path):
             self.skills_dir = Path(self.skills_dir)
         self.skill_mode = normalize_skill_mode(self.skill_mode)

@@ -30,6 +30,7 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 - 每个 BenchFlow execution Step 最多 60 次根 Agent iteration；
 - persistent `AgentContext` 中的完整 `SKILL.md` 预载与证据；
 - 动态 LiteLLM、本机 Docker/原生 Linux host-gateway 适配和容器内健康检查；
+- 默认关闭、由每台机器自行配置的 verifier 进程定向依赖代理与付费前连通性检查；
 - result、trajectory、verifier 与 Skill exposure 的统一结果契约。
 
 交付包**不包含**：

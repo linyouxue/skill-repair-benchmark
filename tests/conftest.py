@@ -31,6 +31,14 @@ REF_TASKS = REPO_ROOT / ".cache" / "datasets" / "benchflow" / "examples" / "task
 def isolate_local_dotenv(monkeypatch, tmp_path) -> None:
     """Keep developer-machine `.env` secrets out of unit tests."""
     monkeypatch.setenv("BENCHFLOW_DOTENV_PATH", str(tmp_path / ".env"))
+    for name in (
+        "BENCHMARK_EXECUTOR_VERIFIER_PROXY_MODE",
+        "BENCHMARK_EXECUTOR_VERIFIER_HTTP_PROXY",
+        "BENCHMARK_EXECUTOR_VERIFIER_HTTPS_PROXY",
+        "BENCHMARK_EXECUTOR_VERIFIER_ALL_PROXY",
+        "BENCHMARK_EXECUTOR_VERIFIER_NO_PROXY",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture

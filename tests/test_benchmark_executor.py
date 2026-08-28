@@ -325,6 +325,69 @@ Solve the task.
     assert not (tmp_path / "jobs").exists()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("network_mode", ["public", "no-network"])
+async def test_verifier_proxy_overlay_stays_out_of_agent_and_task_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    network_mode: str,
+) -> None:
+    """Guards this proxy change: verifier env never relaxes the task network."""
+
+    from benchflow.rollout import Rollout, RolloutConfig
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "placeholder-key")
+    task = tmp_path / "task"
+    (task / "environment").mkdir(parents=True)
+    (task / "verifier").mkdir()
+    (task / "environment" / "Dockerfile").write_text("FROM ubuntu:24.04\n")
+    (task / "verifier" / "test.sh").write_text("#!/bin/sh\nexit 0\n")
+    (task / "task.md").write_text(
+        f"""---
+verifier:
+  type: test-script
+  env:
+    EXISTING_VERIFIER_VAR: preserved
+environment:
+  network_mode: {network_mode}
+---
+Solve the task.
+"""
+    )
+    endpoint = "http://host.docker.internal:18080"
+    config = RolloutConfig.from_legacy(
+        task_path=task,
+        agent="openhands",
+        model="openrouter/openai/gpt-5.2",
+        jobs_dir=tmp_path / "jobs",
+        job_name="proxy-isolation",
+        rollout_name="run-1",
+        verifier_env_overlay={
+            "HTTP_PROXY": endpoint,
+            "http_proxy": endpoint,
+        },
+        verifier_proxy_metadata={
+            "mode": "explicit",
+            "enabled": True,
+            "scope": "verifier-process-only",
+        },
+    )
+    rollout = Rollout(config)
+
+    await rollout.setup()
+
+    assert rollout._task.config.verifier.env["EXISTING_VERIFIER_VAR"] == "preserved"
+    assert "HTTP_PROXY" not in rollout._task.config.verifier.env
+    assert rollout._config.verifier_env_overlay["HTTP_PROXY"] == endpoint
+    assert "HTTP_PROXY" not in rollout._agent_env
+    assert "http_proxy" not in rollout._agent_env
+    assert "HTTP_PROXY" not in (rollout._task.config.environment.env or {})
+    assert rollout._task.config.environment.network_mode.value == network_mode
+    config_text = (rollout._rollout_dir / "config.json").read_text()
+    assert endpoint not in config_text
+    assert '"mode": "explicit"' in config_text
+
+
 def test_executor_records_original_skill_preload_metadata(tmp_path: Path) -> None:
     """Guards protocol v1 on base aadad44: original Skill preload is auditable."""
     task = tmp_path / "task"

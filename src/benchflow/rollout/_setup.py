@@ -456,6 +456,7 @@ async def _verify_rollout(
     planes: RolloutPlanes,
     sandbox_user: str | None = None,
     workspace: str | None = None,
+    verifier_env_overlay: dict[str, str] | None = None,
 ) -> tuple[dict | None, str | None, VerifierTimeoutDiagnostic | None]:
     """Run verifier with pre-verification hardening.
 
@@ -471,7 +472,18 @@ async def _verify_rollout(
     try:
         await planes.harden_before_verify(env, task, sandbox_user, workspace=workspace)
         logger.info("Running verifier...")
-        verifier = planes.verifier(task=task, rollout_paths=rollout_paths, sandbox=env)
+        verifier_kwargs: dict[str, Any] = {
+            "task": task,
+            "rollout_paths": rollout_paths,
+            "sandbox": env,
+        }
+        if verifier_env_overlay:
+            # Preserve compatibility with custom planes whose verifier factory
+            # predates this optional benchmark-executor extension.
+            verifier_kwargs["test_script_env_overlay"] = verifier_env_overlay
+        verifier = planes.verifier(
+            **verifier_kwargs,
+        )
         verifier_result = None
         for attempt in (1, 2):
             try:

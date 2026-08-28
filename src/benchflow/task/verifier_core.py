@@ -24,6 +24,7 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import urlsplit
 
 from benchflow.rewards.validation import (
     apply_aggregate_policy,
@@ -85,6 +86,144 @@ from benchflow.task.verifier_script_strategy import (
 
 logger = logging.getLogger(__name__)
 
+_PROXY_ENV_KEYS = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    }
+)
+_REDACTED_VERIFIER_PROXY = "[REDACTED_VERIFIER_PROXY]"
+
+
+def _verifier_proxy_values(env: dict[str, str] | None) -> list[str]:
+    if env is None:
+        return []
+    values: set[str] = set()
+    endpoint_keys = _PROXY_ENV_KEYS - {"NO_PROXY", "no_proxy"}
+    default_ports = {
+        "http": 80,
+        "https": 443,
+        "socks4": 1080,
+        "socks4a": 1080,
+        "socks5": 1080,
+        "socks5h": 1080,
+    }
+    for key, value in env.items():
+        if key not in _PROXY_ENV_KEYS or len(value) < 8:
+            continue
+        values.add(value)
+        if key not in endpoint_keys:
+            for item in value.split(","):
+                item = item.strip()
+                if len(item) >= 8:
+                    values.add(item)
+            continue
+        try:
+            parsed = urlsplit(value)
+            host = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            continue
+        if host:
+            if len(host) >= 8:
+                values.add(host)
+            effective_port = port or default_ports.get(parsed.scheme.lower())
+            if effective_port is not None:
+                for authority in (
+                    f"{host}:{effective_port}",
+                    f"[{host}]:{effective_port}",
+                ):
+                    if len(authority) >= 8:
+                        values.add(authority)
+    return sorted(
+        values,
+        key=lambda value: len(value),
+        reverse=True,
+    )
+
+
+def _redact_verifier_proxy_text(text: str, env: dict[str, str] | None) -> str:
+    """Remove verifier proxy configuration from an error or log message."""
+
+    redacted = text
+    for value in _verifier_proxy_values(env):
+        redacted = redacted.replace(value, _REDACTED_VERIFIER_PROXY)
+    return redacted
+
+
+def _redact_verifier_proxy_output(path: Path, env: dict[str, str] | None) -> None:
+    """Remove verifier proxy configuration from a persisted stdout artifact."""
+
+    if not env or not path.is_file():
+        return
+    if not _verifier_proxy_values(env):
+        return
+    original = path.read_text(encoding="utf-8", errors="replace")
+    redacted = _redact_verifier_proxy_text(original, env)
+    if redacted != original:
+        path.write_text(redacted, encoding="utf-8")
+
+
+def _redact_verifier_proxy_artifacts(
+    rollout_paths: RolloutPaths,
+    env: dict[str, str] | None,
+) -> None:
+    """Scrub canonical verifier outputs before they are parsed or persisted."""
+
+    for attribute in (
+        "test_stdout_path",
+        "reward_text_path",
+        "reward_json_path",
+        "reward_details_json_path",
+    ):
+        path = getattr(rollout_paths, attribute, None)
+        if isinstance(path, Path):
+            _redact_verifier_proxy_output(path, env)
+
+
+def _merge_test_script_env(
+    task_env: dict[str, str] | None,
+    overlay: dict[str, str] | None,
+) -> dict[str, str]:
+    """Merge a harness overlay without losing task-local proxy bypasses."""
+
+    merged = {
+        key: value
+        for key, value in (task_env or {}).items()
+        if key.lower() != "no_proxy"
+    }
+    merged.update(
+        {
+            key: value
+            for key, value in (overlay or {}).items()
+            if key.lower() != "no_proxy"
+        }
+    )
+
+    no_proxy_items: list[str] = []
+    seen: set[str] = set()
+    for source in (task_env or {}, overlay or {}):
+        for key, value in source.items():
+            if key.lower() != "no_proxy":
+                continue
+            for item in value.split(","):
+                item = item.strip()
+                marker = item.lower()
+                if item and marker not in seen:
+                    seen.add(marker)
+                    no_proxy_items.append(item)
+    if no_proxy_items:
+        no_proxy = ",".join(no_proxy_items)
+        merged["NO_PROXY"] = no_proxy
+        merged["no_proxy"] = no_proxy
+    return merged
+
 
 class Verifier:
     """Runs the task's verifier and parses rewards.
@@ -105,11 +244,13 @@ class Verifier:
         rollout_paths: RolloutPaths,
         sandbox: Any,
         _logger: logging.Logger | None = None,
+        test_script_env_overlay: dict[str, str] | None = None,
     ) -> None:
         self._task = task
         self._rollout_paths = rollout_paths
         self._sandbox = sandbox
         self._logger = (_logger or logger).getChild("verifier")
+        self._test_script_env_overlay = dict(test_script_env_overlay or {})
         # Task-declared ``[verifier] reward_range`` (BF-8); None keeps the
         # canonical strict [0, 1]. Applies to the test-script reward contract
         # (reward.txt / reward.json) — judge and ORS scores stay [0, 1].
@@ -401,15 +542,19 @@ class Verifier:
         self._rollout_paths.test_stdout_path.touch()
 
         env = None
-        if self._task.config.verifier.env:
-            for key in self._task.config.verifier.env:
+        test_script_env = _merge_test_script_env(
+            self._task.config.verifier.env,
+            self._test_script_env_overlay,
+        )
+        if test_script_env:
+            for key in test_script_env:
                 if "api_key" in key.lower():
                     self._logger.debug(
                         "The verifier.env contains an API key (often the case for LLM-"
                         "based verifiers). You will incur costs associated with the "
                         "API calls."
                     )
-            env = resolve_env_vars(self._task.config.verifier.env)
+            env = resolve_env_vars(test_script_env)
 
         if strategy is not None:
             test_command = _script_strategy_command(strategy, verifier_code_dir)
@@ -461,37 +606,56 @@ class Verifier:
                     f"rc={mkdir_return_code}"
                 )
 
-        test_result = await self._sandbox.exec(
-            command=f"{test_command} > {test_stdout_path} 2>&1",
-            env=env,
-            user=self._task.config.verifier.user,
-            service=service,
-            timeout_sec=self._task.config.verifier.timeout_sec,
-        )
-        test_return_code = _exec_return_code(test_result)
-
-        # Download verifier output if it is not host-mounted. Only the agent's
-        # ``main`` container has the rollout dir bind-mounted; a target service
-        # never does, so target-side rewards (#248) are always downloaded.
-        if not verifier_outputs_are_mounted:
+        try:
             try:
-                await self._sandbox.download_dir(
-                    source_dir=str(sandbox_paths.verifier_dir),
-                    target_dir=self._rollout_paths.verifier_dir,
+                test_result = await self._sandbox.exec(
+                    command=f"{test_command} > {test_stdout_path} 2>&1",
+                    env=env,
+                    user=self._task.config.verifier.user,
                     service=service,
+                    timeout_sec=self._task.config.verifier.timeout_sec,
                 )
-            except Exception as e:
-                if service != "main" or not await self._recover_main_verifier_outputs(
-                    sandbox_paths
-                ):
-                    raise DownloadVerifierDirError(
-                        "Failed to download verifier directory from sandbox"
-                    ) from e
-                self._logger.warning(
-                    "Verifier directory download failed; recovered canonical "
-                    "verifier output files individually: %s",
-                    e,
-                )
+            except Exception as exc:
+                # Some sandbox backends include the process environment in an
+                # exception string. Keep result.json/log messages safe as well
+                # as the verifier stdout artifact.
+                safe_message = _redact_verifier_proxy_text(str(exc), env)
+                if safe_message != str(exc):
+                    raise RuntimeError(
+                        f"verifier execution failed: {safe_message}"
+                    ) from None
+                raise
+            test_return_code = _exec_return_code(test_result)
+
+            # Download verifier output if it is not host-mounted. Only the agent's
+            # ``main`` container has the rollout dir bind-mounted; a target service
+            # never does, so target-side rewards (#248) are always downloaded.
+            if not verifier_outputs_are_mounted:
+                try:
+                    await self._sandbox.download_dir(
+                        source_dir=str(sandbox_paths.verifier_dir),
+                        target_dir=self._rollout_paths.verifier_dir,
+                        service=service,
+                    )
+                except Exception as e:
+                    if (
+                        service != "main"
+                        or not await self._recover_main_verifier_outputs(sandbox_paths)
+                    ):
+                        raise DownloadVerifierDirError(
+                            "Failed to download verifier directory from sandbox"
+                        ) from e
+                    self._logger.warning(
+                        "Verifier directory download failed; recovered canonical "
+                        "verifier output files individually: %s",
+                        e,
+                    )
+        finally:
+            # Official verifier scripts are trusted scoring code, but some print
+            # their full environment while debugging. Run this on success,
+            # exception, cancellation, and timeout so a mounted artifact cannot
+            # retain local infrastructure endpoints.
+            _redact_verifier_proxy_artifacts(self._rollout_paths, env)
 
         # A verifier can continue after a failed bootstrap command and still
         # write ``reward.txt=0`` (for example, ``curl | sh`` fails, ``uvx`` is

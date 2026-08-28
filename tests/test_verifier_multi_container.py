@@ -145,6 +145,54 @@ class TestTargetSideTestScriptVerification:
         assert {c["service"] for c in sandbox.exec_calls} == {"main"}
 
     @pytest.mark.asyncio
+    async def test_verifier_env_is_scoped_to_final_test_process(
+        self, tmp_path: Path
+    ) -> None:
+        """Guards this proxy change: setup commands never receive verifier env."""
+        proxy = "http://host.docker.internal:18080"
+        task = _make_task(
+            tmp_path,
+            'version = "1.0"\n'
+            "[verifier]\n"
+            "[verifier.env]\n"
+            'NO_PROXY = "database,target"\n',
+        )
+        rollout_paths = RolloutPaths(rollout_dir=tmp_path / "rollout")
+        rollout_paths.mkdir()
+        sandbox = _RecordingSandbox(rollout_paths, is_mounted=True)
+
+        await Verifier(
+            task,
+            rollout_paths,
+            sandbox,
+            test_script_env_overlay={
+                "HTTP_PROXY": proxy,
+                "NO_PROXY": "host.docker.internal,target",
+                "no_proxy": "host.docker.internal,target",
+            },
+        ).verify()
+
+        test_calls = [
+            call for call in sandbox.exec_calls if "test-stdout.txt" in call["command"]
+        ]
+        setup_calls = [
+            call
+            for call in sandbox.exec_calls
+            if "test-stdout.txt" not in call["command"]
+        ]
+        assert len(test_calls) == 1
+        assert test_calls[0]["env"]["HTTP_PROXY"] == proxy
+        assert test_calls[0]["env"]["NO_PROXY"] == (
+            "database,target,host.docker.internal"
+        )
+        assert test_calls[0]["env"]["no_proxy"] == (
+            "database,target,host.docker.internal"
+        )
+        assert all("env" not in call for call in setup_calls)
+        assert "HTTP_PROXY" not in task.config.verifier.env
+        assert task.config.verifier.env["NO_PROXY"] == "database,target"
+
+    @pytest.mark.asyncio
     async def test_verifier_runs_test_script_in_target_service(
         self, tmp_path: Path
     ) -> None:

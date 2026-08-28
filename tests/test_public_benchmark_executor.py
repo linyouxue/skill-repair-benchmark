@@ -14,12 +14,18 @@ from benchflow.benchmark_executor import (
     protocol_descriptor,
 )
 from benchmark_executor import BenchmarkExecutor
+from benchmark_executor.verifier_proxy import (
+    ENV_VERIFIER_HTTP_PROXY,
+    ENV_VERIFIER_HTTPS_PROXY,
+    ENV_VERIFIER_PROXY_MODE,
+)
 
 
 def _task_root(tmp_path: Path) -> Path:
     task = tmp_path / "tasks" / "task-a"
     task.mkdir(parents=True)
     (task / "instruction.md").write_text("Solve the task.\n")
+    (task / "task.toml").write_text('version = "1.0"\n[verifier]\n')
     return task.parent
 
 
@@ -186,6 +192,148 @@ def test_public_api_uses_selected_model_route_and_shared_rollout_backend(
     assert summary["skill_exposure_verified"] is True
 
 
+def test_public_api_keeps_runner_proxy_out_of_verifier_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guards this proxy change: runner proxy is never copied by default."""
+
+    private_runner_proxy = "http://private-runner.example.test:17890"
+    monkeypatch.delenv(ENV_VERIFIER_PROXY_MODE, raising=False)
+    monkeypatch.setenv("HTTP_PROXY", private_runner_proxy)
+    monkeypatch.setenv("HTTPS_PROXY", private_runner_proxy)
+    captured = _install_fake_rollout(monkeypatch)
+    executor = BenchmarkExecutor(
+        tasks_root=_task_root(tmp_path),
+        jobs_root=tmp_path / "jobs",
+        model="openrouter/openai/gpt-5.2",
+    )
+
+    result = executor.run(
+        task_id="task-a",
+        condition="method-skill",
+        skill_bundle=_bundle(tmp_path),
+        method_id="method",
+        stage="round-1",
+        rollout_id="default-proxy-off",
+    )
+
+    config = captured[0]
+    assert config.verifier_env_overlay is None
+    assert config.pre_agent_hooks is None
+    request_text = result.artifacts.request_json.read_text()
+    assert private_runner_proxy not in request_text
+    assert json.loads(request_text)["verifier_proxy"]["mode"] == "off"
+
+
+def test_public_api_explicit_proxy_is_instance_scoped_and_not_persisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guards this verifier-proxy change against request/config endpoint leaks."""
+    endpoint = "http://host.docker.internal:18080"
+    monkeypatch.setenv(ENV_VERIFIER_HTTP_PROXY, endpoint)
+    monkeypatch.setenv(ENV_VERIFIER_HTTPS_PROXY, endpoint)
+    captured = _install_fake_rollout(monkeypatch)
+    executor = BenchmarkExecutor(
+        tasks_root=_task_root(tmp_path),
+        jobs_root=tmp_path / "jobs",
+        model="openrouter/openai/gpt-5.2",
+        verifier_proxy_mode="explicit",
+    )
+
+    result = executor.run(
+        task_id="task-a",
+        condition="method-skill",
+        skill_bundle=_bundle(tmp_path),
+        method_id="method",
+        stage="round-1",
+        rollout_id="explicit-verifier-proxy",
+    )
+
+    config = captured[0]
+    assert config.verifier_env_overlay["HTTP_PROXY"] == endpoint
+    assert config.verifier_env_overlay["http_proxy"] == endpoint
+    assert len(config.pre_agent_hooks) == 1
+    assert endpoint not in repr(config)
+    assert "host.docker.internal" not in repr(config)
+    assert "18080" not in repr(config)
+    request_text = result.artifacts.request_json.read_text()
+    assert endpoint not in request_text
+    request = json.loads(request_text)
+    assert request["verifier_proxy"]["mode"] == "explicit"
+    assert request["verifier_proxy"]["scope"] == "verifier-process-only"
+
+
+def test_public_api_never_forwards_proxy_to_host_side_llm_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guards this proxy change: the overlay is sandbox test-script only."""
+    tasks_root = _task_root(tmp_path)
+    task = tasks_root / "task-a"
+    (task / "task.md").write_text(
+        "---\nverifier:\n  type: llm-judge\n---\nJudge the output.\n"
+    )
+    endpoint = "http://host.docker.internal:18080"
+    monkeypatch.setenv(ENV_VERIFIER_HTTP_PROXY, endpoint)
+    executor = BenchmarkExecutor(
+        tasks_root=tasks_root,
+        jobs_root=tmp_path / "jobs",
+        model="openrouter/openai/gpt-5.2",
+        verifier_proxy_mode="explicit",
+    )
+
+    with pytest.raises(ValueError, match="only for sandbox test-script"):
+        executor.run(
+            task_id="task-a",
+            condition="method-skill",
+            skill_bundle=_bundle(tmp_path),
+            method_id="method",
+            stage="round-1",
+            rollout_id="llm-judge-proxy-rejected",
+        )
+
+    assert not (tmp_path / "jobs").exists()
+
+
+def test_public_api_rejects_selected_host_side_verifier_strategy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A verifier.md strategy takes precedence over legacy task config."""
+    tasks_root = _task_root(tmp_path)
+    verifier_dir = tasks_root / "task-a" / "verifier"
+    verifier_dir.mkdir()
+    (verifier_dir / "verifier.md").write_text(
+        """---
+verifier:
+  name: host-judge
+  default_strategy: judge
+  strategies:
+    judge:
+      type: llm-judge
+      rubric: rubric.json
+---
+"""
+    )
+    monkeypatch.setenv(ENV_VERIFIER_HTTP_PROXY, "http://host.docker.internal:18080")
+    executor = BenchmarkExecutor(
+        tasks_root=tasks_root,
+        jobs_root=tmp_path / "jobs",
+        model="openrouter/openai/gpt-5.2",
+        verifier_proxy_mode="explicit",
+    )
+
+    with pytest.raises(ValueError, match="only for sandbox test-script"):
+        executor.run(
+            task_id="task-a",
+            condition="method-skill",
+            skill_bundle=_bundle(tmp_path),
+            method_id="method",
+            stage="round-1",
+            rollout_id="selected-host-judge-proxy-rejected",
+        )
+
+    assert not (tmp_path / "jobs").exists()
+
+
 def test_public_result_excludes_verifier_dep_install_from_comparison(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -239,6 +387,7 @@ def test_public_api_does_not_allow_per_rollout_model_or_budget_override() -> Non
     assert "timeout" not in parameters
     assert "agent" not in parameters
     assert "prompt" not in parameters
+    assert "verifier_proxy_mode" not in parameters
 
 
 @pytest.mark.asyncio
