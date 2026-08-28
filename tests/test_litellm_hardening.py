@@ -1097,6 +1097,63 @@ def test_poll_host_health_bails_at_deadline_when_never_healthy(monkeypatch):
         asyncio.run(rt._poll_host_health(process, deadline_s=0.3))
 
 
+def test_poll_host_health_ignores_environment_proxy(monkeypatch):
+    import asyncio
+    from unittest.mock import MagicMock
+
+    import benchflow.providers.litellm_runtime as rt
+
+    real_async_client = rt.httpx.AsyncClient
+    client_options = []
+
+    class _RecordingClient:
+        def __init__(self, *args, **kwargs):
+            client_options.append(kwargs)
+            self._client = real_async_client(*args, **kwargs)
+
+        async def __aenter__(self):
+            await self._client.__aenter__()
+            return self
+
+        async def __aexit__(self, *exc):
+            return await self._client.__aexit__(*exc)
+
+        async def get(self, url):
+            return await self._client.get(url)
+
+    async def _run_probe():
+        async def _serve_health(reader, writer):
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(_serve_health, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        process = MagicMock()
+        process.process.poll.return_value = None
+        process.endpoint.local_base_url = f"http://127.0.0.1:{port}"
+        try:
+            await rt._poll_host_health(process, deadline_s=2.0)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        monkeypatch.setenv(name, "http://127.0.0.1:1")
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(rt.httpx, "AsyncClient", _RecordingClient)
+
+    asyncio.run(_run_probe())
+
+    assert client_options
+    assert all(options.get("trust_env") is False for options in client_options)
+
+
 def test_health_deadline_env_parse_is_defensive(monkeypatch):
     # A malformed BENCHFLOW_LITELLM_HEALTH_TIMEOUT_SEC must not crash import; a
     # 0/negative value is floored so the poll still runs at least once.

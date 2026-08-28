@@ -672,7 +672,7 @@ async def _poll_host_health(
                 "LiteLLM exited before becoming healthy.\n" + process.log_tail()
             )
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
                 for path in ("/health/liveliness", "/health"):
                     response = await client.get(process.endpoint.local_base_url + path)
                     if response.status_code < 500:

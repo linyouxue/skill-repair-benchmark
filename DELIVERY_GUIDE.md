@@ -32,9 +32,10 @@ WSL 终端操作。建议把 executor 放在 `~/` 下，不要长期从 `/mnt/c/
 协调者提供 GitHub 仓库，clone 后必须 checkout 公布的 commit 或 tag：
 
 ```bash
+export EXECUTOR_ROOT="$HOME/benchmark-executor"
 git clone https://github.com/linyouxue/skill-repair-benchmark.git \
-  "$HOME/benchmark-executor"
-cd "$HOME/benchmark-executor"
+  "$EXECUTOR_ROOT"
+cd "$EXECUTOR_ROOT"
 git checkout --detach <课题组公布的commit或tag>
 test "$(git rev-parse HEAD)" = "<课题组公布的完整commit SHA>"
 test -z "$(git status --porcelain)"
@@ -50,7 +51,8 @@ export EXECUTOR_HOME="$HOME/benchmark-executor-delivery"
 
 mkdir -p "$EXECUTOR_HOME"
 unzip -q "$EXECUTOR_ZIP" -d "$EXECUTOR_HOME"
-cd "$EXECUTOR_HOME/benchmark-executor"
+export EXECUTOR_ROOT="$EXECUTOR_HOME/benchmark-executor"
+cd "$EXECUTOR_ROOT"
 
 test -f DELIVERY_GUIDE.md
 test -f BENCHMARK_EXECUTOR_VERSION.json
@@ -106,7 +108,7 @@ test -f tasks/dialogue-parser/task.md
 回到 executor 根目录：
 
 ```bash
-cd "$EXECUTOR_HOME/benchmark-executor"
+cd "$EXECUTOR_ROOT"
 cp .env.sample .env
 chmod 600 .env
 ```

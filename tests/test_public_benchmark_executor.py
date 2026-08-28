@@ -319,3 +319,14 @@ def test_version_descriptor_keeps_model_outside_execution_protocol() -> None:
     assert "model" not in version
     assert "openrouter/openai/gpt-5.2" not in json.dumps(version)
     assert version["model_policy"].startswith("selected once")
+
+
+def test_delivery_guide_uses_executor_root_for_both_install_paths() -> None:
+    guide = (Path(__file__).parents[1] / "DELIVERY_GUIDE.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'export EXECUTOR_ROOT="$HOME/benchmark-executor"' in guide
+    assert 'export EXECUTOR_ROOT="$EXECUTOR_HOME/benchmark-executor"' in guide
+    assert guide.count('cd "$EXECUTOR_ROOT"') >= 3
+    assert 'cd "$EXECUTOR_HOME/benchmark-executor"' not in guide
