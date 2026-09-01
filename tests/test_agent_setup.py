@@ -858,6 +858,15 @@ _PY_SERVICE_ARGV = (
             "openhands acp --always-approve --override-with-envs",
             "/usr/bin/openhands acp --always-approve --override-with-envs",
         ),
+        # Current OpenHands launch: skip the shell `exec` wrapper and the
+        # runtime-resolved Python variable, then key on BenchFlow's adapter.
+        (
+            'exec "$OH_PY" /opt/benchflow/bin/openhands-benchmark-executor '
+            "acp --always-approve --override-with-envs",
+            "/root/.local/share/uv/tools/openhands/bin/python "
+            "/opt/benchflow/bin/openhands-benchmark-executor "
+            "acp --always-approve --override-with-envs",
+        ),
         # package-runner subcommand: skip `uv` and `run`, key on the agent.
         (
             "uv run my-agent-acp --serve",
@@ -879,3 +888,16 @@ def test_agent_kill_pattern_targets_agent_not_python_services(launch, agent_argv
 def test_agent_kill_pattern_empty_launch_is_none():
     assert _agent_process_kill_pattern("") is None
     assert _agent_process_kill_pattern("   ") is None
+
+
+def test_openhands_registry_launch_kill_pattern_targets_adapter():
+    pattern = _agent_process_kill_pattern(AGENTS["openhands"].launch_cmd)
+
+    assert pattern == r"(^|[ /])openhands\-benchmark\-executor( |$)"
+    assert re.search(
+        pattern,
+        "/root/.local/share/uv/tools/openhands/bin/python "
+        "/opt/benchflow/bin/openhands-benchmark-executor "
+        "acp --always-approve --override-with-envs",
+    )
+    assert not re.search(pattern, _PY_SERVICE_ARGV)

@@ -47,6 +47,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger("benchflow")
 
 _DOCKER_BUILD_RETRY_DELAYS_SEC = (2.0, 5.0)
+_FORCE_KILL_COMMAND_TIMEOUT_SEC = 10.0
+_FORCE_KILL_TERMINATE_TIMEOUT_SEC = 5.0
 _DOCKER_BUILD_RETRYABLE_ERRORS = (
     re.compile(r"at least one invalid signature was encountered", re.IGNORECASE),
     re.compile(r"the repository '.+' is not signed", re.IGNORECASE),
@@ -54,6 +56,12 @@ _DOCKER_BUILD_RETRYABLE_ERRORS = (
     re.compile(r"readtimeouterror", re.IGNORECASE),
     re.compile(r"read timed out", re.IGNORECASE),
     re.compile(r"connection (?:timed out|reset by peer)", re.IGNORECASE),
+    re.compile(
+        r"\b(?:429\s+Too Many Requests|502\s+Bad Gateway|"
+        r"503\s+Service Unavailable|504\s+Gateway Timeout)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bHTTP(?:/\d(?:\.\d)?)?\s+(?:429|502|503|504)\b", re.IGNORECASE),
 )
 
 # Compose-up network-race retry config lives in _compose so the host docker
@@ -83,6 +91,33 @@ def _is_retryable_docker_build_error(message: str) -> bool:
 
 def _is_compose_up_network_race_error(message: str) -> bool:
     return is_compose_up_network_race_error(message)
+
+
+async def _communicate_cleanup_process(
+    process: asyncio.subprocess.Process,
+    *,
+    timeout_sec: float = _FORCE_KILL_COMMAND_TIMEOUT_SEC,
+    terminate_timeout_sec: float = _FORCE_KILL_TERMINATE_TIMEOUT_SEC,
+) -> tuple[bytes | None, bytes | None]:
+    """Wait for a cleanup CLI and always reap it after a timeout."""
+
+    communicate_task = asyncio.create_task(process.communicate())
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(communicate_task), timeout=timeout_sec
+        )
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            process.terminate()
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(communicate_task), timeout=terminate_timeout_sec
+            )
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await communicate_task
+        raise
 
 
 class DockerSandboxEnvVars(BaseModel):
@@ -518,11 +553,11 @@ class DockerSandbox(BaseSandbox):
                     ["stop", "-t", "5"], timeout_sec=90
                 )
             elif delete:
+                # Remove per-rollout containers, networks, and volumes while
+                # retaining built task images for later baseline/method runs.
                 await self._run_docker_compose_command(
                     [
                         "down",
-                        "--rmi",
-                        "all",
                         "--volumes",
                         "--remove-orphans",
                         "-t",
@@ -559,8 +594,8 @@ class DockerSandbox(BaseSandbox):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-            cids = stdout.decode().split()
+            stdout, _ = await _communicate_cleanup_process(proc)
+            cids = stdout.decode().split() if stdout else []
             for cid in cids:
                 rm_proc = await asyncio.create_subprocess_exec(
                     "docker",
@@ -571,7 +606,7 @@ class DockerSandbox(BaseSandbox):
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
-                await asyncio.wait_for(rm_proc.wait(), timeout=10)
+                await _communicate_cleanup_process(rm_proc)
             net_proc = await asyncio.create_subprocess_exec(
                 "docker",
                 "network",
@@ -582,7 +617,7 @@ class DockerSandbox(BaseSandbox):
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            await asyncio.wait_for(net_proc.wait(), timeout=10)
+            await _communicate_cleanup_process(net_proc)
         except Exception as e:
             self.logger.warning(f"Force-kill of compose project {project} failed: {e}")
 
