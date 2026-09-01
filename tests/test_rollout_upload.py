@@ -386,7 +386,6 @@ class FakeMountedUploadEnv(FakeUploadEnv):
 
     def __init__(self, host_agent_dir: Path) -> None:
         super().__init__()
-        self.is_mounted = True
         self.host_agent_dir = host_agent_dir
 
     async def upload_file(self, source: Path | str, target: str) -> None:
@@ -422,12 +421,9 @@ async def test_publish_trajectory_artifact_set_matches_across_backends(
     expected = '{"type": "agent_message", "text": "ok"}\n'
     assert (mounted_dir / "acp_trajectory.jsonl").read_text() == expected
     assert (remote_dir / "acp_trajectory.jsonl").read_text() == expected
-    # Mounted backends see the host write directly and must not make another
-    # control-plane call. Remote backends still need the explicit publication.
+    # The sandbox-side copy verifiers read stays published on both backends.
     sandbox_target = "/logs/agent/acp_trajectory.jsonl"
-    assert mounted_env.exec_calls == []
-    assert mounted_env.uploaded_file_contents == []
-    assert ("mkdir -p /logs/agent", "root", 10) in remote_env.exec_calls
+    assert (expected, sandbox_target) in mounted_env.uploaded_file_contents
     assert (expected, sandbox_target) in remote_env.uploaded_file_contents
 
 

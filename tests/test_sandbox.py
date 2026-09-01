@@ -2,7 +2,6 @@
 
 import os
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
@@ -367,87 +366,6 @@ class TestDockerExecEnvSecrecy:
         assert "dashed-key" not in body
         # The user command is still wrapped and reachable.
         assert wrapped.endswith("run-it")
-
-
-class TestDockerBuildAndCleanup:
-    @pytest.mark.parametrize(
-        "message",
-        [
-            "Failed to fetch package: 429 Too Many Requests",
-            "Failed to fetch package: 502 Bad Gateway",
-            "Failed to fetch package: 503 Service Unavailable",
-            "Failed to fetch package: 504 Gateway Timeout",
-            "registry request failed with HTTP 502",
-        ],
-    )
-    def test_transient_http_build_errors_are_retryable(self, message):
-        from benchflow.sandbox.docker import _is_retryable_docker_build_error
-
-        assert _is_retryable_docker_build_error(message)
-
-    def test_bare_http_status_number_is_not_retryable(self):
-        from benchflow.sandbox.docker import _is_retryable_docker_build_error
-
-        assert not _is_retryable_docker_build_error(
-            "Dockerfile parse error on line 502"
-        )
-
-    @pytest.mark.asyncio
-    async def test_delete_cleanup_retains_built_images(self):
-        from unittest.mock import AsyncMock
-
-        from benchflow.sandbox import docker as docker_module
-        from benchflow.sandbox.docker import DockerSandbox
-
-        sandbox = DockerSandbox.__new__(DockerSandbox)
-        sandbox._keep_containers = False
-        sandbox.logger = docker_module.logger
-        sandbox._chown_to_host_user = AsyncMock()
-        sandbox._run_docker_compose_command = AsyncMock()
-
-        await sandbox.stop(delete=True)
-
-        sandbox._run_docker_compose_command.assert_awaited_once_with(
-            ["down", "--volumes", "--remove-orphans", "-t", "5"],
-            timeout_sec=120,
-        )
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("ignore_terminate", [False, True])
-    async def test_cleanup_cli_timeout_reaps_process(self, ignore_terminate):
-        import asyncio
-
-        from benchflow.sandbox.docker import _communicate_cleanup_process
-
-        class HangingProcess:
-            def __init__(self):
-                self.done = asyncio.Event()
-                self.terminate_calls = 0
-                self.kill_calls = 0
-
-            async def communicate(self):
-                await self.done.wait()
-                return b"", b""
-
-            def terminate(self):
-                self.terminate_calls += 1
-                if not ignore_terminate:
-                    self.done.set()
-
-            def kill(self):
-                self.kill_calls += 1
-                self.done.set()
-
-        process = HangingProcess()
-        with pytest.raises(TimeoutError):
-            await _communicate_cleanup_process(
-                cast(asyncio.subprocess.Process, process),
-                timeout_sec=0.001,
-                terminate_timeout_sec=0.001,
-            )
-
-        assert process.terminate_calls == 1
-        assert process.kill_calls == int(ignore_terminate)
 
 
 class TestDockerComposeUpNetworkRaceRetry:

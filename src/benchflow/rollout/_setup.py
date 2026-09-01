@@ -126,10 +126,6 @@ _GENERIC_INTERPRETERS = (
 )
 # Subcommands consumed by a package runner before the agent binary appears.
 _RUNNER_SUBCOMMANDS = frozenset({"run", "tool", "exec", "x"})
-# Shell builtins/wrappers that may precede the real executable in the final
-# launch segment.  They identify launch mechanics, not the agent process.
-_SHELL_LAUNCH_WRAPPERS = frozenset({"exec", "command", "nohup"})
-_SHELL_VAR_RE = re.compile(r"^\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})$")
 # A leading ``FOO=bar`` environment-variable assignment (e.g. harvey-lab's
 # ``HARVEY_LABS_ROOT=/opt/harvey-labs ... python <shim>``).
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_]\w*=")
@@ -171,23 +167,14 @@ def _agent_process_kill_pattern(agent_launch: str) -> str | None:
     if not segments:
         return None
 
-    try:
-        tokens = shlex.split(segments[-1], posix=True)
-    except ValueError:
-        return None
-
     after_runner = False
-    for token in tokens:
+    for token in segments[-1].split():
         if _ENV_ASSIGN_RE.match(token):  # FOO=bar prefix
             continue
         if token.startswith("-"):  # a flag (e.g. python -m, gemini --acp)
             continue
-        if _SHELL_VAR_RE.match(token):  # resolved variable, not stable argv
-            continue
         basename = PurePosixPath(token).name
         if not basename:
-            continue
-        if basename in _SHELL_LAUNCH_WRAPPERS:
             continue
         if _is_generic_interpreter(basename):  # too broad to pkill on
             after_runner = basename in _PACKAGE_RUNNERS
@@ -450,12 +437,6 @@ async def _publish_trajectory_for_verifier(
     payload = redact_acp_trajectory_jsonl(trajectory) + "\n"
     agent_dir.mkdir(parents=True, exist_ok=True)
     (agent_dir / "acp_trajectory.jsonl").write_text(payload)
-    if getattr(env, "is_mounted", False):
-        # Docker and Apple Container bind-mount the host agent directory at
-        # /logs/agent. The host write above is therefore already published;
-        # another sandbox exec/upload is redundant and adds a control-plane
-        # failure point after the agent has completed.
-        return
     await env.exec("mkdir -p /logs/agent", user="root", timeout_sec=10)
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
         f.write(payload)
