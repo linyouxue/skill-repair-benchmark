@@ -1,5 +1,14 @@
 # Skill 诊断与修复细粒度评测
 
+> [!IMPORTANT]
+> **跑任务的首要规则：先确认运行有效，再判断 PASS / FAIL。**
+>
+> 只有基础设施完整正常、模型请求成功获得响应、OpenHands / 工具链正常运行、verifier 正常执行的 rollout，才算有效运行。
+>
+> **任何 provider 连接失败、API 429 / 5xx、Docker / 环境启动失败、工具通信中断、依赖下载失败等基础设施问题，都不计入 PASS / FAIL，也不计入 Verified Fix Rate 的分子或分母。问题修复后，必须重新运行完整 rollout。**
+>
+> 本文“执行无报错但无判决时按任务失败计分”的规则，仅适用于满足上述有效运行前提的情况。基础设施故障导致的无响应、无判决或任务未完成，不能按任务失败计分；应保留故障记录，修复问题后以新的 rollout ID 重新运行。
+
 同学可在自己的机器上完成全部评测：准备诊断和最终 Skill bundle，使用统一 executor 运行任务，再由本脚本读取本地运行目录，生成 Diagnosis/Repair P/R/F1、Location Accuracy、Regression 和 Verified Fix Rate。Gold 由组织者维护，大模型按照固定判据判断语义，Python 负责校验、计数和计算指标。无需将运行文件交回组织者处理。
 
 当前默认 Gold 为 `evaluation/data/core25/gold.json`，由统一人工 Gold repair 清单转换，包含 **7 个任务、14 个 defect（Core-25 当前已整理子集）**。不指定 `--gold` 时直接使用它；真实提交的 `benchmark_version` 应为 `core25-gold-defects-20260909-v1`。数据说明、来源边界和对应提交模板见 [数据说明](data/core25/README.md) 与 [提交模板](data/core25/submission.template.json)。这不是完整的 Core-25 Gold；扩展集尚未发布。下文 `examples/` 的 `v1` 是独立教学样例，使用时须显式指定其 `--gold`。
