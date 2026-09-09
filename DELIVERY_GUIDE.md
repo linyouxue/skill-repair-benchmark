@@ -683,8 +683,46 @@ reasoning effort、通用 provider endpoint；这些入口会被正式执行器�
 | `method-skill` | 必须是该 task 的完整、冻结 bundle |
 
 一个 `BenchmarkExecutor` 实例固定一个模型路由和 reasoning effort；一次 `run()`
-只产生一条 rollout，没有隐式重试。`method_id` 与 `rollout_id` 都必须是安全的单个
-路径名，且每条新 rollout 使用新的 ID。
+只产生一条 rollout，默认没有隐式继续执行或 rollout 重试。`method_id` 与
+`rollout_id` 都必须是安全的单个路径名，且每条新 rollout 使用新的 ID。
+
+### 5.1 诊断性 completion guard
+
+若 guard-off 轨迹明确显示模型只输出“接下来会继续”等纯文本、没有发出工具调用便
+结束，可保留原结果，再创建独立的诊断 executor 做一次 fresh rerun：
+
+```python
+diagnostic_executor = BenchmarkExecutor(
+    tasks_root=Path(os.environ["SKILLSBENCH_ROOT"]) / "tasks",
+    jobs_root=Path(os.environ["BENCHMARK_JOBS_ROOT"]) / "diagnostic-guard",
+    model=os.environ["BENCHMARK_MODEL"],
+    reasoning_effort=(
+        os.environ.get("BENCHMARK_REASONING_EFFORT", "").strip() or None
+    ),
+    experimental_text_only_retry_limit=1,
+)
+```
+
+该参数只允许整数 `0` 或 `1`，默认 `0`。值为 `1` 时，每个 BenchFlow
+Step/prompt 最多在首次 text-only finish 后追加一次继续消息；若模型再次纯文本结束，
+guard 不会第三次干预。它不能恢复 provider、工具或 verifier 错误，也不处理
+`stuck` 或 `max_iterations`，且不会增加每个 Step 的 60 次 iteration 上限。
+
+诊断轮必须使用与原轮不同的 `rollout_id`。只要 guard 开启，即使本轮没有实际触发
+或最终 reward 为 1，`BenchmarkResult.comparable` 仍为 `False`，不能替换原轮或
+进入正式方法比较。检查以下证据区分“已开启”和“实际触发”：
+
+```python
+print(result.experimental_controls)
+print(result.raw_result["executor"]["prompt_runs"])
+```
+
+- `experimental_text_only_retry_limit=1`：本轮开启了 guard；
+- `experimental_text_only_retries_used=1`：实际注入过一次继续消息；
+- `experimental_text_only_retry_exhausted=true`：注入后模型再次纯文本结束。
+
+不要直接写内部 `agent_env`。公开构造参数会同时写入 request、config、result 和
+归一化摘要，避免诊断运行被误认为正式可比结果。
 
 ## 6. 多轮修复示例
 

@@ -9,6 +9,7 @@ import pytest
 
 from benchflow.benchmark_executor import (
     BENCHFLOW_BASE_COMMIT,
+    ENV_TEXT_ONLY_RETRY_LIMIT,
     EXECUTOR_PROTOCOL_ID,
     EXECUTOR_SKILL_EXPOSURE_MODE,
     protocol_descriptor,
@@ -82,6 +83,15 @@ def _install_fake_rollout(
                 }
             ],
         }
+        if "experimental_controls" in request:
+            executor["experimental_controls"] = request["experimental_controls"]
+            executor["prompt_runs"][0].update(
+                {
+                    "experimental_text_only_retry_limit": 1,
+                    "experimental_text_only_retries_used": 0,
+                    "experimental_text_only_retry_exhausted": False,
+                }
+            )
         (rollout_dir / "trajectory").mkdir(exist_ok=True)
         (rollout_dir / "verifier").mkdir(exist_ok=True)
         (rollout_dir / "artifacts").mkdir(exist_ok=True)
@@ -175,6 +185,7 @@ def test_public_api_uses_selected_model_route_and_shared_rollout_backend(
     assert result.success is True
     assert result.execution_ok is True
     assert result.comparable is True
+    assert result.experimental_controls is None
     assert result.agent_iterations == 12
     assert result.provider_requests == 2
     assert result.skill_exposure.verified is True
@@ -189,6 +200,7 @@ def test_public_api_uses_selected_model_route_and_shared_rollout_backend(
     assert summary["verifier_error"] is None
     assert summary["verifier_error_category"] is None
     assert summary["protocol_evidence_valid"] is True
+    assert "experimental_controls" not in summary
     assert summary["skill_exposure_verified"] is True
 
 
@@ -388,6 +400,61 @@ def test_public_api_does_not_allow_per_rollout_model_or_budget_override() -> Non
     assert "agent" not in parameters
     assert "prompt" not in parameters
     assert "verifier_proxy_mode" not in parameters
+
+
+def test_experimental_text_only_guard_is_opt_in_and_non_comparable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_root = _task_root(tmp_path)
+    bundle = _bundle(tmp_path)
+    captured = _install_fake_rollout(monkeypatch)
+    executor = BenchmarkExecutor(
+        tasks_root=tasks_root,
+        jobs_root=tmp_path / "jobs",
+        model="openrouter/openai/gpt-5.2",
+        reasoning_effort="high",
+        experimental_text_only_retry_limit=1,
+    )
+
+    result = executor.run(
+        task_id="task-a",
+        condition="method-skill",
+        skill_bundle=bundle,
+        method_id="completion-guard-experiment",
+        stage="diagnostic",
+        rollout_id="task-a-guard-r001",
+    )
+
+    config = captured[0]
+    assert config.agent_env == {ENV_TEXT_ONLY_RETRY_LIMIT: "1"}
+    assert config.verifier_env_overlay is None
+    request = json.loads(result.artifacts.request_json.read_text())
+    assert request["verifier_proxy"]["mode"] == "off"
+    assert request["experimental_controls"] == {
+        "openhands_text_only_retry_limit": 1,
+        "comparison_status": "diagnostic-non-comparable",
+    }
+    assert result.experimental_controls == request["experimental_controls"]
+    assert result.protocol_evidence_valid is True
+    assert result.comparable is False
+    summary = json.loads(
+        (result.artifacts.rollout_dir / "benchmark_result.json").read_text()
+    )
+    assert summary["experimental_controls"] == request["experimental_controls"]
+    assert summary["comparable"] is False
+
+
+@pytest.mark.parametrize("value", [-1, 2, True, 1.5, "1"])
+def test_experimental_text_only_guard_rejects_invalid_limits(
+    tmp_path: Path, value: object
+) -> None:
+    with pytest.raises(ValueError, match="must be 0 or 1"):
+        BenchmarkExecutor(
+            tasks_root=_task_root(tmp_path),
+            jobs_root=tmp_path / "jobs",
+            model="openrouter/openai/gpt-5.2",
+            experimental_text_only_retry_limit=value,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.asyncio

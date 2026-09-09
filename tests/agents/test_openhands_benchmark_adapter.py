@@ -79,6 +79,12 @@ class _Agent:
     def step(self, conversation, *args, **kwargs):
         del conversation, args, kwargs
 
+    def _handle_content_response(
+        self, message, llm_response, conversation, state, on_event
+    ):
+        del self, message, llm_response, conversation, on_event
+        state.execution_status = _ExecutionStatus.FINISHED
+
     def _initialize(self, state):
         del state
         resolved = {}
@@ -107,12 +113,49 @@ class _Response:
         )
 
 
+class _ExecutionStatus:
+    RUNNING = "running"
+    FINISHED = "finished"
+
+
+class _TextContent:
+    def __init__(self, *, text: str):
+        self.text = text
+
+
+class _Message:
+    def __init__(self, *, role: str, content: list[_TextContent]):
+        self.role = role
+        self.content = content
+
+
+class _MessageEvent:
+    def __init__(self, *, source: str, llm_message: _Message):
+        self.source = source
+        self.llm_message = llm_message
+
+
 def _install_fake_openhands(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, type]:
     context_module = ModuleType("openhands.sdk.context")
     context_module.AgentContext = _Context
     monkeypatch.setitem(sys.modules, "openhands", ModuleType("openhands"))
     monkeypatch.setitem(sys.modules, "openhands.sdk", ModuleType("openhands.sdk"))
     monkeypatch.setitem(sys.modules, "openhands.sdk.context", context_module)
+
+    conversation_package = ModuleType("openhands.sdk.conversation")
+    conversation_state = ModuleType("openhands.sdk.conversation.state")
+    conversation_state.ConversationExecutionStatus = _ExecutionStatus
+    event_module = ModuleType("openhands.sdk.event")
+    event_module.MessageEvent = _MessageEvent
+    llm_module = ModuleType("openhands.sdk.llm")
+    llm_module.Message = _Message
+    llm_module.TextContent = _TextContent
+    monkeypatch.setitem(sys.modules, "openhands.sdk.conversation", conversation_package)
+    monkeypatch.setitem(
+        sys.modules, "openhands.sdk.conversation.state", conversation_state
+    )
+    monkeypatch.setitem(sys.modules, "openhands.sdk.event", event_module)
+    monkeypatch.setitem(sys.modules, "openhands.sdk.llm", llm_module)
 
     local_agent = ModuleType("openhands_cli.acp_impl.agent.local_agent")
 
@@ -338,6 +381,86 @@ def test_adapter_preserves_delegation_tools_without_opt_in(
     )
 
     assert [tool.name for tool in conversation.agent.tools] == ["task_tool_set"]
+
+
+def test_disabled_text_only_guard_does_not_require_openhands_content_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default protocol remains compatible when the experimental hook is absent."""
+
+    class LegacyAgent(_Agent):
+        _handle_content_response = None
+
+        def model_copy(self, *, update: dict):
+            return LegacyAgent(
+                update.get("agent_context", self.agent_context),
+                update.get("tools", self.tools),
+            )
+
+    local_agent, _ = _install_fake_openhands(monkeypatch)
+    monkeypatch.setattr(adapter, "_PATCHED", False)
+    adapter.install_adapter({adapter.ENV_MAX_ITERATIONS: "60"})
+
+    conversation = local_agent.Conversation(agent=LegacyAgent(), workspace="/app")
+
+    assert conversation._benchmark_executor_text_only_retry_limit == 0
+    assert (
+        "_benchmark_executor_text_only_guard_instrumented" not in LegacyAgent.__dict__
+    )
+
+
+def test_text_only_completion_guard_retries_once_then_stops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The diagnostic guard continues once but cannot expand the 60-step budget."""
+
+    (tmp_path / "one").mkdir()
+    (tmp_path / "one" / "SKILL.md").write_text("BODY")
+    env = _adapter_env(tmp_path)
+    env[adapter.ENV_TEXT_ONLY_RETRY_LIMIT] = "1"
+    local_agent, _ = _install_fake_openhands(monkeypatch)
+    monkeypatch.setattr(adapter, "_PATCHED", False)
+    adapter.install_adapter(env)
+    conversation = local_agent.Conversation(agent=_Agent(), workspace="/app")
+    emitted = []
+
+    def on_event(event):
+        emitted.append(event)
+        conversation.state.events.append(event)
+
+    conversation.agent._handle_content_response(
+        _Message(role="assistant", content=[_TextContent(text="I'll inspect it.")]),
+        SimpleNamespace(id="response-1"),
+        conversation,
+        conversation.state,
+        on_event,
+    )
+
+    assert conversation.state.execution_status == _ExecutionStatus.RUNNING
+    assert conversation._benchmark_executor_text_only_retries_used == 1
+    assert conversation._benchmark_executor_text_only_retry_exhausted is False
+    assert len(emitted) == 1
+    assert emitted[0].source == "environment"
+    assert emitted[0].llm_message.role == "user"
+    assert (
+        emitted[0]
+        .llm_message.content[0]
+        .text.startswith(adapter.TEXT_ONLY_GUARD_PREFIX)
+    )
+    assert conversation.kwargs["max_iteration_per_run"] == 60
+
+    conversation.agent._handle_content_response(
+        _Message(role="assistant", content=[_TextContent(text="I'll try again.")]),
+        SimpleNamespace(id="response-2"),
+        conversation,
+        conversation.state,
+        on_event,
+    )
+
+    assert conversation.state.execution_status == _ExecutionStatus.FINISHED
+    assert conversation._benchmark_executor_text_only_retries_used == 1
+    assert conversation._benchmark_executor_text_only_retry_exhausted is True
+    assert len(emitted) == 1
 
 
 def test_delegation_filter_fails_closed_on_malformed_tool(

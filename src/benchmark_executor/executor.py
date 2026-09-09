@@ -14,6 +14,7 @@ from benchflow._utils.config import normalize_reasoning_effort
 from benchflow._utils.hf_datasets import load_source_sidecar
 from benchflow._utils.task_authoring import task_digest
 from benchflow.benchmark_executor import (
+    ENV_TEXT_ONLY_RETRY_LIMIT,
     EXECUTOR_AGENT,
     EXECUTOR_PROTOCOL_ID,
     EXECUTOR_SANDBOX,
@@ -81,6 +82,7 @@ class BenchmarkExecutor:
         reasoning_effort: str | None = None,
         protocol: str = EXECUTOR_PROTOCOL_ID,
         verifier_proxy_mode: str | None = None,
+        experimental_text_only_retry_limit: int = 0,
     ) -> None:
         if protocol != EXECUTOR_PROTOCOL_ID:
             raise ValueError(
@@ -90,6 +92,12 @@ class BenchmarkExecutor:
         model = model.strip()
         if not model:
             raise ValueError("model must be an explicit BenchFlow/LiteLLM route")
+        if (
+            isinstance(experimental_text_only_retry_limit, bool)
+            or not isinstance(experimental_text_only_retry_limit, int)
+            or experimental_text_only_retry_limit not in {0, 1}
+        ):
+            raise ValueError("experimental_text_only_retry_limit must be 0 or 1")
         root = Path(tasks_root).expanduser().resolve(strict=True)
         if not root.is_dir():
             raise ValueError(f"tasks_root is not a directory: {root}")
@@ -99,6 +107,7 @@ class BenchmarkExecutor:
         self.provider_route = provider_route_for_model(model)
         self.reasoning_effort = normalize_reasoning_effort(reasoning_effort)
         self.protocol = protocol
+        self.experimental_text_only_retry_limit = experimental_text_only_retry_limit
         # Resolve once per executor instance so every rollout uses the same
         # infrastructure setting. The default is always off, even if the runner
         # itself has HTTP_PROXY/HTTPS_PROXY configured for the model provider.
@@ -151,7 +160,7 @@ class BenchmarkExecutor:
         stage: str,
         rollout_id: str,
     ) -> dict:
-        return {
+        payload = {
             "schema_version": 1,
             "created_at": datetime.now(UTC).isoformat(),
             "protocol": protocol_descriptor(),
@@ -172,6 +181,14 @@ class BenchmarkExecutor:
             # never enter executor_request.json.
             "verifier_proxy": dict(self.verifier_proxy.metadata),
         }
+        if self.experimental_text_only_retry_limit:
+            payload["experimental_controls"] = {
+                "openhands_text_only_retry_limit": (
+                    self.experimental_text_only_retry_limit
+                ),
+                "comparison_status": "diagnostic-non-comparable",
+            }
+        return payload
 
     async def run_async(
         self,
@@ -246,6 +263,15 @@ class BenchmarkExecutor:
             skip_agent_install=False,
             agent_idle_timeout=IDLE_SAFETY_TIMEOUT_SEC,
             usage_tracking=UsageTrackingConfig(mode=EXECUTOR_USAGE_TRACKING),
+            agent_env=(
+                {
+                    ENV_TEXT_ONLY_RETRY_LIMIT: str(
+                        self.experimental_text_only_retry_limit
+                    )
+                }
+                if self.experimental_text_only_retry_limit
+                else None
+            ),
             skills_dir=bundle,
             skill_mode=skill_mode,
             job_name=method_id,

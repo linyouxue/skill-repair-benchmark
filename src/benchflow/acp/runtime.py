@@ -649,6 +649,15 @@ async def execute_prompts(
             skill_context_preloaded = executor_outcome.get("skill_context_preloaded")
             skill_bundle_sha256 = executor_outcome.get("skill_bundle_sha256")
             preloaded_skill_count = executor_outcome.get("preloaded_skill_count")
+            guard_keys = (
+                "experimental_text_only_retry_limit",
+                "experimental_text_only_retries_used",
+                "experimental_text_only_retry_exhausted",
+            )
+            guard_metadata_present = any(key in executor_outcome for key in guard_keys)
+            text_only_retry_limit = executor_outcome.get(guard_keys[0])
+            text_only_retries_used = executor_outcome.get(guard_keys[1])
+            text_only_retry_exhausted = executor_outcome.get(guard_keys[2])
             if (
                 isinstance(stop_reason, str)
                 and isinstance(acp_stop_reason, str)
@@ -662,6 +671,22 @@ async def execute_prompts(
                 and isinstance(preloaded_skill_count, int)
                 and not isinstance(preloaded_skill_count, bool)
                 and preloaded_skill_count >= 0
+                and (
+                    not guard_metadata_present
+                    or (
+                        isinstance(text_only_retry_limit, int)
+                        and not isinstance(text_only_retry_limit, bool)
+                        and text_only_retry_limit == 1
+                        and isinstance(text_only_retries_used, int)
+                        and not isinstance(text_only_retries_used, bool)
+                        and 0 <= text_only_retries_used <= text_only_retry_limit
+                        and isinstance(text_only_retry_exhausted, bool)
+                        and (
+                            not text_only_retry_exhausted
+                            or text_only_retries_used == text_only_retry_limit
+                        )
+                    )
+                )
                 and (
                     skill_bundle_sha256 is None
                     or (
@@ -704,6 +729,15 @@ async def execute_prompts(
                     skill_context_preloaded=skill_context_preloaded,
                     skill_bundle_sha256=skill_bundle_sha256,
                     preloaded_skill_count=preloaded_skill_count,
+                    experimental_text_only_retry_limit=(
+                        text_only_retry_limit if guard_metadata_present else None
+                    ),
+                    experimental_text_only_retries_used=(
+                        text_only_retries_used if guard_metadata_present else None
+                    ),
+                    experimental_text_only_retry_exhausted=(
+                        text_only_retry_exhausted if guard_metadata_present else None
+                    ),
                 )
             else:
                 raise RuntimeError(

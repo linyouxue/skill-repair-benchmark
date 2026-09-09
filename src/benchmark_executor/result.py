@@ -174,6 +174,33 @@ def _skill_exposure(raw: dict[str, Any]) -> SkillExposure:
     )
 
 
+def _experimental_controls(
+    raw: dict[str, Any],
+    config: dict[str, Any] | None,
+    request: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Read matching diagnostic controls without trusting one artifact alone."""
+
+    containers = [
+        request,
+        config.get("executor") if config else None,
+        raw.get("executor"),
+    ]
+    observed: list[dict[str, Any]] = []
+    for container in containers:
+        if not isinstance(container, dict) or "experimental_controls" not in container:
+            continue
+        value = container["experimental_controls"]
+        if not isinstance(value, dict):
+            return {"invalid": True}
+        observed.append(dict(value))
+    if not observed:
+        return None
+    if any(value != observed[0] for value in observed[1:]):
+        return {"invalid": True}
+    return observed[0]
+
+
 def _protocol_evidence_valid(
     raw: dict[str, Any],
     config: dict[str, Any] | None,
@@ -228,6 +255,7 @@ class BenchmarkResult:
     method_id: str
     stage: str
     protocol_id: str
+    experimental_controls: dict[str, Any] | None
     model: str
     provider_route: str
     provider_base_url: str | None
@@ -278,7 +306,8 @@ class BenchmarkResult:
         """Whether this result has complete evidence for method comparison."""
 
         return bool(
-            self.protocol_evidence_valid
+            not self.experimental_controls
+            and self.protocol_evidence_valid
             and self.execution_ok
             and self.reward is not None
             and self.trajectory_complete
@@ -289,7 +318,7 @@ class BenchmarkResult:
     def to_dict(self) -> dict[str, Any]:
         """Return a compact JSON-serializable summary without copying trajectory."""
 
-        return {
+        summary = {
             "task_id": self.task_id,
             "rollout_id": self.rollout_id,
             "method_id": self.method_id,
@@ -321,6 +350,9 @@ class BenchmarkResult:
             "rollout_dir": str(self.artifacts.rollout_dir),
             "result_json": str(self.artifacts.result_json),
         }
+        if self.experimental_controls is not None:
+            summary["experimental_controls"] = self.experimental_controls
+        return summary
 
     @classmethod
     def from_result_json(
@@ -339,6 +371,7 @@ class BenchmarkResult:
         """Load one canonical persisted result without inventing missing metrics."""
 
         raw = _json_object(result_json)
+        request = _optional_json_object(request_json)
         rollout_dir = result_json.parent
         config_path = rollout_dir / "config.json"
         config = _optional_json_object(config_path)
@@ -393,6 +426,7 @@ class BenchmarkResult:
             method_id=method_id,
             stage=stage,
             protocol_id=protocol_id,
+            experimental_controls=_experimental_controls(raw, config, request),
             model=expected_model,
             provider_route=provider_route_for_model(expected_model),
             provider_base_url=(

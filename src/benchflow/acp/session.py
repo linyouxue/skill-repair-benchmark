@@ -334,6 +334,9 @@ class ACPSession:
         skill_context_preloaded: bool,
         skill_bundle_sha256: str | None,
         preloaded_skill_count: int,
+        experimental_text_only_retry_limit: int | None = None,
+        experimental_text_only_retries_used: int | None = None,
+        experimental_text_only_retry_exhausted: bool | None = None,
     ) -> None:
         """Record the adapter's exact parent-agent count for one ACP prompt."""
 
@@ -342,21 +345,34 @@ class ACPSession:
         prompt_ordinal = sum(
             1 for event in self.events if event.get("type") == "user_message"
         )
-        self.events.append(
-            {
-                "type": "agent_iteration_outcome",
-                "prompt_ordinal": prompt_ordinal,
-                "stop_reason": stop_reason,
-                "acp_stop_reason": acp_stop_reason,
-                "execution_status": execution_status,
-                "error_code": error_code,
-                "max_iterations": max_iterations,
-                "iterations_used": iterations_used,
-                "skill_context_preloaded": skill_context_preloaded,
-                "skill_bundle_sha256": skill_bundle_sha256,
-                "preloaded_skill_count": preloaded_skill_count,
-            }
-        )
+        event = {
+            "type": "agent_iteration_outcome",
+            "prompt_ordinal": prompt_ordinal,
+            "stop_reason": stop_reason,
+            "acp_stop_reason": acp_stop_reason,
+            "execution_status": execution_status,
+            "error_code": error_code,
+            "max_iterations": max_iterations,
+            "iterations_used": iterations_used,
+            "skill_context_preloaded": skill_context_preloaded,
+            "skill_bundle_sha256": skill_bundle_sha256,
+            "preloaded_skill_count": preloaded_skill_count,
+        }
+        if experimental_text_only_retry_limit is not None:
+            event.update(
+                {
+                    "experimental_text_only_retry_limit": (
+                        experimental_text_only_retry_limit
+                    ),
+                    "experimental_text_only_retries_used": (
+                        experimental_text_only_retries_used
+                    ),
+                    "experimental_text_only_retry_exhausted": (
+                        experimental_text_only_retry_exhausted
+                    ),
+                }
+            )
+        self.events.append(event)
         self._notify_change()
 
     def record_prompt_usage(self, usage: object | None) -> None:

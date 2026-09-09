@@ -44,6 +44,7 @@ ENV_SKILL_COUNT = "BENCHMARK_EXECUTOR_SKILL_COUNT"
 ENV_BUNDLE_FILE_COUNT = "BENCHMARK_EXECUTOR_BUNDLE_FILE_COUNT"
 ENV_LLM_TIMEOUT = "LLM_TIMEOUT"
 ENV_DISABLE_SUBAGENTS = "BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS"
+ENV_TEXT_ONLY_RETRY_LIMIT = "BENCHFLOW_OPENHANDS_TEXT_ONLY_RETRY_LIMIT"
 
 _RESERVED_ENV = frozenset(
     {
@@ -54,6 +55,7 @@ _RESERVED_ENV = frozenset(
         ENV_BUNDLE_FILE_COUNT,
         ENV_LLM_TIMEOUT,
         ENV_DISABLE_SUBAGENTS,
+        ENV_TEXT_ONLY_RETRY_LIMIT,
     }
 )
 
@@ -187,12 +189,17 @@ def apply_openhands_executor_env(
 ) -> dict[str, str]:
     """Return a scrubbed env containing only executor-owned adapter controls."""
 
+    text_only_retry_limit = agent_env.get(ENV_TEXT_ONLY_RETRY_LIMIT)
     result = {
         key: value for key, value in agent_env.items() if key not in _RESERVED_ENV
     }
     if agent != EXECUTOR_AGENT:
         return result
 
+    if text_only_retry_limit not in {None, "0", "1"}:
+        raise ValueError(f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be '0' or '1'")
+    if text_only_retry_limit == "1":
+        result[ENV_TEXT_ONLY_RETRY_LIMIT] = "1"
     result[ENV_MAX_ITERATIONS] = str(MAX_PARENT_ITERATIONS_PER_STEP)
     result[ENV_LLM_TIMEOUT] = str(LLM_REQUEST_SAFETY_TIMEOUT_SEC)
     result[ENV_DISABLE_SUBAGENTS] = "1"
@@ -391,6 +398,11 @@ def executor_metadata(
             }
         ),
     }
+    if (resolved_agent_env or {}).get(ENV_TEXT_ONLY_RETRY_LIMIT) == "1":
+        data["experimental_controls"] = {
+            "openhands_text_only_retry_limit": 1,
+            "comparison_status": "diagnostic-non-comparable",
+        }
     if manifest is not None:
         data.update(manifest.to_metadata())
     return data
@@ -469,9 +481,9 @@ def executor_result_metadata(
         ]
         if timeout_events:
             result["stop_reason"] = timeout_events[-1].get("reason")
-    prompt_events = outcomes
-    result["prompt_runs"] = [
-        {
+    prompt_runs: list[dict[str, Any]] = []
+    for event in outcomes:
+        prompt_run = {
             "prompt_ordinal": event.get("prompt_ordinal"),
             "stop_reason": event.get("stop_reason", "max_iterations"),
             "acp_stop_reason": event.get("acp_stop_reason", "max_turn_requests"),
@@ -483,8 +495,15 @@ def executor_result_metadata(
             "skill_bundle_sha256": event.get("skill_bundle_sha256"),
             "preloaded_skill_count": event.get("preloaded_skill_count"),
         }
-        for event in prompt_events
-    ]
+        for key in (
+            "experimental_text_only_retry_limit",
+            "experimental_text_only_retries_used",
+            "experimental_text_only_retry_exhausted",
+        ):
+            if key in event:
+                prompt_run[key] = event.get(key)
+        prompt_runs.append(prompt_run)
+    result["prompt_runs"] = prompt_runs
     if outcomes:
         observed = outcomes[-1].get("skill_context_preloaded")
         result["skill_context_preload_observed"] = observed
@@ -524,6 +543,7 @@ __all__ = [
     "EXECUTOR_SKILL_EXPOSURE_MODE",
     "EXECUTOR_USAGE_TRACKING",
     "ENV_DISABLE_SUBAGENTS",
+    "ENV_TEXT_ONLY_RETRY_LIMIT",
     "IDLE_SAFETY_TIMEOUT_SEC",
     "LLM_REQUEST_SAFETY_TIMEOUT_SEC",
     "MAX_PARENT_ITERATIONS_PER_STEP",

@@ -20,6 +20,16 @@ ENV_SKILLS_SHA256 = "BENCHMARK_EXECUTOR_SKILLS_SHA256"
 ENV_SKILL_COUNT = "BENCHMARK_EXECUTOR_SKILL_COUNT"
 ENV_BUNDLE_FILE_COUNT = "BENCHMARK_EXECUTOR_BUNDLE_FILE_COUNT"
 ENV_DISABLE_SUBAGENTS = "BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS"
+ENV_TEXT_ONLY_RETRY_LIMIT = "BENCHFLOW_OPENHANDS_TEXT_ONLY_RETRY_LIMIT"
+
+TEXT_ONLY_GUARD_PREFIX = "[Benchmark executor text-only guard]"
+TEXT_ONLY_GUARD_MESSAGE = (
+    f"{TEXT_ONLY_GUARD_PREFIX} Your previous response contained only an "
+    "announcement or explanation and no tool call, so the task may still be "
+    "unfinished. Continue now by using the next required work tool. Call the "
+    "finish tool only after the requested deliverable exists and has been "
+    "verified."
+)
 
 # OpenHands 1.28.1 configures current delegation with the ``task_tool_set``
 # specification, which resolves lazily to the provider-facing ``task`` tool.
@@ -43,6 +53,19 @@ def _positive_int(env: Mapping[str, str], key: str) -> int:
         raise RuntimeError(f"{key} must be a positive integer, got {raw!r}") from exc
     if value <= 0:
         raise RuntimeError(f"{key} must be a positive integer, got {raw!r}")
+    return value
+
+
+def _text_only_retry_limit(env: Mapping[str, str]) -> int:
+    raw = env.get(ENV_TEXT_ONLY_RETRY_LIMIT, "0")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be 0 or 1, got {raw!r}"
+        ) from exc
+    if value not in {0, 1}:
+        raise RuntimeError(f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be 0 or 1, got {raw!r}")
     return value
 
 
@@ -299,6 +322,75 @@ def _instrument_runtime_delegation_guard(agent: Any) -> None:
     agent_class._benchmark_executor_delegation_guard_instrumented = True
 
 
+def _instrument_text_only_completion_guard(agent: Any) -> None:
+    """Allow one explicit, auditable retry after a text-only pseudo-finish."""
+
+    agent_class = type(agent)
+    if getattr(agent_class, "_benchmark_executor_text_only_guard_instrumented", False):
+        return
+    original_handler = getattr(agent_class, "_handle_content_response", None)
+    if not callable(original_handler):
+        raise RuntimeError(
+            "OpenHands Agent._handle_content_response is unavailable; cannot "
+            "install the experimental text-only completion guard"
+        )
+
+    @wraps(original_handler)
+    def guarded_content_response(
+        self: Any,
+        message: Any,
+        llm_response: Any,
+        conversation: Any,
+        state: Any,
+        on_event: Any,
+    ) -> Any:
+        result = original_handler(
+            self,
+            message,
+            llm_response,
+            conversation,
+            state,
+            on_event,
+        )
+        retry_limit = getattr(
+            conversation, "_benchmark_executor_text_only_retry_limit", 0
+        )
+        if (
+            retry_limit <= 0
+            or not getattr(conversation, "_benchmark_executor_root", False)
+            or getattr(conversation, "agent", None) is not self
+            or _execution_status(conversation) != "finished"
+        ):
+            return result
+
+        retries_used = getattr(
+            conversation, "_benchmark_executor_text_only_retries_used", 0
+        )
+        if retries_used >= retry_limit:
+            conversation._benchmark_executor_text_only_retry_exhausted = True
+            return result
+
+        from openhands.sdk.conversation.state import ConversationExecutionStatus
+        from openhands.sdk.event import MessageEvent
+        from openhands.sdk.llm import Message, TextContent
+
+        conversation._benchmark_executor_text_only_retries_used = retries_used + 1
+        on_event(
+            MessageEvent(
+                source="environment",
+                llm_message=Message(
+                    role="user",
+                    content=[TextContent(text=TEXT_ONLY_GUARD_MESSAGE)],
+                ),
+            )
+        )
+        state.execution_status = ConversationExecutionStatus.RUNNING
+        return result
+
+    agent_class._handle_content_response = guarded_content_response
+    agent_class._benchmark_executor_text_only_guard_instrumented = True
+
+
 def install_adapter(env: Mapping[str, str] | None = None) -> None:
     """Install idempotent in-memory hooks into the pinned OpenHands CLI."""
 
@@ -307,6 +399,7 @@ def install_adapter(env: Mapping[str, str] | None = None) -> None:
         return
     runtime_env = os.environ if env is None else env
     max_iterations = _positive_int(runtime_env, ENV_MAX_ITERATIONS)
+    text_only_retry_limit = _text_only_retry_limit(runtime_env)
 
     from openhands_cli.acp_impl.agent import base_agent, local_agent
 
@@ -323,6 +416,8 @@ def install_adapter(env: Mapping[str, str] | None = None) -> None:
         else:
             raise RuntimeError("OpenHands Conversation was created without an agent")
         _instrument_parent_iterations(configured_agent)
+        if text_only_retry_limit:
+            _instrument_text_only_completion_guard(configured_agent)
         delegation_disabled = _delegation_disabled(runtime_env)
         if delegation_disabled:
             _assert_delegation_specs_disabled(configured_agent)
@@ -332,6 +427,9 @@ def install_adapter(env: Mapping[str, str] | None = None) -> None:
         conversation._benchmark_executor_delegation_disabled = delegation_disabled
         conversation._benchmark_executor_root = True
         conversation._benchmark_executor_total_iterations = 0
+        conversation._benchmark_executor_text_only_retry_limit = text_only_retry_limit
+        conversation._benchmark_executor_text_only_retries_used = 0
+        conversation._benchmark_executor_text_only_retry_exhausted = False
         preloaded = bool(runtime_env.get(ENV_SKILLS_ROOT))
         conversation._benchmark_executor_skill_context_preloaded = preloaded
         conversation._benchmark_executor_skill_bundle_sha256 = (
@@ -357,6 +455,9 @@ def install_adapter(env: Mapping[str, str] | None = None) -> None:
             if before is not None
             else 0
         )
+        if before is not None:
+            before._benchmark_executor_text_only_retries_used = 0
+            before._benchmark_executor_text_only_retry_exhausted = False
         result = await original_prompt(self, prompt, session_id, **kwargs)
         conversation = self.active_sessions.get(session_id)
         if conversation is None:
@@ -405,6 +506,22 @@ def install_adapter(env: Mapping[str, str] | None = None) -> None:
                 conversation, "_benchmark_executor_preloaded_skill_count", 0
             ),
         }
+        if text_only_retry_limit:
+            field_meta["benchmark_executor"].update(
+                {
+                    "experimental_text_only_retry_limit": text_only_retry_limit,
+                    "experimental_text_only_retries_used": getattr(
+                        conversation,
+                        "_benchmark_executor_text_only_retries_used",
+                        0,
+                    ),
+                    "experimental_text_only_retry_exhausted": getattr(
+                        conversation,
+                        "_benchmark_executor_text_only_retry_exhausted",
+                        False,
+                    ),
+                }
+            )
         if hasattr(result, "model_copy"):
             return result.model_copy(
                 update={"stop_reason": stop_reason, "field_meta": field_meta}

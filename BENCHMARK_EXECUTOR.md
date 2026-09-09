@@ -60,6 +60,23 @@ task；这些限制用于防止不同方法无意间形成不同的执行协议�
 
 这里的一个 iteration 是 OpenHands 根 Agent 的一次 `agent.step()`，不是一个业务步骤、一个 shell 命令或一个 Skill 条目。正式执行器会禁用 delegation，因此不会出现不计入根 Agent 60 次的子 Agent 内部 step。
 
+### 2.1 诊断性 completion guard（默认关闭）
+
+执行器提供一个仅用于诊断“模型以纯文本宣布继续、实际却提前结束”的可选 guard。
+正式的 canonical rollout 必须保持默认值 `0`；只有在已保存 guard-off 原结果后，
+才能用新的唯一 `rollout_id` 设置 `experimental_text_only_retry_limit=1` 做 fresh rerun。
+
+开启后，每个 BenchFlow Step/prompt 最多注入一次明确的继续执行消息。它只拦截
+text-only finish，不处理 provider、工具、verifier、`stuck` 或 `max_iterations` 故障，
+也不会把 60 次上限扩大到 61 次；继续执行只能使用该 Step 剩余的 iteration 预算。
+
+只要开启 guard，无论是否实际触发、最终 reward 是否为 1，该 rollout 都会带有
+`experimental_controls`，并被标为 `comparable=False`，不能进入正式方法比较。
+实际触发情况由 `result.json` 中
+`executor.prompt_runs[].experimental_text_only_retries_used` 和
+`experimental_text_only_retry_exhausted` 留证。不要通过底层 `agent_env` 直接开启；
+统一使用公开 `BenchmarkExecutor` 构造参数。
+
 ## 3. 三种评测条件
 
 以下命令均从本仓库根目录运行，并且一次命令只执行一个 task。先在一个地方选择

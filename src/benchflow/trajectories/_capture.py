@@ -95,21 +95,27 @@ def _events_to_trajectory(events: list[dict]) -> list[dict]:
                 }
             )
         elif event["type"] == "agent_iteration_outcome":
-            out.append(
-                {
-                    "type": "agent_iteration_outcome",
-                    "prompt_ordinal": event["prompt_ordinal"],
-                    "stop_reason": event["stop_reason"],
-                    "acp_stop_reason": event["acp_stop_reason"],
-                    "execution_status": event["execution_status"],
-                    "error_code": event["error_code"],
-                    "max_iterations": event["max_iterations"],
-                    "iterations_used": event["iterations_used"],
-                    "skill_context_preloaded": event["skill_context_preloaded"],
-                    "skill_bundle_sha256": event["skill_bundle_sha256"],
-                    "preloaded_skill_count": event["preloaded_skill_count"],
-                }
-            )
+            outcome = {
+                "type": "agent_iteration_outcome",
+                "prompt_ordinal": event["prompt_ordinal"],
+                "stop_reason": event["stop_reason"],
+                "acp_stop_reason": event["acp_stop_reason"],
+                "execution_status": event["execution_status"],
+                "error_code": event["error_code"],
+                "max_iterations": event["max_iterations"],
+                "iterations_used": event["iterations_used"],
+                "skill_context_preloaded": event["skill_context_preloaded"],
+                "skill_bundle_sha256": event["skill_bundle_sha256"],
+                "preloaded_skill_count": event["preloaded_skill_count"],
+            }
+            for key in (
+                "experimental_text_only_retry_limit",
+                "experimental_text_only_retries_used",
+                "experimental_text_only_retry_exhausted",
+            ):
+                if key in event:
+                    outcome[key] = event[key]
+            out.append(outcome)
     return out
 
 

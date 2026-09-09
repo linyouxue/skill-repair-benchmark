@@ -15,6 +15,7 @@ from benchflow.benchmark_executor import (
     ENV_LLM_TIMEOUT,
     ENV_MAX_ITERATIONS,
     ENV_SKILLS_ROOT,
+    ENV_TEXT_ONLY_RETRY_LIMIT,
     MAX_PARENT_ITERATIONS_PER_STEP,
     OPENHANDS_CLI_COMMIT,
     apply_openhands_executor_env,
@@ -119,6 +120,49 @@ def test_executor_env_scrubs_forged_controls_in_no_skill(tmp_path: Path) -> None
     assert env[ENV_LLM_TIMEOUT] == "3600"
     assert env[ENV_DISABLE_SUBAGENTS] == "1"
     assert env["SAFE"] == "yes"
+
+
+def test_executor_env_preserves_only_valid_diagnostic_guard_control(
+    tmp_path: Path,
+) -> None:
+    """The opt-in guard survives env scrubbing and is marked non-comparable."""
+
+    task = tmp_path / "task"
+    task.mkdir()
+    policy = resolve_task_skill_policy(
+        task_path=task,
+        skill_mode="no-skill",
+        runtime_skills_dir=None,
+        declared_sandbox_skills_dir=None,
+    )
+    agent_env = apply_openhands_executor_env(
+        "openhands",
+        {ENV_TEXT_ONLY_RETRY_LIMIT: "1"},
+        skill_policy=policy,
+        manifest=None,
+    )
+    metadata = executor_metadata(
+        agent="openhands",
+        model="openrouter/openai/gpt-5.2",
+        skill_policy=policy,
+        manifest=None,
+        resolved_agent_env=agent_env,
+    )
+
+    assert agent_env[ENV_TEXT_ONLY_RETRY_LIMIT] == "1"
+    assert metadata is not None
+    assert metadata["experimental_controls"] == {
+        "openhands_text_only_retry_limit": 1,
+        "comparison_status": "diagnostic-non-comparable",
+    }
+
+    with pytest.raises(ValueError, match="must be '0' or '1'"):
+        apply_openhands_executor_env(
+            "openhands",
+            {ENV_TEXT_ONLY_RETRY_LIMIT: "2"},
+            skill_policy=policy,
+            manifest=None,
+        )
 
 
 def test_executor_accepts_selected_model_routes_but_requires_one() -> None:
@@ -623,8 +667,8 @@ def test_result_metadata_distinguishes_iteration_limit_from_infra_error() -> Non
 
 
 @pytest.mark.asyncio
-async def test_acp_records_namespaced_iteration_outcome_without_extra_prompt() -> None:
-    """Guards protocol v1 on base aadad44: metadata adds no synthetic turn."""
+async def test_acp_records_guard_evidence_without_extra_benchflow_prompt() -> None:
+    """Adapter guard evidence survives capture without adding a BenchFlow prompt."""
 
     class Client:
         async def prompt(self, prompt: str) -> SimpleNamespace:
@@ -640,6 +684,9 @@ async def test_acp_records_namespaced_iteration_outcome_without_extra_prompt() -
                         "skill_context_preloaded": False,
                         "skill_bundle_sha256": None,
                         "preloaded_skill_count": 0,
+                        "experimental_text_only_retry_limit": 1,
+                        "experimental_text_only_retries_used": 1,
+                        "experimental_text_only_retry_exhausted": False,
                     }
                 },
             )
@@ -655,6 +702,14 @@ async def test_acp_records_namespaced_iteration_outcome_without_extra_prompt() -
     assert len(outcomes) == 1
     assert outcomes[0]["iterations_used"] == 7
     assert outcomes[0]["max_iterations"] == MAX_PARENT_ITERATIONS_PER_STEP
+    assert outcomes[0]["experimental_text_only_retry_limit"] == 1
+    assert outcomes[0]["experimental_text_only_retries_used"] == 1
+    assert outcomes[0]["experimental_text_only_retry_exhausted"] is False
+    observed = executor_result_metadata(
+        {"max_parent_iterations_per_step": 60}, trajectory
+    )
+    assert observed is not None
+    assert observed["prompt_runs"][0]["experimental_text_only_retries_used"] == 1
     assert [event for event in trajectory if event["type"] == "user_message"] == [
         {"type": "user_message", "text": "original task"}
     ]
