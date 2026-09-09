@@ -247,6 +247,9 @@ async def test_adapter_preloads_before_conversation_and_caps_each_run(
         "skill_context_preloaded": True,
         "skill_bundle_sha256": f"sha256:{env[adapter.ENV_SKILLS_SHA256]}",
         "preloaded_skill_count": 1,
+        "experimental_text_only_retry_limit": 1,
+        "experimental_text_only_retries_used": 0,
+        "experimental_text_only_retry_exhausted": False,
     }
 
 
@@ -280,6 +283,9 @@ async def test_exactly_sixty_finished_steps_remain_end_turn(
         "skill_context_preloaded": True,
         "skill_bundle_sha256": f"sha256:{env[adapter.ENV_SKILLS_SHA256]}",
         "preloaded_skill_count": 1,
+        "experimental_text_only_retry_limit": 1,
+        "experimental_text_only_retries_used": 0,
+        "experimental_text_only_retry_exhausted": False,
     }
 
 
@@ -373,7 +379,12 @@ def test_adapter_preserves_delegation_tools_without_opt_in(
 ) -> None:
     local_agent, _ = _install_fake_openhands(monkeypatch)
     monkeypatch.setattr(adapter, "_PATCHED", False)
-    adapter.install_adapter({adapter.ENV_MAX_ITERATIONS: "60"})
+    adapter.install_adapter(
+        {
+            adapter.ENV_MAX_ITERATIONS: "60",
+            adapter.ENV_TEXT_ONLY_RETRY_LIMIT: "0",
+        }
+    )
 
     conversation = local_agent.Conversation(
         agent=_Agent(tools=[SimpleNamespace(name="task_tool_set")]),
@@ -386,7 +397,7 @@ def test_adapter_preserves_delegation_tools_without_opt_in(
 def test_disabled_text_only_guard_does_not_require_openhands_content_hook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Default protocol remains compatible when the experimental hook is absent."""
+    """An explicit noncanonical guard-off run does not require the private hook."""
 
     class LegacyAgent(_Agent):
         _handle_content_response = None
@@ -399,7 +410,12 @@ def test_disabled_text_only_guard_does_not_require_openhands_content_hook(
 
     local_agent, _ = _install_fake_openhands(monkeypatch)
     monkeypatch.setattr(adapter, "_PATCHED", False)
-    adapter.install_adapter({adapter.ENV_MAX_ITERATIONS: "60"})
+    adapter.install_adapter(
+        {
+            adapter.ENV_MAX_ITERATIONS: "60",
+            adapter.ENV_TEXT_ONLY_RETRY_LIMIT: "0",
+        }
+    )
 
     conversation = local_agent.Conversation(agent=LegacyAgent(), workspace="/app")
 
@@ -412,7 +428,7 @@ def test_disabled_text_only_guard_does_not_require_openhands_content_hook(
 def test_text_only_completion_guard_retries_once_then_stops(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The diagnostic guard continues once but cannot expand the 60-step budget."""
+    """The canonical guard continues once but cannot expand the 60-step budget."""
 
     (tmp_path / "one").mkdir()
     (tmp_path / "one" / "SKILL.md").write_text("BODY")

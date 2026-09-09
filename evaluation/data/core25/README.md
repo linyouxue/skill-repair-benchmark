@@ -35,11 +35,13 @@
 
 ## 使用边界
 
-**公开 Gold 供组织者评分和核查，不应读取它来生成参评方法的诊断或修复。** 参评方法使用 Original 和规定的任务输入。组织者应按统一协议维护 Gold、裁判参数和原始通过核验记录。
+**公开 Gold 供评分和核查，不应读取它来生成参评方法的诊断或修复。** 参评方法使用 Original 和规定的任务输入。组织者维护统一 Gold、执行协议和裁判参数；同学在自己的机器上运行方法及 executor，再用本目录 Gold 生成全部评测指标。
 
 复制 `submission.template.json` 到方法自己的提交目录，填写 `method_id`、逐任务 `diagnoses`，并将完整修复后 Skill 放入 `tasks/<task_id>/skills/`。`benchmark_version` 必须与本版 Gold 相同。模板中的空目录引用尚待方法填充，不能直接作为完成的提交。
 
-正常任务必须提供诊断数组和完整 Final。原始运行经组织者核验通过时，可按评测说明改为 `original_pass` 跳过行；仍须保留全部 7 个任务，并由组织者单独提供可信核验清单。空诊断数组本身不等于跳过。
+正常任务必须提供诊断数组和完整 Final。原始运行通过时，可按评测说明改为 `original_pass` 跳过行，仍须保留全部 7 个任务。使用 `--executor-runs-dir` 指向本地完整运行目录，脚本自动核验跳过证据并汇总 Verified Fix Rate；同学不需要手写结果清单、申请组织者核验或回传运行文件。空诊断数组本身不等于跳过。
+
+`benchmark_result.json` 和 `executor_request.json` 由同学本地的 `BenchmarkExecutor` 自动生成，不是组织者需要另外提供的 Gold 材料。全部指标的运行命令和输出说明见 [本地评测流程](../../README.md#同学在本地完成全部评测)。完整任务数据、verifier 与执行环境仍按仓库的 executor 指南配置。
 
 评测器选取本目录的 `gold.json`。`submission.original-input-check.json` 和 `submission.gold-reference.json` 的目录引用均已在包内配齐，可先使用 `--dry-run` 核查完整输入；真实 bundle 较大，可显式使用 `--max-input-chars 2000000`，不会裁剪文件。正式调用模型须按评测说明显式选择执行模式和模型。
 
@@ -50,7 +52,7 @@
 - `paratransit-routing`：统一 RI 清单保留两项，但历史 `annotation.md` 将该任务标为 `no-Gold-repair`，视作 Agent 遵循强化诊断。此冲突尚未裁决，本次发布沿用统一清单；reference 保留 round-1 实际 bundle，不将它描述为已证明成功的标准修复。
 - `exoplanet-detection-period`：参考修复有 verifier-only diagnostic replay 证据，不能描述为正式可比的 fresh rollout 通过。
 - `sec-financial-report`：原始服务器 rollout 未完整镜像到本地。Original 来自官方任务资源，已有 digest 核对证据表明与历史标注一致；来源表保留该证据，不把本次复制当作新执行验证。
-- `software-dependency-audit`：参考为 content-validated / diagnostic-agent-validated / canonical-non-comparable，验证启用了 completion guard。选取含固定数据库不变量修复的 adherence-reinforcement/round-3；其 manifest 保留历史 `candidate-not-yet-validated` 状态，后续标注记有内容检查与 guard 复测支持。完整 bundle 也含此前的遵循强化，未被重新裁剪。
+- `software-dependency-audit`：参考为 content-validated / agent-validated / verifier-pass，验证运行启用了 completion guard。选取含固定数据库不变量修复的 adherence-reinforcement/round-3；其 manifest 保留历史 `candidate-not-yet-validated` 状态，后续标注记有内容检查与 guard 复测支持。完整 bundle 也含此前的遵循强化，未被重新裁剪。
 - `video-silence-remover`：保留三项 Gold 与 adherence-reinforcement/round-2 bundle；参考验证具有 adherence-assisted 边界。后续 terminal-result gate 不属于这三项 Gold，未纳入本版 reference。round-2 manifest 记录过未执行修复目录的失败，不能据此将所有参考修复统一表述为 canonical 通过。
 
 完整逐任务备注见 `bundle_sources.json` 和 `gold.json` 的 `source_notes`。其中 run/round 标识用于说明历史来源，不是对本次发布进行了任务重跑的声明。若之后调整 Gold 标签或验收标准，应发布新数据版本并对所有方法统一重计。

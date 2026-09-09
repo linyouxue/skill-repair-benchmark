@@ -13,7 +13,7 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 
 | 你要做什么 | 阅读位置 |
 |---|---|
-| 评估方法提交的诊断、修复内容与原始通过跳过申请 | [细粒度评测说明](./evaluation/README.md) |
+| 同学在本地生成诊断、修复与 Verified Fix Rate 全部指标 | [细粒度评测说明](./evaluation/README.md) |
 | 获取当前发布的 Core-25 Gold 子集与提交模板 | [7 任务、14 缺陷的数据说明](./evaluation/data/core25/README.md) |
 | 第一次安装并跑通一条任务 | [DELIVERY_GUIDE.md：第一次使用](./DELIVERY_GUIDE.md#0-第一次使用从解压到一条有效-rollout) |
 | 手动运行 no-skill / original-skill / method-skill | [DELIVERY_GUIDE.md：人工或调试运行](./DELIVERY_GUIDE.md#4-入口-a人工或调试运行) |
@@ -35,10 +35,11 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 - 默认关闭、由每台机器自行配置的 verifier 进程定向依赖代理与付费前连通性检查；
 - result、trajectory、verifier 与 Skill exposure 的统一结果契约。
 
-GitHub 源码另提供独立的 [`evaluation/`](./evaluation/README.md)：诊断与修复分别
-调用裁判，按缺陷计算 P/R/F1，单独报告定位和 regression；原始 Skill 运行经组织者
-核验通过的任务可以跳过。最终报表还可读取 executor 的真实 verifier 结果，汇总
-Verified Fix Rate 和有效验证覆盖率。当前公开 Gold 仅含 Core-25 中已整理的 **7 个任务、14 个
+GitHub 源码另提供独立的 [`evaluation/`](./evaluation/README.md)：同学填写诊断与最终
+Skill，指定本地 executor 运行目录，即可在本机生成按缺陷计算的 Diagnosis/Repair
+P/R/F1、定位、regression、Verified Fix Rate 和有效验证覆盖率。原始运行已通过的
+跳过标记也由脚本读取本地证据核验，无需向组织者回传结果或申请核验清单。
+当前公开 Gold 仅含 Core-25 中已整理的 **7 个任务、14 个
 缺陷**，附 Original/reference Skill 快照、提交模板及离线样例。这是内容评测入口，
 不改变 executor 的 API、运行协议或任务执行结果。
 
@@ -62,7 +63,7 @@ Verified Fix Rate 和有效验证覆盖率。当前公开 Gold 仅含 Core-25 �
 5. 从 `.env.sample` 创建本机 `.env`，填写模型路由和对应供应商的 key。
 6. 运行不调用模型的离线测试。
 7. 明确付费后，只运行一条 original-skill smoke rollout。
-8. 只有 `comparable == true` 的结果才能进入方法比较。
+8. 只有 `execution_ok == true` 且 `task_passed` 为布尔值的结果才进入统计。
 
 完整命令、结果判定和排错方法都在
 [DELIVERY_GUIDE.md](./DELIVERY_GUIDE.md) 中。
@@ -84,16 +85,16 @@ Verified Fix Rate 和有效验证覆盖率。当前公开 Gold 仅含 Core-25 �
 - 修复算法正式接入：使用 `from benchmark_executor import BenchmarkExecutor`。
 
 首次机器验收和正式方法接入都推荐 Python API：它会额外生成
-`benchmark_result.json` 并给出 `comparable`。不要在算法内部拼接 shell 命令。
+`benchmark_result.json`。不要在算法内部拼接 shell 命令。
 
 ## 不能改变的比较条件
 
 - 不要从 PyPI 安装上游 BenchFlow 覆盖本仓库。
 - 不要为每种方法复制并修改一套 BenchFlow。
 - 不要把同一组方法放到不同模型、供应商路由、reasoning effort 或 task commit 上比较。
-- 不要把 `task_passed == false` 当作基础设施故障；先检查 `execution_ok` 和 `comparable`。
+- 不要把 `task_passed == false` 当作基础设施故障；先检查 `execution_ok` 和错误分类。
 - verifier 依赖安装失败时，即使脚本留下 `reward.txt=0`，该结果也是
-  `verifier_dep_install` / `non-comparable`，不能算作方法失败。
+  `verifier_dep_install`，此时 `execution_ok=false`、`task_passed=null`，不能算作方法失败。
 - 不要因为 `artifacts/` 为空就认定任务失败；许多 task 不向 `/logs/artifacts` 写文件。
 - 不要覆盖已有 rollout 目录；每次运行使用唯一的 `rollout_id`。
 

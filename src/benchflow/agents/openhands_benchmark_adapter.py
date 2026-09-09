@@ -21,6 +21,7 @@ ENV_SKILL_COUNT = "BENCHMARK_EXECUTOR_SKILL_COUNT"
 ENV_BUNDLE_FILE_COUNT = "BENCHMARK_EXECUTOR_BUNDLE_FILE_COUNT"
 ENV_DISABLE_SUBAGENTS = "BENCHFLOW_OPENHANDS_DISABLE_SUBAGENTS"
 ENV_TEXT_ONLY_RETRY_LIMIT = "BENCHFLOW_OPENHANDS_TEXT_ONLY_RETRY_LIMIT"
+DEFAULT_TEXT_ONLY_RETRY_LIMIT = 1
 
 TEXT_ONLY_GUARD_PREFIX = "[Benchmark executor text-only guard]"
 TEXT_ONLY_GUARD_MESSAGE = (
@@ -57,7 +58,7 @@ def _positive_int(env: Mapping[str, str], key: str) -> int:
 
 
 def _text_only_retry_limit(env: Mapping[str, str]) -> int:
-    raw = env.get(ENV_TEXT_ONLY_RETRY_LIMIT, "0")
+    raw = env.get(ENV_TEXT_ONLY_RETRY_LIMIT, str(DEFAULT_TEXT_ONLY_RETRY_LIMIT))
     try:
         value = int(raw)
     except ValueError as exc:
@@ -332,7 +333,7 @@ def _instrument_text_only_completion_guard(agent: Any) -> None:
     if not callable(original_handler):
         raise RuntimeError(
             "OpenHands Agent._handle_content_response is unavailable; cannot "
-            "install the experimental text-only completion guard"
+            "install the canonical text-only completion guard"
         )
 
     @wraps(original_handler)

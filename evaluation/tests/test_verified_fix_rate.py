@@ -67,6 +67,7 @@ def verifier_case(tmp_path: Path) -> dict:
             "method_id": "method-a",
             "stage": "final",
             "protocol_id": "skillrepair-v1",
+            "protocol_version": 2,
             "model": "openai/gpt-5.5",
             "provider_route": "openrouter",
             "provider_base_url": "https://openrouter.ai/api/v1",
@@ -74,7 +75,6 @@ def verifier_case(tmp_path: Path) -> dict:
             "reasoning_effort": "medium",
             "task_passed": tid == "passed",
             "execution_ok": True,
-            "comparable": True,
             "reward": 1.0 if tid == "passed" else 0.0,
             "agent_iterations": 2,
             "provider_requests": 2,
@@ -95,7 +95,10 @@ def verifier_case(tmp_path: Path) -> dict:
         }
         requests[tid] = {
             "schema_version": 1,
-            "protocol": {"protocol_id": "skillrepair-v1"},
+            "protocol": {
+                "protocol_id": "skillrepair-v1",
+                "protocol_version": 2,
+            },
             "model_selection": {
                 "model": "openai/gpt-5.5",
                 "provider_route": "openrouter",
@@ -119,7 +122,6 @@ def verifier_case(tmp_path: Path) -> dict:
         }
     reports["invalid"].update(
         execution_ok=False,
-        comparable=False,
         task_passed=None,
         reward=None,
         error="Provider failed",
@@ -235,13 +237,17 @@ def test_unavailable_verified_fix_rate_is_null_not_zero(
 @pytest.mark.parametrize(
     "updates",
     [
-        {"comparable": False},
-        {"comparable": False, "task_passed": None, "reward": None},
         {
-            "comparable": False,
             "execution_ok": False,
             "task_passed": None,
+            "reward": None,
             "error": "crashed",
+        },
+        {
+            "execution_ok": False,
+            "task_passed": None,
+            "reward": None,
+            "verifier_error": "verifier crashed",
         },
     ],
 )
@@ -263,7 +269,6 @@ def test_unusable_but_well_formed_execution_is_excluded(
     "updates",
     [
         {"execution_ok": "true"},
-        {"comparable": 1},
         {"task_passed": 1},
         {"reward": True},
         {"reward": float("nan")},
@@ -277,7 +282,7 @@ def test_unusable_but_well_formed_execution_is_excluded(
         {"export_error": "export failed"},
     ],
 )
-def test_invalid_types_or_contradictory_comparable_result_are_input_errors(
+def test_invalid_types_or_contradictory_successful_result_are_input_errors(
     verifier_case: dict, updates: dict
 ) -> None:
     case = verifier_case
@@ -303,6 +308,8 @@ def test_invalid_types_or_contradictory_comparable_result_are_input_errors(
         "request-model",
         "request-effort",
         "request-protocol",
+        "request-protocol-version",
+        "report-protocol-version",
         "bundle-hash",
         "changed-final-reference",
         "missing-report",
@@ -342,6 +349,10 @@ def test_executor_identity_must_bind_to_this_submission_and_final_bundle(
         ] = "different"
     elif invalid == "request-protocol":
         request["protocol"]["protocol_id"] = "different"
+    elif invalid == "request-protocol-version":
+        request["protocol"]["protocol_version"] = 1
+    elif invalid == "report-protocol-version":
+        report["protocol_version"] = 1
     elif invalid == "bundle-hash":
         request["skill_bundle_manifest"]["skill_bundle_sha256"] = "sha256:" + "0" * 64
     elif invalid == "changed-final-reference":
@@ -361,6 +372,21 @@ def test_executor_identity_must_bind_to_this_submission_and_final_bundle(
 
     with pytest.raises((ValueError, OSError)):
         summarize(case)
+
+
+def test_guard_metadata_is_not_an_evaluation_gate(verifier_case: dict) -> None:
+    case = verifier_case
+    case["requests"]["passed"]["completion_guard"] = {
+        "enabled": False,
+        "text_only_retry_limit_per_step": 0,
+    }
+    case["reports"]["passed"]["completion_guard"] = "different-or-legacy"
+    persist(case)
+
+    result = summarize(case)
+
+    assert result["verified_fix_passed_task_count"] == 1
+    assert result["verified_fix_valid_task_count"] == 2
 
 
 @pytest.mark.parametrize("field", ["model", "reasoning_effort", "protocol_id"])

@@ -174,46 +174,23 @@ def _skill_exposure(raw: dict[str, Any]) -> SkillExposure:
     )
 
 
-def _experimental_controls(
-    raw: dict[str, Any],
-    config: dict[str, Any] | None,
-    request: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Read matching diagnostic controls without trusting one artifact alone."""
-
-    containers = [
-        request,
-        config.get("executor") if config else None,
-        raw.get("executor"),
-    ]
-    observed: list[dict[str, Any]] = []
-    for container in containers:
-        if not isinstance(container, dict) or "experimental_controls" not in container:
-            continue
-        value = container["experimental_controls"]
-        if not isinstance(value, dict):
-            return {"invalid": True}
-        observed.append(dict(value))
-    if not observed:
-        return None
-    if any(value != observed[0] for value in observed[1:]):
-        return {"invalid": True}
-    return observed[0]
-
-
 def _protocol_evidence_valid(
     raw: dict[str, Any],
     config: dict[str, Any] | None,
+    request: dict[str, Any] | None,
     *,
     protocol_id: str,
     expected_model: str,
     expected_reasoning_effort: str | None,
 ) -> bool:
     executor = raw.get("executor")
-    if not isinstance(executor, dict) or config is None:
+    if not isinstance(executor, dict) or config is None or request is None:
         return False
     config_executor = config.get("executor")
     if not isinstance(config_executor, dict):
+        return False
+    request_protocol = request.get("protocol")
+    if not isinstance(request_protocol, dict):
         return False
     expected_provider = provider_route_for_model(expected_model)
     return all(
@@ -229,6 +206,8 @@ def _protocol_evidence_valid(
             executor.get("skill_exposure_mode") == EXECUTOR_SKILL_EXPOSURE_MODE,
             executor.get("max_parent_iterations_per_step")
             == MAX_PARENT_ITERATIONS_PER_STEP,
+            request_protocol.get("protocol_id") == protocol_id,
+            request_protocol.get("protocol_version") == EXECUTOR_PROTOCOL_VERSION,
             raw.get("agent") == EXECUTOR_AGENT,
             raw.get("model") == expected_model,
             config.get("agent") == EXECUTOR_AGENT,
@@ -255,7 +234,6 @@ class BenchmarkResult:
     method_id: str
     stage: str
     protocol_id: str
-    experimental_controls: dict[str, Any] | None
     model: str
     provider_route: str
     provider_base_url: str | None
@@ -301,29 +279,16 @@ class BenchmarkResult:
 
         return self.task_passed
 
-    @property
-    def comparable(self) -> bool:
-        """Whether this result has complete evidence for method comparison."""
-
-        return bool(
-            not self.experimental_controls
-            and self.protocol_evidence_valid
-            and self.execution_ok
-            and self.reward is not None
-            and self.trajectory_complete
-            and self.iteration_accounting_complete
-            and self.skill_exposure.verified is True
-        )
-
     def to_dict(self) -> dict[str, Any]:
         """Return a compact JSON-serializable summary without copying trajectory."""
 
-        summary = {
+        summary: dict[str, Any] = {
             "task_id": self.task_id,
             "rollout_id": self.rollout_id,
             "method_id": self.method_id,
             "stage": self.stage,
             "protocol_id": self.protocol_id,
+            "protocol_version": EXECUTOR_PROTOCOL_VERSION,
             "model": self.model,
             "provider_route": self.provider_route,
             "provider_base_url": self.provider_base_url,
@@ -331,7 +296,6 @@ class BenchmarkResult:
             "reasoning_effort": self.reasoning_effort,
             "task_passed": self.task_passed,
             "execution_ok": self.execution_ok,
-            "comparable": self.comparable,
             "reward": self.reward,
             "agent_iterations": self.agent_iterations,
             "provider_requests": self.provider_requests,
@@ -350,8 +314,6 @@ class BenchmarkResult:
             "rollout_dir": str(self.artifacts.rollout_dir),
             "result_json": str(self.artifacts.result_json),
         }
-        if self.experimental_controls is not None:
-            summary["experimental_controls"] = self.experimental_controls
         return summary
 
     @classmethod
@@ -426,7 +388,6 @@ class BenchmarkResult:
             method_id=method_id,
             stage=stage,
             protocol_id=protocol_id,
-            experimental_controls=_experimental_controls(raw, config, request),
             model=expected_model,
             provider_route=provider_route_for_model(expected_model),
             provider_base_url=(
@@ -483,6 +444,7 @@ class BenchmarkResult:
             protocol_evidence_valid=_protocol_evidence_valid(
                 raw,
                 config,
+                request,
                 protocol_id=protocol_id,
                 expected_model=expected_model,
                 expected_reasoning_effort=expected_reasoning_effort,

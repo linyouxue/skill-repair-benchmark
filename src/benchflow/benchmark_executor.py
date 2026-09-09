@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 EXECUTOR_AGENT = "openhands"
 EXECUTOR_PROTOCOL_ID = "skillrepair-v1"
-EXECUTOR_PROTOCOL_VERSION = 1
+EXECUTOR_PROTOCOL_VERSION = 2
 EXECUTOR_SANDBOX = "docker"
 EXECUTOR_USAGE_TRACKING = "auto"
 EXECUTOR_MAX_ROLLOUT_RETRIES = 0
@@ -29,6 +29,7 @@ OPENHANDS_CLI_COMMIT = "2df8a2835d3f1bd2f2eadf5a7a2e1ad0dfb0d271"
 OPENHANDS_SDK_VERSION = "1.28.1"
 OPENHANDS_TOOLS_VERSION = "1.28.1"
 MAX_PARENT_ITERATIONS_PER_STEP = 60
+TEXT_ONLY_RETRY_LIMIT_PER_STEP = 1
 
 # These are hang watchdogs, not evaluation budgets.  The scored budget is the
 # parent-agent iteration cap above.  A pending tool call is already exempt from
@@ -96,6 +97,23 @@ class SkillBundleManifest:
             "skill_bundle_file_count": self.file_count,
             "skill_bundle_bytes": self.total_bytes,
         }
+
+
+def completion_guard_metadata(retry_limit: int) -> dict[str, Any]:
+    """Describe the protocol-level text-only completion guard."""
+
+    if (
+        isinstance(retry_limit, bool)
+        or not isinstance(retry_limit, int)
+        or retry_limit not in {0, 1}
+    ):
+        raise ValueError("text-only completion guard limit must be 0 or 1")
+    return {
+        "enabled": retry_limit == 1,
+        "scope": "openhands-root-agent-text-only-finish",
+        "text_only_retry_limit_per_step": retry_limit,
+        "uses_remaining_parent_iteration_budget": True,
+    }
 
 
 def _regular_bundle_files(root: Path) -> list[tuple[str, bytes]]:
@@ -189,17 +207,18 @@ def apply_openhands_executor_env(
 ) -> dict[str, str]:
     """Return a scrubbed env containing only executor-owned adapter controls."""
 
-    text_only_retry_limit = agent_env.get(ENV_TEXT_ONLY_RETRY_LIMIT)
+    text_only_retry_limit = agent_env.get(
+        ENV_TEXT_ONLY_RETRY_LIMIT, str(TEXT_ONLY_RETRY_LIMIT_PER_STEP)
+    )
     result = {
         key: value for key, value in agent_env.items() if key not in _RESERVED_ENV
     }
     if agent != EXECUTOR_AGENT:
         return result
 
-    if text_only_retry_limit not in {None, "0", "1"}:
+    if text_only_retry_limit not in {"0", "1"}:
         raise ValueError(f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be '0' or '1'")
-    if text_only_retry_limit == "1":
-        result[ENV_TEXT_ONLY_RETRY_LIMIT] = "1"
+    result[ENV_TEXT_ONLY_RETRY_LIMIT] = text_only_retry_limit
     result[ENV_MAX_ITERATIONS] = str(MAX_PARENT_ITERATIONS_PER_STEP)
     result[ENV_LLM_TIMEOUT] = str(LLM_REQUEST_SAFETY_TIMEOUT_SEC)
     result[ENV_DISABLE_SUBAGENTS] = "1"
@@ -322,7 +341,7 @@ def validate_openhands_executor_scenes(
 
 
 def evaluation_condition(skill_policy: TaskSkillPolicy) -> str:
-    """Name the comparable benchmark condition represented by a skill policy."""
+    """Name the benchmark condition represented by a skill policy."""
 
     from benchflow.skill_policy import (
         SKILL_SOURCE_CUSTOM_RUNTIME,
@@ -398,11 +417,12 @@ def executor_metadata(
             }
         ),
     }
-    if (resolved_agent_env or {}).get(ENV_TEXT_ONLY_RETRY_LIMIT) == "1":
-        data["experimental_controls"] = {
-            "openhands_text_only_retry_limit": 1,
-            "comparison_status": "diagnostic-non-comparable",
-        }
+    retry_limit = int(
+        (resolved_agent_env or {}).get(
+            ENV_TEXT_ONLY_RETRY_LIMIT, str(TEXT_ONLY_RETRY_LIMIT_PER_STEP)
+        )
+    )
+    data["completion_guard"] = completion_guard_metadata(retry_limit)
     if manifest is not None:
         data.update(manifest.to_metadata())
     return data
@@ -439,6 +459,7 @@ def protocol_descriptor() -> dict[str, Any]:
         "usage_tracking": EXECUTOR_USAGE_TRACKING,
         "max_rollout_retries_per_call": EXECUTOR_MAX_ROLLOUT_RETRIES,
         "max_parent_iterations_per_step": MAX_PARENT_ITERATIONS_PER_STEP,
+        "completion_guard": completion_guard_metadata(TEXT_ONLY_RETRY_LIMIT_PER_STEP),
         "skill_exposure_mode": EXECUTOR_SKILL_EXPOSURE_MODE,
         "delegation_disabled": True,
         "wall_clock_safety_timeout_sec": WALL_CLOCK_SAFETY_TIMEOUT_SEC,
@@ -446,7 +467,7 @@ def protocol_descriptor() -> dict[str, Any]:
         "llm_request_safety_timeout_sec": LLM_REQUEST_SAFETY_TIMEOUT_SEC,
         "evaluation_conditions": ["no-skill", "original-skill", "method-skill"],
         "verifier_dependency_install_policy": (
-            "fail closed before reward parsing; classify as non-comparable"
+            "fail closed before reward parsing; record verifier infrastructure error"
         ),
         "verifier_proxy_policy": (
             "default off; explicit opt-in; environment variables on final verifier "
@@ -547,10 +568,12 @@ __all__ = [
     "IDLE_SAFETY_TIMEOUT_SEC",
     "LLM_REQUEST_SAFETY_TIMEOUT_SEC",
     "MAX_PARENT_ITERATIONS_PER_STEP",
+    "TEXT_ONLY_RETRY_LIMIT_PER_STEP",
     "SkillBundleManifest",
     "WALL_CLOCK_SAFETY_TIMEOUT_SEC",
     "apply_openhands_executor_env",
     "build_skill_bundle_manifest",
+    "completion_guard_metadata",
     "evaluation_condition",
     "executor_idle_timeout",
     "executor_metadata",

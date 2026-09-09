@@ -172,14 +172,15 @@ uv run --locked bench tasks check \
   --level structural
 ```
 
-第一条检查公共 API、协议 guard、Skill preload、verifier 失败闭锁和 iteration
+第一条检查公共 API、固定协议约束、Skill preload、verifier 失败闭锁和 iteration
 accounting；第二条只
 检查选定 task 的结构。两者通过后再决定是否开始付费 smoke。
 
 ### 0.7 运行一条 original-skill smoke（付费）
 
 以下代码会真实调用 `BENCHMARK_MODEL`，产生一条 rollout 并计费。它使用公共
-Python API，因此会直接生成 `benchmark_result.json` 和严格的 `comparable` 判定。
+Python API，因此会直接生成 `benchmark_result.json`。该 API 默认启用 completion
+guard；guard 的开关和触发记录不作为结果门禁。
 
 ```bash
 uv run --locked python - <<'PY'
@@ -210,7 +211,7 @@ result = executor.run(
 )
 
 print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-if not result.comparable:
+if not result.execution_ok or result.task_passed is None:
     diagnostics = {
         "protocol_evidence_valid": result.protocol_evidence_valid,
         "execution_ok": result.execution_ok,
@@ -228,7 +229,7 @@ if not result.comparable:
 PY
 ```
 
-验收标准是 `execution_ok: true` 且 `comparable: true`。`task_passed: false` 仍可能是
+验收标准是 `execution_ok: true` 且 `task_passed` 为布尔值。`task_passed: false` 仍可能是
 一条完整、有效的任务失败，不代表环境没跑通。一次 smoke 只能证明这一台机器在
 这个 task、模型和供应商路由上的链路有效；其他 task 的首次镜像构建仍可能遇到
 任务特异问题。
@@ -413,7 +414,7 @@ relay 应只允许 Docker bridge 访问，不得监听公网，也不得把用�
 每个代理 endpoint 做一次 TCP reachability preflight；不通就作为基础设施错误停止，
 不产生模型费用。这个 preflight 能发现地址、DNS、端口和 Docker 路由错误，但不能
 保证所有第三方下载站永不宕机。最终依赖下载仍失败时继续 fail closed，标记为
-`verifier_dep_install` / `non-comparable`。
+`verifier_dep_install`，并令 `execution_ok=false`、`task_passed=null`。
 
 代理变量只进入最终 verifier 的 `test-script` `sandbox.exec`（若框架重试 verifier，
 每次仍保持相同作用域），执行后临时环境文件会被删除；
@@ -444,7 +445,7 @@ public。
 官方 task 的 `verifier.env`。
 
 如果 verifier 因依赖下载失败而没有真正执行测试，执行器会将其标记为
-`verifier_dep_install`、`task_passed=None`、`comparable=False`。不要把留下的
+`verifier_dep_install`、`execution_ok=False`、`task_passed=None`。不要把留下的
 `reward.txt=0` 当成模型失败；处理步骤见第 7.1 节。
 
 ```bash
@@ -476,9 +477,9 @@ Skill 预载 adapter 和 60-iteration 证据链。
 - 实验协调者固定 SkillsBench commit、Core-25 清单及 task digest、模型路由和
   reasoning effort。
 
-`comparable == true` 只验证一条 rollout 的 executor 证据完整，不会把本机 task
-digest 与课题组清单自动比对。因此，所有参与者仍必须在运行前核对 SkillsBench
-checkout，不能把事后记录 digest 当作事前冻结的替代品。
+协议、轨迹、iteration 和 Skill 暴露证据会分别记录，但不会把本机 task digest 与
+课题组清单自动比对。因此，所有参与者仍必须在运行前核对 SkillsBench checkout，
+不能把事后记录 digest 当作事前冻结的替代品。
 
 固定协议 ID 为 `skillrepair-v1`。机器可读说明位于
 `BENCHMARK_EXECUTOR_VERSION.json`，其中固定：
@@ -486,11 +487,13 @@ checkout，不能把事后记录 digest 当作事前冻结的替代品。
 - OpenHands 及其 pinned 版本；
 - persistent `AgentContext` 的完整 `SKILL.md` 预载；
 - 每个 BenchFlow execution Step 最多 60 次父 Agent iteration；
+- 默认开启 completion guard，每个 Step 最多进行 1 次 text-only continuation，
+  并占用同一份 60 iteration 预算；
 - 禁用 delegation；
 - Docker sandbox；
 - 三项仅用于防卡死的高阈值 watchdog；
 - `no-skill`、`original-skill`、`method-skill` 三种条件；
-- 一次 Python API 调用只产生一次 rollout，不做隐式重试。
+- 一次 Python API 调用只产生一次 rollout，不做 rollout 级重启或重试。
 
 模型、供应商路由和 reasoning effort 不属于协议常量，而是每个 executor 实例的
 实验变量。例如：
@@ -623,8 +626,8 @@ uv run --locked bench eval run \
 YAML。
 
 CLI 会写原生 `result.json`、trajectory、verifier 和 job `summary.json`，但不会
-生成公共 API 的 `BenchmarkResult`、`benchmark_result.json` 或 `comparable`。
-CLI 适合人工观察；正式方法接入和最终可比性判断使用第 5 节 Python API。每个
+生成公共 API 的 `BenchmarkResult` 或 `benchmark_result.json`。
+CLI 适合人工观察；正式方法接入使用第 5 节 Python API。每个
 condition/trial 使用新的空 `--jobs-dir`，不要把多个条件写进同一恢复目录。
 
 ## 5. 入口 B：修复算法自动调用
@@ -683,46 +686,36 @@ reasoning effort、通用 provider endpoint；这些入口会被正式执行器�
 | `method-skill` | 必须是该 task 的完整、冻结 bundle |
 
 一个 `BenchmarkExecutor` 实例固定一个模型路由和 reasoning effort；一次 `run()`
-只产生一条 rollout，默认没有隐式继续执行或 rollout 重试。`method_id` 与
-`rollout_id` 都必须是安全的单个路径名，且每条新 rollout 使用新的 ID。
+只产生一条 rollout，不做 rollout 级重启或重试。每个 Step 默认允许 completion
+guard 在首次 text-only finish 后续行一次。`method_id` 与 `rollout_id` 都必须是安全的
+单个路径名，且每条新 rollout 使用新的 ID。
 
-### 5.1 诊断性 completion guard
+### 5.1 正式 completion guard（默认开启）
 
-若 guard-off 轨迹明确显示模型只输出“接下来会继续”等纯文本、没有发出工具调用便
-结束，可保留原结果，再创建独立的诊断 executor 做一次 fresh rerun：
+普通 `BenchmarkExecutor(...)` 构造器已经固定 guard limit 为 1，不需要方法侧额外
+传参。no-skill、original-skill 和 method-skill 都经过同一 guard，因此可以在该统一
+条件下正式比较。Guard 每个 Step 最多追加一次继续消息；若模型再次纯文本结束，不会
+继续注入。它不能恢复 provider、工具或 verifier 错误，也不处理 `stuck` 或
+`max_iterations`，并始终占用原有 60 次 parent iteration 预算。
 
-```python
-diagnostic_executor = BenchmarkExecutor(
-    tasks_root=Path(os.environ["SKILLSBENCH_ROOT"]) / "tasks",
-    jobs_root=Path(os.environ["BENCHMARK_JOBS_ROOT"]) / "diagnostic-guard",
-    model=os.environ["BENCHMARK_MODEL"],
-    reasoning_effort=(
-        os.environ.get("BENCHMARK_REASONING_EFFORT", "").strip() or None
-    ),
-    experimental_text_only_retry_limit=1,
-)
-```
+本版仍使用稳定协议族 ID `skillrepair-v1`，并把 `protocol_version` 提升为 2；两项必须
+同时匹配。协议版本校验独立于 guard 开关。
 
-该参数只允许整数 `0` 或 `1`，默认 `0`。值为 `1` 时，每个 BenchFlow
-Step/prompt 最多在首次 text-only finish 后追加一次继续消息；若模型再次纯文本结束，
-guard 不会第三次干预。它不能恢复 provider、工具或 verifier 错误，也不处理
-`stuck` 或 `max_iterations`，且不会增加每个 Step 的 60 次 iteration 上限。
-
-诊断轮必须使用与原轮不同的 `rollout_id`。只要 guard 开启，即使本轮没有实际触发
-或最终 reward 为 1，`BenchmarkResult.comparable` 仍为 `False`，不能替换原轮或
-进入正式方法比较。检查以下证据区分“已开启”和“实际触发”：
+如需诊断 guard 是否实际触发，可检查原始机器证据：
 
 ```python
-print(result.experimental_controls)
+print(result.raw_result["executor"].get("completion_guard"))
 print(result.raw_result["executor"]["prompt_runs"])
 ```
 
-- `experimental_text_only_retry_limit=1`：本轮开启了 guard；
-- `experimental_text_only_retries_used=1`：实际注入过一次继续消息；
+- `completion_guard.enabled=true`：本轮按正式协议启用 guard；
+- `experimental_text_only_retry_limit=1`：该 Step 配置最多续行一次；
+- `experimental_text_only_retries_used=1`：该 Step 实际注入过一次继续消息；
 - `experimental_text_only_retry_exhausted=true`：注入后模型再次纯文本结束。
 
-不要直接写内部 `agent_env`。公开构造参数会同时写入 request、config、result 和
-归一化摘要，避免诊断运行被误认为正式可比结果。
+`experimental_` 是早期实现保留的证据字段名。执行器默认开启 guard；显式把
+`experimental_text_only_retry_limit` 设为 0 也允许正常执行和计分。评测脚本不检查
+guard 开关，不要求 request、config、result 中的 guard 元数据一致。
 
 ## 6. 多轮修复示例
 
@@ -739,9 +732,9 @@ for round_index in range(3):
         rollout_id=f"{task_id}-r{round_index}",
     )
 
-    if not result.comparable:
+    if not result.execution_ok or result.task_passed is None:
         raise RuntimeError(
-            f"invalid rollout evidence: {result.artifacts.result_json}"
+            f"rollout has no valid verifier verdict: {result.artifacts.result_json}"
         )
 
     diagnosis = skillrevise.diagnose(
@@ -763,7 +756,6 @@ for round_index in range(3):
 |---|---|
 | `task_passed` / `success` | 官方 reward 存在且等于 1；无可靠 verdict 时为 `None` |
 | `execution_ok` | Agent、verifier 和 export 链路均无错误 |
-| `comparable` | 协议、Skill 暴露、iteration 和 trajectory 证据完整，可进入方法比较 |
 | `reward` | 官方总 reward；未评分为 `None` |
 | `error` / `error_category` | Agent 或主执行链路错误及稳定类别 |
 | `verifier_error` / `verifier_error_category` | verifier 错误及稳定类别；`verifier_dep_install` 表示依赖安装失败 |
@@ -785,18 +777,18 @@ for round_index in range(3):
 
 判断时使用以下顺序：
 
-| `execution_ok` | `comparable` | `task_passed` | 解释与处理 |
-|---:|---:|---:|---|
-| `True` | `True` | `True` | 有效任务成功，纳入比较 |
-| `True` | `True` | `False` | 有效任务失败，同样纳入比较 |
-| `True` | `False` | 任意 | 执行结束但证据不完整，排除并排查缺失项 |
-| `False` | `False` | `None` | Agent、verifier 或 export 基础设施失败，排除 |
+| `execution_ok` | `task_passed` | 解释与处理 |
+|---:|---:|---|
+| `True` | `True` | 有效任务成功，纳入统计 |
+| `True` | `False` | 有效任务失败，同样纳入统计 |
+| `True` | `None` | 没有可靠 verifier 判决，排查 reward 与证据 |
+| `False` | `None` | Agent、verifier 或 export 基础设施失败，排除 |
 
 ### 7.1 verifier 失败、`reward=0` 与重新验证
 
 `reward=0` 只有在官方 verifier **真正执行到评分逻辑并产生可信证据**时，才表示有效的
 任务失败。某些 `test.sh` 在依赖安装失败后仍会继续执行，并在结尾无条件写入
-`reward.txt=0`；旧版执行器可能因此把基础设施故障误记为可比较失败。
+`reward.txt=0`；旧版执行器可能因此把基础设施故障误记为任务失败。
 
 当前版本会在解析 reward 前扫描本次 `verifier/test-stdout.txt`。确认出现依赖安装
 失败时，即使 `reward.txt` 或 `reward.json` 已存在，也会忽略该 reward，并输出：
@@ -805,7 +797,6 @@ for round_index in range(3):
 verifier_error_category = "verifier_dep_install"
 execution_ok = false
 task_passed = null
-comparable = false
 reward = null
 ```
 
@@ -822,22 +813,21 @@ reward = null
    LiteLLM 的 provider 代理；
 4. 先重新执行官方 verifier，确认测试框架真正启动且生成该 task 应有的官方证据；
 5. 原 sandbox/workspace 仍完整时，允许把这次操作保存为单独的
-   **verifier-only diagnostic retest**，但它不会自动把原 rollout 改成 comparable；
+   **verifier-only diagnostic retest**，但它不会改写原 rollout；
 6. 原 workspace 已销毁、答案被人工重建，或官方 task/verifier 内容发生变化时，
-   必须在冻结后的统一环境中重新跑完整 rollout，才能生成正式可比较结果。
+   必须在冻结后的统一环境中重新跑完整 rollout，才能生成正式结果。
 
 不是所有 SkillsBench task 都要求 `ctrf.json`，因此执行器不会把“缺少 CTRF”单独作为
 全局失败条件。应以该 task 的官方 verifier 契约、stdout 和 reward 共同判断。若修改
 了官方 verifier 本身，协调者必须发布新的冻结 task commit，并在同一比较组上统一
 重跑；不能只给某一个方法使用修后的 verifier。
 
-对当前版本升级前已经生成的历史结果，若看到 `reward=0`/`comparable=true`，同时
-`test-stdout.txt` 含依赖下载失败或 `uvx: command not found`，应将旧结果人工标记为
-non-comparable，并按上述规则重新验证或重跑，不得直接沿用旧结论。
+对当前版本升级前已经生成的历史结果，若看到 `reward=0`，同时 `test-stdout.txt`
+含依赖下载失败或 `uvx: command not found`，应将其标为 verifier 基础设施失败，
+并按上述规则重新验证或重跑，不得直接沿用旧结论。
 
-`comparable=True` 不等于任务通过，也不证明所有同学使用了同一 SkillsBench commit；
-后者必须由冻结 checkout、Core-25 manifest 和 task digest 共同保证。若
-`comparable=False`，优先查看：
+任务是否通过看 `task_passed`；公共 task 版本是否一致则必须由冻结 checkout、
+Core-25 manifest 和 task digest 共同保证。结果无判决或证据不完整时，优先查看：
 
 ```python
 print(result.protocol_evidence_valid)
@@ -875,7 +865,7 @@ print(result.export_error)
 其中 `trajectory/`、`verifier/` 和各 JSON 结果文件由执行器保存；`artifacts/`
 只对应任务容器中的 `/logs/artifacts`，任务没有向该位置写文件时可以为空。
 SkillsBench 任务通常在 `/app` 中完成工作，执行器不会自动归档整个 `/app`；因此
-`artifacts/` 为空不表示执行失败，也不影响 `execution_ok` 或 `comparable`。
+`artifacts/` 为空不表示执行失败，也不影响 `execution_ok`。
 
 ### 8.2 原生 CLI 输出
 
@@ -894,7 +884,7 @@ CLI 不经过公共 Python wrapper，目录结构不同：
 ```
 
 CLI 结束时会打印实际 Artifacts 与 Summary 路径。它不生成
-`executor_request.json`、`benchmark_result.json` 或 `comparable`。同一个
+`executor_request.json` 或 `benchmark_result.json`。同一个
 `--jobs-dir` 可能触发原生恢复语义，因此每个 condition 和 trial 使用新的空目录。
 
 ## 9. 打包交付
@@ -978,9 +968,9 @@ ZIP 作为 release asset。收到 GitHub 链接的同学必须 checkout 协调�
 | original-skill 在 task prompt 前失败 | `environment/skills` 是否存在且含 `SKILL.md` | 核对冻结 task 是否完整、是否误用了无 Skill task |
 | method-skill bundle 被拒绝 | bundle 缺 `SKILL.md`、只交 patch、非 UTF-8、含 symlink | 先在方法外合成完整 bundle，再提交 executor |
 | `rollout_id` 已存在 | Python API 输出目录 | 生成新 ID；不要覆盖或混写原结果 |
-| `comparable=False` | 第 7 节列出的六类证据 | 保留产物并定位缺失项，不把它计为方法成功或失败 |
+| `execution_ok=False` 或 `task_passed=None` | 第 7 节列出的错误与证据字段 | 保留产物并定位原因，不把它计为方法成功或失败 |
 | `verifier_dep_install`，但目录里有 `reward.txt=0` | `verifier/test-stdout.txt` 与第 7.1 节 | reward 不可信；先修容器/verifier 环境并重新验证，不计为方法失败 |
-| `artifacts/` 为空 | task 是否向 `/logs/artifacts` 写文件 | 这是允许状态；以 result、verifier 和 comparable 为准 |
+| `artifacts/` 为空 | task 是否向 `/logs/artifacts` 写文件 | 这是允许状态；以 result、verifier 和 `execution_ok` 为准 |
 | Windows 侧 `uv` 无法处理 `.venv/lib64` | 是否在 Windows 原生 Python 或 `/mnt/c` 工作树运行 | 按支持边界把仓库放进 WSL/Linux 文件系统，删除并在该环境重建本机 `.venv` |
 | `bad interpreter` / `bash\r` | 是否使用原始交付 ZIP及 Linux `unzip` | 不要用资源管理器重新压缩；核对交付包 SHA 后在 Linux/WSL 重新解压 |
 
@@ -995,13 +985,13 @@ rollout 目录，再由维护者判断是本机网络、Docker 拓扑还是 prov
 
 | 项目 | 必须明确的值 |
 |---|---|
-| Executor | ZIP 文件名、SHA256、`protocol=skillrepair-v1` |
+| Executor | ZIP 文件名、SHA256、`protocol=skillrepair-v1`、`protocol_version=2`、completion guard on/limit=1 |
 | Task source | SkillsBench commit、Core-25 manifest/任务 ID、必要时 task digest |
 | Model | 完整 provider route、reasoning effort、所需 key 的变量名 |
 | Conditions | 要运行 no-skill、original-skill、method-skill 中的哪些条件 |
 | Sampling | 每个条件的 trial 数、随机性设置和统一重试规则 |
 | Method output | `method_id` 命名规则、完整 bundle 路径、round/stage 规则 |
-| Result policy | `comparable=False`、provider 故障和人工补跑如何记录与排除 |
+| Result policy | `execution_ok=False`、无 verifier 判决、provider 故障和人工补跑如何记录与排除 |
 
 同学开始前至少回传一次**不含密钥**的环境核对信息：executor ZIP SHA、SkillsBench
 commit、`BENCHMARK_MODEL`、reasoning effort、Docker/Compose 版本和第 0.6 节测试结果。

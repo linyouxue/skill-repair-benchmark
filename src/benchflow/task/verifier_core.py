@@ -662,7 +662,7 @@ class Verifier:
         # then missing, and an unconditional final ``echo 0`` succeeds).  Such
         # a reward is not evidence that the official tests ran.  Fail closed
         # before accepting or parsing either reward format so the rollout is
-        # classified as verifier_dep_install / non-comparable rather than as
+        # classified as verifier_dep_install infrastructure failure rather than as
         # an honest task failure.  Surface only the fixed redacted diagnostic;
         # raw stdout remains in verifier/test-stdout.txt.
         if _has_dep_install_failure(self._rollout_paths.test_stdout_path):

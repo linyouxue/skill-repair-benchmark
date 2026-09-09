@@ -20,7 +20,9 @@ from benchflow.benchmark_executor import (
     EXECUTOR_SANDBOX,
     EXECUTOR_USAGE_TRACKING,
     IDLE_SAFETY_TIMEOUT_SEC,
+    TEXT_ONLY_RETRY_LIMIT_PER_STEP,
     build_skill_bundle_manifest,
+    completion_guard_metadata,
     protocol_descriptor,
     provider_route_for_model,
 )
@@ -82,7 +84,7 @@ class BenchmarkExecutor:
         reasoning_effort: str | None = None,
         protocol: str = EXECUTOR_PROTOCOL_ID,
         verifier_proxy_mode: str | None = None,
-        experimental_text_only_retry_limit: int = 0,
+        experimental_text_only_retry_limit: int = TEXT_ONLY_RETRY_LIMIT_PER_STEP,
     ) -> None:
         if protocol != EXECUTOR_PROTOCOL_ID:
             raise ValueError(
@@ -181,13 +183,9 @@ class BenchmarkExecutor:
             # never enter executor_request.json.
             "verifier_proxy": dict(self.verifier_proxy.metadata),
         }
-        if self.experimental_text_only_retry_limit:
-            payload["experimental_controls"] = {
-                "openhands_text_only_retry_limit": (
-                    self.experimental_text_only_retry_limit
-                ),
-                "comparison_status": "diagnostic-non-comparable",
-            }
+        payload["completion_guard"] = completion_guard_metadata(
+            self.experimental_text_only_retry_limit
+        )
         return payload
 
     async def run_async(
@@ -263,15 +261,9 @@ class BenchmarkExecutor:
             skip_agent_install=False,
             agent_idle_timeout=IDLE_SAFETY_TIMEOUT_SEC,
             usage_tracking=UsageTrackingConfig(mode=EXECUTOR_USAGE_TRACKING),
-            agent_env=(
-                {
-                    ENV_TEXT_ONLY_RETRY_LIMIT: str(
-                        self.experimental_text_only_retry_limit
-                    )
-                }
-                if self.experimental_text_only_retry_limit
-                else None
-            ),
+            agent_env={
+                ENV_TEXT_ONLY_RETRY_LIMIT: str(self.experimental_text_only_retry_limit)
+            },
             skills_dir=bundle,
             skill_mode=skill_mode,
             job_name=method_id,

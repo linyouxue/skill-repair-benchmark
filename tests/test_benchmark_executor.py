@@ -119,13 +119,14 @@ def test_executor_env_scrubs_forged_controls_in_no_skill(tmp_path: Path) -> None
     assert env[ENV_MAX_ITERATIONS] == "60"
     assert env[ENV_LLM_TIMEOUT] == "3600"
     assert env[ENV_DISABLE_SUBAGENTS] == "1"
+    assert env[ENV_TEXT_ONLY_RETRY_LIMIT] == "1"
     assert env["SAFE"] == "yes"
 
 
-def test_executor_env_preserves_only_valid_diagnostic_guard_control(
+def test_executor_env_applies_only_valid_canonical_guard_control(
     tmp_path: Path,
 ) -> None:
-    """The opt-in guard survives env scrubbing and is marked non-comparable."""
+    """The canonical guard survives env scrubbing and is recorded in metadata."""
 
     task = tmp_path / "task"
     task.mkdir()
@@ -151,9 +152,11 @@ def test_executor_env_preserves_only_valid_diagnostic_guard_control(
 
     assert agent_env[ENV_TEXT_ONLY_RETRY_LIMIT] == "1"
     assert metadata is not None
-    assert metadata["experimental_controls"] == {
-        "openhands_text_only_retry_limit": 1,
-        "comparison_status": "diagnostic-non-comparable",
+    assert metadata["completion_guard"] == {
+        "enabled": True,
+        "scope": "openhands-root-agent-text-only-finish",
+        "text_only_retry_limit_per_step": 1,
+        "uses_remaining_parent_iteration_budget": True,
     }
 
     with pytest.raises(ValueError, match="must be '0' or '1'"):
@@ -196,7 +199,7 @@ def test_version_manifest_matches_runtime_constants() -> None:
     version = json.loads(version_file.read_text())
 
     assert version == protocol_descriptor()
-    assert version["protocol_version"] == 1
+    assert version["protocol_version"] == 2
     assert version["base_commit"] == BENCHFLOW_BASE_COMMIT
     assert version["openhands_cli_commit"] == OPENHANDS_CLI_COMMIT
     assert "model" not in version
@@ -466,7 +469,7 @@ def test_executor_records_original_skill_preload_metadata(tmp_path: Path) -> Non
 
 
 def test_executor_labels_all_three_conditions(tmp_path: Path) -> None:
-    """Guards protocol v1 on base aadad44: condition labels stay comparable."""
+    """Guards protocol v1 on base aadad44: condition labels stay stable."""
     task = tmp_path / "task"
     bundled = _bundle(task / "environment")
     custom = _bundle(tmp_path / "candidate")
@@ -590,7 +593,7 @@ def test_config_and_result_artifacts_persist_executor_evidence(tmp_path: Path) -
 
     config = json.loads((rollout_dir / "config.json").read_text())
     result = json.loads((rollout_dir / "result.json").read_text())
-    assert config["executor"]["protocol_version"] == 1
+    assert config["executor"]["protocol_version"] == 2
     assert config["executor"]["skill_bundle_sha256"] == f"sha256:{manifest.sha256}"
     assert result["executor"]["skill_context_preload_observed"] is True
     assert result["executor"]["skill_context_preload_matches_expected"] is True

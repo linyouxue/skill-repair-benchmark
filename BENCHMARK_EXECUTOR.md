@@ -26,6 +26,9 @@
 
 ## 2. 固定执行协议
 
+`protocol_id=skillrepair-v1` 是稳定的协议族标识；`protocol_version=2` 表示本版正式
+启用 completion guard。评测脚本同时校验两者，旧的 version 1 结果不会混入本轮比较。
+
 | 项目 | 固定值 |
 |---|---|
 | BenchFlow 基线 | `v0.6.7`，commit `aadad44acf27f193df98f438443116d514f51fb8` |
@@ -33,6 +36,7 @@
 | 模型与供应商 | 每个 executor 实例或 CLI 命令显式选择；逐 rollout 记录 |
 | Delegation | 禁用，避免子 Agent 形成额外预算轴 |
 | 主要预算 | 每个 BenchFlow execution Step 最多 60 次 parent-agent iteration |
+| Completion guard | 默认且正式开启；每个 Step 最多续行 1 次，仍计入上述 60 次预算 |
 | 单次 LLM 请求卡死保护 | 3600 秒 |
 | Agent idle 卡死保护 | 3600 秒 |
 | Agent wall-clock 卡死保护 | 21600 秒（6 小时） |
@@ -41,12 +45,12 @@
 
 | 层级 | 由谁固定 | 具体内容 |
 |---|---|---|
-| 执行器协议 | 本交付仓库 | BenchFlow/OpenHands 版本、Docker sandbox、Skill 预载、60 iterations、delegation guard、证据格式 |
+| 执行器协议 | 本交付仓库 | BenchFlow/OpenHands 版本、Docker sandbox、Skill 预载、60 iterations、completion/delegation guard、证据格式 |
 | 实验公共输入 | 实验协调者 | SkillsBench commit、Core-25 task 清单及 digest、模型路由、reasoning effort、trial 数和重试规则 |
 | 方法输入 | 各方法负责人 | `method_id`、候选完整 Skill bundle、轮次和唯一 `rollout_id` |
 
 本 ZIP 不包含 SkillsBench task 仓库，也不会把本机 task digest 自动同课题组清单比较。
-`comparable=True` 只能说明当前 rollout 的执行器证据完整；正式实验仍需先核对公共任务版本。
+执行器会分别记录协议、轨迹、iteration 和 Skill 暴露证据；正式实验仍需先核对公共任务版本。
 
 后三项只是防止 API、工具或传输永久挂死，不是用于比较方法的时间预算。命中 60 次限制不是 infrastructure error：执行器保留当前 workspace，继续运行 verifier，由 reward 判断结果，并在 `result.json` 中记录 `stop_reason=max_iterations`。
 
@@ -60,22 +64,23 @@ task；这些限制用于防止不同方法无意间形成不同的执行协议�
 
 这里的一个 iteration 是 OpenHands 根 Agent 的一次 `agent.step()`，不是一个业务步骤、一个 shell 命令或一个 Skill 条目。正式执行器会禁用 delegation，因此不会出现不计入根 Agent 60 次的子 Agent 内部 step。
 
-### 2.1 诊断性 completion guard（默认关闭）
+### 2.1 正式 completion guard（默认开启）
 
-执行器提供一个仅用于诊断“模型以纯文本宣布继续、实际却提前结束”的可选 guard。
-正式的 canonical rollout 必须保持默认值 `0`；只有在已保存 guard-off 原结果后，
-才能用新的唯一 `rollout_id` 设置 `experimental_text_only_retry_limit=1` 做 fresh rerun。
+Completion guard 是统一正式协议的一部分，对 no-skill、original-skill 和
+method-skill 使用完全相同的配置。模型在根 Agent conversation 中以纯文本宣布继续、
+却没有发出工具调用便结束时，执行器会注入一次明确的继续执行消息。每个 BenchFlow
+Step/prompt 最多续行 1 次，且只能使用该 Step 原有 60 次 parent iteration 中的剩余
+预算，不会形成第 61 次 iteration，也不会启动新的 rollout。
 
-开启后，每个 BenchFlow Step/prompt 最多注入一次明确的继续执行消息。它只拦截
-text-only finish，不处理 provider、工具、verifier、`stuck` 或 `max_iterations` 故障，
-也不会把 60 次上限扩大到 61 次；继续执行只能使用该 Step 剩余的 iteration 预算。
-
-只要开启 guard，无论是否实际触发、最终 reward 是否为 1，该 rollout 都会带有
-`experimental_controls`，并被标为 `comparable=False`，不能进入正式方法比较。
-实际触发情况由 `result.json` 中
+Guard 只拦截根 Agent 的 text-only finish，不处理 provider、工具、verifier、
+`stuck` 或 `max_iterations` 故障。guard 是否开启或实际触发都不作为结果门禁。
+`result.json` 中的
 `executor.prompt_runs[].experimental_text_only_retries_used` 和
-`experimental_text_only_retry_exhausted` 留证。不要通过底层 `agent_env` 直接开启；
-统一使用公开 `BenchmarkExecutor` 构造参数。
+`experimental_text_only_retry_exhausted` 分别记录是否续行以及续行后是否再次纯文本
+结束。这里的 `experimental_` 只是历史证据字段名。
+
+执行器默认 guard limit 为 1。显式设置为 0 时仍可正常执行、读取和计分；评测脚本
+不检查 guard 开关，也不要求不同产物中的 guard 元数据一致。
 
 ## 3. 三种评测条件
 
@@ -170,13 +175,13 @@ full-skills/
 
 本节描述原生 rollout 目录中的证据。CLI 会生成 `config.json`、`result.json`、
 trajectory、verifier 和 artifacts；公共 Python API 会在此基础上额外生成
-`executor_request.json`、`benchmark_result.json`，并返回 `BenchmarkResult.comparable`。
+`executor_request.json`、`benchmark_result.json`。
 两种入口的完整目录差异和判定表见交付指南第 7、8 节。
 
 verifier reward 采用失败闭锁语义：若本次 `test-stdout.txt` 显示依赖安装失败，执行器
 不会接受随后留下的 `reward.txt=0` 或 `reward.json`，而是记录
 `verifier_error_category=verifier_dep_install`、清空可信 reward，并令公共结果
-`task_passed=None`、`comparable=False`。这是 verifier 基础设施错误，不是方法失败。
+`execution_ok=False`、`task_passed=None`。这是 verifier 基础设施错误，不是方法失败。
 修复和 verifier-only diagnostic retest 的边界见交付指南第 7.1 节。
 
 verifier 依赖代理属于统一执行基础设施，默认关闭，只能在
@@ -198,7 +203,7 @@ bridge 可访问；需要物理网络隔离时必须使用独立 verifier 容器
 {
   "executor": {
     "evaluation_condition": "method-skill",
-    "protocol_version": 1,
+    "protocol_version": 2,
     "benchflow_base_commit": "aadad44acf27f193df98f438443116d514f51fb8",
     "openhands_cli_commit": "2df8a2835d3f1bd2f2eadf5a7a2e1ad0dfb0d271",
     "model": "<selected-provider>/<selected-model>",
@@ -206,6 +211,12 @@ bridge 可访问；需要物理网络隔离时必须使用独立 verifier 容器
     "provider_base_url": "<resolved-endpoint>",
     "provider_protocol": "openai-completions",
     "max_parent_iterations_per_step": 60,
+    "completion_guard": {
+      "enabled": true,
+      "scope": "openhands-root-agent-text-only-finish",
+      "text_only_retry_limit_per_step": 1,
+      "uses_remaining_parent_iteration_budget": true
+    },
     "skill_context_preloaded": true,
     "skill_bundle_sha256": "sha256:...",
     "preloaded_skill_count": 2,
@@ -220,7 +231,10 @@ bridge 可访问；需要物理网络隔离时必须使用独立 verifier 容器
         "stop_reason": "end_turn",
         "acp_stop_reason": "end_turn",
         "iterations_used": 23,
-        "max_iterations": 60
+        "max_iterations": 60,
+        "experimental_text_only_retry_limit": 1,
+        "experimental_text_only_retries_used": 0,
+        "experimental_text_only_retry_exhausted": false
       }
     ]
   }

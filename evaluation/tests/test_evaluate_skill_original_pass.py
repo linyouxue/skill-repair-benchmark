@@ -117,7 +117,6 @@ def add_verified_run(case: dict, task_id: str, run_id: str) -> None:
             "run_id": run_id,
             "passed": True,
             "execution_ok": True,
-            "comparable": True,
             "original_bundle": f"snapshots/{task_id}",
             "verifier_report": f"reports/{task_id}.txt",
         }
@@ -462,7 +461,6 @@ def test_invalid_submission_cannot_hide_behind_original_pass_before_api(
         "false-passed",
         "fake-passed-bool",
         "execution-failed",
-        "noncomparable",
         "changed-snapshot",
         "missing-snapshot-file",
         "extra-snapshot-file",
@@ -502,8 +500,6 @@ def test_invalid_organizer_evidence_is_rejected_before_api(
         run["passed"] = "true"
     elif invalid == "execution-failed":
         run["execution_ok"] = False
-    elif invalid == "noncomparable":
-        run["comparable"] = False
     elif invalid == "changed-snapshot":
         (snapshot / "SKILL.md").write_text(
             "A repaired bundle must not count as Original.\n", encoding="utf-8"

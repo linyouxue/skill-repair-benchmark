@@ -11,10 +11,13 @@ from benchflow.benchmark_executor import (
     BENCHFLOW_BASE_COMMIT,
     ENV_TEXT_ONLY_RETRY_LIMIT,
     EXECUTOR_PROTOCOL_ID,
+    EXECUTOR_PROTOCOL_VERSION,
     EXECUTOR_SKILL_EXPOSURE_MODE,
+    TEXT_ONLY_RETRY_LIMIT_PER_STEP,
+    completion_guard_metadata,
     protocol_descriptor,
 )
-from benchmark_executor import BenchmarkExecutor
+from benchmark_executor import BenchmarkExecutor, BenchmarkResult
 from benchmark_executor.verifier_proxy import (
     ENV_VERIFIER_HTTP_PROXY,
     ENV_VERIFIER_HTTPS_PROXY,
@@ -55,7 +58,7 @@ def _install_fake_rollout(
         skill_count = bundle["preloaded_skill_count"]
         executor = {
             "protocol_id": EXECUTOR_PROTOCOL_ID,
-            "protocol_version": 1,
+            "protocol_version": EXECUTOR_PROTOCOL_VERSION,
             "benchflow_base_commit": BENCHFLOW_BASE_COMMIT,
             "agent": "openhands",
             "model": config.model,
@@ -83,15 +86,17 @@ def _install_fake_rollout(
                 }
             ],
         }
-        if "experimental_controls" in request:
-            executor["experimental_controls"] = request["experimental_controls"]
-            executor["prompt_runs"][0].update(
-                {
-                    "experimental_text_only_retry_limit": 1,
-                    "experimental_text_only_retries_used": 0,
-                    "experimental_text_only_retry_exhausted": False,
-                }
-            )
+        if "completion_guard" in request:
+            executor["completion_guard"] = request["completion_guard"]
+            retry_limit = request["completion_guard"]["text_only_retry_limit_per_step"]
+            if retry_limit:
+                executor["prompt_runs"][0].update(
+                    {
+                        "experimental_text_only_retry_limit": retry_limit,
+                        "experimental_text_only_retries_used": 0,
+                        "experimental_text_only_retry_exhausted": False,
+                    }
+                )
         (rollout_dir / "trajectory").mkdir(exist_ok=True)
         (rollout_dir / "verifier").mkdir(exist_ok=True)
         (rollout_dir / "artifacts").mkdir(exist_ok=True)
@@ -184,8 +189,8 @@ def test_public_api_uses_selected_model_route_and_shared_rollout_backend(
     assert result.task_passed is True
     assert result.success is True
     assert result.execution_ok is True
-    assert result.comparable is True
-    assert result.experimental_controls is None
+    assert not hasattr(result, "comparable")
+    assert not hasattr(result, "completion_guard")
     assert result.agent_iterations == 12
     assert result.provider_requests == 2
     assert result.skill_exposure.verified is True
@@ -200,7 +205,8 @@ def test_public_api_uses_selected_model_route_and_shared_rollout_backend(
     assert summary["verifier_error"] is None
     assert summary["verifier_error_category"] is None
     assert summary["protocol_evidence_valid"] is True
-    assert "experimental_controls" not in summary
+    assert summary["protocol_version"] == EXECUTOR_PROTOCOL_VERSION
+    assert "completion_guard" not in summary
     assert summary["skill_exposure_verified"] is True
 
 
@@ -346,10 +352,10 @@ verifier:
     assert not (tmp_path / "jobs").exists()
 
 
-def test_public_result_excludes_verifier_dep_install_from_comparison(
+def test_public_result_records_verifier_dep_install_as_execution_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An unscored verifier bootstrap failure stays visible and non-comparable."""
+    """An unscored verifier bootstrap failure stays visible as infrastructure."""
     tasks_root = _task_root(tmp_path)
     _install_fake_rollout(
         monkeypatch,
@@ -378,14 +384,13 @@ def test_public_result_excludes_verifier_dep_install_from_comparison(
     assert result.reward is None
     assert result.task_passed is None
     assert result.execution_ok is False
-    assert result.comparable is False
     assert result.verifier_error_category == "verifier_dep_install"
     summary = json.loads(
         (result.artifacts.rollout_dir / "benchmark_result.json").read_text()
     )
     assert summary["task_passed"] is None
     assert summary["execution_ok"] is False
-    assert summary["comparable"] is False
+    assert "comparable" not in summary
     assert summary["verifier_error_category"] == "verifier_dep_install"
 
 
@@ -402,7 +407,7 @@ def test_public_api_does_not_allow_per_rollout_model_or_budget_override() -> Non
     assert "verifier_proxy_mode" not in parameters
 
 
-def test_experimental_text_only_guard_is_opt_in_and_non_comparable(
+def test_text_only_guard_is_enabled_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tasks_root = _task_root(tmp_path)
@@ -413,7 +418,6 @@ def test_experimental_text_only_guard_is_opt_in_and_non_comparable(
         jobs_root=tmp_path / "jobs",
         model="openrouter/openai/gpt-5.2",
         reasoning_effort="high",
-        experimental_text_only_retry_limit=1,
     )
 
     result = executor.run(
@@ -430,18 +434,84 @@ def test_experimental_text_only_guard_is_opt_in_and_non_comparable(
     assert config.verifier_env_overlay is None
     request = json.loads(result.artifacts.request_json.read_text())
     assert request["verifier_proxy"]["mode"] == "off"
-    assert request["experimental_controls"] == {
-        "openhands_text_only_retry_limit": 1,
-        "comparison_status": "diagnostic-non-comparable",
-    }
-    assert result.experimental_controls == request["experimental_controls"]
+    assert request["completion_guard"] == completion_guard_metadata(
+        TEXT_ONLY_RETRY_LIMIT_PER_STEP
+    )
     assert result.protocol_evidence_valid is True
-    assert result.comparable is False
     summary = json.loads(
         (result.artifacts.rollout_dir / "benchmark_result.json").read_text()
     )
-    assert summary["experimental_controls"] == request["experimental_controls"]
-    assert summary["comparable"] is False
+    assert "completion_guard" not in summary
+    assert summary["protocol_version"] == EXECUTOR_PROTOCOL_VERSION
+    assert "comparable" not in summary
+
+
+def test_explicitly_disabling_guard_is_accepted_and_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _install_fake_rollout(monkeypatch)
+    executor = BenchmarkExecutor(
+        tasks_root=_task_root(tmp_path),
+        jobs_root=tmp_path / "jobs",
+        model="openrouter/openai/gpt-5.2",
+        experimental_text_only_retry_limit=0,
+    )
+
+    result = executor.run(
+        task_id="task-a",
+        condition="method-skill",
+        skill_bundle=_bundle(tmp_path),
+        method_id="guard-off-ablation",
+        stage="diagnostic",
+        rollout_id="task-a-guard-off-r001",
+    )
+
+    assert captured[0].agent_env == {ENV_TEXT_ONLY_RETRY_LIMIT: "0"}
+    assert result.protocol_evidence_valid is True
+    request = json.loads(result.artifacts.request_json.read_text())
+    assert request["completion_guard"] == completion_guard_metadata(0)
+    assert "comparable" not in result.to_dict()
+
+
+@pytest.mark.parametrize("variation", ["missing-guard", "malformed-guard"])
+def test_guard_metadata_does_not_gate_protocol_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variation: str
+) -> None:
+    _install_fake_rollout(monkeypatch)
+    executor = BenchmarkExecutor(
+        tasks_root=_task_root(tmp_path),
+        jobs_root=tmp_path / "jobs",
+        model="openrouter/openai/gpt-5.2",
+        reasoning_effort="high",
+    )
+    result = executor.run(
+        task_id="task-a",
+        condition="method-skill",
+        skill_bundle=_bundle(tmp_path),
+        method_id="guard-evidence-test",
+        stage="diagnostic",
+        rollout_id=f"task-a-{variation}",
+    )
+    request = json.loads(result.artifacts.request_json.read_text())
+    if variation == "missing-guard":
+        request.pop("completion_guard")
+    else:
+        request["completion_guard"]["text_only_retry_limit_per_step"] = True
+    result.artifacts.request_json.write_text(json.dumps(request))
+
+    reparsed = BenchmarkResult.from_result_json(
+        result.artifacts.result_json,
+        request_json=result.artifacts.request_json,
+        task_id="task-a",
+        rollout_id=f"task-a-{variation}",
+        method_id="guard-evidence-test",
+        stage="diagnostic",
+        protocol_id=EXECUTOR_PROTOCOL_ID,
+        expected_model="openrouter/openai/gpt-5.2",
+        expected_reasoning_effort="high",
+    )
+
+    assert reparsed.protocol_evidence_valid is True
 
 
 @pytest.mark.parametrize("value", [-1, 2, True, 1.5, "1"])

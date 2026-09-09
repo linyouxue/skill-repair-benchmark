@@ -286,7 +286,7 @@ async def test_verify_test_script_surfaces_classifiable_dep_install(tmp_path):
 
 @pytest.mark.asyncio
 async def test_dep_install_failure_overrides_untrustworthy_zero_reward(tmp_path):
-    """A bootstrap failure must not become a comparable task failure merely
+    """A bootstrap failure must not become a scored task failure merely
     because cleanup code writes ``reward.txt=0`` before the script exits."""
     verifier = _make_verifier(
         tmp_path,
