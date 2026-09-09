@@ -4,11 +4,11 @@
 
 当前默认 Gold 为 `evaluation/data/core25/gold.json`，由统一人工 Gold repair 清单转换，包含 **7 个任务、14 个 defect（Core-25 当前已整理子集）**。不指定 `--gold` 时直接使用它；真实提交的 `benchmark_version` 应为 `core25-gold-defects-20260909-v1`。数据说明、来源边界和对应提交模板见 [数据说明](data/core25/README.md) 与 [提交模板](data/core25/submission.template.json)。这不是完整的 Core-25 Gold；扩展集尚未发布。下文 `examples/` 的 `v1` 是独立教学样例，使用时须显式指定其 `--gold`。
 
-本版本采用讨论后简化的协议：**诊断按缺陷一对一匹配；修复按缺陷做二值判断，不计算文本相似度，也不计算 Condition Coverage。** Regression 单独报告。这是提交内容的语义评估，不运行任务，也不代表真实任务执行通过率。
+本版本采用讨论后简化的协议：**诊断按缺陷一对一匹配；修复按缺陷做二值判断，不计算文本相似度，也不计算 Condition Coverage。** Regression 单独报告。另在最终报表中汇总 executor 真实运行的 **Verified Fix Rate**；语义评分和实际任务通过率分别报告，评测器本身不运行任务。
 
 ## 与 executor 的关系及运行环境
 
-本目录是独立的内容评测工具，通过读取文件和裁判响应计分，不导入或修改 `benchmark_executor`，也不调用 Docker 或运行 task。现有 executor 负责生成真实运行证据，入口和依赖保持原样。真实任务通过率与本工具的 Diagnosis/Repair 指标分别报告。
+本目录是独立的内容评测工具，通过读取文件和裁判响应计分，不导入或修改 `benchmark_executor`，也不调用 Docker 或运行 task。现有 executor 负责生成真实运行证据，入口和运行协议保持原样。真实任务通过率与本工具的 Diagnosis/Repair 指标分别报告。
 
 离线检查与计分仅需 Python 3.12+ 标准库，可在 Windows、Linux 或 macOS 运行；测试另需 `pytest`。调用在线裁判才需要 `openai` SDK。可以在独立 Python 环境中安装 `openai`；已配置好 executor 环境的同学也可使用仓库已有的 `judge` extra。无需为离线计分安装或启动 executor。
 
@@ -177,6 +177,55 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission evalua
 
 有害额外修改可能同时产生修复 FP 和 regression 记录：前者说明修改不成立，后者说明原本正确的行为被改坏。它们分别报告，不再合成一个总分。
 
+### Verified Fix Rate（真实 verifier 指标）
+
+`Verified Fix Rate = 修复后 verifier 通过的任务数 / 有效且可比较的修复后验证任务数`。
+
+它按任务计数，与按缺陷计算的 Diagnosis/Repair F1 并列报告，不使用 LLM 的 `repair_correct` 推算。有效结果要求 executor 的 `execution_ok == true`、`comparable == true`，且 `task_passed` 是布尔值；其中 `task_passed == true` 计为通过。有效失败计入分母。
+
+| 情况 | VFR 处理 |
+| --- | --- |
+| 有效修复后运行，通过 verifier | 分子 +1、分母 +1 |
+| 有效修复后运行，未通过 verifier | 仅分母 +1 |
+| 基础设施错误、不可比较、无有效判决 | 不进入分母，记 `invalid_execution` |
+| 未提供该任务的运行结果 | 不进入分母，记 `missing_result` |
+| 原始运行已核验通过并跳过 | 不进入分子或分母，保留跳过状态 |
+
+同时报告 `verified_fix_coverage = 有效修复后验证任务数 / 非跳过任务数`、无效数、缺失数和逐任务明细。例如四个非跳过任务中，一通过、一失败、一基础设施错误、一未运行，VFR 为 **1/2**、coverage 为 **2/4**，状态为 `partial`。不能把这种不完整覆盖的 50% 当作全部四个任务的结果。分母为零时为 `null`；全部跳过也不是满分。
+
+每个任务只导入一次预先确定的最终运行。方法、最终候选和运行选择规则应在评测前固定，不应只提交成功运行或从多次随机运行中挑最好结果。不同方法的任务集合、有效覆盖范围和模型设置应一同核对。
+
+#### 导入 executor 的实际结果
+
+组织者为非跳过任务准备 `executor-results.json`。不复制手填的成功标记，而是引用 executor 已生成的 `benchmark_result.json`；其旁边须保留同一次运行的 `executor_request.json`。
+
+```json
+{
+  "method_id": "method_a",
+  "benchmark_version": "core25-gold-defects-20260909-v1",
+  "tasks": [
+    {
+      "task_id": "dialogue-parser",
+      "benchmark_result": "runs/dialogue-parser-final/benchmark_result.json"
+    }
+  ]
+}
+```
+
+路径相对于清单文件，可引用组织者保存的完整 rollout 目录。上例只提供一个任务，其他非跳过任务会明确记为缺失。原始已通过而跳过的任务不应列入此清单。
+
+脚本核对 method/task/rollout ID、`method-skill` 条件、`skillrepair-v1` 协议、模型与 reasoning effort，并用 executor 已有的 bundle SHA256 格式核对最终提交内容。不能拿 Original 或另一个修复轮次的通过结果来计分。不同任务不得混用模型或 reasoning effort；声明 `comparable=true` 却与 reward、判决或证据标记矛盾时，属于输入错误。原报告中的机器绝对路径无需改写，脚本读取清单指定的文件及其相邻 request，并以内容标识绑定 Final。
+
+这仍以**组织者认可的真实 executor 产物**为信任边界：脚本检查结构与绑定，不认证学生自行编造的 JSON，也不重跑 verifier。Gold 和评测提示不会因为执行通过而自动改写。
+
+已有裁判响应时，可离线增加这个指标，无需重新调用 GPT-5.5：
+
+```bash
+python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission path/to/submission.json --judge-responses path/to/judge_responses.json --executor-results path/to/executor-results.json --output .cache/skill-evaluation/with-verifier --max-input-chars 2000000
+```
+
+如果有原始通过跳过任务，仍需同时传入 `--verified-original-passes`。在线 `--execute` 也可添加 `--executor-results`；verifier 结果只进入 reporting，不放入诊断或修复的 LLM 请求。没有此参数时，Diagnosis/Repair 照常计分，VFR 为 `null`、状态为 `not_provided`；有待复核的语义判断不会抹掉已经有效的实际 verifier 结果。
+
 ## 4. 先离线跑通样例
 
 以下命令均在仓库根目录运行。`examples/` 中的任务、Skill、Gold、预测和裁判响应全部为**虚构教学数据**，不能当作真实模型评测结果。
@@ -219,6 +268,16 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --gold evaluation/e
 
 该例中唯一任务和 3 个 Gold 缺陷全部跳过，调用裁判次数为 `0`，不需要模型或密钥，不产生 API 费用；状态为 `complete`，指标为 `null`。如将 `--execute` 换为 `--dry-run`，只核查输入，`maximum_judge_requests` 为 `0`。
 
+### 带 verifier 结果的离线教学样例
+
+`examples/executor-results/` 提供**虚构**的 executor report/request，只验证格式与计算，不是真实任务通过证据：
+
+```bash
+python evaluation/scripts/evaluate_skill_diagnosis_repair.py --gold evaluation/examples/gold.json --submission evaluation/examples/submission.json --judge-responses evaluation/examples/judge_responses.json --executor-results evaluation/examples/executor-results/manifest.json --output .cache/skill-evaluation/example-with-verifier
+```
+
+此例 Diagnosis F1 仍为 **2/3**、Repair F1 仍为 **1/3**；虚构 verifier 记录通过，所以 VFR 为 **1/1**、coverage 为 **1/1**。这只演示指标独立，不是实验成绩。
+
 ## 5. 使用模型裁判
 
 三个模式 `--dry-run`、`--judge-responses PATH`、`--execute` 必须且只能选择一个。`--execute` 在存在非跳过任务时调用 API，并要求显式提供 `--judge-model`；全部任务都经核验跳过时不需要模型或密钥，也不会调用 API。
@@ -249,6 +308,7 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission path/t
 | 参数 | 默认值或用途 |
 | --- | --- |
 | `--verified-original-passes` | 组织者核验的原始通过清单；存在跳过申请时必须提供 |
+| `--executor-results` | 组织者选择的最终 executor 结果清单；用于 Verified Fix Rate，不调用任务或模型 |
 | `--base-url` | `https://openrouter.ai/api/v1`，可换为兼容服务 |
 | `--api-key-env` | `OPENROUTER_API_KEY`，指定密钥所在环境变量的名称 |
 | `--temperature` | `0` |
@@ -266,6 +326,7 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission path/t
 | 文件 | 内容 |
 | --- | --- |
 | `summary.json` / `summary.csv` | 汇总计数、指标和状态 |
+| `verifier_results.json` | Verified Fix Rate、有效覆盖率及逐任务通过/失败/无效/缺失/跳过明细 |
 | `details.json` | 逐任务、逐缺陷的判断、原因和计算结果 |
 | `review_queue.json` | 警告、候选 Gold 遗漏及阻塞复核项，由 `blocking` 区分 |
 | `skipped_tasks.json` | 已核验跳过的任务、对应 Gold defect ID 和原始运行证据 |
@@ -287,7 +348,9 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission path/t
 
 `evaluated_task_count` 描述评测范围，不保证其中任务都已完成评分。`skipped_original_pass_rate` 只描述已核验并采用跳过机制的比例；其他任务的原始运行结果可能未知，不能把该比例当成完整原始任务通过率。
 
-当前计分版本为 `skill-diagnosis-repair-scoring-v1.1`。输出的 `evaluation_scope` 为 `excluding_verified_original_pass` 或 `all_gold_tasks`，分别标明是否排除了原始通过任务。`maximum_judge_requests` 是非跳过任务数的两倍，表示请求上限；全部跳过的 `--execute` 记录 `mode: "original_pass_only"`，无需模型调用。
+当前计分版本为 `skill-diagnosis-repair-scoring-v1.2`，新增真实 verifier reporting，原有语义判据与 `v2.1` prompt 不变，已有裁判响应可离线重计。输出的 `evaluation_scope` 为 `excluding_verified_original_pass` 或 `all_gold_tasks`，分别标明是否排除了原始通过任务。`maximum_judge_requests` 是非跳过任务数的两倍，表示请求上限；全部跳过的 `--execute` 记录 `mode: "original_pass_only"`，无需模型调用。
+
+`summary.json` 顶层与 `summary.csv` 均包含 `verified_fix_rate`、`verified_fix_status`、`verified_fix_coverage`，以及 `verified_fix_eligible_task_count`、`verified_fix_valid_task_count`、`verified_fix_passed_task_count`、`verified_fix_failed_task_count`、`verified_fix_invalid_task_count`、`verified_fix_missing_task_count`。VFR 状态为 `complete`、`partial`、`not_provided` 或 `no_eligible_tasks`；语义评测的 `status` 单独保留。`--dry-run` 会核查 executor 输入，但不输出正式评分。
 
 导入 `judge_responses.json` 时必须包含 `"prompt_version": "skill-diagnosis-repair-v2.1"`。每个非跳过任务分别保存 `diagnosis_result` 和 `repair_result`，不再使用旧版联合 `result` 包装：
 

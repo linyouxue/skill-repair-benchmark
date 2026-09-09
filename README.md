@@ -37,9 +37,10 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 
 GitHub 源码另提供独立的 [`evaluation/`](./evaluation/README.md)：诊断与修复分别
 调用裁判，按缺陷计算 P/R/F1，单独报告定位和 regression；原始 Skill 运行经组织者
-核验通过的任务可以跳过。当前公开 Gold 仅含 Core-25 中已整理的 **7 个任务、14 个
+核验通过的任务可以跳过。最终报表还可读取 executor 的真实 verifier 结果，汇总
+Verified Fix Rate 和有效验证覆盖率。当前公开 Gold 仅含 Core-25 中已整理的 **7 个任务、14 个
 缺陷**，附 Original/reference Skill 快照、提交模板及离线样例。这是内容评测入口，
-不改变 executor 的 API、依赖、运行协议或任务执行结果。
+不改变 executor 的 API、运行协议或任务执行结果。
 
 交付包**不包含**：
 

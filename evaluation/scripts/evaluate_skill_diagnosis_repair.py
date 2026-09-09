@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import csv
 import difflib
+import hashlib
 import json
 import math
 import os
@@ -17,7 +18,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 PROMPT_VERSION = "skill-diagnosis-repair-v2.1"
-SCORING_VERSION = "skill-diagnosis-repair-scoring-v1.1"
+SCORING_VERSION = "skill-diagnosis-repair-scoring-v1.2"
 ORIGINAL_PASS_STATUS = "skipped_original_pass"
 DEFAULT_GOLD = Path(__file__).resolve().parents[1] / "data" / "core25" / "gold.json"
 CLASSIFICATIONS = {"benign", "harmful_or_unsupported", "possible_new_defect"}
@@ -663,6 +664,201 @@ def coverage_summary(gold_tasks: dict, skipped: dict[str, dict]) -> dict:
     }
 
 
+def executor_bundle_sha256(files: dict[str, bytes]) -> str:
+    """Match the existing executor's length-delimited bundle identity.
+
+    See src/benchflow/benchmark_executor.py::_bundle_digest. Reading persisted
+    executor results must also work on Windows without importing its runtime.
+    """
+    digest = hashlib.sha256()
+    for relative, body in sorted(files.items()):
+        name = relative.encode("utf-8")
+        digest.update(len(name).to_bytes(8, "big"))
+        digest.update(name)
+        digest.update(len(body).to_bytes(8, "big"))
+        digest.update(body)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def verified_fix_report(
+    path: Path | None,
+    submission: dict,
+    gold_tasks: dict,
+    submitted_tasks: dict,
+    skipped: dict,
+    submission_base: Path,
+    max_bytes: int,
+) -> dict:
+    """Summarize organizer-selected final rollouts without executing a verifier.
+
+    Input JSON files are trusted executor artifacts selected by the organizer,
+    not participant-authenticated evidence. Missing/invalid runs remain visible.
+    """
+    eligible = set(gold_tasks) - set(skipped)
+    runs = {}
+    if path is not None:
+        registry = read_json(path)
+        for key in ("method_id", "benchmark_version"):
+            require(
+                registry.get(key) == submission[key],
+                f"Executor results {key} differs from submission",
+            )
+        runs = unique_rows(registry.get("tasks"), "task_id", "executor results")
+        require(
+            set(runs) <= eligible,
+            "Executor results must contain only non-skipped Gold tasks",
+        )
+    tasks = []
+    identities = set()
+    settings = set()
+    for tid in gold_tasks:
+        row = {"task_id": tid}
+        if tid in skipped:
+            tasks.append({**row, "status": ORIGINAL_PASS_STATUS})
+            continue
+        if tid not in runs:
+            tasks.append({**row, "status": "missing_result"})
+            continue
+        report_path = (
+            path.resolve().parent
+            / nonempty(runs[tid].get("benchmark_result"), "benchmark_result path")
+        ).resolve()
+        report = read_json(report_path)
+        request_path = report_path.parent / "executor_request.json"
+        request = read_json(request_path)
+        for record in (report, request):
+            require(record.get("task_id") == tid, f"{tid}: executor task_id differs")
+            require(
+                record.get("method_id") == submission["method_id"],
+                f"{tid}: executor method_id differs",
+            )
+        run_id = nonempty(report.get("rollout_id"), "executor rollout_id")
+        require(
+            run_id == request.get("rollout_id") and run_id not in identities,
+            f"{tid}: executor rollout_id differs or is duplicated",
+        )
+        identities.add(run_id)
+        require(
+            request.get("condition") == "method-skill",
+            f"{tid}: Verified Fix Rate requires a method-skill final rollout",
+        )
+        protocol = object_value(request.get("protocol"), "executor protocol")
+        require(
+            report.get("protocol_id")
+            == protocol.get("protocol_id")
+            == "skillrepair-v1",
+            f"{tid}: executor protocol differs or is unsupported",
+        )
+        selection = object_value(request.get("model_selection"), "model_selection")
+        model = nonempty(report.get("model"), "executor model")
+        effort = report.get("reasoning_effort")
+        require(
+            effort is None or isinstance(effort, str),
+            f"{tid}: invalid executor reasoning_effort",
+        )
+        require(
+            model == selection.get("model")
+            and effort == selection.get("reasoning_effort"),
+            f"{tid}: executor model selection differs",
+        )
+        settings.add((report["protocol_id"], model, effort))
+        require(len(settings) == 1, "Executor results mix models or reasoning efforts")
+        manifest = object_value(
+            request.get("skill_bundle_manifest"), "executor skill_bundle_manifest"
+        )
+        final = bundle_bytes(
+            submission_base, submitted_tasks[tid]["repaired_bundle"], max_bytes
+        )
+        require(
+            manifest.get("skill_bundle_sha256") == executor_bundle_sha256(final),
+            f"{tid}: executor run used a different Final Skill bundle",
+        )
+        execution_ok = boolean(report, "execution_ok")
+        comparable = boolean(report, "comparable")
+        passed = report.get("task_passed")
+        require(
+            "task_passed" in report and (passed is None or isinstance(passed, bool)),
+            f"{tid}: executor task_passed must be a boolean or null",
+        )
+        reward = report.get("reward")
+        require(
+            reward is None
+            or (
+                isinstance(reward, (int, float))
+                and not isinstance(reward, bool)
+                and math.isfinite(reward)
+            ),
+            f"{tid}: executor reward must be a finite number or null",
+        )
+        if comparable:
+            require(
+                execution_ok
+                and isinstance(passed, bool)
+                and isinstance(reward, (int, float))
+                and not isinstance(reward, bool)
+                and math.isfinite(reward)
+                and passed == (reward == 1)
+                and all(
+                    report.get(flag) is True
+                    for flag in (
+                        "protocol_evidence_valid",
+                        "trajectory_complete",
+                        "iteration_accounting_complete",
+                        "skill_exposure_verified",
+                    )
+                )
+                and not any(
+                    report.get(key)
+                    for key in ("error", "verifier_error", "export_error")
+                ),
+                f"{tid}: comparable executor result has contradictory verdict/evidence",
+            )
+        valid = execution_ok and comparable and isinstance(passed, bool)
+        tasks.append(
+            {
+                **row,
+                "status": ("passed" if passed else "failed")
+                if valid
+                else "invalid_execution",
+                "rollout_id": run_id,
+                "benchmark_result": str(report_path),
+                "executor_request": str(request_path),
+                "protocol_id": report["protocol_id"],
+                "model": model,
+                "reasoning_effort": effort,
+                "task_passed": passed,
+                "execution_ok": execution_ok,
+                "comparable": comparable,
+                "reward": reward,
+                "error_category": report.get("error_category"),
+                "verifier_error_category": report.get("verifier_error_category"),
+            }
+        )
+    counts = {
+        status: sum(t["status"] == status for t in tasks)
+        for status in ("passed", "failed", "invalid_execution", "missing_result")
+    }
+    valid_count = counts["passed"] + counts["failed"]
+    return {
+        "verified_fix_rate": counts["passed"] / valid_count if valid_count else None,
+        "verified_fix_status": "no_eligible_tasks"
+        if not eligible
+        else "not_provided"
+        if path is None
+        else "complete"
+        if valid_count == len(eligible)
+        else "partial",
+        "verified_fix_eligible_task_count": len(eligible),
+        "verified_fix_valid_task_count": valid_count,
+        "verified_fix_passed_task_count": counts["passed"],
+        "verified_fix_failed_task_count": counts["failed"],
+        "verified_fix_invalid_task_count": counts["invalid_execution"],
+        "verified_fix_missing_task_count": counts["missing_result"],
+        "verified_fix_coverage": valid_count / len(eligible) if eligible else None,
+        "tasks": tasks,
+    }
+
+
 def judge_defect_fields(
     row: dict, *, prediction: bool = False, repair: bool = False
 ) -> dict:
@@ -802,8 +998,23 @@ def combine_judgments(diagnosis: Any, repair: Any) -> dict:
     return {**diagnosis, **repair}
 
 
-def write_reports(output: Path, meta: dict, results: list[dict]) -> None:
+def write_reports(
+    output: Path, meta: dict, results: list[dict], *, verified_fix: dict | None = None
+) -> None:
     metrics = aggregate_results(results)
+    if verified_fix is None:
+        verified_fix = verified_fix_report(
+            None,
+            meta,
+            {r["task_id"]: r for r in results},
+            {},
+            {r["task_id"]: r for r in results if r["status"] == ORIGINAL_PASS_STATUS},
+            output,
+            0,
+        )
+    verification_summary = {
+        key: value for key, value in verified_fix.items() if key != "tasks"
+    }
     reviews = [item for row in results for item in row.get("review_items", [])]
     confidence_summaries = [
         row["confidence_summary"] for row in results if "confidence_summary" in row
@@ -814,6 +1025,7 @@ def write_reports(output: Path, meta: dict, results: list[dict]) -> None:
     )
     summary = {
         **meta,
+        **verification_summary,
         "status": "error"
         if any(r["status"] == "error" for r in results)
         else "needs_review"
@@ -832,6 +1044,15 @@ def write_reports(output: Path, meta: dict, results: list[dict]) -> None:
         else None,
     }
     write_json(output / "summary.json", summary)
+    write_json(
+        output / "verifier_results.json",
+        {
+            "method_id": meta["method_id"],
+            "benchmark_version": meta["benchmark_version"],
+            "basis": "executor_final_method_skill",
+            **verified_fix,
+        },
+    )
     write_json(output / "details.json", {**meta, "tasks": results})
     write_json(output / "review_queue.json", reviews)
     write_json(
@@ -847,6 +1068,7 @@ def write_reports(output: Path, meta: dict, results: list[dict]) -> None:
         "scored_task_count": summary["scored_task_count"],
         "review_item_count": len(reviews),
         "confidence_policy": meta.get("confidence_policy"),
+        **verification_summary,
     }
     for key in (
         "scoring_version",
@@ -903,6 +1125,11 @@ def main(argv: list[str] | None = None) -> int:
         "--verified-original-passes",
         type=Path,
         help="Organizer-verified original-run passes; required for original_pass submissions",
+    )
+    parser.add_argument(
+        "--executor-results",
+        type=Path,
+        help="Organizer manifest of final executor benchmark_result.json files for Verified Fix Rate",
     )
     parser.add_argument("--output", type=Path, required=True)
     modes = parser.add_mutually_exclusive_group(required=True)
@@ -969,6 +1196,15 @@ def main(argv: list[str] | None = None) -> int:
             args.max_input_chars * 4,
         )
         coverage = coverage_summary(gold_tasks, skipped)
+        verified_fix = verified_fix_report(
+            args.executor_results,
+            submission,
+            gold_tasks,
+            submitted_tasks,
+            skipped,
+            args.submission.resolve().parent,
+            args.max_input_chars * 4,
+        )
         prepared = {
             tid: build_requests(
                 task,
@@ -1236,7 +1472,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             if client is not None:
                 client.close()
-        write_reports(args.output, meta, results)
+        write_reports(args.output, meta, results, verified_fix=verified_fix)
         print(f"Reports: {args.output}")
         return (
             2
