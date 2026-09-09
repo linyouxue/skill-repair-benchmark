@@ -13,6 +13,8 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 
 | 你要做什么 | 阅读位置 |
 |---|---|
+| 评估方法提交的诊断、修复内容与原始通过跳过申请 | [细粒度评测说明](./evaluation/README.md) |
+| 获取当前发布的 Core-25 Gold 子集与提交模板 | [7 任务、14 缺陷的数据说明](./evaluation/data/core25/README.md) |
 | 第一次安装并跑通一条任务 | [DELIVERY_GUIDE.md：第一次使用](./DELIVERY_GUIDE.md#0-第一次使用从解压到一条有效-rollout) |
 | 手动运行 no-skill / original-skill / method-skill | [DELIVERY_GUIDE.md：人工或调试运行](./DELIVERY_GUIDE.md#4-入口-a人工或调试运行) |
 | 在 SkillRevise、SkillHone 等算法中调用 rollout | [DELIVERY_GUIDE.md：修复算法自动调用](./DELIVERY_GUIDE.md#5-入口-b修复算法自动调用) |
@@ -33,9 +35,15 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 - 默认关闭、由每台机器自行配置的 verifier 进程定向依赖代理与付费前连通性检查；
 - result、trajectory、verifier 与 Skill exposure 的统一结果契约。
 
+GitHub 源码另提供独立的 [`evaluation/`](./evaluation/README.md)：诊断与修复分别
+调用裁判，按缺陷计算 P/R/F1，单独报告定位和 regression；原始 Skill 运行经组织者
+核验通过的任务可以跳过。当前公开 Gold 仅含 Core-25 中已整理的 **7 个任务、14 个
+缺陷**，附 Original/reference Skill 快照、提交模板及离线样例。这是内容评测入口，
+不改变 executor 的 API、依赖、运行协议或任务执行结果。
+
 交付包**不包含**：
 
-- SkillsBench task 仓库或 Core-25 任务副本；
+- 完整 SkillsBench task 仓库、Core-25 任务数据或执行环境（上述 Skill 快照仅供内容评测）；
 - GPT-5.2、DeepSeek 等供应商的 API key；
 - 各方法自己的 diagnosis、repair、refinement 或候选选择代码；
 - 已有实验轨迹和运行结果。
@@ -96,8 +104,8 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 框架，不替代本项目的交付指南。
 
 课题组当前项目仓库为
-[linyouxue/skill-repair-benchmark](https://github.com/linyouxue/skill-repair-benchmark)
-（私有仓库，需要仓库权限）。正式实验应 checkout 协调者公布的 commit 或 release
+[linyouxue/skill-repair-benchmark](https://github.com/linyouxue/skill-repair-benchmark)。
+正式实验应 checkout 协调者公布的 commit 或 release
 tag，不要无条件跟随持续变化的默认分支。
 
 SkillsBench 官方仓库为

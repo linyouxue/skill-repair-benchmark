@@ -4,6 +4,10 @@
 > [BENCHMARK_EXECUTOR.md](./BENCHMARK_EXECUTOR.md)；准备运行或接入方法时，按本文
 > 顺序执行。标有“付费”的步骤会调用模型，其余安装和检查不会消耗模型额度。
 
+需要评估方法提交的诊断和修复内容时，另见 [细粒度评测说明](./evaluation/README.md)。
+该工具与 executor 独立；随附的 [Core-25 Gold 子集](./evaluation/data/core25/README.md)
+仅包含 7 个任务的 Skill 快照和标注，不替代本文要求的完整任务数据与执行环境。
+
 ## 0. 第一次使用：从解压到一条有效 rollout
 
 这一节给出一条完整、可复制的首次使用路径。最低机器验收只运行 **1 条
