@@ -203,6 +203,45 @@ def test_mixed_results_count_only_valid_final_runs_and_expose_coverage(
     }
 
 
+@pytest.mark.parametrize("evidence_complete", [True, False])
+def test_incomplete_pass_and_missing_verdict_form_a_complete_scored_batch(
+    verifier_case: dict, evidence_complete: bool
+) -> None:
+    """Guards the verdict-policy correction to the evaluator in commit 5889a8f."""
+    case = verifier_case
+    case["gold_tasks"] = {
+        tid: case["gold_tasks"][tid] for tid in ("passed", "failed", "original-pass")
+    }
+    case["registry"]["tasks"] = case["registry"]["tasks"][:2]
+    case["reports"]["passed"]["trajectory_complete"] = False
+    case["reports"]["failed"].update(
+        task_passed=None,
+        reward=None,
+        protocol_evidence_valid=evidence_complete,
+        trajectory_complete=False,
+        iteration_accounting_complete=evidence_complete,
+        skill_exposure_verified=evidence_complete,
+    )
+    persist(case)
+
+    result = summarize(case)
+
+    assert result["verified_fix_rate"] == 0.5
+    assert result["verified_fix_coverage"] == 1.0
+    assert result["verified_fix_status"] == "complete"
+    assert result["verified_fix_valid_task_count"] == 2
+    assert result["verified_fix_passed_task_count"] == 1
+    assert result["verified_fix_failed_task_count"] == 1
+    assert result["verified_fix_invalid_task_count"] == 0
+    assert result["verified_fix_missing_task_count"] == 0
+    rows = {row["task_id"]: row for row in result["tasks"]}
+    assert rows["passed"]["status"] == "passed"
+    assert rows["failed"]["status"] == "failed"
+    assert rows["failed"]["task_passed"] is None
+    assert rows["failed"]["reward"] is None
+    assert case["reports"]["failed"]["execution_ok"] is True
+
+
 @pytest.mark.parametrize("mode", ["not-provided", "empty-results", "all-skipped"])
 def test_unavailable_verified_fix_rate_is_null_not_zero(
     verifier_case: dict, mode: str
@@ -275,7 +314,6 @@ def test_unusable_but_well_formed_execution_is_excluded(
         {"task_passed": False, "reward": 1.0},
         {"task_passed": None},
         {"protocol_evidence_valid": False},
-        {"trajectory_complete": False},
         {"iteration_accounting_complete": False},
         {"skill_exposure_verified": False},
         {"verifier_error": "verifier failed"},
@@ -455,15 +493,30 @@ def prepare_cli_case(case: dict) -> tuple[Path, Path, Path]:
     return gold_path, submission_path, judge_path
 
 
+@pytest.mark.parametrize(
+    ("updates", "expected_rate", "expected_status"),
+    [
+        ({}, 1.0, "passed"),
+        ({"trajectory_complete": False}, 1.0, "passed"),
+        ({"task_passed": None, "reward": None}, 0.0, "failed"),
+    ],
+    ids=["complete-pass", "incomplete-trajectory-pass", "missing-verdict-failure"],
+)
 def test_cli_offline_reporting_keeps_f1_separate_and_verifier_out_of_judge_payload(
     verifier_case: dict,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    updates: dict,
+    expected_rate: float,
+    expected_status: str,
 ) -> None:
+    """Guards the verdict-policy correction to the evaluator in commit 5889a8f."""
     case = verifier_case
     constructor = Mock()
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=constructor))
     gold, submission, judgments = prepare_cli_case(case)
+    case["reports"]["passed"].update(updates)
+    persist(case)
     common = [
         "--gold",
         str(gold),
@@ -495,21 +548,25 @@ def test_cli_offline_reporting_keeps_f1_separate_and_verifier_out_of_judge_paylo
     assert before["verified_fix_rate"] is None
     assert before["verified_fix_status"] == "not_provided"
     assert after["metrics"] == before["metrics"]
-    assert after["verified_fix_rate"] == after["verified_fix_coverage"] == 1.0
+    assert after["metrics"]["diagnosis"]["f1"] == 0.0
+    assert after["metrics"]["repair"]["f1"] == 1.0
+    assert after["verified_fix_rate"] == expected_rate
+    assert after["verified_fix_coverage"] == 1.0
     assert after["verified_fix_status"] == "complete"
-    assert (
-        after["verified_fix_valid_task_count"]
-        == after["verified_fix_passed_task_count"]
-        == 1
-    )
+    assert after["verified_fix_valid_task_count"] == 1
+    assert after["verified_fix_passed_task_count"] == int(expected_rate)
+    assert after["verified_fix_failed_task_count"] == 1 - int(expected_rate)
     verifier_results = read_json(enriched / "verifier_results.json")
     for key, value in after.items():
         if key.startswith("verified_fix_"):
             assert verifier_results[key] == value
-    assert verifier_results["tasks"][0]["status"] == "passed"
+    assert verifier_results["tasks"][0]["status"] == expected_status
+    if expected_status == "failed":
+        assert verifier_results["tasks"][0]["task_passed"] is None
+        assert verifier_results["tasks"][0]["reward"] is None
     with (enriched / "summary.csv").open(encoding="utf-8-sig", newline="") as stream:
         row = next(csv.DictReader(stream))
-    assert float(row["verified_fix_rate"]) == 1.0
+    assert float(row["verified_fix_rate"]) == expected_rate
     assert row["verified_fix_status"] == "complete"
     assert int(row["verified_fix_valid_task_count"]) == 1
     requests = (enriched / "requests.jsonl").read_text(encoding="utf-8")

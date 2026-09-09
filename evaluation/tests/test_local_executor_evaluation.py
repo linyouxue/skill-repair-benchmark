@@ -286,6 +286,74 @@ def test_local_results_generate_all_reports_without_handwritten_manifests(
         assert "verified_fix_rate" not in payload and "executor-results" not in payload
 
 
+@pytest.mark.parametrize(
+    ("updates", "expected_rate", "expected_status"),
+    [
+        ({"trajectory_complete": False}, 1.0, "passed"),
+        (
+            {
+                "task_passed": None,
+                "reward": None,
+                "trajectory_complete": False,
+                "protocol_evidence_valid": False,
+                "iteration_accounting_complete": False,
+                "skill_exposure_verified": False,
+            },
+            0.0,
+            "failed",
+        ),
+        (
+            {
+                "execution_ok": False,
+                "task_passed": None,
+                "reward": None,
+                "error": "Provider failed",
+            },
+            None,
+            "invalid_execution",
+        ),
+    ],
+    ids=["incomplete-trajectory-pass", "missing-verdict-failure", "execution-error"],
+)
+def test_local_verdict_policy_keeps_f1_reports_and_counts_only_execution_success(
+    local_case: dict,
+    tmp_path: Path,
+    updates: dict,
+    expected_rate: float | None,
+    expected_status: str,
+) -> None:
+    """Guards the verdict-policy correction to the evaluator in commit 5889a8f."""
+    case = local_case
+    run = add_run(case, "final-r1")
+    report_path = run / "benchmark_result.json"
+    report = read_json(report_path)
+    report.update(updates)
+    write_json(report_path, report)
+    output = tmp_path / "verdict-policy"
+
+    assert evaluator.main(arguments(case, output)) == 0
+
+    summary = read_json(output / "summary.json")
+    assert summary["metrics"]["diagnosis"]["f1"] == 0.0
+    assert summary["metrics"]["repair"]["f1"] == 1.0
+    assert summary["verified_fix_rate"] == expected_rate
+    assert summary["verified_fix_coverage"] == (0.0 if expected_rate is None else 1.0)
+    assert summary["verified_fix_status"] == (
+        "partial" if expected_rate is None else "complete"
+    )
+    assert summary["verified_fix_valid_task_count"] == int(expected_rate is not None)
+    assert summary["verified_fix_passed_task_count"] == int(expected_status == "passed")
+    assert summary["verified_fix_failed_task_count"] == int(expected_status == "failed")
+    assert summary["verified_fix_invalid_task_count"] == int(
+        expected_status == "invalid_execution"
+    )
+    result = read_json(output / "verifier_results.json")["tasks"][0]
+    assert result["status"] == expected_status
+    assert result["task_passed"] is report["task_passed"]
+    assert result["reward"] == report["reward"]
+    assert (output / "summary.csv").is_file()
+
+
 def test_unrelated_runs_and_old_final_hashes_do_not_compete_with_current_final(
     local_case: dict, tmp_path: Path
 ) -> None:
@@ -394,12 +462,19 @@ def mark_original_pass(case: dict, run_id: str = "original-r1") -> Path:
     return add_run(case, run_id, condition="original-skill")
 
 
+@pytest.mark.parametrize("trajectory_complete", [True, False])
 def test_original_pass_uses_local_raw_evidence_and_snapshot_without_allowlist_or_model(
     local_case: dict,
     tmp_path: Path,
+    trajectory_complete: bool,
 ) -> None:
+    """Guards the verdict-policy correction to the evaluator in commit 5889a8f."""
     case = local_case
-    mark_original_pass(case)
+    run = mark_original_pass(case)
+    report_path = run / "benchmark_result.json"
+    report = read_json(report_path)
+    report["trajectory_complete"] = trajectory_complete
+    write_json(report_path, report)
     output = tmp_path / "original-pass"
     args = arguments(case, output)
     args = args[: args.index("--judge-responses")]
@@ -418,6 +493,29 @@ def test_original_pass_uses_local_raw_evidence_and_snapshot_without_allowlist_or
     assert skipped["original_run"]["source"] == "local_executor"
     assert skipped["original_run"]["run_id"] == "original-r1"
     assert (output / "requests.jsonl").read_text(encoding="utf-8").strip() == ""
+
+
+def test_original_without_verifier_verdict_cannot_claim_a_pass_to_skip(
+    local_case: dict, tmp_path: Path
+) -> None:
+    """Guards the verdict-policy correction to the evaluator in commit 5889a8f."""
+    case = local_case
+    run = mark_original_pass(case)
+    report_path = run / "benchmark_result.json"
+    report = read_json(report_path)
+    report.update(task_passed=None, reward=None, trajectory_complete=False)
+    write_json(report_path, report)
+    raw_path = run / "result.json"
+    raw = read_json(raw_path)
+    raw["rewards"] = None
+    write_json(raw_path, raw)
+
+    assert (
+        evaluator.main(
+            arguments(case, tmp_path / "missing-original-verdict", execute=True)
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize(

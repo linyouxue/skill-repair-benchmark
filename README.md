@@ -63,7 +63,7 @@ P/R/F1、定位、regression、Verified Fix Rate 和有效验证覆盖率。原�
 5. 从 `.env.sample` 创建本机 `.env`，填写模型路由和对应供应商的 key。
 6. 运行不调用模型的离线测试。
 7. 明确付费后，只运行一条 original-skill smoke rollout。
-8. 只有 `execution_ok == true` 且 `task_passed` 为布尔值的结果才进入统计。
+8. VFR 统计中，`execution_ok == true` 的运行进入分母；`task_passed == true` 算通过，`false` 或 `null` 算失败，轨迹不完整不改变已有通过判决。
 
 完整命令、结果判定和排错方法都在
 [DELIVERY_GUIDE.md](./DELIVERY_GUIDE.md) 中。

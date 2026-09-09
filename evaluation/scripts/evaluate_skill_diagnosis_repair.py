@@ -18,7 +18,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 PROMPT_VERSION = "skill-diagnosis-repair-v2.1"
-SCORING_VERSION = "skill-diagnosis-repair-scoring-v1.3"
+SCORING_VERSION = "skill-diagnosis-repair-scoring-v1.4"
 ORIGINAL_PASS_STATUS = "skipped_original_pass"
 DEFAULT_GOLD = Path(__file__).resolve().parents[1] / "data" / "core25" / "gold.json"
 CLASSIFICATIONS = {"benign", "harmful_or_unsupported", "possible_new_defect"}
@@ -749,22 +749,28 @@ def read_executor_result(
     )
     if execution_ok:
         require(
-            isinstance(passed, bool)
-            and isinstance(reward, (int, float))
-            and not isinstance(reward, bool)
-            and math.isfinite(reward)
+            not any(
+                report.get(key) for key in ("error", "verifier_error", "export_error")
+            ),
+            f"{tid}: execution_ok contradicts executor errors",
+        )
+        if passed is None:
+            # An error-free run with no verdict counts as a failed attempt.
+            # Keep the absent verdict/reward intact in the reported evidence.
+            require(
+                reward is None, f"{tid}: missing verdict contradicts executor reward"
+            )
+            return report, request
+        require(
+            reward is not None
             and passed == (reward == 1)
             and all(
                 report.get(flag) is True
                 for flag in (
                     "protocol_evidence_valid",
-                    "trajectory_complete",
                     "iteration_accounting_complete",
                     "skill_exposure_verified",
                 )
-            )
-            and not any(
-                report.get(key) for key in ("error", "verifier_error", "export_error")
             ),
             f"{tid}: successful executor result has contradictory verdict/evidence",
         )
@@ -1019,11 +1025,12 @@ def verified_fix_report(
         execution_ok = report["execution_ok"]
         passed = report["task_passed"]
         reward = report.get("reward")
-        valid = execution_ok and isinstance(passed, bool)
+        # No verdict on an error-free run is scored as failure, not excluded.
+        valid = execution_ok
         tasks.append(
             {
                 **row,
-                "status": ("passed" if passed else "failed")
+                "status": ("passed" if passed is True else "failed")
                 if valid
                 else "invalid_execution",
                 "rollout_id": run_id,

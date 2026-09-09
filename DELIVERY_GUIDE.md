@@ -234,6 +234,10 @@ PY
 这个 task、模型和供应商路由上的链路有效；其他 task 的首次镜像构建仍可能遇到
 任务特异问题。
 
+这里的首次机器验收要求实际取得 verifier 判决。后续 VFR 评分采用失败计分规则：
+执行无报错但 `task_passed=null` 也计为任务失败，有通过判决但轨迹不完整仍算通过。
+原始执行证据保留原值，详见 [VFR 计分说明](./evaluation/README.md#verified-fix-rate真实-verifier-指标)。
+
 若还要验证 no-skill 路径，再运行一条新的付费 rollout，把上例中的
 `condition="original-skill"` 改成 `condition="no-skill"`，并相应修改 `stage`；
 时间戳会生成新的 `rollout_id`，不会覆盖第一条结果。
@@ -732,9 +736,9 @@ for round_index in range(3):
         rollout_id=f"{task_id}-r{round_index}",
     )
 
-    if not result.execution_ok or result.task_passed is None:
+    if not result.execution_ok:
         raise RuntimeError(
-            f"rollout has no valid verifier verdict: {result.artifacts.result_json}"
+            f"rollout execution failed: {result.artifacts.result_json}"
         )
 
     diagnosis = skillrevise.diagnose(
@@ -781,8 +785,10 @@ for round_index in range(3):
 |---:|---:|---|
 | `True` | `True` | 有效任务成功，纳入统计 |
 | `True` | `False` | 有效任务失败，同样纳入统计 |
-| `True` | `None` | 没有可靠 verifier 判决，排查 reward 与证据 |
+| `True` | `None` | 没有 verifier 判决，VFR 按任务失败计入分母；原始判决仍保留 `None` |
 | `False` | `None` | Agent、verifier 或 export 基础设施失败，排除 |
+
+已有通过判决时，`trajectory_complete=false` 不影响 VFR 通过计分；无需补齐轨迹后才出分。
 
 ### 7.1 verifier 失败、`reward=0` 与重新验证
 

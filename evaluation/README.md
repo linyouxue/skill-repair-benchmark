@@ -198,19 +198,23 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission evalua
 
 ### Verified Fix Rate（真实 verifier 指标）
 
-`Verified Fix Rate = 修复后 verifier 通过的任务数 / 有效的修复后验证任务数`。
+`Verified Fix Rate = 修复后明确通过 verifier 的任务数 / 执行无报错的修复后任务数`。
 
-它按任务计数，与按缺陷计算的 Diagnosis/Repair F1 并列报告，不使用 LLM 的 `repair_correct` 推算。有效结果要求 executor 的 `execution_ok == true` 且 `task_passed` 是布尔值；其中 `task_passed == true` 计为通过。有效失败计入分母。
+它按任务计数，与按缺陷计算的 Diagnosis/Repair F1 并列报告，不使用 LLM 的 `repair_correct` 推算。结果通过输入校验后，`execution_ok == true` 的任务进入分母：`task_passed == true` 计为通过，`false` 或 `null` 均计为任务失败。有通过判决时，`trajectory_complete == false` 不影响通过计分。
 
 | 情况 | VFR 处理 |
 | --- | --- |
 | 有效修复后运行，通过 verifier | 分子 +1、分母 +1 |
 | 有效修复后运行，未通过 verifier | 仅分母 +1 |
-| 基础设施错误或无有效判决 | 不进入分母，记 `invalid_execution` |
+| 执行无报错，但 `task_passed=null`、`reward=null`，没有判决 | 按失败计，分母 +1，不中断评测 |
+| 有通过判决，但 `trajectory_complete=false` | 仍按通过计，分子 +1、分母 +1 |
+| 基础设施错误，`execution_ok=false` | 不进入分母，记 `invalid_execution` |
 | 未提供该任务的运行结果 | 不进入分母，记 `missing_result` |
 | 原始运行已核验通过并跳过 | 不进入分子或分母，保留跳过状态 |
 
-同时报告 `verified_fix_coverage = 有效修复后验证任务数 / 非跳过任务数`、无效数、缺失数和逐任务明细。例如四个非跳过任务中，一通过、一失败、一基础设施错误、一未运行，VFR 为 **1/2**、coverage 为 **2/4**，状态为 `partial`。不能把这种不完整覆盖的 50% 当作全部四个任务的结果。分母为零时为 `null`；全部跳过也不是满分。
+同时报告 `verified_fix_coverage = 纳入 VFR 计分的任务数 / 非跳过任务数`、无效数、缺失数和逐任务明细。`verified_fix_valid_task_count` 沿用字段名，表示纳入计分的任务数，包括执行无报错但无判决的失败任务。例如四个非跳过任务中，一通过、一失败、一基础设施错误、一未运行，VFR 为 **1/2**、coverage 为 **2/4**，状态为 `partial`。不能把这种不完整覆盖的 50% 当作全部四个任务的结果。分母为零时为 `null`；全部跳过也不是满分。
+
+例如两次执行均无报错：A 有通过判决但轨迹不完整，B 没有判决，则通过数为 1、失败数为 1，VFR 为 **1/2**，coverage 为 **2/2**。逐任务报告保留 B 原始的 `task_passed: null` 和 `reward: null`，只将评分 `status` 标为 `failed`，不伪造 verifier 判决。原始通过跳过仍要求明确的 `task_passed=true`；无判决不能申请跳过。
 
 每个任务只导入一次预先确定的最终运行。方法、最终候选和运行选择规则应在评测前固定，不应只提交成功运行或从多次随机运行中挑最好结果。不同方法的任务集合、有效覆盖范围和模型设置应一同核对。
 
@@ -220,7 +224,7 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission evalua
 
 每个任务只能选中一条运行。同一 Final 有多条运行时会报错，需用提交行中的 `executor_run_id` 指定预先确定的轮次，或传入只包含本轮运行的目录。未完成但已有 `executor_request.json` 的运行也参与选择，不会因为它没有结果而自动改选另一条成功记录；被选中但缺少报告时记为 `missing_result`。失败结果必须保留，有效失败会计入 VFR 分母。
 
-脚本核对 report/request 的 method/task/rollout ID、运行条件、`skillrepair-v1` 协议版本 2、模型与 reasoning effort，并用 executor 已有的 bundle SHA256 格式核对最终提交内容。guard 开启、关闭、缺少记录或不同产物中的 guard 元数据不一致均不作为拒绝条件。不能拿 Original 或另一个修复轮次的通过结果来计分。本轮 Original 跳过和 Final 验证运行不得混用模型或 reasoning effort；`execution_ok`、reward、判决或各证据标记矛盾时，属于输入错误。
+脚本核对 report/request 的 method/task/rollout ID、运行条件、`skillrepair-v1` 协议版本 2、模型与 reasoning effort，并用 executor 已有的 bundle SHA256 格式核对最终提交内容。guard 开启、关闭、缺少记录或不同产物中的 guard 元数据不一致均不作为拒绝条件。不能拿 Original 或另一个修复轮次的通过结果来计分。本轮 Original 跳过和 Final 验证运行不得混用模型或 reasoning effort。轨迹完整性不作为计分门槛；有明确判决时仍校验 reward 与判决一致，以及协议、iteration 和 Skill 暴露证据。执行无报错且判决、reward 均为空时直接按失败计；声明无判决但又给出非空 reward，或 `execution_ok=true` 却同时记录执行错误，仍属于输入矛盾。
 
 脚本检查本地运行产物的结构和一致性，不重跑 verifier。运行目录应保留实际 executor 产物；同一轮比较仍使用统一任务源、环境、预算和轮次规则。Gold 和评测提示不会因为执行通过而自动改写。
 
@@ -377,7 +381,7 @@ python evaluation/scripts/evaluate_skill_diagnosis_repair.py --submission path/t
 
 `evaluated_task_count` 描述评测范围，不保证其中任务都已完成评分。`skipped_original_pass_rate` 只描述已核验并采用跳过机制的比例；其他任务的原始运行结果可能未知，不能把该比例当成完整原始任务通过率。
 
-当前计分版本为 `skill-diagnosis-repair-scoring-v1.3`，增加本地运行目录自动导入与 Original-pass 本地核验，原有语义判据与 `v2.1` prompt 不变，已有裁判响应可离线重计。本地模式记录 `evidence_policy: "local_executor_artifacts"`、`original_pass_policy: "local_executor_verified_skip"` 及 `executor_runs_dir`；旧清单模式记录 `evidence_policy: "provided_manifests"`。输出的 `evaluation_scope` 为 `excluding_verified_original_pass` 或 `all_gold_tasks`，分别标明是否排除了原始通过任务。`maximum_judge_requests` 是非跳过任务数的两倍，表示请求上限；全部跳过的 `--execute` 记录 `mode: "original_pass_only"`，无需模型调用。
+当前计分版本为 `skill-diagnosis-repair-scoring-v1.4`：有通过判决但轨迹不完整仍算通过，执行无报错但无判决按失败计入分母。Diagnosis/Repair 语义判据与 `v2.1` prompt 不变，已有裁判响应可离线重计；比较不同方法时应统一使用新的 VFR 口径。本地模式记录 `evidence_policy: "local_executor_artifacts"`、`original_pass_policy: "local_executor_verified_skip"` 及 `executor_runs_dir`；旧清单模式记录 `evidence_policy: "provided_manifests"`。输出的 `evaluation_scope` 为 `excluding_verified_original_pass` 或 `all_gold_tasks`，分别标明是否排除了原始通过任务。`maximum_judge_requests` 是非跳过任务数的两倍，表示请求上限；全部跳过的 `--execute` 记录 `mode: "original_pass_only"`，无需模型调用。
 
 `summary.json` 顶层与 `summary.csv` 均包含 `verified_fix_rate`、`verified_fix_status`、`verified_fix_coverage`，以及 `verified_fix_eligible_task_count`、`verified_fix_valid_task_count`、`verified_fix_passed_task_count`、`verified_fix_failed_task_count`、`verified_fix_invalid_task_count`、`verified_fix_missing_task_count`。VFR 状态为 `complete`、`partial`、`not_provided` 或 `no_eligible_tasks`；语义评测的 `status` 单独保留。`--dry-run` 会核查 executor 输入，但不输出正式评分。
 
