@@ -15,6 +15,7 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 |---|---|
 | 同学在本地生成诊断、修复与 Verified Fix Rate 全部指标 | [细粒度评测说明](./evaluation/README.md) |
 | 获取当前发布的 Core-25 Gold 子集与提交模板 | [7 任务、14 缺陷的数据说明](./evaluation/data/core25/README.md) |
+| 运行人工注入的错误 Skill 样本 | [Skill 错误样本操作说明](./benchmarks/skill-error-injection/README.md) |
 | 第一次安装并跑通一条任务 | [DELIVERY_GUIDE.md：第一次使用](./DELIVERY_GUIDE.md#0-第一次使用从解压到一条有效-rollout) |
 | 手动运行 no-skill / original-skill / method-skill | [DELIVERY_GUIDE.md：人工或调试运行](./DELIVERY_GUIDE.md#4-入口-a人工或调试运行) |
 | 在 SkillRevise、SkillHone 等算法中调用 rollout | [DELIVERY_GUIDE.md：修复算法自动调用](./DELIVERY_GUIDE.md#5-入口-b修复算法自动调用) |
