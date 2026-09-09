@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -33,11 +36,87 @@ def case_map(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {case["case_id"]: case for case in manifest["cases"]}
 
 
-def bundle_path(case: dict[str, Any]) -> Path:
-    candidate = (PACKAGE_ROOT / case["skills_dir"]).resolve(strict=True)
+def overlay_root(case: dict[str, Any]) -> Path:
+    candidate = (PACKAGE_ROOT / "cases" / case["case_id"] / "overlay").resolve(
+        strict=True
+    )
     if not candidate.is_relative_to(PACKAGE_ROOT):
-        raise ValueError(f"skills_dir escapes package root: {case['skills_dir']}")
+        raise ValueError(f"overlay escapes package root: {case['case_id']}")
     return candidate
+
+
+def validated_overlay_files(case: dict[str, Any]) -> list[tuple[Path, Path]]:
+    root = overlay_root(case)
+    declared = case.get("files")
+    if not isinstance(declared, list) or not declared:
+        raise ValueError(f"case has no changed files: {case['case_id']}")
+
+    rows: list[tuple[Path, Path]] = []
+    declared_paths: set[str] = set()
+    for item in declared:
+        relative = Path(item["path"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"invalid changed file path: {relative}")
+        relative_text = relative.as_posix()
+        if relative_text in declared_paths:
+            raise ValueError(f"duplicate changed file path: {relative_text}")
+        declared_paths.add(relative_text)
+
+        source = (root / relative).resolve(strict=True)
+        if not source.is_relative_to(root) or not source.is_file() or source.is_symlink():
+            raise ValueError(f"invalid changed file: {relative_text}")
+        observed_sha256 = f"sha256:{hashlib.sha256(source.read_bytes()).hexdigest()}"
+        if observed_sha256 != item["sha256"]:
+            raise ValueError(
+                f"file digest mismatch for {case['case_id']}/{relative_text}: "
+                f"expected {item['sha256']}, got {observed_sha256}"
+            )
+        rows.append((relative, source))
+
+    observed_paths = {
+        path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()
+    }
+    if observed_paths != declared_paths:
+        raise ValueError(
+            f"changed file list mismatch for {case['case_id']}: "
+            f"expected {sorted(declared_paths)}, got {sorted(observed_paths)}"
+        )
+    return rows
+
+
+def task_skills_path(tasks_root: Path, task_id: str) -> Path:
+    root = tasks_root.expanduser().resolve(strict=True)
+    task = root if root.name == task_id else (root / task_id).resolve(strict=True)
+    if task != root and not task.is_relative_to(root):
+        raise ValueError(f"task escapes tasks root: {task_id}")
+    skills = (task / "environment" / "skills").resolve(strict=True)
+    if not skills.is_dir():
+        raise ValueError(f"original Skill directory is missing: {skills}")
+    return skills
+
+
+def materialize_bundle(
+    case: dict[str, Any], tasks_root: Path, output: Path
+) -> dict[str, Any]:
+    if output.exists():
+        raise FileExistsError(f"refusing to overwrite existing output: {output}")
+    original = task_skills_path(tasks_root, case["task_id"])
+    shutil.copytree(original, output)
+    for relative, source in validated_overlay_files(case):
+        target = output / relative
+        if not target.is_file():
+            raise ValueError(f"changed file is absent from original bundle: {relative}")
+        shutil.copy2(source, target)
+
+    bundle = build_skill_bundle_manifest(output)
+    observed_sha256 = f"sha256:{bundle.sha256}"
+    if observed_sha256 != case["full_skill_bundle_sha256"]:
+        raise ValueError(
+            f"materialized bundle digest mismatch for {case['case_id']}: "
+            f"expected {case['full_skill_bundle_sha256']}, got {observed_sha256}. "
+            "Check the SkillsBench commit."
+        )
+    return bundle.to_metadata()
 
 
 def command_list(manifest: dict[str, Any]) -> int:
@@ -53,21 +132,13 @@ def command_list(manifest: dict[str, Any]) -> int:
 def command_check(manifest: dict[str, Any]) -> int:
     rows = []
     for case in manifest["cases"]:
-        path = bundle_path(case)
-        bundle = build_skill_bundle_manifest(path)
-        observed_sha256 = f"sha256:{bundle.sha256}"
-        if observed_sha256 != case["skill_bundle_sha256"]:
-            raise ValueError(
-                f"bundle digest mismatch for {case['case_id']}: "
-                f"expected {case['skill_bundle_sha256']}, got {observed_sha256}"
-            )
+        files = validated_overlay_files(case)
         rows.append(
             {
                 "case_id": case["case_id"],
                 "task_id": case["task_id"],
-                "skill_bundle_sha256": observed_sha256,
-                "file_count": bundle.file_count,
-                "total_bytes": bundle.total_bytes,
+                "changed_files": [relative.as_posix() for relative, _ in files],
+                "full_skill_bundle_sha256": case["full_skill_bundle_sha256"],
             }
         )
     print(json.dumps({"ok": True, "cases": rows}, ensure_ascii=False, indent=2))
@@ -81,15 +152,43 @@ def required_value(value: str | None, *, option: str, env_name: str) -> str:
     return resolved
 
 
-def command_run(args: argparse.Namespace, manifest: dict[str, Any]) -> int:
+def selected_case(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str, Any]:
     cases = case_map(manifest)
     if args.case not in cases:
         raise ValueError(f"unknown case_id: {args.case}")
-    case = cases[args.case]
+    return cases[args.case]
 
-    tasks_root = required_value(
-        args.tasks_root, option="--tasks-root", env_name="SKILLSBENCH_TASKS_ROOT"
+
+def command_materialize(args: argparse.Namespace, manifest: dict[str, Any]) -> int:
+    case = selected_case(args, manifest)
+    tasks_root = Path(
+        required_value(
+            args.tasks_root,
+            option="--tasks-root",
+            env_name="SKILLSBENCH_TASKS_ROOT",
+        )
     )
+    output = args.output.expanduser().resolve()
+    metadata = materialize_bundle(case, tasks_root, output)
+    print(
+        json.dumps(
+            {"ok": True, "case_id": case["case_id"], "output": str(output), **metadata},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def execute_case(
+    args: argparse.Namespace,
+    case: dict[str, Any],
+    *,
+    tasks_root: str,
+    skills: Path | None,
+    condition: str,
+) -> int:
+
     jobs_root = required_value(
         args.jobs_root, option="--jobs-root", env_name="BENCHMARK_JOBS_ROOT"
     )
@@ -101,20 +200,6 @@ def command_run(args: argparse.Namespace, manifest: dict[str, Any]) -> int:
         if args.reasoning_effort is not None
         else os.environ.get("BENCHMARK_REASONING_EFFORT", "")
     ).strip() or None
-
-    if args.condition == "defective":
-        condition = "method-skill"
-        skills = bundle_path(case)
-    elif args.condition == "repaired":
-        if args.skills_dir is None:
-            raise ValueError("--condition repaired requires --skills-dir")
-        condition = "method-skill"
-        skills = args.skills_dir.expanduser().resolve(strict=True)
-    else:
-        if args.skills_dir is not None:
-            raise ValueError("--condition original does not accept --skills-dir")
-        condition = "original-skill"
-        skills = None
 
     executor = BenchmarkExecutor(
         tasks_root=tasks_root,
@@ -135,12 +220,56 @@ def command_run(args: argparse.Namespace, manifest: dict[str, Any]) -> int:
     return 0 if result.execution_ok else 2
 
 
+def command_run(args: argparse.Namespace, manifest: dict[str, Any]) -> int:
+    case = selected_case(args, manifest)
+    tasks_root = required_value(
+        args.tasks_root, option="--tasks-root", env_name="SKILLSBENCH_TASKS_ROOT"
+    )
+
+    if args.condition == "defective":
+        with tempfile.TemporaryDirectory(prefix=f"{case['case_id']}-") as temporary:
+            skills = Path(temporary) / "skills"
+            materialize_bundle(case, Path(tasks_root), skills)
+            return execute_case(
+                args,
+                case,
+                tasks_root=tasks_root,
+                skills=skills,
+                condition="method-skill",
+            )
+    if args.condition == "repaired":
+        if args.skills_dir is None:
+            raise ValueError("--condition repaired requires --skills-dir")
+        skills = args.skills_dir.expanduser().resolve(strict=True)
+        return execute_case(
+            args,
+            case,
+            tasks_root=tasks_root,
+            skills=skills,
+            condition="method-skill",
+        )
+    if args.skills_dir is not None:
+        raise ValueError("--condition original does not accept --skills-dir")
+    return execute_case(
+        args,
+        case,
+        tasks_root=tasks_root,
+        skills=None,
+        condition="original-skill",
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("list")
     subparsers.add_parser("check")
+
+    materialize_parser = subparsers.add_parser("materialize")
+    materialize_parser.add_argument("--case", required=True)
+    materialize_parser.add_argument("--tasks-root")
+    materialize_parser.add_argument("--output", type=Path, required=True)
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--case", required=True)
@@ -167,6 +296,8 @@ def main() -> int:
         return command_list(manifest)
     if args.command == "check":
         return command_check(manifest)
+    if args.command == "materialize":
+        return command_materialize(args, manifest)
     return command_run(args, manifest)
 
 

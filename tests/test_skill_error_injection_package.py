@@ -1,13 +1,12 @@
+import hashlib
 import json
 from pathlib import Path
-
-from benchflow.benchmark_executor import build_skill_bundle_manifest
 
 PACKAGE_ROOT = Path("benchmarks/skill-error-injection")
 
 
 def test_published_skill_error_cases_are_complete() -> None:
-    """Ensure the published case set contains seven complete Skill bundles."""
+    """Ensure the published case set contains seven minimal file overlays."""
 
     manifest = json.loads((PACKAGE_ROOT / "manifest.json").read_text(encoding="utf-8"))
     cases = manifest["cases"]
@@ -22,10 +21,20 @@ def test_published_skill_error_cases_are_complete() -> None:
     }
 
     for case in cases:
-        skills_dir = PACKAGE_ROOT / case["skills_dir"]
-        assert skills_dir.is_dir()
-        assert list(skills_dir.rglob("SKILL.md"))
-        assert not any(path.is_symlink() for path in skills_dir.rglob("*"))
-        bundle = build_skill_bundle_manifest(skills_dir)
-        assert f"sha256:{bundle.sha256}" == case["skill_bundle_sha256"]
-        assert not (PACKAGE_ROOT / "cases" / case["case_id"] / "ground_truth").exists()
+        case_root = PACKAGE_ROOT / "cases" / case["case_id"]
+        overlay = case_root / "overlay"
+        declared = {item["path"]: item["sha256"] for item in case["files"]}
+        observed = {
+            path.relative_to(overlay).as_posix()
+            for path in overlay.rglob("*")
+            if path.is_file()
+        }
+
+        assert len(declared) == 1
+        assert observed == set(declared)
+        assert not any(path.is_symlink() for path in overlay.rglob("*"))
+        for relative, expected_sha256 in declared.items():
+            body = (overlay / relative).read_bytes()
+            assert f"sha256:{hashlib.sha256(body).hexdigest()}" == expected_sha256
+        assert not any(path.is_file() for path in (case_root / "skills").rglob("*"))
+        assert not (case_root / "ground_truth").exists()

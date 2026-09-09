@@ -48,7 +48,7 @@ export BENCHMARK_JOBS_ROOT="$(pwd)/jobs/skill-error-injection"
 uv run python benchmarks/skill-error-injection/run_case.py check
 ```
 
-输出中的 `"ok": true` 表示 7 个 Skill 目录都能通过结构和摘要检查。
+输出中的 `"ok": true` 表示 7 个样本的修改文件和摘要均通过检查。
 
 查看全部样本：
 
@@ -75,19 +75,22 @@ uv run python benchmarks/skill-error-injection/run_case.py run \
   --rollout-id "${CASE_ID}-defective-r0"
 ```
 
+工具会读取本地 SkillsBench 任务中的原始 Skill，覆盖当前样本提供的修改文件，然后把生成的完整 Skill 包交给统一执行器。
+
 每次运行必须使用新的 `rollout-id`。执行器拒绝覆盖已有目录。
 
 ## 4. 准备修复结果
 
-复制完整 Skill 目录：
+生成供修复方法使用的完整 Skill 目录：
 
 ```bash
 mkdir -p "method-output/$CASE_ID"
-cp -R "benchmarks/skill-error-injection/cases/$CASE_ID/skills" \
-  "method-output/$CASE_ID/full-skills"
+uv run python benchmarks/skill-error-injection/run_case.py materialize \
+  --case "$CASE_ID" \
+  --output "method-output/$CASE_ID/full-skills"
 ```
 
-修复方法应修改 `method-output/$CASE_ID/full-skills`。提交目录必须保留全部 Skill 文件、脚本和资源。
+命令拒绝覆盖已有目录。修复方法应修改 `method-output/$CASE_ID/full-skills`。提交目录必须保留全部 Skill 文件、脚本和资源。
 
 ## 5. 运行修复后的 Skill
 
