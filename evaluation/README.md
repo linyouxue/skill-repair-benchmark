@@ -11,7 +11,7 @@
 >
 > 关于 task / verifier 的网络与代理：
 > 需要区分模型 API、task 环境依赖和 verifier 依赖三条网络路径。服务器宿主机上的 HTTP_PROXY/HTTPS_PROXY 主要用于模型 provider 等宿主侧网络请求，并不意味着 task 容器或 verifier 会自动继承同一代理。
-> 部分 SkillsBench task 在环境准备或执行过程中可能通过 pip、uv、apt、GitHub 等获取额外依赖，这类依赖可以优先尝试使用清华镜像等国内镜像，或者提前缓存/预构建 Docker 镜像。
+> 部分 SkillsBench task 在环境准备或执行过程中可能通过 pip、uv、apt、GitHub 等获取额外依赖，这类依赖如果下载出现问题可以优先尝试使用清华镜像等国内镜像，或者提前缓存/预构建 Docker 镜像。
 > verifier 如果自身需要联网安装依赖，可以使用 executor 提供的 verifier-only proxy。该代理默认关闭，只在最终 sandbox test-script verifier 进程中临时注入。
 > llm-judge 等宿主侧 verifier 不使用这个代理，需要走其自身的模型/provider 网络配置。
 
