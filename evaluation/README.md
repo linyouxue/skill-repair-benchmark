@@ -8,6 +8,8 @@
 > **任何 provider 连接失败、API 429 / 5xx、Docker / 环境启动失败、工具通信中断、依赖下载失败等基础设施问题，都不计入 PASS / FAIL，也不计入 Verified Fix Rate 的分子或分母。问题修复后，必须重新运行完整 rollout。**
 >
 > 本文“执行无报错但无判决时按任务失败计分”的规则，仅适用于满足上述有效运行前提的情况。基础设施故障导致的无响应、无判决或任务未完成，不能按任务失败计分；应保留故障记录，修复问题后以新的 rollout ID 重新运行。
+>
+> 如果依赖下载出现问题可以尝试换成清华源
 
 同学可在自己的机器上完成全部评测：准备诊断和最终 Skill bundle，使用统一 executor 运行任务，再由本脚本读取本地运行目录，生成 Diagnosis/Repair P/R/F1、Location Accuracy、Regression 和 Verified Fix Rate。Gold 由组织者维护，大模型按照固定判据判断语义，Python 负责校验、计数和计算指标。无需将运行文件交回组织者处理。
 
