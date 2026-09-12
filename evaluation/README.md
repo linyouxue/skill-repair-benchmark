@@ -13,6 +13,22 @@
 
 当前默认 Gold 为 `evaluation/data/core25/gold.json`，由统一人工 Gold repair 清单转换，包含 **7 个任务、14 个 defect（Core-25 当前已整理子集）**。不指定 `--gold` 时直接使用它；真实提交的 `benchmark_version` 应为 `core25-gold-defects-20260909-v1`。数据说明、来源边界和对应提交模板见 [数据说明](data/core25/README.md) 与 [提交模板](data/core25/submission.template.json)。这不是完整的 Core-25 Gold；扩展集尚未发布。下文 `examples/` 的 `v1` 是独立教学样例，使用时须显式指定其 `--gold`。
 
+### CausalFlow 结果转提交格式
+
+如使用 CausalFlow，可复制 [逐任务计划模板](data/core25/causalflow_plan.template.json)，填写每个任务的诊断结果 JSON、最终完整 Skill 目录和可选的 `executor_run_id`。计划中的相对路径从计划文件所在目录解析。用以下命令导出并调用评估器做离线检查（无模型费用、不产生分数）：
+
+```bash
+python evaluation/scripts/export_causalflow_submission.py \
+  --plan path/to/causalflow-plan.json \
+  --template evaluation/data/core25/submission.template.json \
+  --output .cache/skill-evaluation/causalflow-export \
+  --evaluator-script evaluation/scripts/evaluate_skill_diagnosis_repair.py
+```
+
+输出包含 `submission.json`、复制后的完整 Skill bundle、`conversion_report.json` 和 `evaluation-output/summary.json`。也可只导出 `submission.json`，随后按本文的评测命令手工评分。正式在线评分需改用新的输出目录，并添加 `--evaluation-mode execute --judge-model openai/gpt-5.5 --omit-temperature --reasoning-effort medium`；有最终任务运行证据时再添加 `--executor-runs-dir`。导出器也支持 `--evaluation-mode responses --judge-responses` 离线复算。原版 CausalFlow 的动作级 CRS 结果不能自动代表 Skill 文件级诊断或修复；若结果没有明确的 Skill 预测，导出器会写 `diagnoses: []` 并在转换报告中标注。完整 Final Skill 仍须由方法实际产出，导出器不会根据动作级修复伪造它。
+
+此模板对应本目录的 Core-25 Gold 子集，不对应 `benchmarks/skill-error-injection/` 的 7 个错误注入案例。后者要使用同一评估器，需要先发布匹配的 Gold 和 Original bundle。
+
 本版本采用讨论后简化的协议：**诊断按缺陷一对一匹配；修复按缺陷做二值判断，不计算文本相似度，也不计算 Condition Coverage。** Regression 单独报告。另在最终报表中汇总 executor 真实运行的 **Verified Fix Rate**；语义评分和实际任务通过率分别报告，评测器本身不运行任务。
 
 ## 与 executor 的关系及运行环境

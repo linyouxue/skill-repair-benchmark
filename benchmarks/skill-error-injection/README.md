@@ -137,3 +137,5 @@ jq '{execution_ok, task_passed, reward, error_category}' \
 - `trajectory/`
 - `verifier/`
 - 修复后的完整 Skill 目录
+
+本目录的 7 个错误注入案例与 `evaluation/data/core25/` 的 7 个 Gold 任务并非同一集合。CausalFlow 的 Core-25 [提交格式导出说明](../../evaluation/README.md#causalflow-结果转提交格式)可用于对接评估器，但不能直接拿此目录的错误注入案例套用 Core-25 Gold 评分。
