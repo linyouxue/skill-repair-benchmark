@@ -16,6 +16,7 @@ from benchflow.agents.registry import AGENT_INSTALLERS, AGENT_LAUNCH, AGENTS
 from benchflow.agents.registry import AgentConfig as _AC
 from benchflow.providers.litellm_config import (
     LITELLM_MODEL_VIA_ENV,
+    OPENHANDS_CHAT_MODEL_ALIAS,
     resolve_litellm_route,
 )
 from benchflow.providers.litellm_runtime import _wire_litellm_agent_env
@@ -85,3 +86,18 @@ def test_no_model_mapping_does_not_get_flag(_route):
         master_key="sk-master",
     )
     assert LITELLM_MODEL_VIA_ENV not in updated
+
+
+def test_openhands_uses_opaque_chat_alias_for_gpt5_route():
+    route = resolve_litellm_route("vllm/gpt-5.2", {"VLLM_API_KEY": "k"})
+    updated = _wire_litellm_agent_env(
+        agent="openhands",
+        agent_env={},
+        route=route,
+        base_url="http://127.0.0.1:4000",
+        master_key="sk-master",
+    )
+
+    assert updated["LLM_MODEL"] == f"openai/{OPENHANDS_CHAT_MODEL_ALIAS}"
+    assert "gpt-5" not in updated["LLM_MODEL"]
+    assert updated[LITELLM_MODEL_VIA_ENV] == "1"

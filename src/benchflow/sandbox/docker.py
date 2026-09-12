@@ -54,6 +54,10 @@ _DOCKER_BUILD_RETRYABLE_ERRORS = (
     re.compile(r"readtimeouterror", re.IGNORECASE),
     re.compile(r"read timed out", re.IGNORECASE),
     re.compile(r"connection (?:timed out|reset by peer)", re.IGNORECASE),
+    # npm reports transient proxy/TLS disconnects with Node error names rather
+    # than the generic connection-reset wording above.
+    re.compile(r"\bECONNRESET\b", re.IGNORECASE),
+    re.compile(r"socket hang up", re.IGNORECASE),
 )
 
 # Compose-up network-race retry config lives in _compose so the host docker
@@ -173,6 +177,9 @@ class DockerSandbox(BaseSandbox):
         self._keep_containers = keep_containers
         self._mounts_json = mounts_json
         self._mounts_compose_path: Path | None = None
+        self._logs_bind_mounts_visible = False
+        self._mount_probe_path: Path | None = None
+        self._mount_probe_token: str | None = None
 
         verifier_dir = (
             str(rollout_paths.verifier_dir.resolve().absolute())
@@ -229,7 +236,50 @@ class DockerSandbox(BaseSandbox):
 
     @property
     def is_mounted(self) -> bool:
-        return True
+        """Whether Docker's daemon can see the runner's bind-mount paths.
+
+        A Docker CLI can target a daemon in another host/mount namespace. In
+        that topology Compose accepts runner paths but mounts different,
+        often-empty daemon-side directories. Those outputs must be copied out.
+        """
+        return self._logs_bind_mounts_visible
+
+    def _prepare_logs_mount_probe(self) -> None:
+        if self.rollout_paths is None:
+            return
+        token = uuid.uuid4().hex
+        path = self.rollout_paths.verifier_dir / f".benchflow-mount-probe-{token}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(token, encoding="utf-8")
+        self._mount_probe_path = path
+        self._mount_probe_token = token
+
+    async def _detect_logs_bind_mounts(self) -> None:
+        path = self._mount_probe_path
+        token = self._mount_probe_token
+        if path is None or token is None:
+            self._logs_bind_mounts_visible = False
+            return
+        sandbox_path = SandboxPaths.verifier_dir / path.name
+        try:
+            result = await self.exec(
+                f'test "$(cat {shlex.quote(str(sandbox_path))} 2>/dev/null)" = '
+                f"{shlex.quote(token)}",
+                user="root",
+                timeout_sec=10,
+            )
+            self._logs_bind_mounts_visible = result.return_code == 0
+        except Exception:
+            self._logs_bind_mounts_visible = False
+        finally:
+            path.unlink(missing_ok=True)
+            self._mount_probe_path = None
+            self._mount_probe_token = None
+        if not self._logs_bind_mounts_visible:
+            self.logger.warning(
+                "Docker daemon cannot see runner bind-mount paths; verifier "
+                "outputs will be copied out of the container"
+            )
 
     @property
     def _dockerfile_path(self) -> Path:
@@ -453,6 +503,7 @@ class DockerSandbox(BaseSandbox):
                 await asyncio.sleep(delay)
 
     async def start(self, force_build: bool) -> None:
+        self._prepare_logs_mount_probe()
         if self._mounts_json:
             self._mounts_compose_path = self._write_mounts_compose_file()
 
@@ -483,6 +534,7 @@ class DockerSandbox(BaseSandbox):
             if build_sem is not None:
                 build_sem.release()
 
+        await self._detect_logs_bind_mounts()
         await self.exec(
             f"chmod 777 {SandboxPaths.agent_dir} {SandboxPaths.verifier_dir}"
         )

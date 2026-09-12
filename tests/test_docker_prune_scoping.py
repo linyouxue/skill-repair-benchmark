@@ -19,6 +19,18 @@ from benchflow.evaluation import (
     Evaluation,
     EvaluationConfig,
 )
+from benchflow.sandbox.docker import _is_retryable_docker_build_error
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "npm error code ECONNRESET",
+        "request failed, reason: socket hang up",
+    ],
+)
+def test_npm_network_disconnect_is_retryable(message):
+    assert _is_retryable_docker_build_error(message)
 
 
 @pytest.fixture

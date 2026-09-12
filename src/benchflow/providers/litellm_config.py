@@ -22,6 +22,12 @@ PROVIDER_REASONING_EFFORT_ENV = "BENCHFLOW_REASONING_EFFORT"
 LITELLM_MODEL_ALIAS_ENV = "BENCHFLOW_LITELLM_MODEL_ALIAS"
 LITELLM_MODEL_VIA_ENV = "BENCHFLOW_LITELLM_MODEL_VIA_ENV"
 LITELLM_MASTER_KEY_ENV = "BENCHFLOW_LITELLM_MASTER_KEY"
+# OpenHands derives transport capabilities from substring matches against the
+# client-facing model name. An alias containing ``gpt-5`` forces its Responses
+# API path even when BenchFlow's private gateway is a completions endpoint.
+# Keep its client alias opaque while preserving the exact upstream route.
+OPENHANDS_CHAT_MODEL_ALIAS = "benchflow-openhands-chat-route"
+
 _PROVIDER_REASONING_EFFORTS = frozenset(
     {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
@@ -428,6 +434,10 @@ def litellm_proxy_config(
     model_list: list[dict[str, object]] = [
         {"model_name": route.model_alias, "litellm_params": dict(params)},
         {"model_name": openai_alias, "litellm_params": dict(params)},
+        {
+            "model_name": OPENHANDS_CHAT_MODEL_ALIAS,
+            "litellm_params": dict(params),
+        },
     ]
     for model_name in (bare_requested, f"openai/{bare_requested}"):
         if model_name and model_name not in {

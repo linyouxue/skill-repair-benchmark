@@ -40,6 +40,7 @@ from benchflow.providers.litellm_config import (
     LITELLM_MODEL_ALIAS_ENV,
     LITELLM_MODEL_VIA_ENV,
     LiteLLMRoute,
+    OPENHANDS_CHAT_MODEL_ALIAS,
     litellm_proxy_config,
     resolve_litellm_route,
     strip_provider_prefix,
@@ -464,6 +465,25 @@ def needs_litellm_runtime(agent: str, model: str | None) -> bool:
 
 
 def _find_free_port(bind_address: str = "127.0.0.1") -> int:
+    configured = os.environ.get("BENCHFLOW_LITELLM_PORT", "").strip()
+    if configured:
+        try:
+            port = int(configured)
+            if not 1 <= port <= 65535:
+                raise ValueError
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Configured BENCHFLOW_LITELLM_PORT is invalid: {configured!r}"
+            ) from exc
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind((bind_address, port))
+            except OSError as exc:
+                raise RuntimeError(
+                    "Cannot bind the configured host LiteLLM proxy port "
+                    f"{port} on {bind_address!r}."
+                ) from exc
+        return port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
             sock.bind((bind_address, 0))
@@ -566,7 +586,7 @@ def _docker_bridge_gateway_address() -> str | None:
 def _docker_host_address() -> str:
     """Stable hostname advertised to task containers for host services."""
 
-    return "host.docker.internal"
+    return os.environ.get("BENCHFLOW_LITELLM_AGENT_HOST", "host.docker.internal")
 
 
 def _host_bind_address(environment: str) -> str:
@@ -583,6 +603,15 @@ def _host_bind_address(environment: str) -> str:
 
     if environment != "docker":
         return "127.0.0.1"
+    configured = os.environ.get("BENCHFLOW_LITELLM_BIND_ADDRESS", "").strip()
+    if configured:
+        try:
+            socket.inet_aton(configured)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Configured BENCHFLOW_LITELLM_BIND_ADDRESS is not an IPv4 address: {configured!r}"
+            ) from exc
+        return configured
     if platform.system().lower() != "linux" or _docker_server_is_desktop():
         return "0.0.0.0"
     address = _docker_bridge_gateway_address()
@@ -1387,7 +1416,8 @@ def _wire_litellm_agent_env(
     if agent == "openhands":
         updated["LLM_BASE_URL"] = openai_base_url
         updated["LLM_API_KEY"] = master_key
-        updated["LLM_MODEL"] = f"openai/{route.model_alias}"
+        # Keep OpenHands off its Responses path, which can wedge before ACP.
+        updated["LLM_MODEL"] = f"openai/{OPENHANDS_CHAT_MODEL_ALIAS}"
         updated[LITELLM_MODEL_VIA_ENV] = "1"
         return updated
     if agent == "gemini":

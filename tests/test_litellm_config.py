@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from benchflow.providers.litellm_config import (
+    OPENHANDS_CHAT_MODEL_ALIAS,
     litellm_proxy_config,
     resolve_litellm_route,
 )
@@ -190,6 +191,7 @@ def test_proxy_config_registers_plain_and_openai_aliases():
     names = [entry["model_name"] for entry in config["model_list"]]
     assert route.model_alias in names
     assert f"openai/{route.model_alias}" in names
+    assert OPENHANDS_CHAT_MODEL_ALIAS in names
     assert "us.anthropic.claude-opus-4-8" in names
     assert "openai/us.anthropic.claude-opus-4-8" in names
     assert config["litellm_settings"]["callbacks"] == [

@@ -986,6 +986,12 @@ AGENTS: dict[str, AgentConfig] = {
         supports_acp_set_model=False,
         task_mcp_transport="native-config",
         task_mcp_config_path=".openhands/mcp.json",
+        # The pinned CLI is installed from a Git commit and resolves roughly
+        # two hundred Python packages.  A controlled Docker-bridge proxy can
+        # make that legitimately exceed the generic 900-second default even
+        # when traffic is progressing, so keep a bounded agent-specific
+        # installation window.
+        install_timeout=1800,
         disallow_web_tools_setup_cmd=(
             'mkdir -p "$BENCHFLOW_AGENT_HOME/.openhands" && '
             "printf '[agent]\\nenable_browsing = false\\n' "
