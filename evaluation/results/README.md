@@ -99,7 +99,7 @@ results/xxx/
 建议先执行：
 ```text
 python export_trajectory.py \
-  --root "results/skillaxe" \
+  --root "results/xxx" \
   --dry-run
 ```
 --dry-run 只检查有哪些轨迹，以及它们会被识别为 before / after / unknown，不会写入文件。
