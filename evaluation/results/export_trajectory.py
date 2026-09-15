@@ -29,16 +29,16 @@ Design goals
 
 Usage
 -----
-python export_trajectory_timelines.py --root D:\\path\\to\\runs
+python export_trajectory.py --root D:\\path\\to\\runs
 
 # Preview without writing Markdown:
-python export_trajectory_timelines.py --root D:\\path\\to\\runs --dry-run
+python export_trajectory.py --root D:\\path\\to\\runs --dry-run
 
 # Keep existing Markdown files:
-python export_trajectory_timelines.py --root D:\\path\\to\\runs --skip-existing
+python export_trajectory.py --root D:\\path\\to\\runs --skip-existing
 
 # Use a custom centralized output folder name:
-python export_trajectory_timelines.py --root D:\\path\\to\\runs --export-dir-name readable_trajectories
+python export_trajectory.py --root D:\\path\\to\\runs --export-dir-name readable_trajectories
 """
 
 from __future__ import annotations
