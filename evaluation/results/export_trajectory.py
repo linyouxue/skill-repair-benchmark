@@ -23,8 +23,11 @@ Design goals
    The original run/trajectory directories are left untouched.
 5. Do not semantically classify actions by wording.
    Each actual tool_call is one Step, in original order.
-6. agent_thought is intentionally omitted from the readable Markdown.
-7. Generate a root-level trajectory_timeline_index.json so before/after
+6. agent_thought bodies are intentionally omitted from the readable Markdown,
+   while unknown event types are preserved as generic folded events.
+7. Distinguish intermediate agent_message from final agent_message by whether
+   another tool_call occurs later in the same trajectory.
+8. Generate a root-level trajectory_timeline_index.json so before/after
    runs can be paired by task_id + method_id.
 
 Usage
@@ -57,6 +60,12 @@ CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 WS_RE = re.compile(r"[ \t]+")
 EXIT_CODE_RE = re.compile(r"(?:Exit code|exit code)\s*:\s*(-?\d+)", re.I)
 WORKDIR_RE = re.compile(r"Working directory\s*:\s*(.+)", re.I)
+EDITED_FILE_RE = re.compile(
+    r"\[File\s+(.+?)\s+edited with\s+(\d+)\s+changes?\.\]", re.I
+)
+TOOL_ERROR_RE = re.compile(
+    r"(?:^|\n)(?:❌\s*)?\[An error occurred during execution\.\]", re.I
+)
 
 BEFORE_CONDITIONS = {
     "original-skill",
@@ -313,6 +322,45 @@ def extract_workdir(text: str) -> str | None:
     return matches[-1].strip() if matches else None
 
 
+def extract_edit_info(text: str) -> list[tuple[str, int]]:
+    """Extract file-editor success records without interpreting task semantics."""
+    result: list[tuple[str, int]] = []
+    for path, count in EDITED_FILE_RE.findall(clean_text(text)):
+        try:
+            n = int(count)
+        except ValueError:
+            n = 0
+        result.append((path.strip(), n))
+    return result
+
+
+def observed_tool_result(text: str, exit_code: int | None) -> str | None:
+    """Best-effort deterministic result signal separate from ACP transport status."""
+    if exit_code is not None:
+        return "success" if exit_code == 0 else "error"
+    if TOOL_ERROR_RE.search(clean_text(text)):
+        return "error"
+    return None
+
+
+def event_type_counts(events: list[tuple[int, dict[str, Any]]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for _, obj in events:
+        key = str(obj.get("type") or "<missing>")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def tool_kind_counts(events: list[tuple[int, dict[str, Any]]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for _, obj in events:
+        if obj.get("type") != "tool_call":
+            continue
+        key = str(obj.get("kind") or "<missing>")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def load_events(acp_path: Path) -> list[tuple[int, dict[str, Any]]]:
     events: list[tuple[int, dict[str, Any]]] = []
     with acp_path.open("r", encoding="utf-8-sig") as f:
@@ -363,6 +411,9 @@ def build_markdown(
     user_events = [(ln, obj) for ln, obj in events if obj.get("type") == "user_message"]
     agent_messages = [(ln, obj) for ln, obj in events if obj.get("type") == "agent_message"]
     outcomes = [(ln, obj) for ln, obj in events if obj.get("type") == "agent_iteration_outcome"]
+    type_counts = event_type_counts(events)
+    kind_counts = tool_kind_counts(events)
+    tool_line_numbers = [ln for ln, _ in tool_events]
 
     lines: list[str] = []
     title_task = meta.task_id or run_root.name
@@ -371,7 +422,8 @@ def build_markdown(
     lines.append(
         "> Deterministically generated from `acp_trajectory.jsonl`. "
         "No LLM summarization or semantic action classification is used. "
-        "`agent_thought` records are intentionally omitted; the raw JSONL remains the source of truth."
+        "`agent_thought` bodies are intentionally omitted; unknown observable event types are preserved "
+        "as generic folded events. The raw JSONL remains the source of truth."
     )
     lines.append("")
 
@@ -407,6 +459,30 @@ def build_markdown(
         value_str = md_value(value).replace("|", r"\|")
         lines.append(f"| {key} | {value_str} |")
     lines.append("")
+
+    lines.append("## Event summary")
+    lines.append("")
+    lines.append("### ACP event types")
+    lines.append("")
+    lines.append("| Event type | Count |")
+    lines.append("|---|---:|")
+    for event_type, count in sorted(type_counts.items()):
+        lines.append(f"| `{event_type}` | {count} |")
+    lines.append("")
+    if type_counts.get("agent_thought", 0):
+        lines.append(
+            f"> `{type_counts['agent_thought']}` `agent_thought` event(s) exist in the raw trajectory; "
+            "their bodies are omitted from this readable export."
+        )
+        lines.append("")
+    if kind_counts:
+        lines.append("### Tool-call kinds")
+        lines.append("")
+        lines.append("| Kind | Count |")
+        lines.append("|---|---:|")
+        for kind, count in sorted(kind_counts.items()):
+            lines.append(f"| `{kind}` | {count} |")
+        lines.append("")
 
     if user_events:
         lines.append("## Task / user prompts")
@@ -461,6 +537,8 @@ def build_markdown(
             output_text = extract_tool_output(obj)
             exit_code = extract_exit_code(output_text)
             workdir = extract_workdir(output_text)
+            edit_info = extract_edit_info(output_text) if kind == "edit" else []
+            result_signal = observed_tool_result(output_text, exit_code)
 
             lines.append(f"### Step {step} · `{kind}` · `{status}`")
             lines.append("")
@@ -473,6 +551,11 @@ def build_markdown(
                 lines.append(f"- **Working directory:** `{workdir}`")
             if exit_code is not None:
                 lines.append(f"- **Exit code:** `{exit_code}`")
+            if result_signal is not None:
+                lines.append(f"- **Observed tool result:** `{result_signal}`")
+            for edited_path, change_count in edit_info:
+                lines.append(f"- **Edited file:** `{edited_path}`")
+                lines.append(f"- **Recorded changes:** `{change_count}`")
             if command:
                 lines.append(f"- **Command preview:** `{command.replace('`', 'ˋ')}`")
             lines.append("")
@@ -490,7 +573,9 @@ def build_markdown(
         if event_type == "agent_message":
             text = obj.get("text")
             if isinstance(text, str) and text.strip():
-                lines.append("### Agent final/message")
+                has_later_tool_call = any(tool_line > line_no for tool_line in tool_line_numbers)
+                message_label = "Agent message" if has_later_tool_call else "Agent final message"
+                lines.append(f"### {message_label}")
                 lines.append("")
                 lines.append(f"- **Raw event:** `{line_no}`")
                 lines.append("")
@@ -518,13 +603,33 @@ def build_markdown(
                 "skill_context_preloaded",
                 "skill_bundle_sha256",
                 "preloaded_skill_count",
+                "experimental_text_only_retry_limit",
+                "experimental_text_only_retries_used",
+                "experimental_text_only_retry_exhausted",
             ):
                 if key in obj:
                     lines.append(f"- **{key}:** `{md_value(obj.get(key))}`")
             lines.append("")
+            continue
 
-        # All other ACP event types, especially agent_thought, are intentionally
-        # omitted from the readable timeline.
+        if event_type == "agent_thought":
+            # Deliberately hidden from the human-readable export; counted above.
+            continue
+
+        # Forward-compatible fallback: do not silently lose future/unknown
+        # observable ACP event types. Keep a compact raw preview instead.
+        lines.append(f"### Other event · `{md_value(event_type)}`")
+        lines.append("")
+        lines.append(f"- **Raw event:** `{line_no}`")
+        lines.append("")
+        lines.append("<details>")
+        lines.append("<summary>Show raw event preview</summary>")
+        lines.append("")
+        raw_preview = json.dumps(obj, ensure_ascii=False, indent=2)
+        lines.append(fenced(preview_lines(raw_preview, max_lines=40, max_chars=6000), "json"))
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
 
     lines.append("## Final outcome")
     lines.append("")
