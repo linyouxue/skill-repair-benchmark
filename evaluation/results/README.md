@@ -123,5 +123,5 @@ original-skill → before/
 method-skill   → after/
 
 脚本优先根据 executor_request.json、result.json 和 benchmark_result.json 中的运行条件判断 Before / After。
-
+转换脚本会额外生成 trajectory_timeline_index.json，用于记录各任务 before/after 轨迹的对应关系，供后续批量分析使用，请勿手工修改。
 请把所有模型运行轨迹转换完成之后把文件夹上传上来
