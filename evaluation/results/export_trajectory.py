@@ -50,10 +50,10 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import dataclass, asdict
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -412,8 +412,6 @@ def build_markdown(
 ) -> str:
     tool_events = [(ln, obj) for ln, obj in events if obj.get("type") == "tool_call"]
     user_events = [(ln, obj) for ln, obj in events if obj.get("type") == "user_message"]
-    agent_messages = [(ln, obj) for ln, obj in events if obj.get("type") == "agent_message"]
-    outcomes = [(ln, obj) for ln, obj in events if obj.get("type") == "agent_iteration_outcome"]
     type_counts = event_type_counts(events)
     kind_counts = tool_kind_counts(events)
     tool_line_numbers = [ln for ln, _ in tool_events]
@@ -569,7 +567,8 @@ def build_markdown(
                 lines.append(f"- **Edited file:** `{edited_path}`")
                 lines.append(f"- **Recorded changes:** `{change_count}`")
             if command:
-                lines.append(f"- **Command preview:** `{command.replace('`', 'ˋ')}`")
+                command_preview = command.replace("`", "'")
+                lines.append(f"- **Command preview:** `{command_preview}`")
             lines.append("")
 
             if output_text.strip():
@@ -585,8 +584,12 @@ def build_markdown(
         if event_type == "agent_message":
             text = obj.get("text")
             if isinstance(text, str) and text.strip():
-                has_later_tool_call = any(tool_line > line_no for tool_line in tool_line_numbers)
-                message_label = "Agent message" if has_later_tool_call else "Agent final message"
+                has_later_tool_call = any(
+                    tool_line > line_no for tool_line in tool_line_numbers
+                )
+                message_label = (
+                    "Agent message" if has_later_tool_call else "Agent final message"
+                )
                 lines.append(f"### {message_label}")
                 lines.append("")
                 lines.append(f"- **Raw event:** `{line_no}`")
@@ -638,7 +641,9 @@ def build_markdown(
         lines.append("<summary>Show raw event preview</summary>")
         lines.append("")
         raw_preview = json.dumps(obj, ensure_ascii=False, indent=2)
-        lines.append(fenced(preview_lines(raw_preview, max_lines=40, max_chars=6000), "json"))
+        lines.append(
+            fenced(preview_lines(raw_preview, max_lines=40, max_chars=6000), "json")
+        )
         lines.append("")
         lines.append("</details>")
         lines.append("")
@@ -660,11 +665,15 @@ def build_markdown(
         lines.append("")
         if reward_txt.exists():
             try:
-                raw_reward = clean_text(reward_txt.read_text(encoding="utf-8-sig")).strip()
+                raw_reward = clean_text(
+                    reward_txt.read_text(encoding="utf-8-sig")
+                ).strip()
             except OSError:
                 raw_reward = ""
             if raw_reward:
-                lines.append(f"- **`verifier/reward.txt`:** `{one_line(raw_reward, 300)}`")
+                lines.append(
+                    f"- **`verifier/reward.txt`:** `{one_line(raw_reward, 300)}`"
+                )
         if stdout_txt.exists():
             try:
                 stdout = stdout_txt.read_text(encoding="utf-8-sig")
@@ -675,7 +684,9 @@ def build_markdown(
                 lines.append("<details>")
                 lines.append("<summary>Show verifier stdout preview</summary>")
                 lines.append("")
-                lines.append(fenced(preview_lines(stdout, max_lines=12, max_chars=2400), "text"))
+                lines.append(
+                    fenced(preview_lines(stdout, max_lines=12, max_chars=2400), "text")
+                )
                 lines.append("")
                 lines.append("</details>")
         lines.append("")
@@ -887,7 +898,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"\nOutput root: {central_output}")
         print(f"Index: {index_path}")
-        print(f"Converted: {wrote}; skipped existing: {skipped}; discovered: {len(entries)}")
+        print(
+            f"Converted: {wrote}; skipped existing: {skipped}; discovered: {len(entries)}"
+        )
     else:
         print(f"\nDry run: discovered {len(entries)} trajectory file(s).")
 
