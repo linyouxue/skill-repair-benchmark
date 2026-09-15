@@ -119,6 +119,9 @@ class TimelineEntry:
     label: str
     task_passed: bool | None
     execution_ok: bool | None
+    trajectory_empty: bool
+    trajectory_bytes: int
+    raw_event_count: int
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -427,6 +430,13 @@ def build_markdown(
     )
     lines.append("")
 
+    trajectory_bytes = acp_path.stat().st_size
+    if trajectory_bytes == 0:
+        lines.append("> ⚠ EMPTY TRAJECTORY")
+        lines.append("> `acp_trajectory.jsonl` exists but contains 0 bytes.")
+        lines.append("> This file does not contain usable agent execution evidence.")
+        lines.append("")
+
     lines.append("## Run metadata")
     lines.append("")
     rows = [
@@ -452,6 +462,8 @@ def build_markdown(
         ("Partial trajectory", meta.partial_trajectory),
         ("Tool-call steps", len(tool_events)),
         ("Raw ACP events", len(events)),
+        ("Trajectory bytes", trajectory_bytes),
+        ("Trajectory empty", trajectory_bytes == 0),
     ]
     lines.append("| Field | Value |")
     lines.append("|---|---|")
@@ -735,6 +747,11 @@ def output_path(export_root: Path, label: str, meta: RunMeta, run_root: Path) ->
     return export_root / bucket / timeline_filename(meta, run_root)
 
 
+def relative_posix(path: Path, base: Path) -> str:
+    """Return a portable POSIX-style path relative to base."""
+    return path.resolve().relative_to(base.resolve()).as_posix()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Batch-convert ACP trajectories into centralized deterministic Markdown timelines."
@@ -779,6 +796,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     central_output = export_base(root, args.export_dir_name)
+    index_base = root if root.is_dir() else root.parent.parent
 
     acp_files = list(iter_acp_files(root))
     if not acp_files:
@@ -806,11 +824,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"          {acp_path} -> {out_path}")
 
+        trajectory_bytes = acp_path.stat().st_size
+        trajectory_empty = trajectory_bytes == 0
+        events: list[tuple[int, dict[str, Any]]] = []
+
         if not args.dry_run:
+            # Parse even when --skip-existing is used so the index still records
+            # the real raw event count for every discovered trajectory.
+            events = load_events(acp_path)
             if args.skip_existing and out_path.exists():
                 skipped += 1
             else:
-                events = load_events(acp_path)
                 md = build_markdown(acp_path, run_root, meta, events)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(md, encoding="utf-8")
@@ -818,9 +842,9 @@ def main(argv: list[str] | None = None) -> int:
 
         entries.append(
             TimelineEntry(
-                source=str(acp_path),
-                output=str(out_path),
-                run_root=str(run_root),
+                source=relative_posix(acp_path, index_base),
+                output=relative_posix(out_path, index_base),
+                run_root=relative_posix(run_root, index_base),
                 task_id=meta.task_id,
                 method_id=meta.method_id,
                 run_id=meta.run_id,
@@ -828,6 +852,9 @@ def main(argv: list[str] | None = None) -> int:
                 label=meta.label,
                 task_passed=meta.task_passed,
                 execution_ok=meta.execution_ok,
+                trajectory_empty=trajectory_empty,
+                trajectory_bytes=trajectory_bytes,
+                raw_event_count=len(events),
             )
         )
 
@@ -838,14 +865,14 @@ def main(argv: list[str] | None = None) -> int:
         # Pairing hint is implicit in task_id + method_id + label.
         index = {
             "schema_version": "1.0",
-            "root": str(root),
-            "export_root": str(central_output),
+            "root": ".",
+            "export_root": relative_posix(central_output, index_base),
             "count": len(entries),
             "pairing_key": ["task_id", "method_id"],
             "layout": {
-                "before": str(central_output / "before"),
-                "after": str(central_output / "after"),
-                "unknown": str(central_output / "unknown"),
+                "before": relative_posix(central_output / "before", index_base),
+                "after": relative_posix(central_output / "after", index_base),
+                "unknown": relative_posix(central_output / "unknown", index_base),
             },
             "label_policy": {
                 "before": sorted(BEFORE_CONDITIONS),
