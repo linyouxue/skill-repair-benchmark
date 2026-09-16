@@ -16,9 +16,9 @@
 当前结果：
 
 - 任务数：**87 / 87**
-- PASS：**47**
-- FAIL：**40**
-- 使用 guard 的代表运行：**3**
+- PASS：**48**
+- FAIL：**39**
+- 使用 guard 的代表运行：**4**
 - 自动排除的基础设施无效或无明确 P/F 候选运行：**43**
 
 ## 目录结构
@@ -72,7 +72,7 @@ GPT52-AllTasks-RepresentativeRuns-20260916/
 
 ### 旧版 WSL runner
 
-`weighted-gdp-calc`、`3d-scan-calc`、`paratransit-routing` 继续复用 Core-22 已复核的旧 WSL 运行；`manufacturing-codebook-normalization` 使用旧 WSL GPT-5.2 Original-Skill 运行 `batch-20260823-103940`。旧格式缺少部分新版 metadata，因此可读 trajectory 可能被仓库的 `export_trajectory.py` 放入 `unknown/`；原始 JSONL 仍是源证据。
+`weighted-gdp-calc`、`3d-scan-calc` 继续复用 Core-22 已复核的旧 WSL 运行；`paratransit-routing` 已更新为当前协议下的 Windows completion-guard Original-Skill PASS 运行；`manufacturing-codebook-normalization` 使用旧 WSL GPT-5.2 Original-Skill 运行 `batch-20260823-103940`。旧格式缺少部分新版 metadata，因此可读 trajectory 可能被仓库的 `export_trajectory.py` 放入 `unknown/`；原始 JSONL 仍是源证据。
 
 ### 已知 verifier / benchmark caveat
 
