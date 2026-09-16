@@ -1,0 +1,176 @@
+==========================================
+Installing dependencies...
+==========================================
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 25.0.1 -> 26.2.1
+[notice] To update, run: pip install --upgrade pip
+
+==========================================
+Agent's solution.py:
+==========================================
+from __future__ import annotations
+
+from collections import Counter
+from fractions import Fraction
+from typing import Any
+
+from pymatgen.core import Structure
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+
+def _as_float_in_unit_interval(x: float) -> float:
+    x = float(x) % 1.0
+    if abs(x - 1.0) < 1e-12:
+        return 0.0
+    if abs(x) < 1e-12:
+        return 0.0
+    return x
+
+
+def _float_to_rational_str(x: float, *, max_denominator: int = 12) -> str:
+    x = _as_float_in_unit_interval(x)
+    frac = Fraction(x).limit_denominator(max_denominator)
+    if frac.denominator == 1:
+        return str(frac.numerator)
+    return f"{frac.numerator}/{frac.denominator}"
+
+
+def _get_wyckoffs_from_dataset(dataset: Any) -> list[str]:
+    if dataset is None:
+        raise ValueError("No symmetry dataset returned by spglib")
+
+    if isinstance(dataset, dict):
+        wyckoffs = dataset.get("wyckoffs")
+    else:
+        wyckoffs = getattr(dataset, "wyckoffs", None)
+
+    if wyckoffs is None:
+        raise ValueError("Symmetry dataset does not contain Wyckoff labels")
+
+    return [str(w) for w in wyckoffs]
+
+
+def analyze_wyckoff_position_multiplicities_and_coordinates(
+    filepath: str,
+) -> dict[str, dict] | dict[str, Any]:
+    """Analyze Wyckoff multiplicities and first-site coordinates from a CIF.
+
+    Returns a dict with keys:
+      - wyckoff_multiplicity_dict: {wyckoff_letter: multiplicity_in_cell}
+      - wyckoff_coordinates_dict: {wyckoff_letter: [x, y, z]} as rationals
+
+    If analysis fails, returns a dict containing an "error" key.
+    """
+
+    try:
+        structure = Structure.from_file(filepath)
+        if not structure.is_ordered:
+            structure = structure.get_ordered_structure()
+
+        dataset = None
+        for symprec in (1e-3, 1e-2, 5e-2, 1e-1):
+            try:
+                sga = SpacegroupAnalyzer(
+                    structure, symprec=symprec, angle_tolerance=5.0
+                )
+                dataset = sga.get_symmetry_dataset()
+                wyckoffs = _get_wyckoffs_from_dataset(dataset)
+                if len(wyckoffs) != len(structure):
+                    raise ValueError(
+                        "Wyckoff label list length does not match number of sites"
+                    )
+                break
+            except Exception:
+                dataset = None
+
+        if dataset is None:
+            raise ValueError("Failed to obtain symmetry dataset from structure")
+
+        wyckoffs = _get_wyckoffs_from_dataset(dataset)
+
+        multiplicities = Counter(wyckoffs)
+        multiplicity_dict: dict[str, int] = dict(multiplicities)
+
+        coordinates_dict: dict[str, list[str]] = {}
+        for i, letter in enumerate(wyckoffs):
+            if letter in coordinates_dict:
+                continue
+            coords = structure[i].frac_coords
+            coordinates_dict[letter] = [
+                _float_to_rational_str(float(c), max_denominator=12) for c in coords
+            ]
+
+        return {
+            "wyckoff_multiplicity_dict": multiplicity_dict,
+            "wyckoff_coordinates_dict": coordinates_dict,
+        }
+    except Exception as exc:
+        return {"error": str(exc), "filepath": filepath}
+
+==========================================
+Running tests...
+==========================================
+/usr/local/lib/python3.12/site-packages/pymatgen/core/structure.py:3109: UserWarning: Issues encountered while parsing CIF: 2 fractional coordinates rounded to ideal values to avoid issues with finite precision.
+  struct = parser.parse_structures(primitive=primitive)[0]
+================================================================================
+Testing Wyckoff Position Analysis
+================================================================================
+
+Test 1: Al2O3_mp-7048.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 2: C_mp-169.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 3: C_mp-683919.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 4: CF4_mp-1167.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 5: FeS2_mp-1522.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 6: FeS2_mp-226.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 7: HgSe_mp-1018722.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 8: SiO2_mp-12787.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 9: SiO2_mp-542814.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 10: SiO2_mp-6945.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 11: SiO2_mp-7000.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+================================================================================
+Summary
+================================================================================
+Total tests: 11
+Passed: 11
+Failed: 0
+
+Score: 1.00
+
+==========================================
+Test completed. Score:
+1.00
+==========================================
