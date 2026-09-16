@@ -1,20 +1,33 @@
-# Official Skill baseline — Core-22 representative runs
+# Official Skill 基线 —— Core-22 代表性运行结果
 
-This directory archives one representative SkillsBench execution for each of 22 tasks used in the manual acceptance audit.
+本目录归档了人工验收过程中使用的 22 个 SkillsBench 任务，每个任务保留一条具有代表性的执行记录。
 
-It is an **execution-evidence archive**, not a repair-method submission, so it intentionally does not contain a `submission.json` or any repaired Skill bundle.
+本目录属于**执行证据归档**，不是某个 Skill 修复方法的提交结果，因此不会包含 `submission.json`，也不会包含任何修复后的 Skill bundle。
 
-## Selection policy
+## 运行选择规则
 
-- The representative run must match the manually accepted PASS/FAIL label in `VALIDATION.json`.
-- A completion-guard run is preferred when a matching run exists.
-- If no matching guard run exists, the matching non-guard run is used.
-- The full selected run evidence is retained: executor/result/config metadata, raw trajectories, trainer exports, verifier outputs, artifacts when present, timing/reward files, and the run-specific log when available.
-- Official Skill bundle contents are excluded. In particular, `inputs/skills/**` and legacy `input-skill-bundle/**` are not archived here.
+- 每个任务选取的代表运行必须与 `VALIDATION.json` 中人工确认的 PASS/FAIL 标签一致。
+- 如果存在结果一致的 completion guard 运行，优先使用 guard 运行。
+- 如果没有结果一致的 guard 运行，则使用对应的非 guard 运行。
+- 对选中的运行，保留完整的运行证据，包括：
+  - executor / result / config 等元数据；
+  - 原始模型执行轨迹；
+  - trainer 导出结果；
+  - verifier 输出；
+  - artifacts（若该运行实际生成）；
+  - timing / reward 等运行信息；
+  - 能够对应到该次运行的外层日志。
+- **不上传官方 Skill bundle 内容**。具体而言，本目录明确排除：
+  - `inputs/skills/**`
+  - 旧版 runner 中的 `input-skill-bundle/**`
 
-`MANIFEST.json` records source selection and provenance. `VALIDATION.json` records the accepted result and the observed result for every task. `STATUS.csv` is a compact tabular view.
+`MANIFEST.json` 用于记录每个任务代表运行的来源及 provenance。
 
-## Layout
+`VALIDATION.json` 用于记录每个任务的人工验收结果、实际运行结果以及二者是否一致。
+
+`STATUS.csv` 提供一份便于快速查看的表格化汇总。
+
+## 目录结构
 
 ```text
 OfficialSkillBaseline-Core22-20260916/
@@ -26,8 +39,8 @@ OfficialSkillBaseline-Core22-20260916/
 │   └── <task-id>/
 │       ├── run_selection.json
 │       └── original_run/
-│           ├── executor_request.json      # when emitted by that runner
-│           ├── benchmark_result.json      # when emitted by that runner
+│           ├── executor_request.json      # 该 runner 有生成时保留
+│           ├── benchmark_result.json      # 该 runner 有生成时保留
 │           ├── result.json
 │           ├── config.json
 │           ├── prompts.json
@@ -38,57 +51,11 @@ OfficialSkillBaseline-Core22-20260916/
 │           ├── trajectory/
 │           ├── trainer/
 │           ├── verifier/
-│           ├── artifacts/                 # when present
-│           ├── logs/                      # run-specific outer log, when available
-│           └── run_metadata/              # legacy runner metadata only
+│           ├── artifacts/                 # 存在时保留
+│           ├── logs/                      # 存在对应运行日志时保留
+│           └── run_metadata/              # 仅用于旧版 runner 的必要元数据
 └── trajectory_timelines/
     ├── before/
     ├── after/
     ├── unknown/
     └── trajectory_timeline_index.json
-```
-
-The Markdown timelines were generated with the repository's `evaluation/results/export_trajectory.py`; raw JSONL remains the source of truth.
-
-## Accepted task outcomes
-
-| Task | Accepted outcome | Guard used in selected run |
-|---|---|---:|
-| `software-dependency-audit` | FAIL | yes |
-| `suricata-custom-exfil` | PASS | no |
-| `fix-erlang-ssh-cve` | PASS | no |
-| `sec-financial-report` | FAIL | no |
-| `weighted-gdp-calc` | PASS | no |
-| `3d-scan-calc` | PASS | no |
-| `r2r-mpc-control` | PASS | no |
-| `lean4-proof` | PASS | no |
-| `pddl-tpp-planning` | PASS | yes |
-| `paratransit-routing` | FAIL | no |
-| `threejs-to-obj` | PASS | no |
-| `mario-coin-counting` | PASS | no |
-| `video-silence-remover` | FAIL | no |
-| `exoplanet-detection-period` | FAIL | no |
-| `crystallographic-wyckoff-position-analysis` | PASS | no |
-| `glm-lake-mendota` | PASS | no |
-| `court-form-filling` | PASS | no |
-| `pptx-reference-formatting` | PASS | yes |
-| `sales-pivot-analysis` | PASS | no |
-| `dialogue-parser` | FAIL | no |
-| `python-scala-translation` | FAIL | no |
-| `fix-visual-stability` | PASS | no |
-
-`VALIDATION.json` reports 22/22 selected runs matching these accepted outcomes.
-
-## Compatibility notes
-
-### Legacy runner metadata
-
-`weighted-gdp-calc`, `3d-scan-calc`, and `paratransit-routing` came from the older WSL runner. Their original per-task run directories are preserved, but runner-specific injection/debug files such as `forced-*`, `input-skill-*`, `benchflow-compat/`, PID files, and completion-prompt scaffolding were intentionally omitted during normalization. Only the actual task run plus `bench.log`, `health-summary.json`, `run-config.json`, and `task-manifest.json` are retained.
-
-Those legacy `result.json` files predate `evaluation_condition`, so `export_trajectory.py` correctly places their readable timelines under `trajectory_timelines/unknown/` rather than inventing metadata.
-
-### `sec-financial-report`
-
-The primary GPT-5.2 Original-Skill server run, `sec-financial-report-original-skill-server-r003`, was not mirrored back to the local archive. The locally available valid FAIL run `sec-financial-report-round-1-r002` is therefore used as the representative failure evidence. It has the requested FAIL outcome, but its metadata identifies `condition=method-skill`; consequently the trajectory exporter places its readable timeline under `trajectory_timelines/after/`. This substitution is explicitly recorded in `MANIFEST.json`, `VALIDATION.json`, and the task's `run_selection.json`.
-
-No official Skill bundle content from that run is included.
