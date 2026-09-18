@@ -63,24 +63,6 @@ GPT52-AllTasks-RepresentativeRuns-20260916/
 - `FAIL`：运行本身有效、verifier 正常执行，但任务级结果未达到完整通过；部分分数也记为 FAIL。
 - 基础设施错误运行不进入 P/F，不会被选为代表运行。
 
-## 特殊说明
-
-### `sec-financial-report`
-
-该任务现已从北大服务器镜像真实 GPT-5.2 Original-Skill 运行 `sec-financial-report-original-skill-server-r003`，不再使用 Round-1 method-skill substitute。该 rollout 的 Agent 执行有效：30/60 iterations、30 次 provider requests，并以 `end_turn` 正常结束；官方 Skill 全文 persistent preload 已核验。需要注意的是，原 verifier 在下载 `uv` 时发生网络失败，随后 `uvx` 不存在，因此旧 runner 写出的 `reward=0 / comparable=true` 按当前 fail-closed 规则应视为 verifier 阶段 non-comparable。本目录仍保留原始 verifier 输出，不篡改 `benchmark_result.json`；任务的 FAIL 标签由同一冻结答案在修复 verifier 依赖后的 replay（`1 passed / 1 failed`）及人工标注文档支持。
-
-### 旧版 WSL runner
-
-`weighted-gdp-calc`、`3d-scan-calc` 继续复用 Core-22 已复核的旧 WSL 运行；`paratransit-routing` 已更新为当前协议下的 Windows completion-guard Original-Skill PASS 运行；`manufacturing-codebook-normalization` 使用旧 WSL GPT-5.2 Original-Skill 运行 `batch-20260823-103940`。旧格式缺少部分新版 metadata，因此可读 trajectory 可能被仓库的 `export_trajectory.py` 放入 `unknown/`；原始 JSONL 仍是源证据。
-
-### 已知 verifier / benchmark caveat
-
-- `invoice-fraud-detection`：任务/oracle/verifier 对 Invalid PO 的处理存在契约冲突。
-- `xlsx-recover-data`：已知 oracle/verifier 数值口径存在不一致。
-- `manufacturing-codebook-normalization`：T11 对连续中文的 lexical tokenization 存在假阴性问题。
-
-这些 caveat 不改变本目录对**所选运行官方 P/F**的记录，但后续分析时不应把它们直接解释为纯 Agent 能力差异。
-
 ## 文件说明
 
 - `MANIFEST.json`：87 条最终代表运行的来源、模型、condition、guard、rollout ID、P/F 与选择原因。
