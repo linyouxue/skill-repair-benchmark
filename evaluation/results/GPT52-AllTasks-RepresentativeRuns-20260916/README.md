@@ -20,6 +20,53 @@
 - FAIL：**39**
 - 自动排除的基础设施无效或无明确 P/F 候选运行：**43**
 
+### 需要先处理然后再运行的任务
+
+- **enterprise-information-search**：运行时去掉任务说明里面的"tokens":"xxx"中的"",verifier与任务说明冲突,应该是xxx而不是"xxx"
+- **simpo-code-reproduction**：请在运行 simpo-code-reproduction 前统一修复 verifier 的依赖缺失：在该任务 verifier/test.sh 的 uvx fallback 分支依赖列表中，新增一行 --with rich==11.2.0 \，确保 
+verifier 自建的 Python 3.10 环境能够导入 trl.trainer 所需的 rich
+- **organize-messy-files**:请把verifier中test_no_allowed_files_outside_subject_folders这个函数换成下面这个函数
+```python
+def test_no_allowed_files_outside_subject_folders():
+    """No expected task-input files should exist outside the five subject folders."""
+    subject_root = find_subject_root()
+    allowed_roots = {subject_root / subject for subject in SUBJECTS}
+    excluded_root = Path("/root/papers/all")
+
+    # Only task-owned input files are relevant to this assertion.
+    expected_names = {
+        normalize_filename(name)
+        for name in FILE_TO_SUBJECT
+    }
+
+    stray = []
+
+    for path in Path("/root").rglob("*"):
+        if path.is_dir() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
+            continue
+
+        # Ignore unrelated PDF/DOCX/PPTX files belonging to the runtime,
+        # installed packages, temporary environments, etc.
+        if normalize_filename(path.name) not in expected_names:
+            continue
+
+        # The unsorted source directory is checked separately by
+        # test_no_leftover_expected_files_in_unsorted_folder().
+        if excluded_root in path.parents:
+            continue
+
+        if not any(
+            root in path.parents or path.parent == root
+            for root in allowed_roots
+        ):
+            stray.append(str(path))
+
+    assert not stray, (
+        f"Found expected task-input files outside subject folders: {stray[:10]}"
+    )
+```
+- **jpg-ocr-stat**:运行的时候可以把调用最大次数从60改成65
+
 ## 目录结构
 
 ```text
