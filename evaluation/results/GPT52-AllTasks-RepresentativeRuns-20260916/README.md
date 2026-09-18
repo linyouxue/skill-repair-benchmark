@@ -67,7 +67,7 @@ GPT52-AllTasks-RepresentativeRuns-20260916/
 
 ### `sec-financial-report`
 
-该任务原 GPT-5.2 Original-Skill server 运行的 verifier 阶段发生依赖基础设施故障，而且原始 server run 没有完整镜像回本地。为同时满足“排除基础设施错误”和“全部任务必须有明确 P/F”，本目录沿用已经人工说明过的本地有效替代运行 `sec-financial-report-round-1-r002`。它是 GPT-5.2、结果为 FAIL，但元数据为 `condition=method-skill`。该例外在 `MANIFEST.json` 和任务自己的 `run_selection.json` 中均显式标注，不把它伪装成 Original-Skill。
+该任务现已从北大服务器镜像真实 GPT-5.2 Original-Skill 运行 `sec-financial-report-original-skill-server-r003`，不再使用 Round-1 method-skill substitute。该 rollout 的 Agent 执行有效：30/60 iterations、30 次 provider requests，并以 `end_turn` 正常结束；官方 Skill 全文 persistent preload 已核验。需要注意的是，原 verifier 在下载 `uv` 时发生网络失败，随后 `uvx` 不存在，因此旧 runner 写出的 `reward=0 / comparable=true` 按当前 fail-closed 规则应视为 verifier 阶段 non-comparable。本目录仍保留原始 verifier 输出，不篡改 `benchmark_result.json`；任务的 FAIL 标签由同一冻结答案在修复 verifier 依赖后的 replay（`1 passed / 1 failed`）及人工标注文档支持。
 
 ### 旧版 WSL runner
 
