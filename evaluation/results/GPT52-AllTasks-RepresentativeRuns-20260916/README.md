@@ -22,7 +22,8 @@
 
 ### 需要先处理然后再运行的任务
 
-- **enterprise-information-search**：运行时去掉任务说明里面的"tokens":"xxx"中的"",verifier与任务说明冲突,改成"tokens":0
+- **enterprise-information-search**：运行时改动任务说明 (prompt.json) 里面的"tokens":"xxx",verifier与任务说明冲突,改成"tokens":0。
+
   json示例类似这样：
   ```json
   {
