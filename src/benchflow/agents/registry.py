@@ -923,11 +923,17 @@ AGENTS: dict[str, AgentConfig] = {
             f"printf 'openhands-sdk=={_OPENHANDS_SDK_VERSION}\\n"
             f"openhands-tools=={_OPENHANDS_TOOLS_VERSION}\\n' "
             "> /tmp/oh-sdk-overrides.txt && "
-            "uv tool install --force --refresh "
-            "--overrides /tmp/oh-sdk-overrides.txt "
-            "--from "
+            "( OH_INSTALL_OK=0; OH_INSTALL_ATTEMPT=1; "
+            '  while [ "$OH_INSTALL_ATTEMPT" -le 3 ]; do '
+            "    if timeout 90s uv tool install --force --refresh "
+            "      --overrides /tmp/oh-sdk-overrides.txt "
+            "      --from "
             f"'git+https://github.com/OpenHands/OpenHands-CLI.git@{_OPENHANDS_CLI_GIT_REV}' "
-            "openhands --python 3.12 && "
+            "      openhands --python 3.12; then OH_INSTALL_OK=1; break; fi; "
+            '    echo "OpenHands install attempt $OH_INSTALL_ATTEMPT failed; retrying" >&2; '
+            "    sleep $((OH_INSTALL_ATTEMPT * 5)); "
+            "    OH_INSTALL_ATTEMPT=$((OH_INSTALL_ATTEMPT + 1)); "
+            '  done; [ "$OH_INSTALL_OK" = 1 ]; ) && '
             "  uv tool list | grep -q '^openhands\\b' ) && "
             # Let sandbox user traverse to uv-managed Python interpreter path.
             "( chmod o+x /root /root/.local /root/.local/share "
