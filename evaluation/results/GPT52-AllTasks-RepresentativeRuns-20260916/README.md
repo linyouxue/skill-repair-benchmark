@@ -30,7 +30,7 @@
   "q2": {"answer": ["xxx"], "tokens": 0},
   "q3": {"answer": ["xxx"], "tokens": 0}
     }
-```
+  ```
 - **simpo-code-reproduction**：请在运行 simpo-code-reproduction 前统一修复 verifier 的依赖缺失：在该任务 verifier/test.sh 的 uvx fallback 分支依赖列表中，新增一行 --with rich==11.2.0 \，确保 
 verifier 自建的 Python 3.10 环境能够导入 trl.trainer 所需的 rich
 - **organize-messy-files**:请把verifier中test_no_allowed_files_outside_subject_folders这个函数换成下面这个函数
