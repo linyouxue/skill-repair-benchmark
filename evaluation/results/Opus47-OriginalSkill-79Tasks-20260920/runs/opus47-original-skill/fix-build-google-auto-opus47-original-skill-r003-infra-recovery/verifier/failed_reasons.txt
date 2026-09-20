@@ -1,0 +1,62 @@
+Repository: google/auto  (path: /home/travis/build/failed/google/auto)
+Build command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Failing module: AutoValue (`value/`) — specifically the maven-invoker
+integration test project at `value/src/it/functional/pom.xml`
+(unpacked under `value/target/it/functional`).
+
+--------------------------------------------------------------------
+Failure output (essentials)
+--------------------------------------------------------------------
+Two independent compile-time errors during the `testCompile` phase of
+the functional IT:
+
+  1) "unmappable character for encoding ASCII" on several source files:
+       .../com/google/auto/value/AutoValueTest.java:[50,33]
+       .../com/google/auto/value/SimpleValueTypeTest.java:[26,33]
+       .../com/google/auto/value/enums/MyEnum.java:[19,33]
+       .../PackagelessValueTypeTest.java:[25,33]
+     Preceded by the warning:
+       "File encoding has not been set, using platform encoding
+        ANSI_X3.4-1968, i.e. build is platform dependent!"
+     These lines contain the author's name "Éamonn McManus" as UTF-8
+     bytes; javac is defaulting to ASCII because the Maven compiler
+     plugin has no <encoding> and the POM has no
+     project.build.sourceEncoding property.
+
+  2) "cannot find symbol: class MoreObjects" in
+       .../com/google/auto/value/AutoValueTest.java  (lines 20 and 72)
+     `com.google.common.base.MoreObjects` was introduced in Guava 18.0.
+     The functional IT POM declares:
+         com.google.truth:truth:0.25     (transitively depends on guava 17.0)
+         com.google.guava:guava-testlib:18.0  (transitively depends on guava 18.0)
+     Both transitive `guava` entries live at depth 2, so Maven's
+     dependency mediation picks the one from the dependency that is
+     declared first — `truth`, which pulls **guava 17.0**.  Guava 17.0
+     has no `MoreObjects` class, hence the compile failure.  The build
+     log confirms this: it downloads only guava-17.0.jar.
+
+Both problems are entirely in the build configuration of the functional
+integration-test module (`value/src/it/functional/pom.xml`); no
+production source code has to change.
+
+--------------------------------------------------------------------
+Fix plan
+--------------------------------------------------------------------
+Edit `value/src/it/functional/pom.xml`:
+
+  a) Add `<properties><project.build.sourceEncoding>UTF-8
+     </project.build.sourceEncoding></properties>` and set
+     `<encoding>UTF-8</encoding>` inside both maven-compiler-plugin
+     <configuration> blocks (default + eclipse profile).  This resolves
+     issue (1).
+
+  b) Add an explicit direct dependency on
+       com.google.guava:guava:18.0
+     declared before the `truth` dependency so that Maven's dependency
+     mediation picks guava 18.0 (which contains `MoreObjects`).  This
+     resolves issue (2).
+
+The change is written as `patch_1.diff` in the repo root and applied
+with `patch -p1`.
