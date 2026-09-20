@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import uuid
@@ -371,6 +372,7 @@ class DockerSandbox(BaseSandbox):
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
         )
 
         try:
@@ -381,13 +383,22 @@ class DockerSandbox(BaseSandbox):
             else:
                 stdout_bytes, stderr_bytes = await process.communicate()
         except TimeoutError:
-            process.terminate()
+            # docker compose spawns a child `docker compose exec` process;
+            # terminating only the parent leaves the ACP/container command
+            # orphaned and makes later rollouts appear to hang forever.
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                process.terminate()
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     process.communicate(), timeout=5
                 )
             except TimeoutError:
-                process.kill()
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    process.kill()
                 stdout_bytes, stderr_bytes = await process.communicate()
             raise RuntimeError(
                 f"Command timed out after {timeout_sec} seconds"
