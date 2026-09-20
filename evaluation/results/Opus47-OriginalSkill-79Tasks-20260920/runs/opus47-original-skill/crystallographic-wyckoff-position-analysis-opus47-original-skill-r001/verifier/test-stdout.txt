@@ -1,0 +1,134 @@
+==========================================
+Installing dependencies...
+==========================================
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+==========================================
+Agent's solution.py:
+==========================================
+from typing import Any
+
+from pymatgen.core import Structure
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+from sympy import Rational, nsimplify
+
+
+def _coord_to_fraction(value: float, max_denominator: int = 12) -> str:
+    rational = nsimplify(float(value), rational=True, tolerance=1e-2)
+    rational = Rational(rational).limit_denominator(max_denominator)
+    if rational.q == 1:
+        return str(rational.p)
+    return f"{rational.p}/{rational.q}"
+
+
+def analyze_wyckoff_position_multiplicities_and_coordinates(
+    filepath: str,
+) -> dict[str, dict] | dict[str, Any]:
+    structure = Structure.from_file(filepath)
+    sga = SpacegroupAnalyzer(structure)
+    dataset = sga.get_symmetry_dataset()
+
+    wyckoff_letters = list(dataset.wyckoffs)
+    equivalent_atoms = list(dataset.equivalent_atoms)
+
+    multiplicity: dict[str, int] = {}
+    first_index: dict[str, int] = {}
+    for site_idx, letter in enumerate(wyckoff_letters):
+        multiplicity[letter] = multiplicity.get(letter, 0) + 1
+        group_repr = equivalent_atoms[site_idx]
+        if letter not in first_index or group_repr < first_index[letter]:
+            first_index[letter] = group_repr
+
+    coordinates: dict[str, list[str]] = {}
+    for letter, idx in first_index.items():
+        frac = structure[idx].frac_coords
+        coordinates[letter] = [_coord_to_fraction(c) for c in frac]
+
+    ordered_letters = sorted(multiplicity.keys())
+    return {
+        "wyckoff_multiplicity_dict": {l: multiplicity[l] for l in ordered_letters},
+        "wyckoff_coordinates_dict": {l: coordinates[l] for l in ordered_letters},
+    }
+
+
+if __name__ == "__main__":
+    import json
+    import os
+    import sys
+
+    if len(sys.argv) > 1:
+        paths = sys.argv[1:]
+    else:
+        cif_dir = "/root/cif_files"
+        paths = [os.path.join(cif_dir, f) for f in sorted(os.listdir(cif_dir))]
+
+    for path in paths:
+        print(f"=== {os.path.basename(path)} ===")
+        print(json.dumps(analyze_wyckoff_position_multiplicities_and_coordinates(path), indent=2))
+
+==========================================
+Running tests...
+==========================================
+/usr/local/lib/python3.12/site-packages/pymatgen/core/structure.py:3109: UserWarning: Issues encountered while parsing CIF: 2 fractional coordinates rounded to ideal values to avoid issues with finite precision.
+  struct = parser.parse_structures(primitive=primitive)[0]
+================================================================================
+Testing Wyckoff Position Analysis
+================================================================================
+
+Test 1: Al2O3_mp-7048.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 2: C_mp-169.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 3: C_mp-683919.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 4: CF4_mp-1167.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 5: FeS2_mp-1522.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 6: FeS2_mp-226.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 7: HgSe_mp-1018722.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 8: SiO2_mp-12787.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 9: SiO2_mp-542814.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 10: SiO2_mp-6945.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+Test 11: SiO2_mp-7000.cif
+--------------------------------------------------------------------------------
+✓ PASSED
+
+================================================================================
+Summary
+================================================================================
+Total tests: 11
+Passed: 11
+Failed: 0
+
+Score: 1.00
+
+==========================================
+Test completed. Score:
+1.00
+==========================================
