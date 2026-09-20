@@ -34,9 +34,9 @@ TEXT_ONLY_RETRY_LIMIT_PER_STEP = 1
 # These are hang watchdogs, not evaluation budgets.  The scored budget is the
 # parent-agent iteration cap above.  A pending tool call is already exempt from
 # the idle watchdog by the ACP runtime and is covered by the high wall backstop.
-WALL_CLOCK_SAFETY_TIMEOUT_SEC = 21_600
-IDLE_SAFETY_TIMEOUT_SEC = 3_600
-LLM_REQUEST_SAFETY_TIMEOUT_SEC = 3_600
+WALL_CLOCK_SAFETY_TIMEOUT_SEC = 900
+IDLE_SAFETY_TIMEOUT_SEC = 300
+LLM_REQUEST_SAFETY_TIMEOUT_SEC = 300
 
 ENV_MAX_ITERATIONS = "BENCHMARK_EXECUTOR_MAX_ITERATIONS"
 ENV_SKILLS_ROOT = "BENCHMARK_EXECUTOR_SKILLS_ROOT"
