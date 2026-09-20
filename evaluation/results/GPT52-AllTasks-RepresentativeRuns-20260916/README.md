@@ -76,6 +76,42 @@ def test_no_allowed_files_outside_subject_folders():
 ```
 - **jpg-ocr-stat**:运行的时候可以把调用最大次数从60改成65
 
+## 修复的 31 任务统计
+
+| 任务 | D 数量 |
+|---|---:|
+| `dialogue-parser` | 1 |
+| `exoplanet-detection-period` | 1 |
+| `python-scala-translation` | 3 |
+| `sec-financial-report` | 3 |
+| `software-dependency-audit` | 1 |
+| `video-silence-remover` | 3 |
+| `lab-unit-harmonization` | 2 |
+| `data-to-d3` | 1 |
+| `dynamic-object-aware-egomotion` | 3 |
+| `multilingual-video-dubbing` | 1 |
+| `enterprise-information-search` | 1 |
+| `reserves-at-risk-calc` | 2 |
+| `fix-druid-loophole-cve` | 1 |
+| `flink-query` | 2 |
+| `azure-bgp-oscillation-route-leak` | 1 |
+| `bike-rebalance` | 1 |
+| `energy-market-pricing` | 1 |
+| `seismic-phase-picking` | 4 |
+| `exceltable-in-ppt` | 1 |
+| `paper-anonymizer` | 3 |
+| `fix-build-agentops` | 2 |
+| `energy-unit-commitment` | 2 |
+| `simpo-code-reproduction` | 1 |
+| `manufacturing-equipment-maintenance` | 2 |
+| `pddl-airport-planning` | 1 |
+| `organize-messy-files` | 2 |
+| `syzkaller-ppdev-syzlang` | 1 |
+| `drone-planning-control` | 4 |
+| `fix-build-google-auto` | 2 |
+| `shock-analysis-supply` | 3 |
+| `jpg-ocr-stat` | 1 |
+
 ## 目录结构
 
 ```text
