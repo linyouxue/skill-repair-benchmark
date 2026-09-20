@@ -896,9 +896,9 @@ AGENTS: dict[str, AgentConfig] = {
             "  if command -v apt-get >/dev/null 2>&1; then "
             f"    {_apt_install('curl', 'ca-certificates', 'git')}; "
             "  elif command -v dnf >/dev/null 2>&1; then "
-            "    dnf -y --allowerasing install curl ca-certificates git >/dev/null 2>&1; "
+            "    timeout 45s dnf -y --allowerasing install curl ca-certificates git >/dev/null 2>&1; "
             "  elif command -v apk >/dev/null 2>&1; then "
-            "    apk add --no-cache curl ca-certificates git >/dev/null 2>&1; "
+            "    timeout 45s apk add --no-cache curl ca-certificates git >/dev/null 2>&1; "
             "  else "
             "    echo 'OpenHands GitHub install requires curl and git' >&2; "
             "    exit 127; "
@@ -912,7 +912,7 @@ AGENTS: dict[str, AgentConfig] = {
             "    fi; "
             "  fi; "
             '  if [ "$UV_OK" = 0 ]; then '
-            "    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 && "
+            "    timeout 45s curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 && "
             '    export PATH="$HOME/.local/bin:$PATH"; '
             "  fi && "
             # Pin the OpenHands CLI source and its matching SDK/tools release
