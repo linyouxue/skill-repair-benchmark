@@ -94,8 +94,8 @@ def _apt_install(*packages: str) -> str:
         'while [ "$attempt" -le 3 ]; do '
         "rm -rf /var/lib/apt/lists/*; "
         "apt-get clean; "
-        "if apt-get -o Acquire::Retries=3 update -qq && "
-        f"apt-get -o Acquire::Retries=3 install -y -qq {package_args}; then "
+        "if timeout 45s apt-get -o Acquire::Retries=3 update -qq && "
+        f"timeout 45s apt-get -o Acquire::Retries=3 install -y -qq {package_args}; then "
         "exit 0; "
         "fi; "
         'case "$attempt" in 1) sleep 2; attempt=2 ;; '
