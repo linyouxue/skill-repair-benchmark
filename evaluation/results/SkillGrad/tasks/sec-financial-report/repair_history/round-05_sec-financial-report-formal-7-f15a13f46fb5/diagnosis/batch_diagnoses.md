@@ -1,0 +1,24 @@
+# Batch Diagnoses
+
+## Task sec-financial-report (reward: 0.0)
+
+<label>Missing required output artifact</label>
+
+(1) First observable failure:
+- The run finished (“end_turn”) without producing the required deliverable file `/root/answers.json` (with the specified schema/keys). This is a hard failure regardless of whether intermediate analysis was performed.
+
+(2) Trajectory step that produced it:
+- The final agent termination step (the last `end_turn` / final agent message) occurred without a preceding write+verify of `/root/answers.json`.
+
+(3) Relevant skill rule or missing rule:
+- **Present rule (violated):** Both `13f-analyzer` and `fuzzy-name-search` skills include a “Plan & Package Outputs” rule: termination is forbidden until the mandated `answers.json` artifact is written and verified at the required path, using the provided `write_verify_and_gate(...)` sentinel.
+- **Execution evidence:** `result.json` shows `n_skill_invocations: 0`, meaning the agent did not invoke the skills that contain the gating rule, so the safeguard was never applied.
+
+(4) General corrective behavior:
+- Treat “write required artifact” as a non-negotiable completion criterion. Before ending the run, always (a) assemble the final payload with exactly the required keys, (b) write it to the exact required path, and (c) read it back to confirm JSON parse + key set matches. If any values are missing, continue working—do not terminate.
+- Additionally, explicitly invoke the relevant skills (or implement the same gating behavior in the main flow) so the “terminal sentinel” is actually executed.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/sec-financial-report/iter_6/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/sec-financial-report/iter_6/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/sec-financial-report/workspace

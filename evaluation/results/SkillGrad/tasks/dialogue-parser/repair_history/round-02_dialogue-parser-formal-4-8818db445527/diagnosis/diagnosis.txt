@@ -1,0 +1,21 @@
+<label>Missing required output artifacts</label>
+
+(1) First observable failure:
+- The run produced only the input `script.txt` and did not create the required deliverables `/app/dialogue.json` and `/app/dialogue.dot`. This is the earliest concrete, externally visible violation (artifact absence), and it matches the “Output inventory” containing only `script.txt`.
+
+(2) Trajectory step that produced it:
+- The finalization/output step of the agent run (end of the single-shot conversation) where it should have serialized the parsed graph and written both files. In other words, the failure occurs at the “write outputs + artifact check” phase, which never happened (or happened incorrectly), resulting in no files.
+
+(3) Relevant skill rule or missing rule:
+- Directly covered by the skill “Dialogue Graph Skill”:
+  - “Plan the run (minimal)”: identify required deliverables and paths up front.
+  - “Common Pitfalls”: “Finishing ‘logic’ but not materializing required deliverables … always perform a post-write artifact check.”
+  - “Export to JSON” and “Export to Graphviz DOT”: explicitly write DOT source, not an image.
+- The missing behavior is the mandated post-write artifact check (existence, non-empty, JSON loads).
+
+(4) General corrective behavior:
+- Always implement an explicit end-of-run export routine that:
+  1) Calls `parse_script(text)` to build an in-memory `{"nodes":..., "edges":...}` structure,
+  2) Writes `/app/dialogue.json` (validated JSON that loads) and `/app/dialogue.dot` (DOT source),
+  3) Performs an artifact check: `os.path.exists`, file size > 0, and `json.load` succeeds for the JSON file.
+- This is skill-controllable (not an API/permission/grader issue): the environment executed successfully, but the agent omitted required filesystem outputs.

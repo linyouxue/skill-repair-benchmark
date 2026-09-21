@@ -1,0 +1,20 @@
+<LABEL>Missing required artifact outputs</LABEL>
+
+(1) First observable failure:
+No required on-disk deliverables were produced: the output inventory contains only the input script, with no generated JSON graph or DOT visualization. This violates the task requirement to write `/app/dialogue.json` and `/app/dialogue.dot`.
+
+(2) Trajectory step that produced it:
+The finalization/end-of-run step: the agent terminated (`end_turn`) without performing an export step or an artifact existence/non-empty check. This is the first externally visible failure because the verifier expects files at specific paths and none were created.
+
+(3) Relevant skill rule or missing rule:
+Directly violates the preloaded “Dialogue Graph Skill”:
+- “Identify the required deliverables …”
+- “Before ending the run, run an explicit export → artifact check routine that writes every required file and then verifies existence/non-empty (and json.load for JSON).”
+This indicates a controllable failure to execute the “export and artifact check” portion of the skill.
+
+(4) General corrective behavior:
+Always implement and call an explicit export pipeline after parsing:
+- Ensure `parse_script(text)` returns a nodes/edges dict.
+- Write JSON and DOT to the exact required absolute paths.
+- Immediately verify: `os.path.exists`, file size > 0, and `json.load` succeeds; also ensure DOT file is non-empty.
+Do not end the run until these checks pass (or fail loudly with an actionable error).
