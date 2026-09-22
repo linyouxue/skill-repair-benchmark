@@ -1,0 +1,8 @@
+### deliverables-gate-always-write-artifacts | workflow | always emit required JSON+NPZ artifacts and verify on-disk existence before terminating
+- anchor: output-validation
+- appeared_in: iter_0
+- description: The executor sometimes completes analysis but fails at the finalization step, terminating without writing any required output files. In this task family, the harness expects two artifacts: `/root/pred_instructions.json` (interval keys mapping to allowed motion labels) and `/root/pred_dyn_masks.npz` (CSR-encoded dynamic object masks for each sampled frame plus `shape=[H,W]`). When neither file is created, evaluation yields an empty inventory regardless of analysis quality.
+- latest_executor_action: Treat output writing as a hard gate. Before termination, always (1) compute sampling indices per task policy (here: fps=5) and ensure interval keys cover all sampled frames with consistent half-open convention (e.g., `i->i+1`), (2) write `/root/pred_instructions.json` containing only allowed labels (non-empty list per interval), (3) write `/root/pred_dyn_masks.npz` containing `shape` and per-sampled-frame CSR triplets (`f_{i}_data`, `f_{i}_indices`, `f_{i}_indptr`) even if empty, and (4) re-open both files from disk and run basic format/loadability checks (existence, JSON parse, NPZ keys present, CSR invariants) before exiting.
+- remedy_log:
+  - iter_0 | diagnosis: run produced no outputs at all; required JSON and NPZ files were not created
+            | patch: (none yet; to be applied) strengthen/introduce a mandatory deliverables gate in output-validation to force write+verify of both artifacts

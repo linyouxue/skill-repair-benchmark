@@ -1,0 +1,28 @@
+# Batch Diagnoses
+
+## Task exceltable-in-ppt (reward: 0.0)
+
+<label>Missing writeback and deliverable</label>
+
+(1) First observable failure:
+- No updated output PPTX was produced at the required deliverable location (`/root/results.pptx`). The output inventory only contains the original input artifact, indicating the agent never saved/repacked an updated presentation.
+
+(2) Trajectory step that produced it:
+- The final termination step (“end_turn”) occurred without performing the required “pack/save” writeback. This is the first point where the missing deliverable becomes observable: the run ends while no results file exists.
+
+(3) Relevant skill rule or missing rule:
+- Relevant rule exists in `pptx/SKILL.md`:
+  - “Treat writeback as part of correctness… you must repack/re-embed them into the container file and save the updated container as the deliverable.”
+  - “End-of-run deliverable gate: before terminating, assert the required deliverable path exists and is non-empty; if it does not, do not end the turn…”
+- Failure indicates the agent did not follow this gate and/or did not execute the repack/re-embed workflow after updating extracted embedded content.
+
+(4) General corrective behavior:
+- Always implement a deliverable gate: after any extraction/edit of embedded OLE/Excel content, re-embed it into the PPTX container, save to the required output path, then assert the file exists and is non-empty before ending the run. If the file is missing, continue by performing the pack/save step rather than terminating.
+
+Controllability:
+- Skill-controllable error (workflow omission). No evidence of API/dependency/permission/harness/grader malfunction; the run completed successfully but failed to emit the required deliverable.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/exceltable-in-ppt/iter_3/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/exceltable-in-ppt/iter_3/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/exceltable-in-ppt/workspace

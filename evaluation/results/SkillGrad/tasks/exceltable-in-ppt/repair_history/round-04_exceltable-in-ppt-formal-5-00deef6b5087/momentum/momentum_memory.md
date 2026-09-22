@@ -1,0 +1,14 @@
+# Pattern record (iteration 4)
+
+### deliverable-writeback-and-final-existence-check | workflow | completes edits but fails to persist/emit the required final artifact
+- anchor: confirm-sandboxed-artifact-i-o-before-operating
+- appeared_in: iter_2, iter_3, iter_4
+- description: The executor performs (or plans) in-memory / intermediate edits but ends the run without producing the harness-required deliverable file at the specified path. In this batch, the failure mode is specific to PPTX containing an embedded Excel (OLE) object: after extracting and editing the embedded workbook, the agent does not re-embed/replace the updated package back into the PPTX and does not save the resulting presentation to the required deliverable path (e.g., `/root/results.pptx` or the in-sandbox equivalent the harness collects). The earliest external symptom is that the output inventory contains only the original `input.pptx`, and the run terminates (`end_turn`) without a pack/save writeback step. Even when an “End-of-run deliverable gate (MANDATORY)” rule exists, the executor may still terminate without running the existence+non-empty assertion immediately before `end_turn`.
+- latest_executor_action: Treat “writeback” as a first-class, end-to-end pipeline requirement. For PPTX+embedded-XLSX tasks: (1) extract the embedded workbook, (2) apply the minimal intended cell edits while preserving formulas/formatting, (3) write the workbook back into the embedded part/OLE package, (4) pack/save a new PPTX to the exact required output path, and (5) immediately before terminating, assert the output file exists and is non-empty (optionally `ls -l` the output directory). If the assertion fails, do not end the turn—perform the missing pack/save (and re-embed, if applicable) step and re-check; do not rely on having “planned” the save.
+- remedy_log:
+  - iter_2 | diagnosis: no updated output presentation was produced; agent skipped re-embed/replace step and never saved `/root/results.pptx`
+            | patch: recommend strengthening L2 “Confirm sandboxed artifact I/O…” to include explicit final deliverable existence assertion and PPTX embedded-object writeback checkpoint
+  - iter_3 | diagnosis: same failure recurred; run ended without performing repack/save writeback, despite L2 rule “End-of-run deliverable gate”
+            | patch: (none yet) — needs enforcement strengthening (e.g., mandatory pre-end checklist / explicit refusal to terminate until assert passes)
+  - iter_4 | diagnosis: run terminated with only original `input.pptx` present; final step ended in `end_turn` without save/repack and without asserting `/root/results.pptx` (or equivalent) exists
+            | patch: (none yet) — still indicates noncompliance with the existing L2 “MANDATORY” gate; needs a more forceful checklist/algorithmic stop condition

@@ -1,0 +1,18 @@
+# Batch Diagnoses
+
+## Task organize-messy-files (reward: 0.0)
+
+<label>Skipped core organizing requirement</label>
+
+(1) **First observable failure:** No subject folders were created and no documents were moved/classified; instead, the run ended with only a few downloaded files present in a single location. This violates “organize >100 files into 5 folders; no other files left out.”
+
+(2) **Trajectory step that produced it:** The earliest point of failure is the initial execution phase where the agent chose to fetch/create a tiny set of files (via a download script) rather than inventorying the provided dataset directory and performing classification/moves. In the trace, the tool-call sequence is dominated by download/creation activity and never reaches a “create 5 folders → classify → move all files” step.
+
+(3) **Relevant skill rule or missing rule:** The **file-organizer** skill explicitly says “Inspect first (inventory)” and “Prefer evidence from the filesystem over prompt phrasing; record chosen scope+objective and keep it stable.” The agent did not follow this rule: it didn’t inventory the actual file tree containing the >100 documents, didn’t determine scope, and didn’t execute moves with logging/verification. A missing/unused rule is: “If task is classification into fixed taxonomy, immediately create target folders and iteratively classify/move every file until none remain outside targets.”
+
+(4) **General corrective behavior:** Before any external fetching or content-generation, always (a) locate and inventory the real dataset directory, (b) create the required target folders, (c) classify each existing file based on extracted text/metadata (PDF/docx/pptx), (d) move every file exactly once into one of the five folders with a move log, and (e) verify that zero original files remain outside the five subject folders (counts match, no leftovers). This is skill-controllable (workflow/decision error), not an API/permission/grader issue.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/organize-messy-files/iter_2/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/organize-messy-files/iter_2/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/organize-messy-files/workspace

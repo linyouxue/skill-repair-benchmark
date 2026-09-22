@@ -1,0 +1,12 @@
+### write-required-output-artifact | workflow | executor ends turn without writing the required deliverable file
+- anchor: output-expectations
+- appeared_in: iter_0, iter_1, iter_2
+- description: The executor completes analysis (or otherwise terminates normally) but fails to produce the required output artifact at the exact path expected by the harness, leaving the output inventory empty (e.g., missing `/app/output/oscillation_report.json`). This is a workflow finalization failure: even correct reasoning would not be graded because no deliverable is serialized. In iter_1, the trace showed only 3 tool calls total and none that created/wrote the required path; the agent terminated (“end_turn”) without any write/verify step. In iter_2, the same mechanism recurred: the run ended normally ("termination_reason": "end_turn") but still did not create the required report file.
+- latest_executor_action: Treat deliverable-writing as a mandatory finalization step. Before ending: (1) determine the exact required harness path + filename, (2) create the parent directory (e.g., `/app/output`) if needed, (3) write the required JSON payload to the exact required filename, (4) close/flush (prefer atomic temp-write → fsync → rename), and (5) verify existence + non-empty + JSON-parseable (and required top-level keys) by reading it back. Only then end the turn; if verification fails, fix and re-write rather than terminating.
+- remedy_log:
+  - iter_0 | diagnosis: run terminated normally but never wrote the required `/app/output/oscillation_report.json`; output inventory empty
+            | patch: (none yet) add an explicit “Output Expectations / Write required artifact” rule and end-of-run checklist under the skill’s output section
+  - iter_1 | diagnosis: run never produced `/app/output/oscillation_report.json`; final agent message ended turn without any tool call that writes/verifies the output report
+            | patch: (none yet) enforcement likely needs a stronger end-of-run checklist gate (e.g., “do not end turn until output exists and parses”) and/or a dedicated L3 write-and-verify algorithm referenced from L2
+  - iter_2 | diagnosis: noncompliance with existing hard gate; agent terminated ("end_turn") with no `/app/output/oscillation_report.json` present
+            | patch: (none yet) strengthen/clarify the hard gate to be a literal pre-end-turn checklist item; consider requiring an explicit "verification succeeded" confirmation before end-turn

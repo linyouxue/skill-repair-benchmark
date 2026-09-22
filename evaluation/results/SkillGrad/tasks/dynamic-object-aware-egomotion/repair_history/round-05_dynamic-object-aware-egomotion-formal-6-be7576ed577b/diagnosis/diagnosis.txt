@@ -1,0 +1,21 @@
+<label>Missing required output artifacts</label>
+
+(1) First observable failure:
+- The run produced **no required deliverables** in the output inventory: neither `/root/pred_instructions.json` nor `/root/pred_dyn_masks.npz` exists (inventory only shows `input.mp4`). This is the earliest externally observable failure that explains the grader “task_passed: false” despite “execution_ok: true”.
+
+(2) Trajectory step that produced it:
+- The agent **terminated (`end_turn`) without having written and validated the on-disk artifacts**. This corresponds to the final agent message/termination step in the trace (the run ends cleanly, but with no file outputs). No intermediate step shows an artifact-writing action.
+
+(3) Relevant skill rule or missing rule:
+- Violated **output-validation / Deliverables gate (hard stop)**: “Write required artifacts unconditionally … Re-open from disk and validate … Do not terminate unless this step has executed and passed.”
+- Also implicitly missing adherence to sampling/indexing and mask-writing conventions, but the primary controllable rule is the deliverables gate.
+
+(4) General corrective behavior:
+- Add/ensure a mandatory pre-termination routine that **always**:
+  1) samples frames at the required fps,
+  2) generates interval→label JSON covering all sampled frames,
+  3) generates CSR sparse masks for every sampled frame with the required NPZ keys and global `shape`,
+  4) writes both files to the exact absolute paths,
+  5) reloads them from disk and asserts structural invariants (existence, keys, CSR integrity, label validity),
+  6) only then terminates.
+- This is skill-controllable (no evidence of API/permission/verifier malfunction); the failure is simply that the pipeline/deliverables gate wasn’t executed before ending.

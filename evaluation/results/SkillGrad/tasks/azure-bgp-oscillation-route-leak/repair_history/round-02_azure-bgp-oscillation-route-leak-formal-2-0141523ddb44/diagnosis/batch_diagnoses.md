@@ -1,0 +1,23 @@
+# Batch Diagnoses
+
+## Task azure-bgp-oscillation-route-leak (reward: 0.0)
+
+<label>Missing deliverable file output</label>
+
+(1) First observable failure:
+- The run never produced the required deliverable `/app/output/oscillation_report.json` (or any evidence of writing it). This is the earliest concrete failure because the task is graded by a test-script expecting that exact file path and JSON schema; without it, the verifier will fail regardless of reasoning quality.
+
+(2) Trajectory step that produced it:
+- The final agent message / termination (“end_turn”) occurred without any tool call or action that writes and verifies the output report. In the trace summary there are only 3 tool calls total and 0 skill invocations; none correspond to creating `/app/output/oscillation_report.json`.
+
+(3) Relevant skill rule or missing rule:
+- Skill rule exists and was not followed: **“Always write the required deliverable file before ending the run … read it back to confirm it exists, is non-empty, and is valid JSON.”**
+- Missing operationalization: the agent did not translate this into an explicit terminal/python step to serialize the computed report to the harness path.
+
+(4) General corrective behavior:
+- Before ending any run, explicitly (a) load the required inputs, (b) compute detection + per-solution evaluation, then (c) write the exact required JSON to the exact required path, (d) read it back and `json.loads` it to confirm validity and non-emptiness. If any required input files are absent, fail fast with a clear diagnostic, but still ensure the harness-required output is produced if the task demands it.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/azure-bgp-oscillation-route-leak/iter_1/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/azure-bgp-oscillation-route-leak/iter_1/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/azure-bgp-oscillation-route-leak/workspace

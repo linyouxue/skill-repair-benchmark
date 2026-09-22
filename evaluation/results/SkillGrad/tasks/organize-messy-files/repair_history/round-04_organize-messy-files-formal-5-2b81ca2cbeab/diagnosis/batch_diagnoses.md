@@ -1,0 +1,28 @@
+# Batch Diagnoses
+
+## Task organize-messy-files (reward: 0.0)
+
+<label>Incorrect file organization output</label>
+
+(1) First observable failure:
+The produced workspace does not contain the required 5 subject folders populated with the >100 documents. Instead, only a few files remain in the original location (e.g., three documents under a single “all/” directory) and the subject folders (LLM, trapped_ion_and_qc, black_hole, DNA, music_history) are not created/populated. This violates “No other files left out” and the required final folder structure.
+
+(2) Trajectory step that produced it:
+The earliest decisive failure is the agent’s execution phase where it never performs the core organizing actions (creating the 5 target directories and moving every input file into exactly one of them). In the trace, the run ends after tool calls without any corresponding file-move/organization outcome; the final output inventory confirms no reorganization happened.
+
+(3) Relevant skill rule or missing rule:
+Missing/violated “file-organizer” workflow rule: after inspecting contents to classify, the agent must (a) create the exact required folder names, (b) move each file into exactly one folder, and (c) verify that the source directory is empty (or contains only the 5 folders) and that counts match. The skills bundle was preloaded, but no skill invocation occurred (n_skill_invocations = 0), indicating the agent did not follow the prescribed skill workflow at all.
+
+(4) General corrective behavior:
+Always execute an explicit end-to-end organization loop:
+- Enumerate all files to be organized.
+- Create the five required directories with exact names.
+- For each file, extract minimal text/metadata (pdf/docx/pptx) to classify into exactly one subject.
+- Move the file (no renaming) into the chosen folder.
+- Final validation: assert every original file path is now under one of the five folders and that no files remain outside them; if any are unclassified, assign them to the best remaining category and re-check.
+This is skill-controllable (agent failed to apply available workflow), not an API/permission/grader issue.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/organize-messy-files/iter_4/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/organize-messy-files/iter_4/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/organize-messy-files/workspace

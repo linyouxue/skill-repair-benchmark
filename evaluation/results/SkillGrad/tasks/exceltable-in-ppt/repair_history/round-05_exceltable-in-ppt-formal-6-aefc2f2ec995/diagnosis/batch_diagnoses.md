@@ -1,0 +1,22 @@
+# Batch Diagnoses
+
+## Task exceltable-in-ppt (reward: 0.0)
+
+<label>Did not produce required output</label>
+
+(1) First observable failure:
+No updated PowerPoint was generated at the required location. The output inventory contains only the original presentation, and there is no `/root/results.pptx`.
+
+(2) Trajectory step that produced it:
+The final agent step ended the turn without performing any file extraction/update/save actions (the run contains no skill invocations and no substantive tool-driven edits). This “end_turn without writing results file” is the first concrete point where the task becomes impossible to pass.
+
+(3) Relevant skill rule or missing rule:
+Missing/violated core completion rule: for file-transformation tasks, the agent must (a) open the input artifact, (b) apply the requested transformation while preserving constraints (here: keep formula cells as formulas), and (c) write the modified artifact to the explicitly required output path. No skill-controlled procedure for “embedded Excel in PPTX: locate OLE object, extract workbook, edit only target value while preserving formulas, re-embed, save PPTX” was executed.
+
+(4) General corrective behavior:
+Before finishing, always ensure an output artifact is actually written to the required path and verify it exists. For PPTX-with-embedded-Excel tasks: programmatically locate the embedded workbook (OLE object), parse the nearby textbox to get the update value, edit only the intended input cell(s) (do not overwrite any cell containing a formula), repackage/re-embed the workbook into the PPTX, save to the required output filename, and optionally re-open to confirm the embedded workbook reflects the update.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/exceltable-in-ppt/iter_5/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/exceltable-in-ppt/iter_5/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/exceltable-in-ppt/workspace
