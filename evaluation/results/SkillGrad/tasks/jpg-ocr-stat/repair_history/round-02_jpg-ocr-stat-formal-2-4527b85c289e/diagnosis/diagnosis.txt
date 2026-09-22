@@ -1,0 +1,15 @@
+<label>Iteration budget exhausted</label>
+
+(1) First observable failure:
+- The agent never produced the required output spreadsheet; the run terminated with `MaxIterationsReached` and `n_skill_invocations: 0`, indicating no actionable progress toward creating `/app/workspace/stat_ocr.xlsx`.
+
+(2) Trajectory step that produced it:
+- The very first agent “thought” step led into a loop of tool calls without emitting any agent messages or completing the workflow; the final termination event shows `stop_reason: max_iterations` after 60 tool calls and 0 agent outputs.
+
+(3) Relevant skill rule or missing rule:
+- Missing skill-level control policy: there is no enforced “early plan then execute” / “stop-and-write-output” rule to prevent unproductive tool-call loops and to ensure the agent actually invokes the OCR/XLSX skills to generate the single-sheet Excel deliverable.
+- This is a skill-controllable behavioral failure (not an API/dependency/grader issue): execution was ok, no verifier error, but the agent did not progress to using the available `image-ocr` and `xlsx` skills.
+
+(4) General corrective behavior:
+- Add/strengthen a rule that after initial context read, the agent must:
+  1) enumerate input files, 2) run OCR in a batch loop, 3) parse date/total with the keyword/exclusion logic, 4) write exactly one “results” sheet with the required columns, and 5) finish—while enforcing a hard cap on exploratory tool calls (e.g., if no artifact is created within N steps, switch to producing the Excel immediately with best-effort nulls).

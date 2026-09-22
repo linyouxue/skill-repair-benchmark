@@ -1,0 +1,18 @@
+# Batch Diagnoses
+
+## Task jpg-ocr-stat (reward: 0.0)
+
+<label>Output file not produced</label>
+
+(1) **First observable failure:** The required Excel output `/app/workspace/stat_ocr.xlsx` was not generated (or not generated in the expected location), leading the verifier to fail when comparing outputs.
+
+(2) **Trajectory step that produced it:** The agent run ended after only **2 tool calls** and **no skill invocations**, then terminated with `end_turn` without performing the OCR→parsing→Excel-writing workflow. This “early termination without producing the artifact” is the earliest observable failure.
+
+(3) **Relevant skill rule or missing rule:** This is a **missing/violated workflow rule**: the agent should (a) enumerate images, (b) OCR each, (c) extract `date` and `total_amount`, and (d) write a single-sheet Excel named exactly as specified. Despite having `image-ocr` and `xlsx` skills preloaded, the agent never invoked them. So the gap is not a library limitation but a **control-flow/termination guardrail**: *“Do not finish until the required output file exists and matches schema constraints (one sheet, exact columns, ordered rows).”*
+
+(4) **General corrective behavior:** Add/adhere to a completion criterion before stopping: verify that (i) all input images were processed, (ii) a dataframe with exactly `filename,date,total_amount` is built and sorted, (iii) the Excel file is written to the required path with a single sheet `"results"`, and (iv) re-open/read back the Excel to confirm sheet name and column set before ending. This is a skill-controllable planning/execution/termination error, not an API/dependency/harness issue.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/jpg-ocr-stat/iter_3/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/jpg-ocr-stat/iter_3/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/jpg-ocr-stat/workspace
