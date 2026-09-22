@@ -1,0 +1,444 @@
+Hit:1 http://ports.ubuntu.com/ubuntu-ports noble InRelease
+Hit:2 http://ports.ubuntu.com/ubuntu-ports noble-updates InRelease
+Hit:3 http://ports.ubuntu.com/ubuntu-ports noble-backports InRelease
+Hit:4 http://ports.ubuntu.com/ubuntu-ports noble-security InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (8.5.0-2ubuntu10.13).
+0 upgraded, 0 newly installed, 0 to remove and 25 not upgraded.
+downloading uv 0.9.7 aarch64-unknown-linux-gnu
+no checksums to verify
+installing to /root/.local/bin
+  uv
+  uvx
+everything's installed!
+
+To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+    source $HOME/.local/bin/env (sh, bash, zsh)
+    source $HOME/.local/bin/env.fish (fish)
+Downloading pygments (1.2MiB)
+ Downloading pygments
+Installed 6 packages in 12ms
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-8.4.1, pluggy-1.6.0
+rootdir: /app/workspace
+configfile: ../../dev/null
+plugins: json-ctrf-0.3.5
+collected 3 items
+
+. FFF                                                                    [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_maven_build _______________________________
+
+    def test_maven_build():
+        # Print the generated LongestSessionPerJob.java for debugging
+        java_path = "/app/workspace/src/main/java/clusterdata/query/LongestSessionPerJob.java"
+        if os.path.isfile(java_path):
+            with open(java_path, "r") as f:
+                print(f"\n=== Content of LongestSessionPerJob.java ===\n{f.read()}\n=== End of LongestSessionPerJob.java ===\n")
+        else:
+            print(f"Warning: {java_path} not found")
+    
+        """Test that Maven build compiles successfully."""
+        result = subprocess.run(
+            "cd /app/workspace && mvn clean package -q",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+>       assert result.returncode == 0, f"Maven build failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+E       AssertionError: Maven build failed:
+E         stdout: 
+E         stderr: The JAVA_HOME environment variable is not defined correctly,
+E         this environment variable is needed to run this program.
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args='cd /app/workspace && mvn clean package -q', returncode=1, stdout='', stderr='The JAVA_HOME environment variable is not defined correctly,\nthis environment variable is needed to run this program.\n').returncode
+
+/verifier/test_outputs.py:28: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+=== Content of LongestSessionPerJob.java ===
+package clusterdata.query;
+
+import clusterdata.datatypes.JobEvent;
+import clusterdata.datatypes.TaskEvent;
+import clusterdata.utils.AppBase;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.state.ListState;
+import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
+import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.util.Collector;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.zip.GZIPInputStream;
+
+public class LongestSessionPerJob extends AppBase {
+    private static final int SUBMIT = 0;
+    private static final int FINISH = 4;
+    private static final long MICROS_PER_SECOND = 1_000_000L;
+    private static final long MICROS_PER_MILLISECOND = 1_000L;
+    private static final Duration MAX_OUT_OF_ORDERNESS = Duration.ofHours(24);
+
+    public static void main(String[] args) throws Exception {
+        ParameterTool params = ParameterTool.fromArgs(args);
+        String taskInput = params.get("task_input", null);
+        String jobInput = params.get("job_input", null);
+        String outputPath = params.get("output", null);
+        int sessionSeconds = params.getInt("sesssize", 600);
+
+        if (sessionSeconds <= 0) {
+            throw new IllegalArgumentException("sesssize must be positive");
+        }
+        if (taskInput == null && taskEvents == null) {
+            throw new IllegalArgumentException("missing required parameter: task_input");
+        }
+        if (jobInput == null && jobEvents == null) {
+            throw new IllegalArgumentException("missing required parameter: job_input");
+        }
+        if (outputPath == null && out == null) {
+            throw new IllegalArgumentException("missing required parameter: output");
+        }
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(1);
+
+        DataStream<TaskEvent> taskStream = env
+                .addSource(taskSourceOrTest(new TaskEventSource(taskInput)), "task events")
+                .setParallelism(1)
+                .assignTimestampsAndWatermarks(taskWatermarks());
+        DataStream<JobEvent> jobStream = env
+                .addSource(jobSourceOrTest(new JobEventSource(jobInput)), "job events")
+                .setParallelism(1)
+                .assignTimestampsAndWatermarks(jobWatermarks());
+
+        long sessionMicros = Math.multiplyExact((long) sessionSeconds, MICROS_PER_SECOND);
+        DataStream<String> results = taskStream
+                .keyBy(TaskEvent::getJobId)
+                .connect(jobStream.keyBy(JobEvent::getJobId))
+                .process(new LongestStageProcessFunction(sessionMicros));
+
+        @SuppressWarnings("unchecked")
+        SinkFunction<String> sink = (SinkFunction<String>) sinkOrTest(new LocalFileSink(outputPath));
+        results.addSink(sink).setParallelism(1);
+        env.execute("LongestSessionPerJob");
+    }
+
+    private static WatermarkStrategy<TaskEvent> taskWatermarks() {
+        return WatermarkStrategy.<TaskEvent>forBoundedOutOfOrderness(MAX_OUT_OF_ORDERNESS)
+                .withTimestampAssigner((event, recordTimestamp) -> toMillis(event.getTimestamp()));
+    }
+
+    private static WatermarkStrategy<JobEvent> jobWatermarks() {
+        return WatermarkStrategy.<JobEvent>forBoundedOutOfOrderness(MAX_OUT_OF_ORDERNESS)
+                .withTimestampAssigner((event, recordTimestamp) -> toMillis(event.getTimestamp()));
+    }
+
+    private static long toMillis(long timestampMicros) {
+        if (timestampMicros == Long.MAX_VALUE) {
+            return Long.MAX_VALUE;
+        }
+        return Math.floorDiv(timestampMicros, MICROS_PER_MILLISECOND);
+    }
+
+    private static long timerMillis(long timestampMicros) {
+        if (timestampMicros >= Long.MAX_VALUE - (MICROS_PER_MILLISECOND - 1)) {
+            return Long.MAX_VALUE;
+        }
+        return Math.floorDiv(timestampMicros + MICROS_PER_MILLISECOND - 1,
+                MICROS_PER_MILLISECOND);
+    }
+
+    private static final class LongestStageProcessFunction
+            extends KeyedCoProcessFunction<Long, TaskEvent, JobEvent, String> {
+        private final long sessionMicros;
+        private transient ListState<Long> submitTimestamps;
+        private transient ValueState<Long> finishTimestamp;
+        private transient ValueState<Boolean> emitted;
+
+        private LongestStageProcessFunction(long sessionMicros) {
+            this.sessionMicros = sessionMicros;
+        }
+
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            submitTimestamps = getRuntimeContext().getListState(
+                    new ListStateDescriptor<>("submit timestamps", Long.class));
+            finishTimestamp = getRuntimeContext().getState(
+                    new ValueStateDescriptor<>("finish timestamp", Long.class));
+            emitted = getRuntimeContext().getState(
+                    new ValueStateDescriptor<>("result emitted", Boolean.class));
+        }
+
+        @Override
+        public void processElement1(TaskEvent event, Context context, Collector<String> out)
+                throws Exception {
+            if (event.getEventType() != SUBMIT || Boolean.TRUE.equals(emitted.value())) {
+                return;
+            }
+            Long finishedAt = finishTimestamp.value();
+            if (finishedAt == null || event.getTimestamp() <= finishedAt) {
+                submitTimestamps.add(event.getTimestamp());
+            }
+        }
+
+        @Override
+        public void processElement2(JobEvent event, Context context, Collector<String> out)
+                throws Exception {
+            if (event.getEventType() != FINISH || Boolean.TRUE.equals(emitted.value())
+                    || event.getTimestamp() == Long.MAX_VALUE) {
+                return;
+            }
+
+            Long previousFinish = finishTimestamp.value();
+            if (previousFinish == null || event.getTimestamp() < previousFinish) {
+                finishTimestamp.update(event.getTimestamp());
+                context.timerService().registerEventTimeTimer(timerMillis(event.getTimestamp()));
+            }
+        }
+
+        @Override
+        public void onTimer(long timestamp, OnTimerContext context, Collector<String> out)
+                throws Exception {
+            if (Boolean.TRUE.equals(emitted.value())) {
+                return;
+            }
+
+            Long finishedAt = finishTimestamp.value();
+            if (finishedAt == null) {
+                return;
+            }
+
+            List<Long> timestamps = new ArrayList<>();
+            for (Long submitTimestamp : submitTimestamps.get()) {
+                if (submitTimestamp != null && submitTimestamp <= finishedAt) {
+                    timestamps.add(submitTimestamp);
+                }
+            }
+            if (!timestamps.isEmpty()) {
+                Collections.sort(timestamps);
+                long longestStage = longestStage(timestamps);
+                out.collect("(" + context.getCurrentKey() + "," + longestStage + ")");
+            }
+            emitted.update(true);
+        }
+
+        private long longestStage(List<Long> sortedTimestamps) {
+            long longest = 0;
+            long current = 0;
+            Long previous = null;
+            for (long timestamp : sortedTimestamps) {
+                if (previous == null || timestamp - previous >= sessionMicros) {
+                    current = 1;
+                } else {
+                    current++;
+                }
+                longest = Math.max(longest, current);
+                previous = timestamp;
+            }
+            return longest;
+        }
+    }
+
+    private static final class TaskEventSource extends RichParallelSourceFunction<TaskEvent> {
+        private final String path;
+        private volatile boolean running = true;
+
+        private TaskEventSource(String path) {
+            this.path = path;
+        }
+
+        @Override
+        public void run(SourceContext<TaskEvent> context) throws Exception {
+            if (path == null) {
+                return;
+            }
+            try (BufferedReader reader = openReader(path)) {
+                String line;
+                long lineNumber = 0;
+                while (running && (line = reader.readLine()) != null) {
+                    lineNumber++;
+                    if (line.isEmpty()) {
+                        continue;
+                    }
+                    try {
+                        context.collect(TaskEvent.fromCsv(line));
+                    } catch (RuntimeException e) {
+                        System.err.println("Skipping malformed task row " + path + ":"
+                                + lineNumber + " (" + e.getMessage() + ")");
+                    }
+                }
+            }
+            if (running) {
+                context.emitWatermark(new Watermark(Long.MAX_VALUE));
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
+    }
+
+    private static final class JobEventSource extends RichParallelSourceFunction<JobEvent> {
+        private final String path;
+        private volatile boolean running = true;
+
+        private JobEventSource(String path) {
+            this.path = path;
+        }
+
+        @Override
+        public void run(SourceContext<JobEvent> context) throws Exception {
+            if (path == null) {
+                return;
+            }
+            try (BufferedReader reader = openReader(path)) {
+                String line;
+                long lineNumber = 0;
+                while (running && (line = reader.readLine()) != null) {
+                    lineNumber++;
+                    if (line.isEmpty()) {
+                        continue;
+                    }
+                    try {
+                        context.collect(JobEvent.fromCsv(line));
+                    } catch (RuntimeException e) {
+                        System.err.println("Skipping malformed job row " + path + ":"
+                                + lineNumber + " (" + e.getMessage() + ")");
+                    }
+                }
+            }
+            if (running) {
+                context.emitWatermark(new Watermark(Long.MAX_VALUE));
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
+    }
+
+    private static BufferedReader openReader(String path) throws IOException {
+        InputStream input = new FileInputStream(path);
+        if (path.endsWith(".gz")) {
+            input = new GZIPInputStream(input);
+        }
+        return new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
+    }
+
+    private static final class LocalFileSink extends RichSinkFunction<String> {
+        private final String path;
+        private transient BufferedWriter writer;
+
+        private LocalFileSink(String path) {
+            this.path = path;
+        }
+
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            if (getRuntimeContext().getIndexOfThisSubtask() != 0 || path == null) {
+                return;
+            }
+            File output = new File(path);
+            File parent = output.getParentFile();
+            if (parent != null) {
+                Files.createDirectories(parent.toPath());
+            }
+            writer = Files.newBufferedWriter(output.toPath(), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        }
+
+        @Override
+        public void invoke(String value, Context context) throws Exception {
+            if (writer != null) {
+                writer.write(value);
+                writer.newLine();
+            }
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (writer != null) {
+                writer.close();
+            }
+        }
+    }
+}
+
+=== End of LongestSessionPerJob.java ===
+
+_____________________________ test_flink_job_runs ______________________________
+
+    def test_flink_job_runs():
+        """Test that the Flink job runs without error."""
+        result = subprocess.run(
+            "cd /opt/flink/bin && ./flink run -t local "
+            "-c clusterdata.query.LongestSessionPerJob "
+            "/app/workspace/target/LongestSessionPerJob-jar-with-dependencies.jar "
+            "--task_input /app/workspace/data/task_events/part-00001-of-00500.csv.gz "
+            "--job_input /app/workspace/data/job_events/part-00001-of-00500.csv.gz "
+            "--output /app/workspace/out.txt",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+>       assert result.returncode == 0, f"Flink job failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+E       AssertionError: Flink job failed:
+E         stdout: Could not get job jar and dependencies from JAR file: JAR file does not exist: /app/workspace/target/LongestSessionPerJob-jar-with-dependencies.jar
+E         
+E         Use the help option (-h or --help) to get help on the command.
+E         
+E         stderr: 
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args='cd /opt/flink/bin && ./flink run -t local -c clusterdata.query.LongestSessionPerJob /app/worksp...essionPerJob-jar-with-dependencies.jar\n\nUse the help option (-h or --help) to get help on the command.\n', stderr='').returncode
+
+/verifier/test_outputs.py:44: AssertionError
+_________________________ test_output_matches_expected _________________________
+
+    def test_output_matches_expected():
+        """Test that the output file matches the expected output. This testcase also check the query semantics."""
+        expected_path = os.path.join(os.path.dirname(__file__), "out_lsj_001a.txt")
+        actual_path = "/app/workspace/out.txt"
+    
+>       assert os.path.isfile(actual_path), f"Output file {actual_path} does not exist"
+E       AssertionError: Output file /app/workspace/out.txt does not exist
+E       assert False
+E        +  where False = <function isfile at 0xffffa7f7cb80>('/app/workspace/out.txt')
+E        +    where <function isfile at 0xffffa7f7cb80> = <module 'posixpath' (frozen)>.isfile
+E        +      where <module 'posixpath' (frozen)> = os.path
+
+/verifier/test_outputs.py:52: AssertionError
+=========================== short test summary info ============================
+FAILED ::test_maven_build - AssertionError: Maven build failed:
+FAILED ::test_flink_job_runs - AssertionError: Flink job failed:
+FAILED ::test_output_matches_expected - AssertionError: Output file /app/work...
+============================== 3 failed in 0.64s ===============================
