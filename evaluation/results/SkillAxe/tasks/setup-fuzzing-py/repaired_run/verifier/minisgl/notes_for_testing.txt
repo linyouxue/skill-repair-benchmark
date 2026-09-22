@@ -1,0 +1,32 @@
+MiniSGL – notes for fuzzing / robustness testing
+
+Important constraint
+- The project declares very heavy dependencies (torch, transformers, flashinfer, etc.).
+- For lightweight fuzzing validation here, prefer modules that can be executed without importing the full minisgl package tree.
+
+High-value (low-dependency) file(s)
+- python/minisgl/utils/misc.py
+  - Pure-Python integer arithmetic and a decorator factory.
+  - NOTE: importing minisgl.utils normally runs minisgl/utils/__init__.py which imports heavyweight deps.
+  - For fuzzing, load misc.py directly by file path (importlib.util.spec_from_file_location).
+
+Functions to target
+- call_if_main(name: str="__main__", discard: bool|None=None)
+  - Returns decorators with subtle control flow.
+- div_even(a: int, b: int, allow_replicate: bool=False)
+  - Assertion-based preconditions; should fail cleanly.
+- div_ceil(a: int, b: int)
+- align_ceil(a: int, b: int)
+- align_down(a: int, b: int)
+
+Oracles
+- No crash beyond expected AssertionError / ZeroDivisionError for invalid parameters.
+- Returned objects from call_if_main should be callable and behave consistently.
+
+Expected/acceptable exceptions
+- AssertionError
+- ZeroDivisionError
+- TypeError (if non-ints are forced through)
+
+Seed ideas
+- Small integers including 0, 1, -1, powers of two, very large magnitude ints.

@@ -1,0 +1,38 @@
+Arrow (date/time library) – notes for fuzzing / robustness testing
+
+High-value files
+- arrow/api.py: public entrypoints (arrow.get/now/utcnow)
+- arrow/parser.py: DateTimeParser, TzinfoParser, ParserError (string parsing)
+- arrow/formatter.py: DateTimeFormatter (token formatting)
+- arrow/arrow.py: Arrow class constructors and conversions
+- arrow/util.py: timestamp/ordinal/ISO-week helpers and validators
+
+Functions / methods to target
+- arrow.api.get(*args, **kwargs) / arrow.get(...)
+  - Parses strings, timestamps, datetimes, and other inputs.
+  - Drives most of the parsing stack.
+- arrow.parser.DateTimeParser.parse(...)
+  - String parsing + matching logic. Likely complex and regex/token heavy.
+- arrow.parser.TzinfoParser.parse(...)
+  - Timezone parsing, edge cases around offsets and tz database.
+- arrow.formatter.DateTimeFormatter.format(...)
+  - Token formatting, locale/timezone interactions.
+- arrow.arrow.Arrow.strptime(...), Arrow.fromtimestamp(...), Arrow.utcfromtimestamp(...)
+  - Conversion boundaries and error handling for bad ranges.
+- arrow.util.normalize_timestamp(), validate_ordinal(), validate_bounds(), iso_to_gregorian()
+  - Useful for focused unit fuzzing with integer/float boundaries.
+
+Existing tests and likely oracles (from tests/)
+- Many tests exercise parsing/formatting and constructors.
+- Fuzz-friendly oracles:
+  - No-crash / no-hang for arbitrary strings.
+  - For structured ISO timestamps: parse -> isoformat -> parse is stable.
+
+Expected/acceptable exceptions for malformed input
+- arrow.parser.ParserError / ValueError
+- TypeError
+- OverflowError
+
+Seed ideas
+- ISO-8601 strings and formats from tests/test_parser.py, tests/test_formatter.py
+- Timezones: 'UTC', 'Europe/Paris', 'America/New_York', numeric offsets like '+02:00'

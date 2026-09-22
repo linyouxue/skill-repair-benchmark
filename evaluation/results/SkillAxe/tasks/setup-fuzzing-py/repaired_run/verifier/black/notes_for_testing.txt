@@ -1,0 +1,34 @@
+Black (Python code formatter) – notes for fuzzing / robustness testing
+
+High-value files
+- src/black/__init__.py: format_str(), format_file_contents(), stability/equivalence checks
+- src/black/parsing.py: lib2to3_parse(), parse_ast() (parsing boundary)
+- src/black/handle_ipynb_magics.py: notebook magic handling (string rewriting)
+
+Functions / methods to target
+- black.format_str(src: str, mode: black.FileMode)
+  - Primary entrypoint; parses and rewrites code.
+- black.format_file_contents(src: str, fast: bool, mode: black.FileMode)
+  - Similar to format_str with more options/paths.
+- black.parsing.lib2to3_parse(src: str, ...)
+  - Parser boundary; should reject malformed inputs safely.
+- black.parsing.parse_ast(src: str)
+  - Uses Python ast parsing; can raise SyntaxError.
+- black.assert_equivalent(src, dst) / black.assert_stable(src, dst, mode)
+  - Great correctness oracles when formatting succeeds.
+
+Existing tests and likely oracles (from tests/)
+- tests/test_format.py and related modules strongly exercise formatting.
+- Fuzz-friendly oracles:
+  - If format_str succeeds, output should be stable under reformat.
+  - If format_str succeeds, black.assert_stable/assert_equivalent should not fail.
+
+Expected/acceptable exceptions for malformed input
+- black.InvalidInput
+- SyntaxError / IndentationError
+- ValueError / TokenError (occasionally from tokenization)
+
+Seed ideas
+- Small valid Python snippets:
+  - 'pass\n', 'x=1\n', 'def f():\n  return 1\n'
+- Edge whitespace / newlines / encoding oddities (including '\x00')
