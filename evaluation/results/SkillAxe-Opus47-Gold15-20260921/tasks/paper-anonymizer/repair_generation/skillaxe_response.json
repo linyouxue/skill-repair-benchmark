@@ -1,0 +1,131 @@
+{
+  "task_id": "paper-anonymizer",
+  "source_rollout_id": "paper-anonymizer-opus47-original-skill-r001",
+  "repair_model": "anthropic/claude-opus-4.7",
+  "payload": {
+    "diagnoses": [
+      {
+        "prediction_id": "D1",
+        "description": "The skill lists 'Equal contribution' as a pattern to redact but the verifier's identifier check for paper3 failed because the exact literal 'Equal contribution' remained in the output. The skill's example only shows starred variants ('* Equal contribution') and does not emphasize that plain, unstarred, and possibly hyphenated variants (e.g., '*Equal contribution', 'Equal contribution', 'Equal Contribution', 'equal contribution', 'These authors contributed equally') must all be searched. Because search_for is case-sensitive and literal, an agent following the skill can easily miss variants. Additionally, the skill omits 'Equal contribution' from the identifier examples verifiers care about, and does not tell the agent to scan the paper text for likely equal-contribution markers before choosing patterns.",
+        "evidence": "Verifier failure: 'paper3.pdf: identifiers not redacted: [\"Equal contribution\"]'. The agent's leak-check regex list did not include an 'Equal contribution' pattern, and the trajectory shows raw text containing '*Equal contribution' on paper3 page 0. The skill's pitfall list mentions '* Equal contribution' but does not require redacting all case/spacing variants.",
+        "locations": [
+          {
+            "file": "academic-pdf-redaction/SKILL.md",
+            "section": "Patterns to Redact (Before References Only) - item 8 Equal contribution footnotes"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D2",
+        "description": "The skill's verification function only checks page count and text-retention ratio; it does not verify that the patterns the agent intended to redact are actually absent from the redacted output. This means the agent can silently miss a required identifier (as happened with 'Equal contribution') and still see 'Verification passed'. A post-redaction 'residual pattern' check is needed for the identifier categories the task cares about (arXiv IDs, DOIs, venues, equal-contribution markers, emails, author names).",
+        "evidence": "The provided verify_redaction only compares character counts and page counts; the verifier failure was a leak of a specific string, which the skill's verification would not have caught. The agent built its own ad-hoc regex leak check but forgot the 'Equal contribution' pattern.",
+        "locations": [
+          {
+            "file": "academic-pdf-redaction/SKILL.md",
+            "section": "REQUIRED: Verification Function"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D3",
+        "description": "search_for in PyMuPDF is case-sensitive by default and matches exact substrings; the skill does not tell the agent to (a) pass flags=fitz.TEXT_DEHYPHENATE and quads=False consistently, or more importantly (b) enumerate case variants and spacing variants for footnote markers. This weakens solution-path coverage for common footnote texts.",
+        "evidence": "Trajectory shows raw text '*Equal contribution' surviving in paper3, and skill's example only shows one literal variant. No guidance on case-insensitive matching or variant enumeration.",
+        "locations": [
+          {
+            "file": "academic-pdf-redaction/SKILL.md",
+            "section": "PyMuPDF (fitz) - Recommended Approach"
+          }
+        ]
+      }
+    ],
+    "file_updates": [
+      {
+        "path": "academic-pdf-redaction/SKILL.md",
+        "content": "---\nname: academic-pdf-redaction\ndescription: Redact text from PDF documents for blind review anonymization\n---\n\n# PDF Redaction for Blind Review\n\nRedact identifying information from academic papers for blind review.\n\n## CRITICAL RULES\n\n1. **PRESERVE References section** - Self-citations MUST remain intact\n2. **ONLY redact specific text matches** - Never redact entire pages/regions\n3. **VERIFY output** - Check that 80%+ of original text remains AND that every intended pattern is actually gone\n\n## Common Pitfalls to AVOID\n\n```python\n# ❌ WRONG - This removes ALL text from the page:\nfor block in page.get_text(\"blocks\"):\n    page.add_redact_annot(fitz.Rect(block[:4]))\n\n# ❌ WRONG - Drawing rectangles over text:\npage.draw_rect(fitz.Rect(0, 0, 600, 100), fill=(0,0,0))\n\n# ✅ CORRECT - Only redact specific search matches:\nfor rect in page.search_for(\"John Smith\"):\n    page.add_redact_annot(rect)\n```\n\n## Patterns to Redact (Before References Only)\n\n**IMPORTANT: Use FULL names/phrases, not partial matches!**\n- ✅ \"John Smith\" (full name)\n- ❌ \"Smith\" (partial - would incorrectly match \"Smith et al.\" citations in References)\n\n1. **Author names** - FULL names only (e.g., \"John Smith\", not just \"Smith\"). Also redact first-name-only occurrences that appear in acknowledgements (e.g., \"We thank John for...\").\n2. **Affiliations** - Universities, companies (e.g., \"Duke University\")\n3. **Email addresses** - Pattern: `*@*.edu`, `*@*.com`\n4. **Venue names** - Conference/workshop names AND accompanying location/date/copyright lines (e.g., \"ICML 2024\", \"ICML Workshop on ...\", \"Vancouver, Canada\", \"Copyright 2025 by the author(s)\", \"Interspeech 2024\", \"1-5 September 2024, Kos, Greece\")\n5. **arXiv identifiers** - Pattern: `arXiv:XXXX.XXXXX` AND the full vertical banner line that often appears on page 1 (e.g., `arXiv:2509.26542v1  [eess.AS]  30 Sep 2025` — redact the id, category, and date parts).\n6. **DOIs** - Pattern: `10.XXXX/...`\n7. **Acknowledgement content** - Names in \"Acknowledgements\" section AND identifying grant numbers / agencies that identify authors (e.g., \"NSF 2112562\", \"ARO W911NF-23-2-0224\", \"NSFC 62072462\"). Grant numbers routinely leak identity via public grant databases.\n8. **Equal contribution / equal advising footnotes** — MANDATORY, and this is a common verifier trip point. `page.search_for` is case-sensitive and literal, so you MUST enumerate variants. At minimum, search for every one of:\n   - `\"Equal contribution\"`\n   - `\"equal contribution\"`\n   - `\"Equal Contribution\"`\n   - `\"EQUAL CONTRIBUTION\"`\n   - `\"*Equal contribution\"` (asterisk-prefixed, no space)\n   - `\"* Equal contribution\"` (asterisk-prefixed, with space)\n   - `\"†Equal contribution\"` / `\"† Equal contribution\"`\n   - `\"Equal contributors\"`, `\"Equal contribution.\"`, `\"Equal contribution,\"`\n   - `\"These authors contributed equally\"`, `\"Authors contributed equally\"`, `\"Equally contributing authors\"`\n   - `\"Equal advising\"`, `\"Equal senior authorship\"`, `\"Co-first authors\"`, `\"Co-senior authors\"`\n   Also grep the pre-references text with a case-insensitive regex like `r\"equal(ly)?\\s+(contribut|advis)\"` to discover any variant you missed before finalising your pattern list.\n\n## Recommended Discovery Workflow (before choosing patterns)\n\nBefore writing your redaction pattern list, scan each PDF once to enumerate what actually appears. This is what prevents missing variants:\n\n```python\nimport fitz, re\n\ndef discover_identifiers(path, refs_page):\n    doc = fitz.open(path)\n    pre_refs = \"\".join(doc[i].get_text() for i in range(refs_page))\n    doc.close()\n    findings = {\n        \"emails\":   re.findall(r\"[\\w.+-]+@[\\w-]+\\.[\\w.-]+\", pre_refs),\n        \"arxiv\":    re.findall(r\"arXiv:\\d{4}\\.\\d{4,5}(?:v\\d+)?\", pre_refs),\n        \"doi\":      re.findall(r\"10\\.\\d{4,9}/[^\\s]+\", pre_refs),\n        \"equal\":    re.findall(r\".{0,20}[Ee]qual(?:ly)?\\s+(?:[Cc]ontribut|[Aa]dvis)[^\\n]{0,40}\", pre_refs),\n        \"venues\":   re.findall(r\"(ICML|NeurIPS|ICLR|ACL|EMNLP|CVPR|ECCV|ICCV|AAAI|Interspeech|ICASSP)[^\\n]{0,60}\", pre_refs),\n        \"grants\":   re.findall(r\"(NSF|ARO|NSFC|ONR|DARPA)[^\\n]{0,40}\", pre_refs),\n        \"copyright\":re.findall(r\"Copyright\\s+\\d{4}[^\\n]{0,80}\", pre_refs),\n    }\n    return findings\n```\n\nAdd every discovered literal (and its obvious variants) to your `patterns` list. Do NOT rely on the examples in this file being exhaustive.\n\n## PyMuPDF (fitz) - Recommended Approach\n\n```python\nimport fitz\nimport os\n\ndef redact_with_pymupdf(input_path: str, output_path: str, patterns: list[str]):\n    \"\"\"Redact specific patterns from PDF using PyMuPDF.\"\"\"\n    doc = fitz.open(input_path)\n    original_len = sum(len(p.get_text()) for p in doc)\n\n    # Find References page - stop redacting there\n    references_page = None\n    for i, page in enumerate(doc):\n        if \"references\" in page.get_text().lower():\n            references_page = i\n            break\n\n    for page_num, page in enumerate(doc):\n        if references_page is not None and page_num >= references_page:\n            continue  # Skip References section\n\n        for pattern in patterns:\n            # ONLY redact exact search matches. search_for is case-sensitive\n            # and literal, so include case/spacing variants in `patterns`.\n            for rect in page.search_for(pattern):\n                page.add_redact_annot(rect, fill=(0, 0, 0))\n        page.apply_redactions()\n\n    os.makedirs(os.path.dirname(output_path), exist_ok=True)\n    doc.save(output_path)\n    doc.close()\n\n    # MUST verify after saving\n    verify_redaction(input_path, output_path, patterns, references_page)\n```\n\n## REQUIRED: Verification Function\n\n**Always run this after ANY redaction. It does two independent checks:**\n1. Structural check (page count, char retention).\n2. **Residual-pattern check** — every literal in `patterns` must be absent from the pre-references text of the output. This is what catches missed variants like an un-redacted \"Equal contribution\".\n\n```python\nimport fitz, re\n\nEQUAL_CONTRIB_REGEX = re.compile(r\"equal(?:ly)?\\s+(?:contribut|advis)\", re.IGNORECASE)\nARXIV_REGEX         = re.compile(r\"arXiv:\\d{4}\\.\\d{4,5}\", re.IGNORECASE)\nDOI_REGEX           = re.compile(r\"\\b10\\.\\d{4,9}/\\S+\")\nEMAIL_REGEX         = re.compile(r\"[\\w.+-]+@[\\w-]+\\.[\\w.-]+\")\n\ndef verify_redaction(original_path, output_path, patterns=None, references_page=None):\n    \"\"\"Verify redaction didn't corrupt the PDF and that identifiers are gone.\"\"\"\n    orig = fitz.open(original_path)\n    redc = fitz.open(output_path)\n\n    orig_len = sum(len(p.get_text()) for p in orig)\n    redc_len = sum(len(p.get_text()) for p in redc)\n\n    print(f\"Original: {len(orig)} pages, {orig_len} chars\")\n    print(f\"Redacted: {len(redc)} pages, {redc_len} chars\")\n    print(f\"Retained: {redc_len/orig_len:.1%}\")\n\n    # 1) DEFENSIVE STRUCTURAL CHECKS\n    if len(redc) != len(orig):\n        raise ValueError(f\"Page count changed: {len(orig)} -> {len(redc)}\")\n    if redc_len < 1000:\n        raise ValueError(f\"PDF corrupted: only {redc_len} chars remain!\")\n    if redc_len < orig_len * 0.7:\n        raise ValueError(f\"Too much removed: kept only {redc_len/orig_len:.0%}\")\n\n    # 2) RESIDUAL-PATTERN CHECK on pre-references pages\n    if references_page is None:\n        references_page = len(redc)\n        for i, page in enumerate(redc):\n            if \"references\" in page.get_text().lower():\n                references_page = i\n                break\n    pre_refs = \"\".join(redc[i].get_text() for i in range(references_page))\n\n    leaks = []\n    if patterns:\n        for pat in patterns:\n            if pat and pat in pre_refs:\n                leaks.append(f\"literal not redacted: {pat!r}\")\n\n    # Category regex sweeps (catch variants the pattern list forgot)\n    for name, rgx in [\n        (\"equal-contribution marker\", EQUAL_CONTRIB_REGEX),\n        (\"arXiv id\",                   ARXIV_REGEX),\n        (\"DOI\",                        DOI_REGEX),\n        (\"email\",                      EMAIL_REGEX),\n    ]:\n        m = rgx.search(pre_refs)\n        if m:\n            leaks.append(f\"{name} still present: {m.group(0)!r}\")\n\n    if leaks:\n        raise ValueError(\"Residual identifiers detected in redacted PDF:\\n  - \" +\n                         \"\\n  - \".join(leaks))\n\n    orig.close()\n    redc.close()\n    print(\"✓ Verification passed\")\n```\n\nIf `verify_redaction` raises, extend your `patterns` list with the reported variant and re-run redaction. Do not declare the task done until this function passes for every output PDF.\n"
+      }
+    ],
+    "skillaxe_evaluation": {
+      "quality_impact": {
+        "score": 0.8,
+        "rationale": "Directly addresses the observed failure by (a) enumerating equal-contribution variants including the exact 'Equal contribution' literal that leaked, and (b) adding a residual-pattern verification step that would have surfaced the leak before completion."
+      },
+      "trigger_precision": {
+        "score": 0.85,
+        "rationale": "Changes stay within the academic-pdf-redaction skill boundary (blind-review redaction) and do not overfit to paper3's specific text — they generalize to case/spacing/asterisk variants and to sibling markers like equal advising and co-first authors."
+      },
+      "instruction_compliance": {
+        "score": 0.85,
+        "rationale": "Turns implicit expectations into explicit required checks: mandatory variant enumeration, a discovery pre-scan, and a verification function that fails loudly on residual identifiers. This shifts the failure mode from silent non-compliance to explicit error."
+      },
+      "solution_path_coverage": {
+        "score": 0.8,
+        "rationale": "Supports multiple valid solution paths: agents can either enumerate literal variants or use the provided regex sweep. Also broadens coverage to venues/copyright lines, grant numbers, and vertical arXiv banners that other papers may exhibit, without prescribing a single workflow."
+      },
+      "overall_rationale": "The repair targets the exact skill deficiency evidenced by the verifier (missed 'Equal contribution' literal) via two independent mechanisms — an expanded variant list and a residual-pattern verifier — while preserving all prior guidance and staying inside the skill's scope."
+    }
+  },
+  "submission_row": {
+    "task_id": "paper-anonymizer",
+    "diagnoses": [
+      {
+        "prediction_id": "D1",
+        "description": "The skill lists 'Equal contribution' as a pattern to redact but the verifier's identifier check for paper3 failed because the exact literal 'Equal contribution' remained in the output. The skill's example only shows starred variants ('* Equal contribution') and does not emphasize that plain, unstarred, and possibly hyphenated variants (e.g., '*Equal contribution', 'Equal contribution', 'Equal Contribution', 'equal contribution', 'These authors contributed equally') must all be searched. Because search_for is case-sensitive and literal, an agent following the skill can easily miss variants. Additionally, the skill omits 'Equal contribution' from the identifier examples verifiers care about, and does not tell the agent to scan the paper text for likely equal-contribution markers before choosing patterns.",
+        "locations": [
+          {
+            "file": "academic-pdf-redaction/SKILL.md",
+            "section": "Patterns to Redact (Before References Only) - item 8 Equal contribution footnotes"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D2",
+        "description": "The skill's verification function only checks page count and text-retention ratio; it does not verify that the patterns the agent intended to redact are actually absent from the redacted output. This means the agent can silently miss a required identifier (as happened with 'Equal contribution') and still see 'Verification passed'. A post-redaction 'residual pattern' check is needed for the identifier categories the task cares about (arXiv IDs, DOIs, venues, equal-contribution markers, emails, author names).",
+        "locations": [
+          {
+            "file": "academic-pdf-redaction/SKILL.md",
+            "section": "REQUIRED: Verification Function"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D3",
+        "description": "search_for in PyMuPDF is case-sensitive by default and matches exact substrings; the skill does not tell the agent to (a) pass flags=fitz.TEXT_DEHYPHENATE and quads=False consistently, or more importantly (b) enumerate case variants and spacing variants for footnote markers. This weakens solution-path coverage for common footnote texts.",
+        "locations": [
+          {
+            "file": "academic-pdf-redaction/SKILL.md",
+            "section": "PyMuPDF (fitz) - Recommended Approach"
+          }
+        ]
+      }
+    ],
+    "repaired_bundle": "tasks/paper-anonymizer/skills"
+  },
+  "updated_files": [
+    "academic-pdf-redaction/SKILL.md"
+  ],
+  "usage": {
+    "completion_tokens": 5703,
+    "prompt_tokens": 27623,
+    "total_tokens": 33326,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": 0,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "image_tokens": 0
+    },
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost": 0.28069,
+    "is_byok": false,
+    "cost_details": {
+      "upstream_inference_cost": 0.28069,
+      "upstream_inference_prompt_cost": 0.138115,
+      "upstream_inference_completions_cost": 0.142575
+    }
+  }
+}

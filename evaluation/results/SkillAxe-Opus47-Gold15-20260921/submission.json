@@ -1,0 +1,587 @@
+{
+  "method_id": "skillaxe-opus47-gold15-20260921",
+  "benchmark_version": "manual-gold-defects-20260917-v25-claude-fail15",
+  "tasks": [
+    {
+      "task_id": "azure-bgp-oscillation-route-leak",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "Skill conflates 'breaks preference cycle' with 'any export/ingress filter of provider routes from hub1 to hub2'. The skill's Tier 2 guidance treats export policies that block provider→peer advertisement, no-export community, and ingress AS_PATH filtering as valid oscillation fixes. Per the task, oscillation is only resolved by breaking the routing preference cycle (i.e., changing preferences.json semantics), not by filtering which specific prefixes are advertised. Blocking provider routes stops the leak but the peer-preference cycle between 65002↔65003 remains for any other prefix category, so oscillation_resolved should be False for these solutions.",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Fix Selection Logic — Tier 2 Export / Route Policy — For oscillation"
+            },
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Reasoning Workflow — Step 2/Step 3"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Skill does not clearly state that RPKI origin validation resolves route leaks when the origin ASN matches the legitimate originator (i.e., RPKI passes and does not drop the route, therefore does not stop the leak). More generally, skill fails to instruct agents to check whether an ingress-side validation actually filters the leaked announcement given the input data. The verifier expects RPKI in this scenario to resolve the leak (expected_leak=True) because the leaked route carries a valid origin that RPKI can bind and use with policy to reject transit paths where origin is not directly connected — but this depends on task-specific interpretation. The skill needs to explicitly instruct agents to determine leak-resolution by whether the mechanism prevents hub1 from advertising, or hub2 from accepting, the provider-learned prefix.",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Fix Selection Logic — Tier 2 — For route leaks (RPKI bullet)"
+            },
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Common Pitfalls"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "Skill lacks an explicit decision rubric mapping each candidate-solution class to (oscillation_resolved, route_leak_resolved) with the strict task definitions. The task defines strict criteria: oscillation resolved ⇔ breaks the preference cycle (i.e., changes preferences); route leak resolved ⇔ stops hub1/hub2 from advertising provider routes to the other hub. The current skill mixes tiers and 'both' language, encouraging over-crediting Tier 2 fixes on the oscillation axis.",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Fix Selection Logic (Ranked)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/azure-bgp-oscillation-route-leak/repaired_skill",
+      "executor_run_id": "azure-bgp-oscillation-route-leak-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [
+        {
+          "prediction_id": "d1",
+          "description": "Verifier's fixture starts an HTTP server on a fixed port (8765) but the agent (or a leftover process) already had a server bound to that port, causing 7 tests to error with 'Address already in use'. The skill does not warn agents to avoid leaving long-running processes/servers bound to ports before the verifier runs.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Determinism rules / new subsection on process & port hygiene"
+            }
+          ]
+        },
+        {
+          "prediction_id": "d2",
+          "description": "Skill lacks explicit guidance that D3 visualizations depending on `d3.csv` / `fetch` must be served via HTTP (not file://) and that any test HTTP servers started by the agent MUST be shut down (and their ports freed) before finishing, since verifiers commonly spin up their own server on a fixed port.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Offline + dependency determinism / serving & teardown"
+            }
+          ]
+        },
+        {
+          "prediction_id": "d3",
+          "description": "Skill defaults to D3 v7 and `dist/` output paths, but many tasks (including this one) require v6 and custom output paths. The skill should tell the agent to honor task-specified D3 version and output layout instead of the defaults.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Outputs / Recommended project layout / Offline determinism"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/data-to-d3/repaired_skill",
+      "executor_run_id": "data-to-d3-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "dynamic-object-aware-egomotion",
+      "diagnoses": [
+        {
+          "prediction_id": "mask-iou-catastrophic",
+          "description": "Dynamic-object masks achieve Mean IoU 0.014 (below 0.1 threshold) even though motion classification passes. The skill's mask pipeline uses only prev→curr absdiff after affine warp, which under strong dolly-in parallax (as in this walking POV) either floods the mask (~15-20% of pixels flagged) or, when thresholds are tightened, wipes it out entirely. The skill offers no guidance on choosing between parallax-tolerant and parallax-sensitive settings, no calibration procedure, and no verification that mask area is plausible before submission.",
+          "locations": [
+            {
+              "file": "dyn-object-masks/SKILL.md",
+              "section": "Workflow / Code sketch / Self-check"
+            }
+          ]
+        },
+        {
+          "prediction_id": "missing-mask-sanity-check",
+          "description": "The output-validation skill only checks structural CSR integrity, never plausibility of mask content. Two very different failure modes (mask covers 15-22% of every pixel; mask is empty on most frames) both passed the local self-check yet failed the accuracy test. An explicit sanity bound on per-frame foreground fraction and a warning against near-zero / near-total coverage would have prompted re-tuning.",
+          "locations": [
+            {
+              "file": "output-validation/SKILL.md",
+              "section": "Checks / Reference snippet / Self-check list"
+            }
+          ]
+        },
+        {
+          "prediction_id": "no-guidance-on-parallax-and-tuning-loop",
+          "description": "dyn-object-masks gives one static threshold recipe with no fallback strategy when the scene has strong translational parallax (walking POV, dolly-in). It also does not tell the agent to iterate: threshold → measure area fraction → adjust. The result is a one-shot choice with no feedback loop, which is exactly what happened in the trajectory (two extreme attempts, no middle ground).",
+          "locations": [
+            {
+              "file": "dyn-object-masks/SKILL.md",
+              "section": "Workflow / Heuristics"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/dynamic-object-aware-egomotion/repaired_skill",
+      "executor_run_id": "dynamic-object-aware-egomotion-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "enterprise-information-search",
+      "diagnoses": [
+        {
+          "prediction_id": "d1",
+          "description": "Skill under-specifies scope of 'authors and key reviewers' for the CoachForce Market Research Report: it treats reviewers as only those matching Tier 1/2/3 evidence contributors, but the verifier expects a broader union that includes all authors across report versions (draft/final/latest) plus reviewers, yielding 11 IDs. The agent only produced 8 IDs by (a) picking a single 'final/latest' version's author and (b) using only one review meeting's participants who spoke.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Step 3 — Select the correct report version"
+            },
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Step 5 — Extract key reviewers"
+            }
+          ]
+        },
+        {
+          "prediction_id": "d2",
+          "description": "Skill lacks explicit union-collection rules across all VALID product-grounded report versions and across all evidence sources (document feedback authors, meeting participants who contributed, PR reviewers, slack thread repliers). This omission drives under-collection when the benchmark expects the union.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Step 1 — Build candidate set"
+            },
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Step 5 — Extract key reviewers"
+            },
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Step 6 — Validate IDs & de-duplicate"
+            }
+          ]
+        },
+        {
+          "prediction_id": "d3",
+          "description": "Skill does not address Q2/Q3 patterns (competitor insight contributors, competitor demo URLs) even though the task file contains three questions of these shapes. Guidance is narrowly scoped to authors/reviewers, leaving Q2/Q3 without procedural support. The agent still passed Q2/Q3 length checks in this run, but the skill should generalize across the observed question family.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Core Procedure (Must Follow)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "d4",
+          "description": "Token logging is fabricated (approximate constants) rather than derived; while the token-efficiency tests passed here, the skill provides no guidance on how to log tokens, risking future failures.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Output Format"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/enterprise-information-search/repaired_skill",
+      "executor_run_id": "enterprise-information-search-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "fix-build-agentops",
+      "diagnoses": [
+        {
+          "prediction_id": "missing-build-fix-guidance",
+          "description": "No skill in the bundle targets the 'fix Python build failures' task. All four preloaded skills (analyze-ci, temporal-python-testing, testing-python, uv-package-manager) address orthogonal concerns and provide no guidance on: (a) running the actual verifier (tox with matrix py37-py312), (b) reproducing failures under the same environment the verifier uses, or (c) treating pre-existing test failures as in-scope when the task is to make the build pass.",
+          "locations": [
+            {
+              "file": "testing-python/SKILL.md",
+              "section": "Running Tests"
+            },
+            {
+              "file": "uv-package-manager/SKILL.md",
+              "section": "CI/CD Integration"
+            },
+            {
+              "file": "analyze-ci/SKILL.md",
+              "section": "whole file"
+            }
+          ]
+        },
+        {
+          "prediction_id": "trigger-mismatch",
+          "description": "The preloaded skill set is a mismatch for the trigger 'fix Python build failures in a repo under /home/github/build/failed'. analyze-ci is about GH-Actions log fetching for a PR URL, temporal-python-testing is Temporal-specific, testing-python is fastmcp/asyncio project-conventions, and uv-package-manager assumes uv-based projects. The target repo uses tox+setuptools+pip; none of the skills' descriptions would legitimately fire, yet all four were loaded.",
+          "locations": [
+            {
+              "file": "testing-python/SKILL.md",
+              "section": "frontmatter description"
+            },
+            {
+              "file": "uv-package-manager/SKILL.md",
+              "section": "frontmatter description"
+            }
+          ]
+        },
+        {
+          "prediction_id": "instruction-compliance-verifier-parity",
+          "description": "No skill instructs the agent to run the exact verifier command (tox) before declaring success, nor to enumerate every failing test/env from the verifier's perspective. The agent's self-verification used `python -m pytest` against a single interpreter that happened to skip the async test and never exercised tox's env-matrix, so it missed the py37/38/39 discovery failures and misclassified the timestamp failure as pre-existing.",
+          "locations": [
+            {
+              "file": "testing-python/SKILL.md",
+              "section": "Running Tests"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/fix-build-agentops/repaired_skill",
+      "executor_run_id": "fix-build-agentops-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "Session-window semantics do not match the spec: the Flink job uses EventTimeSessionWindows.withGap(600s) which merges any two SUBMITs within 600s, but a Python reference simulation using strict per-consecutive-gap > 600s exactly reproduced expected output. The provided skill offers no guidance on Google cluster-trace stage semantics and no reminder to cross-validate against a small reference; the agent's implementation shipped a plausible-but-wrong semantics because 'stage ends when there is an inactivity period of 10 minutes' can be read two ways (strict > vs <= gap, and inclusive/exclusive boundary handling of the 600s * 1e6 microsecond arithmetic).",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Core Workflows > 5. Building Real-Time Streaming Pipelines / Streaming Patterns"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Skill lacks a required-verification checkpoint for Flink query tasks: agents must (a) build a small independent reference (Python or SQL) over the exact input file, (b) compare line-by-line with the Flink output, and (c) explicitly document boundary conventions (strict-inequality gap, timestamp unit conversion, terminal-event set) before declaring success. The agent did do a self-check but used its own interpretation as the oracle, so the check was circular.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Best Practices / Data Quality"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "Trigger precision: `senior-data-engineer` is a very broad skill loaded for a narrow Google cluster-trace Flink coding task. Its 'Quick Start' section spends most of the token budget on Airflow DAG generation, dbt, Kafka topic generation, and Kinesis - none applicable here - and provides no Flink Java DataStream code patterns for session-window aggregation over gzipped CSV. The skill therefore fires broadly but delivers little targeted value for the actual solution path.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Quick Start / Real-Time Streaming"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/flink-query/repaired_skill",
+      "executor_run_id": "flink-query-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "jpg-ocr-stat",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "OCR of 078.jpg produces malformed 'Grand Total' amounts with missing/garbled decimal separators (e.g., '92 80', '92:80', '9280', '92.80') and the digit-only extractor in extract_last_number only accepts strict d+\\.dd patterns, so all candidates are rejected and total_amount becomes null even though the correct value 92.80 appears repeatedly across OCR variants. The image-ocr skill provides multi-pass OCR guidance but does not tell the caller how to normalize/repair numeric tokens whose decimal point was lost or replaced by ':', space, or nothing.",
+          "locations": [
+            {
+              "file": "image-ocr/SKILL.md",
+              "section": "Multi-Pass OCR Strategy / Advanced Preprocessing Strategies"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "The image-ocr skill's Multi-Pass OCR Strategy section stops at 'combine all extracted text' and offers no guidance for value-level cross-variant voting or fuzzy numeric normalization on scanned receipts. When several OCR variants surface the same amount with different corruptions (e.g., '92.80', '92 80', '9280'), callers have no recipe for reconciling them, so a single garbled pass can eliminate an otherwise-recoverable value.",
+          "locations": [
+            {
+              "file": "image-ocr/SKILL.md",
+              "section": "Multi-Pass OCR Strategy"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "The image-ocr skill lacks a receipt-specific quality self-check reminding callers to (a) always keep at least one candidate per keyword tier by falling back to the largest plausible number on the keyword line or the following line, and (b) verify that when the task's primary keyword (e.g., GRAND TOTAL) is detected, extraction never returns null without exhausting fallbacks. This omission let the agent return null for 078.jpg even though 'Grand Total' was clearly detected in every OCR variant.",
+          "locations": [
+            {
+              "file": "image-ocr/SKILL.md",
+              "section": "Quality Self-Check"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/jpg-ocr-stat/repaired_skill",
+      "executor_run_id": "jpg-ocr-stat-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "q05-runner-up-sort",
+          "description": "Q5 runner_up_run_ids are emitted in ranking order (best-to-worst by quality/efficiency), but the verifier requires them to be sorted lexicographically by run_id ascending. This caused the only test failure (Q5 loose test for board_family=Compute_IO).",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "Output construction guardrails / Sorting"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md",
+              "section": "Body guidance (sorting rules)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/manufacturing-equipment-maintenance/repaired_skill",
+      "executor_run_id": "manufacturing-equipment-maintenance-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "paper-anonymizer",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "The skill lists 'Equal contribution' as a pattern to redact but the verifier's identifier check for paper3 failed because the exact literal 'Equal contribution' remained in the output. The skill's example only shows starred variants ('* Equal contribution') and does not emphasize that plain, unstarred, and possibly hyphenated variants (e.g., '*Equal contribution', 'Equal contribution', 'Equal Contribution', 'equal contribution', 'These authors contributed equally') must all be searched. Because search_for is case-sensitive and literal, an agent following the skill can easily miss variants. Additionally, the skill omits 'Equal contribution' from the identifier examples verifiers care about, and does not tell the agent to scan the paper text for likely equal-contribution markers before choosing patterns.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "Patterns to Redact (Before References Only) - item 8 Equal contribution footnotes"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "The skill's verification function only checks page count and text-retention ratio; it does not verify that the patterns the agent intended to redact are actually absent from the redacted output. This means the agent can silently miss a required identifier (as happened with 'Equal contribution') and still see 'Verification passed'. A post-redaction 'residual pattern' check is needed for the identifier categories the task cares about (arXiv IDs, DOIs, venues, equal-contribution markers, emails, author names).",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "REQUIRED: Verification Function"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "search_for in PyMuPDF is case-sensitive by default and matches exact substrings; the skill does not tell the agent to (a) pass flags=fitz.TEXT_DEHYPHENATE and quads=False consistently, or more importantly (b) enumerate case variants and spacing variants for footnote markers. This weakens solution-path coverage for common footnote texts.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "PyMuPDF (fitz) - Recommended Approach"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/paper-anonymizer/repaired_skill",
+      "executor_run_id": "paper-anonymizer-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "The plan output format uses Python-style `action(arg1, arg2)` with parentheses and commas, but the verifier uses `unified_planning.io.PDDLReader.parse_plan` which requires PDDL-standard S-expression format `(action-name arg1 arg2 ...)`. The skill's example workflow shows `save-plan` via `PDDLWriter`, but the agent hand-formatted lines using the task-prompt example's misleading `action(a, b)` syntax, producing unparseable output.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "3. Plan Saving / Example Workflow"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Skill does not explicitly warn that the task-instruction's example `drive(truck1, depot1, market1)` is illustrative only and that the verifier requires standard PDDL plan syntax `(action arg1 arg2 ...)`. No explicit output-format contract is stated.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "Requirements for Outputs / 3. Plan Saving"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "Skill lacks a post-write verification step that re-parses the written file with PDDLReader.parse_plan to catch format mismatches before finishing.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "4. Plan Validation / Example Workflow"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/pddl-airport-planning/repaired_skill",
+      "executor_run_id": "pddl-airport-planning-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "python-scala-translation",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "Skill lacks explicit guidance for translating Python's `runtime_checkable` Protocol to Scala. The agent initially chose a type-class `Tokenizable[-A]` encoding, which collided with an `Any`-typed `tokenize` overload and required a rework. Guidance should note that Python `Protocol` classes that are dispatched via `isinstance` at runtime are more faithfully modelled as a Scala subtype trait (allowing pattern matching), while purely structural, non-dispatch uses may be modelled as type classes.",
+          "locations": [
+            {
+              "file": "python-scala-functional/SKILL.md",
+              "section": "Implicit Conversions and Type Classes"
+            },
+            {
+              "file": "python-scala-oop/SKILL.md",
+              "section": "Abstract Classes and Interfaces"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Skill does not warn about the interaction between a single `Any`-typed dispatch method (translating a Python `isinstance` chain / `@overload` union) and additional generic overloads on the same method name; these easily produce ambiguous-overload errors under Scala 2.13. Adding a short note in the OOP and functional skills about preferring one uniform dispatch method (pattern match inside `def foo(value: Any)`) rather than mixing it with `def foo[A](value: A)(implicit ...)` would prevent this class of compile error.",
+          "locations": [
+            {
+              "file": "python-scala-functional/SKILL.md",
+              "section": "Pattern Matching"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "The `python-scala-libraries` regex/formatting section does not cover Scala's `f\"\"` interpolator gotcha: using a runtime-computed precision like `f\"$d%.${precision}f\"` is a compile error (`Missing conversion operator in '%'`). Translating Python's `f\"{v:.{precision}f}\"` is common in numeric tokenization; the skill should recommend `String.format(s\"%.${precision}f\", d)` (or `\"%.\"+precision+\"f\" formatted d`).",
+          "locations": [
+            {
+              "file": "python-scala-syntax-mapping/SKILL.md",
+              "section": "String Formatting"
+            },
+            {
+              "file": "python-scala-libraries/SKILL.md",
+              "section": "Date and Time"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "Skill omits the `import scala.language.implicitConversions` requirement for user-defined implicit conversions used to model Python union types (e.g. `str | bytes`, `datetime | date`) as sealed ADTs with convenience implicits. This produced feature warnings the agent then had to resolve.",
+          "locations": [
+            {
+              "file": "python-scala-functional/SKILL.md",
+              "section": "Implicit Conversions and Type Classes"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/python-scala-translation/repaired_skill",
+      "executor_run_id": "python-scala-translation-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "reserves-at-risk-calc",
+      "diagnoses": [
+        {
+          "prediction_id": "exposure-formula-misspecification",
+          "description": "The agent computed the Step 2 'Gold valuation exposure (95% one-sided shock)' using an annualized-style formula: reserves × Z × σ_3m × √3 / 100 (≈ 1.732× too large). Verifier expected reserves × Z × σ_3m / 100 (i.e., the plain 3-month one-sided shock, without an additional √3 scaling). Every risk value in row 13 was overstated by a factor of ~√3 ≈ 1.7267, and this error propagated to Step 3 RaR (row 24). The skill offers no guidance on financial-risk formula construction (VaR/one-sided shock semantics), and the task hint 'near-term valuation swing' is ambiguous, so the agent guessed a scaling that annualized the 3-month vol.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "Financial models / Formula Construction Rules"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/reserves-at-risk-calc/repaired_skill",
+      "executor_run_id": "reserves-at-risk-calc-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "seismic-phase-picking",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "Skill does not warn that npz `data` arrays may be zero-padded on unused columns (single-component EHZ files stored as (12000,3) with only one non-zero column). If the raw (12000,3) is passed directly with channel names from `channels` (of length 1) or as three traces with two all-zero channels, PhaseNet's normalization on zero traces produces spurious activations and S-wave picking degrades sharply.",
+          "locations": [
+            {
+              "file": "obspy-data-api/SKILL.md",
+              "section": "Waveform Data"
+            },
+            {
+              "file": "seisbench-model-api/SKILL.md",
+              "section": "Best Practices"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Skill does not recommend ensembling / model selection or preprocessing (bandpass filter, detrend, resample to model.sampling_rate) that materially improves S-wave recall. The agent used a single pretrained model (`scedc`) with only amplitude scaling and default resampling and got S recall 0.560. Preprocessing (highpass/detrend/taper) and choosing/ensembling models trained on similar (California) network data (e.g. `scedc`, `stead`, `instance`, `original`) typically pushes S-F1 over 0.6.",
+          "locations": [
+            {
+              "file": "seisbench-model-api/SKILL.md",
+              "section": "Best Practices"
+            },
+            {
+              "file": "seismic-picker-selection/SKILL.md",
+              "section": "Deep Learning Pickers"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "Skill gives no concrete guidance for choosing P/S thresholds or handling multiple picks per trace to maximize F1. The agent iterated on thresholds blindly (0.3 → 0.15 → 0.1 → 0.05) without a principled recipe. Precision is high (S=0.629) while recall is the bottleneck (S=0.560), a classic sign the threshold/model diversity is underexploited.",
+          "locations": [
+            {
+              "file": "seisbench-model-api/SKILL.md",
+              "section": "Overview"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "Skill does not stress that constructing an ObsPy Stream requires accurate `starttime`, `sampling_rate/delta`, and mapping trace `channel` codes to the correct axis (Z vs N vs E). SeisBench relies on channel codes to route components; wrong ordering degrades S detection which depends on horizontal components.",
+          "locations": [
+            {
+              "file": "obspy-data-api/SKILL.md",
+              "section": "Trace - DATA"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/seismic-phase-picking/repaired_skill",
+      "executor_run_id": "seismic-phase-picking-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "shock-analysis-supply",
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "The skill lacks guidance on validating that computed output magnitudes match the expected scale/units when linking data across sheets. The Ystar_base values came out ~78 instead of ~78,000 because Y (real GDP) was linked from WEO in billions while the test expects thousands (millions of GEL). No unit-consistency check is enforced.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "Formula Verification Checklist / Formula Testing Strategy"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "The skill's 'Formula Testing Strategy' mentions testing edge cases but does not require a post-recalc magnitude/unit sanity check on final output cells. A required check ('do computed headline outputs fall in the expected order of magnitude given stated units?') would have surfaced the units mismatch before finishing.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "Formula Verification Checklist"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/shock-analysis-supply/repaired_skill",
+      "executor_run_id": "shock-analysis-supply-skillaxe-opus47-r001"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "pd-pause-precision",
+          "description": "Pause detector produces low-precision short segments: many detected pauses (e.g., 228-231, 232-237, 239-241 cluster; 465-467, 483-485, 522-524, 525-527, 557-559, 597-599) fail IoU>0.3 matching against ground truth, yielding 50% precision. The default min-duration=2s and threshold-ratio=0.5 accept borderline low-energy dips that are not true >2s teaching pauses, and adjacent short segments should be merged into single longer pauses.",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "Parameters + How It Works + Notes"
+            }
+          ]
+        },
+        {
+          "prediction_id": "pd-workflow-guidance",
+          "description": "No top-level orchestration guidance explains how to combine silence-detector and pause-detector for this task, so agents accept default pause parameters without post-processing (merging adjacent segments, requiring strictly >2 s pauses per task spec). The task states pauses are 'usually > 2 sec' but default min-duration=2 allows exactly-2s segments which are often false positives.",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "Parameters Tuning + Notes"
+            },
+            {
+              "file": "segment-combiner/SKILL.md",
+              "section": "Notes"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/video-silence-remover/repaired_skill",
+      "executor_run_id": "video-silence-remover-skillaxe-opus47-r001"
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "task_id": "shock-analysis-supply",
+  "source_rollout_id": "shock-analysis-supply-opus47-original-skill-r004-credit-recovery",
+  "repair_model": "anthropic/claude-opus-4.7",
+  "payload": {
+    "diagnoses": [
+      {
+        "prediction_id": "D1",
+        "description": "The skill lacks guidance on validating that computed output magnitudes match the expected scale/units when linking data across sheets. The Ystar_base values came out ~78 instead of ~78,000 because Y (real GDP) was linked from WEO in billions while the test expects thousands (millions of GEL). No unit-consistency check is enforced.",
+        "evidence": "Verifier failure: 'Ystar_base should be in thousands (10k-500k), got 78.46'. All 8 structural tests passed (formulas, sheets, data collection) but test_value_magnitudes failed on H60:H65. Agent's WEO_Data values were IMF USD-billions rather than local-currency-millions; the skill offered no instruction to sanity-check output magnitude against a documented expected scale.",
+        "locations": [
+          {
+            "file": "xlsx/SKILL.md",
+            "section": "Formula Verification Checklist / Formula Testing Strategy"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D2",
+        "description": "The skill's 'Formula Testing Strategy' mentions testing edge cases but does not require a post-recalc magnitude/unit sanity check on final output cells. A required check ('do computed headline outputs fall in the expected order of magnitude given stated units?') would have surfaced the units mismatch before finishing.",
+        "evidence": "Agent reported 'recalc.py 735 formulas, 0 errors' and treated that as sufficient verification, then finished. The trajectory shows no comparison of Ystar_base scale to Y scale, and no check that Y units in WEO_Data are consistent with K units in PWT (which are in mil 2017 USD). The verifier's magnitude test failed as a direct result.",
+        "locations": [
+          {
+            "file": "xlsx/SKILL.md",
+            "section": "Formula Verification Checklist"
+          }
+        ]
+      }
+    ],
+    "file_updates": [
+      {
+        "path": "xlsx/SKILL.md",
+        "content": "---\nname: xlsx\ndescription: \"Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreadsheets (.xlsx, .xlsm, .csv, .tsv, etc) for: (1) Creating new spreadsheets with formulas and formatting, (2) Reading or analyzing data, (3) Modify existing spreadsheets while preserving formulas, (4) Data analysis and visualization in spreadsheets, or (5) Recalculating formulas\"\nlicense: Proprietary. LICENSE.txt has complete terms\n---\n\n# Requirements for Outputs\n\n## All Excel files\n\n### Zero Formula Errors\n- Every Excel model MUST be delivered with ZERO formula errors (#REF!, #DIV/0!, #VALUE!, #N/A, #NAME?)\n\n### Preserve Existing Templates (when updating templates)\n- Study and EXACTLY match existing format, style, and conventions when modifying files\n- Never impose standardized formatting on files with established patterns\n- Existing template conventions ALWAYS override these guidelines\n\n### Unit & Magnitude Consistency (MANDATORY before finishing)\nZero formula errors is NECESSARY but NOT SUFFICIENT. A model can be error-free yet numerically wrong because inputs from different sources use different units (e.g., USD-billions vs local-currency-millions, index vs level, nominal vs real, per-capita vs aggregate). Before declaring the task complete, you MUST:\n\n1. **Document the unit of every hard-coded/linked input** the moment you populate it. For each raw-data sheet, record in a cell comment or a nearby cell: currency, scale (units / thousands / millions / billions), base year (for real series), and source URL.\n2. **Check that units combine correctly in every downstream formula.** If K is in \"mil 2017 US$\" and Y is in \"bn current US$\", ratios like K/Y and Cobb-Douglas outputs `EXP(lnZ)*K^alpha` will be off by 10^3 or more. All operands in one formula must share the same currency, scale, and price base — convert first if they don't.\n3. **Sanity-check final output magnitudes against the inputs they are derived from.** For example, potential GDP (Ystar) should be within a small multiple of actual GDP (Y) in the same units; a K/Y ratio for a real economy should typically be roughly 2–5, not 0.002 or 500. If Ystar and Y differ by 3+ orders of magnitude, the units are almost certainly mismatched.\n4. **Prefer local, task-native units when a template mixes sources.** If the template's other sheets (e.g., CFC data in millions of local currency) implicitly fix the model's unit, convert imported series (e.g., IMF WEO real GDP) into that same unit rather than leaving them in the source's native unit.\n5. **When in doubt, print/read a few paired cells and eyeball the ratio.** A 30-second check of `Ystar/Y` and `K/Y` before finishing will catch nearly all unit bugs that `recalc.py` cannot detect.\n\n## Financial models\n\n### Color Coding Standards\nUnless otherwise stated by the user or existing template\n\n#### Industry-Standard Color Conventions\n- **Blue text (RGB: 0,0,255)**: Hardcoded inputs, and numbers users will change for scenarios\n- **Black text (RGB: 0,0,0)**: ALL formulas and calculations\n- **Green text (RGB: 0,128,0)**: Links pulling from other worksheets within same workbook\n- **Red text (RGB: 255,0,0)**: External links to other files\n- **Yellow background (RGB: 255,255,0)**: Key assumptions needing attention or cells that need to be updated\n\n### Number Formatting Standards\n\n#### Required Format Rules\n- **Years**: Format as text strings (e.g., \"2024\" not \"2,024\")\n- **Currency**: Use $#,##0 format; ALWAYS specify units in headers (\"Revenue ($mm)\")\n- **Zeros**: Use number formatting to make all zeros \"-\", including percentages (e.g., \"$#,##0;($#,##0);-\")\n- **Percentages**: Default to 0.0% format (one decimal)\n- **Multiples**: Format as 0.0x for valuation multiples (EV/EBITDA, P/E)\n- **Negative numbers**: Use parentheses (123) not minus -123\n\n### Formula Construction Rules\n\n#### Assumptions Placement\n- Place ALL assumptions (growth rates, margins, multiples, etc.) in separate assumption cells\n- Use cell references instead of hardcoded values in formulas\n- Example: Use =B5*(1+$B$6) instead of =B5*1.05\n\n#### Formula Error Prevention\n- Verify all cell references are correct\n- Check for off-by-one errors in ranges\n- Ensure consistent formulas across all projection periods\n- Test with edge cases (zero values, negative numbers)\n- Verify no unintended circular references\n\n#### Documentation Requirements for Hardcodes\n- Comment or in cells beside (if end of table). Format: \"Source: [System/Document], [Date], [Specific Reference], [URL if applicable], Units: [currency, scale, base year]\"\n- Examples:\n  - \"Source: Company 10-K, FY2024, Page 45, Revenue Note, [SEC EDGAR URL], Units: USD millions\"\n  - \"Source: IMF WEO Oct-2025, NGDP_R Georgia, Units: national currency, billions, constant prices\"\n  - \"Source: PWT 10.01, rnna, Units: 2017 US$ millions\"\n  - \"Source: ECB SDMX IDCM.A.N.GE..., Units: GEL millions, current prices\"\n\n# XLSX creation, editing, and analysis\n\n## Overview\n\nA user may ask you to create, edit, or analyze the contents of an .xlsx file. You have different tools and workflows available for different tasks.\n\n## Important Requirements\n\n**LibreOffice Required for Formula Recalculation**: You can assume LibreOffice is installed for recalculating formula values using the `recalc.py` script. The script automatically configures LibreOffice on first run\n\n## Reading and analyzing data\n\n### Data analysis with pandas\nFor data analysis, visualization, and basic operations, use **pandas** which provides powerful data manipulation capabilities:\n\n```python\nimport pandas as pd\n\n# Read Excel\ndf = pd.read_excel('file.xlsx')  # Default: first sheet\nall_sheets = pd.read_excel('file.xlsx', sheet_name=None)  # All sheets as dict\n\n# Analyze\ndf.head()      # Preview data\ndf.info()      # Column info\ndf.describe()  # Statistics\n\n# Write Excel\ndf.to_excel('output.xlsx', index=False)\n```\n\n## Excel File Workflows\n\n## CRITICAL: Use Formulas, Not Hardcoded Values\n\n**Always use Excel formulas instead of calculating values in Python and hardcoding them.** This ensures the spreadsheet remains dynamic and updateable.\n\n### ❌ WRONG - Hardcoding Calculated Values\n```python\n# Bad: Calculating in Python and hardcoding result\ntotal = df['Sales'].sum()\nsheet['B10'] = total  # Hardcodes 5000\n\n# Bad: Computing growth rate in Python\ngrowth = (df.iloc[-1]['Revenue'] - df.iloc[0]['Revenue']) / df.iloc[0]['Revenue']\nsheet['C5'] = growth  # Hardcodes 0.15\n\n# Bad: Python calculation for average\navg = sum(values) / len(values)\nsheet['D20'] = avg  # Hardcodes 42.5\n```\n\n### ✅ CORRECT - Using Excel Formulas\n```python\n# Good: Let Excel calculate the sum\nsheet['B10'] = '=SUM(B2:B9)'\n\n# Good: Growth rate as Excel formula\nsheet['C5'] = '=(C4-C2)/C2'\n\n# Good: Average using Excel function\nsheet['D20'] = '=AVERAGE(D2:D19)'\n```\n\nThis applies to ALL calculations - totals, percentages, ratios, differences, etc. The spreadsheet should be able to recalculate when source data changes.\n\n## Common Workflow\n1. **Choose tool**: pandas for data, openpyxl for formulas/formatting\n2. **Create/Load**: Create new workbook or load existing file\n3. **Modify**: Add/edit data, formulas, and formatting\n4. **Save**: Write to file\n5. **Recalculate formulas (MANDATORY IF USING FORMULAS)**: Use the recalc.py script\n   ```bash\n   python recalc.py output.xlsx\n   ```\n6. **Verify and fix any errors**:\n   - The script returns JSON with error details\n   - If `status` is `errors_found`, check `error_summary` for specific error types and locations\n   - Fix the identified errors and recalculate again\n   - Common errors to fix:\n     - `#REF!`: Invalid cell references\n     - `#DIV/0!`: Division by zero\n     - `#VALUE!`: Wrong data type in formula\n     - `#NAME?`: Unrecognized formula name\n7. **Verify numerical plausibility (MANDATORY for quantitative models)**:\n   - Reload the file with `data_only=True` and print a handful of headline output cells.\n   - Compare their magnitudes to the inputs they derive from and to any commonly-known ranges (e.g., capital-output ratios ~2–5, depreciation rates ~1–10%, GDP-share ratios <1).\n   - If an output differs from the corresponding input by an unexpected factor of 1,000 or 1,000,000, STOP and re-check the units of every source series before delivering.\n\n### Creating new Excel files\n\n```python\n# Using openpyxl for formulas and formatting\nfrom openpyxl import Workbook\nfrom openpyxl.styles import Font, PatternFill, Alignment\n\nwb = Workbook()\nsheet = wb.active\n\n# Add data\nsheet['A1'] = 'Hello'\nsheet['B1'] = 'World'\nsheet.append(['Row', 'of', 'data'])\n\n# Add formula\nsheet['B2'] = '=SUM(A1:A10)'\n\n# Formatting\nsheet['A1'].font = Font(bold=True, color='FF0000')\nsheet['A1'].fill = PatternFill('solid', start_color='FFFF00')\nsheet['A1'].alignment = Alignment(horizontal='center')\n\n# Column width\nsheet.column_dimensions['A'].width = 20\n\nwb.save('output.xlsx')\n```\n\n### Editing existing Excel files\n\n```python\n# Using openpyxl to preserve formulas and formatting\nfrom openpyxl import load_workbook\n\n# Load existing file\nwb = load_workbook('existing.xlsx')\nsheet = wb.active  # or wb['SheetName'] for specific sheet\n\n# Working with multiple sheets\nfor sheet_name in wb.sheetnames:\n    sheet = wb[sheet_name]\n    print(f\"Sheet: {sheet_name}\")\n\n# Modify cells\nsheet['A1'] = 'New Value'\nsheet.insert_rows(2)  # Insert row at position 2\nsheet.delete_cols(3)  # Delete column 3\n\n# Add new sheet\nnew_sheet = wb.create_sheet('NewSheet')\nnew_sheet['A1'] = 'Data'\n\nwb.save('modified.xlsx')\n```\n\n## Recalculating formulas\n\nExcel files created or modified by openpyxl contain formulas as strings but not calculated values. Use the provided `recalc.py` script to recalculate formulas:\n\n```bash\npython recalc.py <excel_file> [timeout_seconds]\n```\n\nExample:\n```bash\npython recalc.py output.xlsx 30\n```\n\nThe script:\n- Automatically sets up LibreOffice macro on first run\n- Recalculates all formulas in all sheets\n- Scans ALL cells for Excel errors (#REF!, #DIV/0!, etc.)\n- Returns JSON with detailed error locations and counts\n- Works on both Linux and macOS\n\n**Reminder**: `recalc.py` only detects *formula* errors. It CANNOT detect wrong units, wrong sign, wrong sheet linkage, or off-by-1000× scale mistakes. Always perform the numerical plausibility check in step 7 above before finishing.\n\n## Formula Verification Checklist\n\nQuick checks to ensure formulas work correctly:\n\n### Essential Verification\n- [ ] **Test 2-3 sample references**: Verify they pull correct values before building full model\n- [ ] **Column mapping**: Confirm Excel columns match (e.g., column 64 = BL, not BK)\n- [ ] **Row offset**: Remember Excel rows are 1-indexed (DataFrame row 5 = Excel row 6)\n- [ ] **Unit audit**: For every linked/hard-coded input, record currency, scale, and price base. Confirm all operands in each formula share compatible units.\n- [ ] **Magnitude sanity check on outputs**: Reload with `data_only=True` and eyeball headline outputs (e.g., ratios, potential-GDP vs actual-GDP) against reasonable ranges.\n\n### Common Pitfalls\n- [ ] **NaN handling**: Check for null values with `pd.notna()`\n- [ ] **Far-right columns**: FY data often in columns 50+\n- [ ] **Multiple matches**: Search all occurrences, not just first\n- [ ] **Division by zero**: Check denominators before using `/` in formulas (#DIV/0!)\n- [ ] **Wrong references**: Verify all cell references point to intended cells (#REF!)\n- [ ] **Cross-sheet references**: Use correct format (Sheet1!A1) for linking sheets\n- [ ] **Unit mismatches across sources**: IMF WEO (national currency, billions), PWT (2017 US$ millions), ECB SDMX (local currency millions), and central-bank series often disagree on scale. Convert to one common unit before combining.\n\n### Formula Testing Strategy\n- [ ] **Start small**: Test formulas on 2-3 cells before applying broadly\n- [ ] **Verify dependencies**: Check all cells referenced in formulas exist\n- [ ] **Test edge cases**: Include zero, negative, and very large values\n- [ ] **Order-of-magnitude test**: For any derived quantity, compare it to the input it is closest to (e.g., Ystar vs Y, K_With vs K). A factor-of-1000 gap almost always signals a units bug, not a formula bug.\n\n### Interpreting recalc.py Output\nThe script returns JSON with error details:\n```json\n{\n  \"status\": \"success\",           // or \"errors_found\"\n  \"total_errors\": 0,              // Total error count\n  \"total_formulas\": 42,           // Number of formulas in file\n  \"error_summary\": {              // Only present if errors found\n    \"#REF!\": {\n      \"count\": 2,\n      \"locations\": [\"Sheet1!B5\", \"Sheet1!C10\"]\n    }\n  }\n}\n```\n\nA `status: success` result means the workbook is free of formula errors. It does NOT mean the numbers are correct. Follow the magnitude-sanity step before declaring the task done.\n\n## Best Practices\n\n### Library Selection\n- **pandas**: Best for data analysis, bulk operations, and simple data export\n- **openpyxl**: Best for complex formatting, formulas, and Excel-specific features\n\n### Working with openpyxl\n- Cell indices are 1-based (row=1, column=1 refers to cell A1)\n- Use `data_only=True` to read calculated values: `load_workbook('file.xlsx', data_only=True)`\n- **Warning**: If opened with `data_only=True` and saved, formulas are replaced with values and permanently lost\n- For large files: Use `read_only=True` for reading or `write_only=True` for writing\n- Formulas are preserved but not evaluated - use recalc.py to update values\n\n### Working with pandas\n- Specify data types to avoid inference issues: `pd.read_excel('file.xlsx', dtype={'id': str})`\n- For large files, read specific columns: `pd.read_excel('file.xlsx', usecols=['A', 'C', 'E'])`\n- Handle dates properly: `pd.read_excel('file.xlsx', parse_dates=['date_column'])`\n\n## Code Style Guidelines\n**IMPORTANT**: When generating Python code for Excel operations:\n- Write minimal, concise Python code without unnecessary comments\n- Avoid verbose variable names and redundant operations\n- Avoid unnecessary print statements\n\n**For Excel files themselves**:\n- Add comments to cells with complex formulas or important assumptions\n- Document data sources for hardcoded values (including units and scale)\n- Include notes for key calculations and model sections\n"
+      }
+    ],
+    "skillaxe_evaluation": {
+      "quality_impact": {
+        "score": 0.7,
+        "rationale": "Added an explicit Unit & Magnitude Consistency section and a mandatory post-recalc plausibility step that directly targets the observed failure mode (Ystar_base off by ~1000× due to WEO GDP being in billions while K is in millions). This gives the agent a concrete checklist that would have caught the bug before finishing, though it still relies on the agent actually running the check."
+      },
+      "trigger_precision": {
+        "score": 0.8,
+        "rationale": "Changes sit at the general xlsx skill boundary (units, magnitudes, verification checklist) and are useful for any quantitative Excel model that combines cross-source data. Nothing is hard-coded to Georgia, Cobb-Douglas, or WEO specifically, so there is minimal task-instance overfitting."
+      },
+      "instruction_compliance": {
+        "score": 0.7,
+        "rationale": "The original skill only required zero formula errors and treated recalc.py success as sufficient verification. The agent complied with those instructions but still failed. The update reframes 'done' to include an explicit units audit and magnitude sanity check, making the previously implicit requirement enforceable."
+      },
+      "solution_path_coverage": {
+        "score": 0.7,
+        "rationale": "The added guidance is agnostic to whether the agent uses WEO in local currency vs USD, PWT extrapolation method, or HP-filter solver technique. It supports any path that ends with headline economic outputs, and it flags the general class of unit mismatches (index vs level, real vs nominal, per-capita vs aggregate) rather than only this trace's specific pairing."
+      },
+      "overall_rationale": "All 8 structural tests passed; only test_value_magnitudes failed, and the root cause is a units mismatch between IMF WEO GDP (billions) and PWT capital (millions) that produced Ystar_base ~78 instead of ~78,000. The skill previously offered no explicit unit-consistency or magnitude-plausibility requirement, so the agent reasonably stopped once recalc.py reported zero errors. The repair adds a mandatory unit audit, a documented-units convention for hard-coded inputs, and an order-of-magnitude sanity step in the verification checklist — transferable guidance that would have caught this failure while remaining useful across other quantitative Excel tasks."
+    }
+  },
+  "submission_row": {
+    "task_id": "shock-analysis-supply",
+    "diagnoses": [
+      {
+        "prediction_id": "D1",
+        "description": "The skill lacks guidance on validating that computed output magnitudes match the expected scale/units when linking data across sheets. The Ystar_base values came out ~78 instead of ~78,000 because Y (real GDP) was linked from WEO in billions while the test expects thousands (millions of GEL). No unit-consistency check is enforced.",
+        "locations": [
+          {
+            "file": "xlsx/SKILL.md",
+            "section": "Formula Verification Checklist / Formula Testing Strategy"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D2",
+        "description": "The skill's 'Formula Testing Strategy' mentions testing edge cases but does not require a post-recalc magnitude/unit sanity check on final output cells. A required check ('do computed headline outputs fall in the expected order of magnitude given stated units?') would have surfaced the units mismatch before finishing.",
+        "locations": [
+          {
+            "file": "xlsx/SKILL.md",
+            "section": "Formula Verification Checklist"
+          }
+        ]
+      }
+    ],
+    "repaired_bundle": "tasks/shock-analysis-supply/skills"
+  },
+  "updated_files": [
+    "xlsx/SKILL.md"
+  ],
+  "usage": {
+    "completion_tokens": 7613,
+    "prompt_tokens": 30994,
+    "total_tokens": 38607,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": 0,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "image_tokens": 0
+    },
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost": 0.345295,
+    "is_byok": false,
+    "cost_details": {
+      "upstream_inference_cost": 0.345295,
+      "upstream_inference_prompt_cost": 0.15497,
+      "upstream_inference_completions_cost": 0.190325
+    }
+  }
+}

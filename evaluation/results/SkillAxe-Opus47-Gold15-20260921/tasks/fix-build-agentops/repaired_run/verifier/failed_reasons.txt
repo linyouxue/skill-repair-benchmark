@@ -1,0 +1,59 @@
+Repository: /home/github/build/failed/AgentOps-AI/agentops
+Declared build runner: tox (tox.ini defines envlist = py37..py312)
+
+Symptoms
+--------
+Running the project's own runner (`tox -e py310`) fails during pytest
+collection with the same ImportError in all five test modules:
+
+    tests/test_canary.py -> import agentops
+      agentops/__init__.py:12
+        from .langchain_callback_handler import (
+            LangchainCallbackHandler, AsyncLangchainCallbackHandler
+        )
+      agentops/langchain_callback_handler.py:8
+        from langchain.callbacks.base import (
+            BaseCallbackHandler, AsyncCallbackHandler
+        )
+    ModuleNotFoundError: No module named 'langchain.callbacks'
+
+Root cause
+----------
+`tox.ini` declares `langchain-core` and `langchain` with no version pin,
+so tox installs the current release (langchain 1.4.2 / langchain-core
+1.6.3). In langchain >=0.1 the `langchain.callbacks` subpackage has
+been removed and the base callback handlers moved to
+`langchain_core.callbacks` (specifically
+`langchain_core.callbacks.base`). The file
+`agentops/langchain_callback_handler.py` still uses the pre-0.1 path
+`langchain.callbacks.base`, which fails to import.
+
+Everything else already imports from `langchain_core.*`
+(`langchain_core.agents`, `langchain_core.documents`,
+`langchain_core.outputs`, `langchain_core.messages`), which confirms
+the intended location for these symbols is `langchain_core`.
+
+`grep -rn "langchain.callbacks"` in the source tree returns exactly
+one live occurrence: `agentops/langchain_callback_handler.py:8`. The
+other match is inside `.tox/` (a copy of the installed package) and
+is not part of the repository sources.
+
+Fix plan
+--------
+Change the import in `agentops/langchain_callback_handler.py` from
+
+    from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+to
+
+    from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+This is the minimal change that restores compatibility with the
+version of langchain-core that tox actually installs, and is
+consistent with the other langchain_core imports already used in the
+same file. No configuration change is required.
+
+Verification
+------------
+After the patch, `.tox/py310/bin/python -c "import agentops"` must
+succeed and `tox -e py310` must proceed past collection.

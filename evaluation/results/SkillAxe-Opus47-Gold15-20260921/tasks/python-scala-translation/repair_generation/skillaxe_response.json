@@ -1,0 +1,173 @@
+{
+  "task_id": "python-scala-translation",
+  "source_rollout_id": "python-scala-translation-opus47-original-skill-r001",
+  "repair_model": "anthropic/claude-opus-4.7",
+  "payload": {
+    "diagnoses": [
+      {
+        "prediction_id": "D1",
+        "description": "Skill lacks explicit guidance for translating Python's `runtime_checkable` Protocol to Scala. The agent initially chose a type-class `Tokenizable[-A]` encoding, which collided with an `Any`-typed `tokenize` overload and required a rework. Guidance should note that Python `Protocol` classes that are dispatched via `isinstance` at runtime are more faithfully modelled as a Scala subtype trait (allowing pattern matching), while purely structural, non-dispatch uses may be modelled as type classes.",
+        "evidence": "Trajectory shows initial compile/test failure `ambiguous reference to overloaded definition, both method tokenize ... [A](value: A)(implicit ev: Tokenizable[A]) ... and (value: Any): Token`. Agent then rewrote `Tokenizable` from a `trait Tokenizable[-A] { def toToken(value: A): String }` to `trait Tokenizable { def toToken: String }` and matched on it inside the `Any` dispatch.",
+        "locations": [
+          {
+            "file": "python-scala-functional/SKILL.md",
+            "section": "Implicit Conversions and Type Classes"
+          },
+          {
+            "file": "python-scala-oop/SKILL.md",
+            "section": "Abstract Classes and Interfaces"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D2",
+        "description": "Skill does not warn about the interaction between a single `Any`-typed dispatch method (translating a Python `isinstance` chain / `@overload` union) and additional generic overloads on the same method name; these easily produce ambiguous-overload errors under Scala 2.13. Adding a short note in the OOP and functional skills about preferring one uniform dispatch method (pattern match inside `def foo(value: Any)`) rather than mixing it with `def foo[A](value: A)(implicit ...)` would prevent this class of compile error.",
+        "evidence": "Verifier/trajectory shows `ambiguous reference to overloaded definition ... match argument types (java.time.LocalDate)` and `... (Foo)` errors on `UniversalTokenizer.tokenize`, requiring removal of the type-class overload.",
+        "locations": [
+          {
+            "file": "python-scala-functional/SKILL.md",
+            "section": "Pattern Matching"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D3",
+        "description": "The `python-scala-libraries` regex/formatting section does not cover Scala's `f\"\"` interpolator gotcha: using a runtime-computed precision like `f\"$d%.${precision}f\"` is a compile error (`Missing conversion operator in '%'`). Translating Python's `f\"{v:.{precision}f}\"` is common in numeric tokenization; the skill should recommend `String.format(s\"%.${precision}f\", d)` (or `\"%.\"+precision+\"f\" formatted d`).",
+        "evidence": "Compile output: `Tokenizer.scala:177: error: Missing conversion operator in '%'; use %% for literal %, %n for newline   case d: Double => f\"$d%.${precision}f\"` and same on line 178 for Float. Agent had to edit around this.",
+        "locations": [
+          {
+            "file": "python-scala-syntax-mapping/SKILL.md",
+            "section": "String Formatting"
+          },
+          {
+            "file": "python-scala-libraries/SKILL.md",
+            "section": "Date and Time"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D4",
+        "description": "Skill omits the `import scala.language.implicitConversions` requirement for user-defined implicit conversions used to model Python union types (e.g. `str | bytes`, `datetime | date`) as sealed ADTs with convenience implicits. This produced feature warnings the agent then had to resolve.",
+        "evidence": "Compiler warnings: `implicit conversion method fromString should be enabled by making the implicit value scala.language.implicitConversions visible. ...` for `fromString`, `fromBytes`, `fromDate`, `fromDateTime`.",
+        "locations": [
+          {
+            "file": "python-scala-functional/SKILL.md",
+            "section": "Implicit Conversions and Type Classes"
+          }
+        ]
+      }
+    ],
+    "file_updates": [
+      {
+        "path": "python-scala-functional/SKILL.md",
+        "content": "---\nname: python-scala-functional\ndescription: Guide for translating Python code to functional Scala style. Use when converting Python code involving higher-order functions, decorators, closures, generators, or when aiming for idiomatic functional Scala with pattern matching, Option handling, and monadic operations.\n---\n\n# Python to Scala Functional Programming Translation\n\n## Higher-Order Functions\n\n```python\n# Python\ndef apply_twice(f, x):\n    return f(f(x))\n\ndef make_multiplier(n):\n    return lambda x: x * n\n\ndouble = make_multiplier(2)\nresult = apply_twice(double, 5)  # 20\n```\n\n```scala\n// Scala\ndef applyTwice[A](f: A => A, x: A): A = f(f(x))\n\ndef makeMultiplier(n: Int): Int => Int = x => x * n\n\nval double = makeMultiplier(2)\nval result = applyTwice(double, 5)  // 20\n```\n\n## Decorators → Function Composition\n\n```python\n# Python\ndef log_calls(func):\n    def wrapper(*args, **kwargs):\n        print(f\"Calling {func.__name__}\")\n        result = func(*args, **kwargs)\n        print(f\"Finished {func.__name__}\")\n        return result\n    return wrapper\n\n@log_calls\ndef add(a, b):\n    return a + b\n```\n\n```scala\n// Scala - function composition\ndef logCalls[A, B](f: A => B, name: String): A => B = { a =>\n  println(s\"Calling $name\")\n  val result = f(a)\n  println(s\"Finished $name\")\n  result\n}\n\nval add = (a: Int, b: Int) => a + b\nval loggedAdd = logCalls(add.tupled, \"add\")\n\n// Alternative: using by-name parameters\ndef withLogging[A](name: String)(block: => A): A = {\n  println(s\"Calling $name\")\n  val result = block\n  println(s\"Finished $name\")\n  result\n}\n```\n\n## Pattern Matching\n\n```python\n# Python (3.10+)\ndef describe(value):\n    match value:\n        case 0:\n            return \"zero\"\n        case int(x) if x > 0:\n            return \"positive int\"\n        case int(x):\n            return \"negative int\"\n        case [x, y]:\n            return f\"pair: {x}, {y}\"\n        case {\"name\": name, \"age\": age}:\n            return f\"{name} is {age}\"\n        case _:\n            return \"unknown\"\n```\n\n```scala\n// Scala - pattern matching is more powerful\ndef describe(value: Any): String = value match {\n  case 0 => \"zero\"\n  case x: Int if x > 0 => \"positive int\"\n  case _: Int => \"negative int\"\n  case (x, y) => s\"pair: $x, $y\"\n  case List(x, y) => s\"list of two: $x, $y\"\n  case m: Map[_, _] if m.contains(\"name\") =>\n    s\"${m(\"name\")} is ${m(\"age\")}\"\n  case _ => \"unknown\"\n}\n\n// Case class pattern matching (preferred)\nsealed trait Result\ncase class Success(value: Int) extends Result\ncase class Error(message: String) extends Result\n\ndef handle(result: Result): String = result match {\n  case Success(v) if v > 100 => s\"Big success: $v\"\n  case Success(v) => s\"Success: $v\"\n  case Error(msg) => s\"Failed: $msg\"\n}\n```\n\n### Translating `isinstance` dispatch / Python `@overload` unions\n\nPython code that dispatches on runtime type (an `isinstance` chain, often paired with `@overload` stubs over a union) becomes **one** Scala method that takes `Any` (or a sealed parent) and pattern matches. Do **not** also add a second generic overload of the same method (for example a type-class version `def foo[A](value: A)(implicit ev: Foo[A])`) — the two overloads produce `ambiguous reference to overloaded definition` errors on any argument whose static type is a subtype the generic version could accept.\n\n```python\n# Python - isinstance dispatch with Protocol\n@runtime_checkable\nclass Tokenizable(Protocol):\n    def to_token(self) -> str: ...\n\ndef tokenize(value):\n    if value is None: return null_token()\n    if isinstance(value, Tokenizable): return Token(value.to_token(), STRUCTURED)\n    if isinstance(value, (str, bytes)): return string_tokenize(value)\n    if isinstance(value, (int, float, Decimal)): return numeric_tokenize(value)\n    ...\n```\n\n```scala\n// Scala - single dispatch method, sealed subtypes for the Protocol\ntrait Tokenizable { def toToken: String }\n\ndef tokenize(value: Any): Token = value match {\n  case null                     => Token(\"NULL\", TokenType.NULL)\n  case None                     => Token(\"NULL\", TokenType.NULL)\n  case t: Tokenizable           => Token(t.toToken, TokenType.STRUCTURED)\n  case s: String                => stringTokenize(s)\n  case n: (Int | Long | Double) => numericTokenize(n) // via case _: Int | _: Long ...\n  case other                    => Token(other.toString, TokenType.STRING)\n}\n// Do NOT also declare: def tokenize[A](value: A)(implicit ev: Tokenizable[A]): Token\n```\n\nRule of thumb: if the Python code chooses branches with `isinstance(value, SomeProtocol)`, model the Protocol as a **subtype trait** and match on it; reserve type-class encodings for structural APIs that never participate in an `Any` dispatch.\n\n## Option Handling (None/null Safety)\n\n```python\n# Python\ndef find_user(user_id: int) -> Optional[User]:\n    user = db.get(user_id)\n    return user if user else None\n\ndef get_user_email(user_id: int) -> Optional[str]:\n    user = find_user(user_id)\n    if user is None:\n        return None\n    return user.email\n\n# Chained operations\ndef get_user_city(user_id: int) -> Optional[str]:\n    user = find_user(user_id)\n    if user is None:\n        return None\n    address = user.address\n    if address is None:\n        return None\n    return address.city\n```\n\n```scala\n// Scala - Option monad\ndef findUser(userId: Int): Option[User] = db.get(userId)\n\ndef getUserEmail(userId: Int): Option[String] =\n  findUser(userId).map(_.email)\n\n// Chained operations with flatMap\ndef getUserCity(userId: Int): Option[String] =\n  findUser(userId)\n    .flatMap(_.address)\n    .map(_.city)\n\n// For-comprehension (cleaner for multiple operations)\ndef getUserCity(userId: Int): Option[String] = for {\n  user <- findUser(userId)\n  address <- user.address\n  city <- Option(address.city)\n} yield city\n\n// Getting values out\nval email = getUserEmail(1).getOrElse(\"no-email@example.com\")\nval emailOrThrow = getUserEmail(1).get  // Throws if None\n```\n\n## Generators → Iterators/LazyList\n\n```python\n# Python\ndef fibonacci():\n    a, b = 0, 1\n    while True:\n        yield a\n        a, b = b, a + b\n\n# Take first 10\nfibs = list(itertools.islice(fibonacci(), 10))\n```\n\n```scala\n// Scala - LazyList (was Stream in Scala 2.12)\ndef fibonacci: LazyList[BigInt] = {\n  def loop(a: BigInt, b: BigInt): LazyList[BigInt] =\n    a #:: loop(b, a + b)\n  loop(0, 1)\n}\n\nval fibs = fibonacci.take(10).toList\n\n// Alternative: Iterator\ndef fibonacciIterator: Iterator[BigInt] = new Iterator[BigInt] {\n  private var (a, b) = (BigInt(0), BigInt(1))\n  def hasNext: Boolean = true\n  def next(): BigInt = {\n    val result = a\n    val newB = a + b\n    a = b\n    b = newB\n    result\n  }\n}\n```\n\n## Try/Either for Error Handling\n\n```python\n# Python - exceptions\ndef parse_int(s: str) -> int:\n    try:\n        return int(s)\n    except ValueError:\n        return 0\n\n# Python - Optional for errors\ndef safe_parse_int(s: str) -> Optional[int]:\n    try:\n        return int(s)\n    except ValueError:\n        return None\n```\n\n```scala\n// Scala - Try monad\nimport scala.util.{Try, Success, Failure}\n\ndef parseInt(s: String): Try[Int] = Try(s.toInt)\n\nval result = parseInt(\"123\") match {\n  case Success(n) => s\"Got: $n\"\n  case Failure(e) => s\"Error: ${e.getMessage}\"\n}\n\n// Chaining Try operations\nval doubled = parseInt(\"123\").map(_ * 2)\n\n// Either for custom error types\ndef parsePositive(s: String): Either[String, Int] = {\n  Try(s.toInt).toEither\n    .left.map(_ => \"Not a number\")\n    .flatMap { n =>\n      if (n > 0) Right(n)\n      else Left(\"Must be positive\")\n    }\n}\n```\n\n## Function Composition\n\n```python\n# Python\ndef compose(f, g):\n    return lambda x: f(g(x))\n\ndef pipe(*functions):\n    def inner(x):\n        result = x\n        for f in functions:\n            result = f(result)\n        return result\n    return inner\n\n# Usage\nadd_one = lambda x: x + 1\ndouble = lambda x: x * 2\npipeline = pipe(add_one, double, add_one)  # (x + 1) * 2 + 1\n```\n\n```scala\n// Scala - built-in composition\nval addOne: Int => Int = _ + 1\nval double: Int => Int = _ * 2\n\n// compose: f.compose(g) = f(g(x))\nval composed = addOne.compose(double)  // addOne(double(x))\n\n// andThen: f.andThen(g) = g(f(x))\nval pipeline = addOne.andThen(double).andThen(addOne)  // (x + 1) * 2 + 1\n```\n\n## Currying and Partial Application\n\n```python\n# Python\nfrom functools import partial\n\ndef add(a, b, c):\n    return a + b + c\n\nadd_5 = partial(add, 5)\nresult = add_5(3, 2)  # 10\n```\n\n```scala\n// Scala - curried functions\ndef add(a: Int)(b: Int)(c: Int): Int = a + b + c\n\nval add5 = add(5) _  // Partially applied\nval result = add5(3)(2)  // 10\n\n// Converting between curried and uncurried\nval uncurried = Function.uncurried(add _)\nval curried = (uncurried _).curried\n\n// Multiple parameter lists\ndef fold[A, B](init: B)(list: List[A])(f: (B, A) => B): B =\n  list.foldLeft(init)(f)\n\nval sum = fold(0)(List(1, 2, 3))(_ + _)\n```\n\n## Tail Recursion\n\n```python\n# Python - no tail call optimization\ndef factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n\n# Workaround: iterative\ndef factorial_iter(n):\n    result = 1\n    for i in range(2, n + 1):\n        result *= i\n    return result\n```\n\n```scala\n// Scala - tail recursion with annotation\nimport scala.annotation.tailrec\n\ndef factorial(n: Int): BigInt = {\n  @tailrec\n  def loop(n: Int, acc: BigInt): BigInt = {\n    if (n <= 1) acc\n    else loop(n - 1, n * acc)\n  }\n  loop(n, 1)\n}\n```\n\n## Implicit Conversions and Type Classes\n\n### Choosing between a type class and a subtype trait\n\nPython Protocols map to two different Scala patterns depending on how the Python code uses them:\n\n| Python usage | Idiomatic Scala |\n|--------------|-----------------|\n| Protocol only used for structural constraints on generic functions | Type class (implicit / `given`) parameter |\n| Protocol checked at runtime via `isinstance(x, Proto)` inside a dispatcher | **Subtype trait**; match `case t: Proto =>` inside a single `Any`-typed method |\n\nThe subtype-trait form composes cleanly with a single pattern-matching dispatch method and avoids overload ambiguity (see \"Pattern Matching\" above).\n\n### Type classes (when the Protocol is used generically)\n\n```python\n# Python - no direct equivalent\n# Duck typing provides flexibility\n```\n\n```scala\n// Scala - type classes via implicits (Scala 2) or given/using (Scala 3)\n\n// Scala 3\ntrait Show[A]:\n  def show(a: A): String\n\ngiven Show[Int] with\n  def show(a: Int): String = s\"Int: $a\"\n\ndef display[A](a: A)(using s: Show[A]): String = s.show(a)\n\n// Scala 2\ntrait Show[A] {\n  def show(a: A): String\n}\n\nimplicit val intShow: Show[Int] = new Show[Int] {\n  def show(a: Int): String = s\"Int: $a\"\n}\n\ndef display[A](a: A)(implicit s: Show[A]): String = s.show(a)\n```\n\n### Implicit conversions (for ergonomic ADT lifts of Python union types)\n\nWhen a Python union like `str | bytes` or `datetime | date` becomes a sealed ADT in Scala, small implicit conversions from the wrapped types into the ADT are convenient. Scala 2.13 emits a `feature` warning for user-defined implicit conversions unless you opt in:\n\n```scala\nimport scala.language.implicitConversions   // required, or pass -language:implicitConversions\n\nsealed trait StringOrBytes\nobject StringOrBytes {\n  final case class Str(s: String)          extends StringOrBytes\n  final case class Bytes(bs: Array[Byte])  extends StringOrBytes\n  implicit def fromString(s: String): StringOrBytes    = Str(s)\n  implicit def fromBytes(bs: Array[Byte]): StringOrBytes = Bytes(bs)\n}\n```\n\nAlways add the `import scala.language.implicitConversions` at the top of any file that declares such conversions; compiling with `-feature` will otherwise print a warning that some reviewers treat as a failure.\n"
+      },
+      {
+        "path": "python-scala-syntax-mapping/SKILL.md",
+        "content": "---\nname: python-scala-syntax-mapping\ndescription: Reference guide for translating Python syntax constructs to Scala equivalents. Use when converting Python code to Scala and need mappings for basic syntax elements like variable declarations, control flow, comprehensions, string formatting, and common operators.\n---\n\n# Python to Scala Syntax Mapping\n\n## Variable Declarations\n\n| Python | Scala |\n|--------|-------|\n| `x = 5` | `val x = 5` (immutable) or `var x = 5` (mutable) |\n| `x: int = 5` | `val x: Int = 5` |\n| `x, y = 1, 2` | `val (x, y) = (1, 2)` |\n\nPrefer `val` over `var` unless mutation is required.\n\n## Type Mappings\n\n| Python | Scala |\n|--------|-------|\n| `int` | `Int` |\n| `float` | `Double` |\n| `str` | `String` |\n| `bool` | `Boolean` |\n| `None` | `None` (of type `Option`) or `null` |\n| `list[T]` | `List[T]` or `Seq[T]` |\n| `dict[K, V]` | `Map[K, V]` |\n| `set[T]` | `Set[T]` |\n| `tuple[A, B]` | `(A, B)` or `Tuple2[A, B]` |\n| `Optional[T]` | `Option[T]` |\n\n## Control Flow\n\n### Conditionals\n\n```python\n# Python\nif x > 0:\n    result = \"positive\"\nelif x < 0:\n    result = \"negative\"\nelse:\n    result = \"zero\"\n```\n\n```scala\n// Scala - if is an expression\nval result = if (x > 0) \"positive\"\n             else if (x < 0) \"negative\"\n             else \"zero\"\n```\n\n### Loops\n\n```python\n# Python for loop\nfor i in range(10):\n    print(i)\n\nfor item in items:\n    process(item)\n\nfor i, item in enumerate(items):\n    print(f\"{i}: {item}\")\n```\n\n```scala\n// Scala equivalents\nfor (i <- 0 until 10) println(i)\n\nfor (item <- items) process(item)\n\nfor ((item, i) <- items.zipWithIndex) println(s\"$i: $item\")\n```\n\n### While loops\n\n```python\n# Python\nwhile condition:\n    do_something()\n```\n\n```scala\n// Scala\nwhile (condition) {\n  doSomething()\n}\n```\n\n## Comprehensions\n\n```python\n# Python list comprehension\nsquares = [x ** 2 for x in range(10)]\nevens = [x for x in numbers if x % 2 == 0]\npairs = [(x, y) for x in xs for y in ys]\n```\n\n```scala\n// Scala for-comprehensions or map/filter\nval squares = (0 until 10).map(x => x * x).toList\nval evens = numbers.filter(_ % 2 == 0)\nval pairs = for { x <- xs; y <- ys } yield (x, y)\n```\n\n## Functions\n\n```python\n# Python\ndef add(a: int, b: int) -> int:\n    return a + b\n\n# Lambda\nsquare = lambda x: x ** 2\n\n# Default arguments\ndef greet(name: str, greeting: str = \"Hello\") -> str:\n    return f\"{greeting}, {name}!\"\n```\n\n```scala\n// Scala\ndef add(a: Int, b: Int): Int = a + b\n\n// Lambda\nval square: Int => Int = x => x * x\n// or shorter: val square = (x: Int) => x * x\n\n// Default arguments\ndef greet(name: String, greeting: String = \"Hello\"): String =\n  s\"$greeting, $name!\"\n```\n\n## String Formatting\n\n| Python | Scala |\n|--------|-------|\n| `f\"Hello, {name}!\"` | `s\"Hello, $name!\"` |\n| `f\"Value: {x:.2f}\"` | `f\"Value: $x%.2f\"` |\n| `f\"{x + y}\"` | `s\"${x + y}\"` |\n\n### Runtime-computed format specifiers (important)\n\nScala's `f\"...\"` interpolator parses format specifiers **at compile time**, so you cannot splice a variable into the specifier the way Python allows:\n\n```python\n# Python - precision comes from a variable\nformatted = f\"{value:.{precision}f}\"\n```\n\n```scala\n// WRONG - compile error: \"Missing conversion operator in '%'; use %% for literal %\"\nval bad = f\"$value%.${precision}f\"\n\n// RIGHT - build the format string dynamically and pass to String.format\nval good = String.format(s\"%.${precision}f\", java.lang.Double.valueOf(value))\n\n// Also fine\nval good2 = (\"%.\" + precision + \"f\").format(value)\n```\n\nRule: if any part of the specifier (precision, width, flags) depends on a runtime value, drop the `f\"\"` interpolator and use `String.format` / `\"...\".format(...)` instead.\n\n## Common Operators\n\n| Python | Scala |\n|--------|-------|\n| `**` (power) | `math.pow(x, y)` or use `scala.math.pow` |\n| `//` (floor div) | `x / y` (for Int) or `math.floor(x / y)` |\n| `%` (modulo) | `%` |\n| `and`, `or`, `not` | `&&`, `||`, `!` |\n| `in` | `.contains()` |\n| `is` | `eq` (reference equality) |\n| `==` | `==` (value equality) |\n\n## Exception Handling\n\n```python\n# Python\ntry:\n    result = risky_operation()\nexcept ValueError as e:\n    handle_error(e)\nfinally:\n    cleanup()\n```\n\n```scala\n// Scala\nimport scala.util.{Try, Success, Failure}\n\n// Pattern 1: try-catch\ntry {\n  val result = riskyOperation()\n} catch {\n  case e: IllegalArgumentException => handleError(e)\n} finally {\n  cleanup()\n}\n\n// Pattern 2: Try monad (preferred for functional style)\nval result = Try(riskyOperation()) match {\n  case Success(value) => value\n  case Failure(e) => handleError(e)\n}\n```\n\n## None/Null Handling\n\n```python\n# Python\nif value is None:\n    return default\nreturn process(value)\n\n# Or\nresult = value if value is not None else default\n```\n\n```scala\n// Scala - use Option\nval result = optionValue match {\n  case Some(v) => process(v)\n  case None => default\n}\n\n// Or more concisely\nval result = optionValue.map(process).getOrElse(default)\n```\n"
+      }
+    ],
+    "skillaxe_evaluation": {
+      "quality_impact": {
+        "score": 0.6,
+        "rationale": "The trajectory succeeded on the agent's self-test but still received reward 0.0 from the verifier, suggesting the verifier applies a rubric (idiomatic style / warnings / specific API shape) not fully captured. The updates directly target the four concrete friction points observed in the trajectory — protocol→trait vs type class choice, ambiguous overload, `f\"\"` with dynamic precision, and missing `implicitConversions` import — which should reduce compile-time and idiomatic-style deductions on future runs, but do not guarantee a rubric pass."
+      },
+      "trigger_precision": {
+        "score": 0.8,
+        "rationale": "Edits stay inside two already-relevant skill files (functional and syntax-mapping) and are phrased as general Python→Scala guidance (Protocols, overload dispatch, `f\"\"` limits, implicitConversions). No task-specific names (`Tokenizer`, `TokenType`) leak into the skill; the guidance is transferable to any Python→Scala translation task."
+      },
+      "instruction_compliance": {
+        "score": 0.7,
+        "rationale": "The original skills did not make the `implicitConversions` import or the `f\"\"` compile-time-specifier constraint explicit, and did not distinguish Protocol-as-trait vs Protocol-as-type-class. These are genuine instruction deficiencies, now made explicit with 'always add this import' / 'use `String.format` when specifier is dynamic' / 'match `case t: Proto`' rules. The agent's non-compliance was partly caused by these gaps rather than pure disobedience."
+      },
+      "solution_path_coverage": {
+        "score": 0.75,
+        "rationale": "Guidance covers both encodings of Python Protocols (subtype trait for `isinstance` dispatch, type class for generic constraints), both formatting styles (`f\"\"` for static, `String.format` for dynamic), and both ADT-with-implicits and pure-pattern-match dispatch paths. Alternative valid solutions (e.g., using `Any` dispatch without any `Tokenizable` trait at all, or using scala 3 union types) are not forced-in, keeping the door open."
+      },
+      "overall_rationale": "Targeted, transferable additions to the two most-implicated skills that address every concrete compile error and warning surfaced in the trajectory, without over-fitting to the Tokenizer task."
+    }
+  },
+  "submission_row": {
+    "task_id": "python-scala-translation",
+    "diagnoses": [
+      {
+        "prediction_id": "D1",
+        "description": "Skill lacks explicit guidance for translating Python's `runtime_checkable` Protocol to Scala. The agent initially chose a type-class `Tokenizable[-A]` encoding, which collided with an `Any`-typed `tokenize` overload and required a rework. Guidance should note that Python `Protocol` classes that are dispatched via `isinstance` at runtime are more faithfully modelled as a Scala subtype trait (allowing pattern matching), while purely structural, non-dispatch uses may be modelled as type classes.",
+        "locations": [
+          {
+            "file": "python-scala-functional/SKILL.md",
+            "section": "Implicit Conversions and Type Classes"
+          },
+          {
+            "file": "python-scala-oop/SKILL.md",
+            "section": "Abstract Classes and Interfaces"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D2",
+        "description": "Skill does not warn about the interaction between a single `Any`-typed dispatch method (translating a Python `isinstance` chain / `@overload` union) and additional generic overloads on the same method name; these easily produce ambiguous-overload errors under Scala 2.13. Adding a short note in the OOP and functional skills about preferring one uniform dispatch method (pattern match inside `def foo(value: Any)`) rather than mixing it with `def foo[A](value: A)(implicit ...)` would prevent this class of compile error.",
+        "locations": [
+          {
+            "file": "python-scala-functional/SKILL.md",
+            "section": "Pattern Matching"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D3",
+        "description": "The `python-scala-libraries` regex/formatting section does not cover Scala's `f\"\"` interpolator gotcha: using a runtime-computed precision like `f\"$d%.${precision}f\"` is a compile error (`Missing conversion operator in '%'`). Translating Python's `f\"{v:.{precision}f}\"` is common in numeric tokenization; the skill should recommend `String.format(s\"%.${precision}f\", d)` (or `\"%.\"+precision+\"f\" formatted d`).",
+        "locations": [
+          {
+            "file": "python-scala-syntax-mapping/SKILL.md",
+            "section": "String Formatting"
+          },
+          {
+            "file": "python-scala-libraries/SKILL.md",
+            "section": "Date and Time"
+          }
+        ]
+      },
+      {
+        "prediction_id": "D4",
+        "description": "Skill omits the `import scala.language.implicitConversions` requirement for user-defined implicit conversions used to model Python union types (e.g. `str | bytes`, `datetime | date`) as sealed ADTs with convenience implicits. This produced feature warnings the agent then had to resolve.",
+        "locations": [
+          {
+            "file": "python-scala-functional/SKILL.md",
+            "section": "Implicit Conversions and Type Classes"
+          }
+        ]
+      }
+    ],
+    "repaired_bundle": "tasks/python-scala-translation/skills"
+  },
+  "updated_files": [
+    "python-scala-functional/SKILL.md",
+    "python-scala-syntax-mapping/SKILL.md"
+  ],
+  "usage": {
+    "completion_tokens": 10125,
+    "prompt_tokens": 38898,
+    "total_tokens": 49023,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": 0,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "image_tokens": 0
+    },
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost": 0.447615,
+    "is_byok": false,
+    "cost_details": {
+      "upstream_inference_cost": 0.447615,
+      "upstream_inference_prompt_cost": 0.19449,
+      "upstream_inference_completions_cost": 0.253125
+    }
+  }
+}
