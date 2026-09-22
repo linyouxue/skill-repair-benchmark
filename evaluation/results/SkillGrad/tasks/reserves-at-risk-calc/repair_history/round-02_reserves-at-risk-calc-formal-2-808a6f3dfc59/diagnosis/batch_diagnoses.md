@@ -1,0 +1,23 @@
+# Batch Diagnoses
+
+## Task reserves-at-risk-calc (reward: 0.0)
+
+<label>Output artifact not delivered</label>
+
+(1) First observable failure:
+- The required deliverable `/root/output/rar_result.xlsx` is missing. Output inventory shows only an input/template workbook, indicating the agent never saved the completed workbook to the mandated path.
+
+(2) Trajectory step that produced it:
+- The terminal agent step (“end_turn”) occurred without any preceding action that writes/verifies the workbook at `/root/output/rar_result.xlsx`. This is a completion-gate failure at the end of the run (failure to export), not a calculation-specific error.
+
+(3) Relevant skill rule or missing rule:
+- Relevant existing rule in `xlsx/SKILL.md`: **Workflow: Deliver the required artifact (mandatory)**, especially steps 3–5: save to exact output path/filename and verify existence before terminating.
+- The run violated this explicit “artifact exists at exact required path” completion gate.
+
+(4) General corrective behavior:
+- Always treat “save + filesystem existence check at the exact requested path” as the final non-negotiable step before ending. If the file is not present, immediately re-save to the correct location (creating parent dirs) and re-check; do not terminate until the path check passes. This is fully skill-controllable (not a grader, API, or permission issue based on provided evidence).
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/iter_1/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/iter_1/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/workspace

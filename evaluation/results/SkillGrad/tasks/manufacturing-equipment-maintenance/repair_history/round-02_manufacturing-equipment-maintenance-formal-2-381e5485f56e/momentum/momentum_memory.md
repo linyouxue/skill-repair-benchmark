@@ -1,0 +1,10 @@
+### write-required-output-artifacts | workflow | executor ends without writing required /app/output/*.json deliverables
+- anchor: write-required-output-artifacts-do-not-end-with-empty-inventory
+- appeared_in: iter_0, iter_1
+- description: The executor terminates the run without materializing the required output files, yielding an empty output inventory (or missing subset). This is a procedural omission at the finalization stage: even if computations were performed, the required contract is to write specific JSON files (e.g., q01.json … q05.json) under /app/output/ before ending. The failure is externally observable by the verifier as “missing artifacts,” independent of the correctness of any intermediate reasoning. In iter_1 the trace ended at end_turn without any tool actions that wrote /app/output/q01.json…/app/output/q05.json and without a pre-termination existence/parse/schema guard.
+- latest_executor_action: Follow an artifact-first protocol. (1) At the start, derive the output contract (all required filenames + schema) and create placeholder payloads for every required file. (2) As each answer is computed, overwrite the corresponding file. (3) Before ending, run a strict validation guard: confirm every required /app/output/q0*.json exists, is non-empty, parses as JSON, and matches required keys/types/nullability/formatting (including rounding, sorting, and no NaN/Inf). If any check fails, re-read spec, fix payload shape/content, rewrite, and re-validate; only then terminate.
+- remedy_log:
+  - iter_0 | diagnosis: output inventory is empty; executor terminated end_turn without writing any /app/output JSON deliverables
+            | patch: (none yet—recorded for patcher to add an explicit “write artifacts + verify” completion protocol to the skill)
+  - iter_1 | diagnosis: no required deliverable JSON files were produced under /app/output (q01–q05); run ended without a “write outputs then validate” phase
+            | patch: anchored the pattern to existing L2 section “Write required output artifacts (do not end with empty inventory)” and L3 references/output-artifact-protocol.md; no new content added here (iter_1 recorder)

@@ -86,6 +86,78 @@
       ],
       "repaired_bundle": "tasks/software-dependency-audit/skills",
       "executor_run_id": "software-dependency-audit-formal-5-2be1bdd78958"
+    },
+    {
+      "task_id": "lab-unit-harmonization",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "<label>Missing artifact generation</label>\n\n<first_observable_failure>\nNo harmonized output file was produced: the output inventory is empty, indicating `/root/ckd_lab_data_harmonized.csv` was never created or saved.\n</first_observable_failure>\n\n<trajectory_step_that_produced_it>\nThe failure occurs at the end of the rollout (“end_turn”) without any file-writing action. In other words, the agent terminated without executing the required transformation pipeline and save step.\n</trajectory_step_that_produced_it>\n\n<relevant_skill_rule_or_missing_rule>\nMissing/violated skill rule: “Always persist required deliverables to the specified path and verify existence/format before finishing.”  \nThis includes: (a) writing the CSV to the exact required location, (b) confirming row/column counts match expectations, and (c) checking formatting constraints (2-decimal fixed-point, no scientific notation, no commas).\n</relevant_skill_rule_or_missing_rule>\n\n<general_corrective_behavior>\nBefore ending, the agent must always:\n1) run the full cleaning + unit-harmonization procedure,  \n2) write the final dataframe to the exact required output path, and  \n3) perform a post-save verification (file exists, non-empty, correct columns, no NaNs, string format `X.XX`, no `e`/`,`), retrying if checks fail.  \nThis is skill-controllable (not a harness/API error) because producing and saving the output file is entirely within the agent’s procedural responsibilities.\n</general_corrective_behavior>",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/lab-unit-harmonization/skills",
+      "executor_run_id": "lab-unit-harmonization-formal-5-d1763f50c8b1"
+    },
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "<label>Missing artifact generation</label>\n\n(1) First observable failure:\n- The run produced **no output artifacts** (output inventory is empty), meaning the required `/root/output/index.html` and supporting `/root/output/js/...`, `/root/output/css/...`, `/root/output/data/...` were never created/copied. This is the earliest concrete, externally visible failure.\n\n(2) Trajectory step that produced it:\n- **Finalization / last agent step (end_turn)**: the agent ended without writing any files to the required output paths. In other words, the failure is not a “bad D3 implementation” yet; it’s the absence of the deliverable filesystem outputs.\n\n(3) Relevant skill rule or missing rule:\n- Missing or violated rule: **“Always materialize deliverables before ending”** for implementation/generation tasks: create the required directory structure, copy input data into the output data folder, and write the HTML/CSS/JS assets to the specified locations.\n- No evidence of a downstream API/dependency issue; this is controllable by the agent workflow/skill.\n\n(4) General corrective behavior:\n- Before terminating, the agent should perform a deterministic “deliverables checklist”:\n  1) Create `/root/output/`, `/root/output/js/`, `/root/output/css/`, `/root/output/data/`.\n  2) Copy the specified input datasets into `/root/output/data/` (preserving needed subfolders like `indiv-stock/`).\n  3) Write `index.html`, `css/style.css`, `js/visualization.js`, and place `js/d3.v6.min.js` (download or vendor it).\n  4) Verify existence (and ideally non-empty size) of each required file path, then only end the run.",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/data-to-d3/skills",
+      "executor_run_id": "data-to-d3-formal-2-ff6e0283a7e5"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "<label>Missing artifact production</label>\n\n(1) **First observable failure:** No required outputs were produced—`compressed_video.mp4` and `compression_report.json` are both missing. This is directly evidenced by the **Output inventory: `[]`**.\n\n(2) **Trajectory step that produced it:** The finalization/end of the run (“end_turn”) occurred **without any prior step creating/writing the output files**. The trace file is empty/unavailable in the accessible workspace, so the first concrete, observable failure is at the point where the agent should have written deliverables but didn’t.\n\n(3) **Relevant skill rule or missing rule:** A **missing “always materialize deliverables” rule** in the video-processing workflow skill: after detection/transformation, the agent must (a) run ffmpeg (or equivalent) to generate the compressed video, (b) compute durations/segments removed, and (c) write the JSON report in the specified schema. There is also likely a missing “verify outputs exist before finishing” checkpoint.\n\n(4) **General corrective behavior:** Add/ensure a mandatory end-of-task checkpoint:  \n- Generate `compressed_video.mp4` (even if using a simple silence-removal heuristic)  \n- Generate `compression_report.json` with consistent math and valid segment list  \n- Validate both files exist and are non-empty (and JSON parses) **before** ending the turn.  \n\nThis is skill-controllable (workflow/omission), not an API/dependency/grader issue.",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/video-silence-remover/skills",
+      "executor_run_id": "video-silence-remover-formal-5-e85bfd2a8d82"
+    },
+    {
+      "task_id": "reserves-at-risk-calc",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "<label>Missing artifact and save</label>\n\n  <first_observable_failure>\n    The run produced no output file at all (output inventory is empty), despite the task requiring saving an Excel workbook to the specified output path.\n  </first_observable_failure>\n\n  <trajectory_step_that_produced_it>\n    Finalization/end-of-turn: the agent terminated without executing (or successfully completing) the “Save As / export workbook to the required path” step. This is the first externally observable failure because nothing was written to the output location.\n  </trajectory_step_that_produced_it>\n\n  <relevant_skill_rule_or_missing_rule>\n    Missing or not enforced: a “hard requirement” rule to always (1) save the edited spreadsheet to the exact required path before ending, and (2) verify the file exists in the output directory (or equivalent in-app confirmation) before termination.\n    This is a skill-controllable procedural omission (workflow completion/validation), not an API, permission, dependency, harness, or grader error.\n  </relevant_skill_rule_or_missing_rule>\n\n  <general_corrective_behavior>\n    Add a mandatory completion checklist for spreadsheet tasks:\n    1) Perform calculations and fill required answer cells.\n    2) Save/export to the exact required output path and filename.\n    3) Immediately validate persistence (re-open or confirm presence/path) before ending the turn.\n    If saving fails, retry with correct path and ensure no unsaved changes remain.\n  </general_corrective_behavior>",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/reserves-at-risk-calc/skills",
+      "executor_run_id": "reserves-at-risk-calc-formal-5-85c1e8ab7a5f"
+    },
+    {
+      "task_id": "energy-unit-commitment",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "<label>Missing required output file</label>\n\n(1) **First observable failure:** No `/root/report.json` (or any report artifact) was produced. This is visible in the **Output inventory: `[]`**, meaning the agent never wrote the required JSON schedule for the verifier to evaluate.\n\n(2) **Trajectory step that produced it:** The failure occurs at the point the run ends (`termination_reason: end_turn`) without executing the mandatory “write report to `/root/report.json`” action. In other words, the *finalization/write-output step is absent* from the trajectory (no output-producing step is recorded).\n\n(3) **Relevant skill rule or missing rule:** This is a **missing “always emit required artifact” rule** in the unit-commitment MILP workflow skill. The skill should explicitly require:\n- constructing a schedule (even heuristic-feasible if needed),\n- then **serializing it exactly to the required schema**, and\n- **writing it to `/root/report.json`** before ending the turn.\n\n(4) **General corrective behavior:** Add/strengthen a terminal-phase behavior: *Before ending, verify the required files exist and match schema.* Concretely:\n- enforce a checklist: “solver run (or fallback heuristic) → build arrays for all generators & hours → compute hourly_summary → fill summary fields → set all constraint_check keys → write `/root/report.json`”.\n- if optimization fails, still output a **feasible** schedule with `solver_status: heuristic_feasible` rather than ending without a file.\n\n**Controllability:** Skill-controllable (agent behavior/output discipline), not an API, permission, dependency, or verifier/harness issue.",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/energy-unit-commitment/skills",
+      "executor_run_id": "energy-unit-commitment-formal-2-9f00434ae30d"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "<label>Missing output files generation</label>\n\n(1) **First observable failure:** The output inventory is empty (`[]`), meaning the agent did not generate any of the required JSON deliverables under `/app/output/` (e.g., `q01.json` … `q05.json`). This is the earliest concrete, externally observable failure because the verifier expects these files and none exist.\n\n(2) **Trajectory step that produced it:** **Finalization/end-turn step** — the agent terminated (`termination_reason: end_turn`) without writing outputs. This implies that across the interaction, no step executed the required “write JSON files” action, culminating in an empty output inventory.\n\n(3) **Relevant skill rule or missing rule:** The required skill **reflow-machine-maintenance-guidance** should contain (but apparently lacks or the agent failed to follow) an explicit **“always materialize answers into the exact required JSON files/paths”** rule, including:\n- Create `/app/output/` artifacts for each question\n- Strict schema adherence (keys, arrays sorted, rounding, null handling)\n- Ensure files are actually written before ending the run\n\nThis is a **skill-controllable** procedural omission (not an API/dependency/permission error), because the environment executed OK and no tool/harness error is indicated—only missing artifacts.\n\n(4) **General corrective behavior:** Add/strengthen a deterministic completion protocol:\n- Parse requirements → compute using handbook + CSVs → **write each `/app/output/q0X.json`** exactly as specified → verify file existence/content formatting (rounding, sorting, nulls) → only then end.\nAlso include a “no data => null + failing/compliance rules” handling step so outputs are still produced even when some runs lack sensor data.",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/manufacturing-equipment-maintenance/skills",
+      "executor_run_id": "manufacturing-equipment-maintenance-formal-3-e52fb091f628"
     }
   ]
 }

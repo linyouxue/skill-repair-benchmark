@@ -1,0 +1,26 @@
+# Batch Diagnoses
+
+## Task lab-unit-harmonization (reward: 0.75)
+
+<label>Missing output artifact write</label>
+
+(1) **First observable failure**
+- The required deliverable file was never created at the specified path. The task mandates saving the harmonized CSV to an exact location, but the output inventory contains only the two input CSVs, indicating no new harmonized file existed when grading ran.
+
+(2) **Trajectory step that produced it**
+- The finalization/termination step (“end_turn”) occurred **without executing the persistence + post-save verification gate** (i.e., no step that writes `/root/…harmonized.csv` and confirms it exists and reloads). This is the first point where the failure becomes observable: the run ends while the required artifact is absent.
+
+(3) **Relevant skill rule or missing rule**
+- Relevant existing rule in the provided skill: **“Step 4: Persist Deliverable + Post-save Verification”** with the hard completion gate:
+  - write to the exact required path
+  - assert exists and non-empty
+  - reload and confirm schema/columns
+- The agent did not follow this rule. No new rule is needed; it’s a **skill-controllable compliance failure** with the persistence gate.
+
+(4) **General corrective behavior**
+- Treat output persistence as non-optional: before terminating, always (a) write the output to the exact required path, (b) assert the file exists and is non-empty, and (c) reload it to verify column count/order and formatting constraints. If any check fails, fix and re-save—do not end the run until the gate passes.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/iter_2/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/iter_2/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/workspace

@@ -1,0 +1,18 @@
+# Batch Diagnoses
+
+## Task reserves-at-risk-calc (reward: 0.0)
+
+<label>Wrong output path and artifact</label>
+
+(1) **First observable failure:** The run did not produce the required saved spreadsheet at the mandated location `/root/output/rar_result.xlsx`. Instead, the only exported artifact recorded in the output inventory is a different file (`data/test-rar.xlsx`), so the grader could not find/validate the expected deliverable.
+
+(2) **Trajectory step that produced it:** The **final save/export step**—where the agent wrote the workbook to a non-required path/name (ending with a file under `data/` rather than `/root/output/rar_result.xlsx`). This is the earliest externally observable mismatch because even if computations were correct, the required output file was never produced at the specified path.
+
+(3) **Relevant skill rule or missing rule:** Missing/violated rule in the spreadsheet skill procedure: **“Always Save As exactly to the required absolute output path and filename specified by the task, and verify it exists after saving.”** The current behavior allowed saving to a convenient default or template path without enforcing the task’s output contract.
+
+(4) **General corrective behavior:** Treat the output path as a hard constraint. Before finishing: (a) perform an explicit **Save As** to the exact required location/name, (b) confirm the file exists and is readable, and (c) ensure the saved file is the final edited workbook (not an intermediate or template copy). This is a skill-controllable error (not an API/dependency/grader issue).
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/iter_3/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/iter_3/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/workspace

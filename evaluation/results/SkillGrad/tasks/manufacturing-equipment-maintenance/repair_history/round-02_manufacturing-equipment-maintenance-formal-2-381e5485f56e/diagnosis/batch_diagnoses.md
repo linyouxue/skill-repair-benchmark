@@ -1,0 +1,28 @@
+# Batch Diagnoses
+
+## Task manufacturing-equipment-maintenance (reward: 0.0)
+
+LABEL: Missing required output artifacts
+
+(1) First observable failure:
+No required deliverable JSON files were produced under `/app/output/` (q01–q05). This is the earliest concrete failure because the task requires these artifacts regardless of whether computations succeed; without them the verifier cannot grade the numeric content.
+
+(2) Trajectory step that produced it:
+The final/termination step (“end_turn”) occurred without any tool actions that write `/app/output/q01.json` … `/app/output/q05.json` and without any final existence/parse checks. In the trace summary, the run ends after analysis/tool usage but never executes a “write outputs then validate” phase.
+
+(3) Relevant skill rule or missing rule:
+Directly violates **reflow-machine-maintenance-guidance → “Write required output artifacts (do not end with empty inventory)”** and the “Plan the run (contract-first)” requirement to materialize outputs early and only terminate after writing and verifying all required artifacts.
+
+(4) General corrective behavior:
+Adopt an artifact-first protocol:
+- Create placeholder JSON structures for every required output file at the start (with `null` where needed).
+- After computing each question’s metrics, overwrite the corresponding file.
+- Before ending the run, perform a strict guard: confirm all `/app/output/q0*.json` exist, are non-empty, parse as JSON, and match required keys/types (no NaN/Inf; 2-decimal rounding; sorted IDs). If any check fails, fix and re-write before termination.
+
+Controllability:
+This is skill-controllable (process/discipline failure), not an API/dependency/grader issue.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/manufacturing-equipment-maintenance/iter_1/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/manufacturing-equipment-maintenance/iter_1/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/manufacturing-equipment-maintenance/workspace

@@ -1,0 +1,22 @@
+# Batch Diagnoses
+
+## Task lab-unit-harmonization (reward: 0.583)
+
+<label>Missing deliverable file written</label>
+
+(1) First observable failure:
+- The required output artifact `/root/ckd_lab_data_harmonized.csv` was not produced (output inventory lists only the two input CSVs; no harmonized CSV is present). This violates the task’s explicit “Please save…” requirement and would cause the verifier to fail regardless of conversion quality.
+
+(2) Trajectory step that produced it:
+- The finalization/termination step of the run: the agent ended the turn without completing “persist deliverable + post-save verification” (i.e., never successfully executed the save to the exact required path and verified existence/round-trip).
+
+(3) Relevant skill rule or missing rule:
+- Directly covered by SKILL.md “Step 4: Persist Deliverable + Post-save Verification (STOP CONDITION)” and the “Common Pitfalls” section: do not terminate until the file is written to the exact path, exists, is non-empty, and reloads with matching columns.
+
+(4) General corrective behavior:
+- Treat output persistence as a hard gate: explicitly write the cleaned dataframe to the exact required path, then immediately assert the file exists and is non-empty, reload it, and confirm column count/order match. Only end the run after these checks pass. If the save fails or path is wrong, fix and re-save before terminating. This is skill-controllable (not an API/dependency/grader issue).
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/iter_4/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/iter_4/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/workspace
