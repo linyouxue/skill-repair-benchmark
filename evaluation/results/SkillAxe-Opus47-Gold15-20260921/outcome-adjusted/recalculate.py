@@ -25,7 +25,7 @@ baseline = {t["task_id"]: t for t in manifest["tasks"]}
 rows = []
 for task in details["tasks"]:
     tid = task["task_id"]
-    result_path = ROOT / "runs" / manifest["method_id"] / f"{tid}-skillaxe-opus47-r001/benchmark_result.json"
+    result_path = ROOT / "tasks" / tid / "repaired_run/benchmark_result.json"
     result = read(result_path)
     assert result["task_id"] == tid
     assert baseline[tid]["status"] == "FAIL"
@@ -60,7 +60,7 @@ for version in ("original", "pass_task_full_credit", "gold_tp_keep_extra_fp"):
 rules = {
     "pass_task_full_credit": "F→P任务：诊断和修复均设TP=Gold defect数量、FP=FN=0；其他任务保留原Gold评分。",
     "gold_tp_keep_extra_fp": "F→P任务：全部Gold defect设为TP、FN=0；保留原诊断额外误报FP及修复有害额外改动FP，移除被覆盖的Gold修复失败FP；其他任务保持原分。",
-    "scope": "仍统计15题32个Gold defect；2个基础设施异常任务保留原内容评分，不将其视为执行FAIL或PASS。",
+    "scope": "统计同15题32个Gold defect；仅有效执行PASS触发覆盖，基础设施错误不能视为执行FAIL或PASS。",
     "limitations": "离线事后替代计分，不是Gold裁判重新认定。通过不证明逐项诊断正确或全部缺陷均被修复。定位、回归、置信度指标不重新推断。",
 }
 payload = dict(method_id=manifest["method_id"], source_details="gold-evaluation/details.json",
@@ -74,7 +74,7 @@ payload = dict(method_id=manifest["method_id"], source_details="gold-evaluation/
 
 lines = ["# F→P 任务全 TP：替代计分", "", "现有 Gold 评分保留不变；本文件仅基于已完成结果离线重算，无模型调用、无任务重跑。", ""]
 lines += [f"- {value}" for value in rules.values()]
-lines += ["", "6个F→P任务覆盖12个Gold defect。诊断TP由原来的3个覆盖为12个，净增9个；修复TP由1个覆盖为12个，净增11个。", "",
+lines += ["", f"{payload['overridden_task_count']}个F→P任务覆盖{payload['overridden_gold_defect_count']}个Gold defect。逐题原Gold判断保留，覆盖仅改变下述计分。", "",
           "## 汇总（micro）", "", "| 口径 | 指标 | TP | FP | FN | Precision | Recall | F1 |", "|---|---|---:|---:|---:|---:|---:|---:|"]
 labels = {"original": "原Gold评分", "pass_task_full_credit": "新版：通过任务整体满分", "gold_tp_keep_extra_fp": "附加：保留额外FP"}
 for version, metrics in aggregates.items():
