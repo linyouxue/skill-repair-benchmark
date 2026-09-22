@@ -1,0 +1,25 @@
+# Batch Diagnoses
+
+## Task sec-financial-report (reward: 0.0)
+
+<label>Missing required output artifact</label>
+
+(1) First observable failure:
+- No required deliverable file was produced: `/root/answers.json` is missing (or not written in the required schema). The run ended without creating the JSON artifact the verifier expects.
+
+(2) Trajectory step that produced it:
+- The final agent step (`end_turn` termination) occurred without a prior step writing and read-back verifying `/root/answers.json`. This is the first point where failure becomes observable: termination without artifact creation.
+
+(3) Relevant skill rule or missing rule:
+- Relevant rule exists in both preloaded skills (`13f-analyzer` and `fuzzy-name-search`) under **“Plan & Package Outputs”**:
+  - “Do not terminate until deliverables are written at the exact required paths.”
+  - “When the deliverable is a JSON file, serialize once, then re-open and parse it to confirm it is valid JSON and contains the required top-level keys.”
+- The agent did not follow this rule (skill-controllable).
+
+(4) General corrective behavior:
+- Before finishing, always (a) compute answers, (b) write them to the exact required path `/root/answers.json` with the specified keys, and (c) immediately re-open and JSON-parse the file to confirm validity and presence of `q1_answer`, `q2_answer`, `q3_answer`, `q4_answer`. Only then terminate. This is independent of the analysis correctness and prevents “analysis-only” completions from failing artifact-based grading.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/sec-financial-report/iter_1/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/sec-financial-report/iter_1/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/sec-financial-report/workspace

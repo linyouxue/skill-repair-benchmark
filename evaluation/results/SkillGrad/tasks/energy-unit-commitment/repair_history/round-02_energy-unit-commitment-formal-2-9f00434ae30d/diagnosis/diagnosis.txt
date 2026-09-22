@@ -1,0 +1,17 @@
+<label>Missing required output artifact</label>
+
+(1) First observable failure:
+- The run finished without producing the required `/root/report.json` schedule file. The output inventory contains only the input (`network.json`), and there is no generated report artifact for the verifier to evaluate.
+
+(2) Trajectory step that produced it:
+- The final “end_turn” completion step terminated the agent without a successful “write report.json to fixed path and re-open/validate it exists” action. In other words, the last step omitted the mandatory report-writing/finalization step.
+
+(3) Relevant skill rule or missing rule:
+- **milp-solver-workflow → Reporting Discipline**: “Treat output emission as mandatory… When the required path is a fixed filename (e.g., `/root/report.json`), write exactly there… do not end a run until the evaluator-required artifact(s) exist on disk.”
+- This is a skill-controllable failure: it’s not an API/permission/harness issue; it is a missing implementation of the required finalization behavior.
+
+(4) General corrective behavior:
+- Add an explicit end-of-run “artifact finalization” routine:
+  1) Always serialize the computed schedules to the exact required path (`/root/report.json`).
+  2) Immediately re-open/read the file and minimally validate: JSON parses, required keys present, array lengths match `T`, generator names match input.
+  3) Only then terminate. If solve fails, still write a report with a feasible/heuristic status only if a validated feasible schedule exists; otherwise fail fast rather than exiting with no artifact.

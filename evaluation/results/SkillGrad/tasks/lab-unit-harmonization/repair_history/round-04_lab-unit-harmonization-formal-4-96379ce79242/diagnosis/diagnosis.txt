@@ -1,0 +1,16 @@
+<label>Missing output artifact written</label>
+
+(1) First observable failure:
+- The required harmonized CSV was not produced at the specified output path, so the verifier could not assess content-level requirements (2-decimal formatting, no scientific notation/commas, unit ranges). This is the earliest concrete, externally observable failure consistent with a low-but-nonzero reward and “execution_ok: true” yet “task_passed: false”.
+
+(2) Trajectory step that produced it:
+- The terminal/pipeline run ended (“end_turn”) without completing the “persist deliverable + post-save verification” gate (i.e., no final step that writes the file to the exact required location and reloads it to confirm schema/order and non-empty). In other words, the failure occurs at the finalization stage: the agent terminated before Step 4 of the intended workflow.
+
+(3) Relevant skill rule or missing rule:
+- Directly violates SKILL.md “Step 4: Persist Deliverable + Post-save Verification (STOP CONDITION)”:
+  - “Do not terminate / end the run until all checks pass.”
+  - Must assert the output path exists, is non-empty, and round-trip reload preserves columns/order.
+- This is skill-controllable (not an API/dependency/permission issue): the environment ran successfully, but the agent did not execute the required hard completion gate.
+
+(4) General corrective behavior:
+- Treat file persistence and round-trip verification as mandatory before stopping: always (a) write to the exact required path, (b) confirm file exists and size > 0, (c) reload and assert identical columns/order, and only then end the run. If any assertion fails, fix formatting/conversion logic and re-save until the gate passes.

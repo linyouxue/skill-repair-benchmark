@@ -1,0 +1,24 @@
+# Batch Diagnoses
+
+## Task reserves-at-risk-calc (reward: 0.0)
+
+<label>Output path not satisfied</label>
+
+(1) **First observable failure:** The required deliverable `/root/output/rar_result.xlsx` was not produced. The output inventory shows only `data/test-rar.xlsx`, so the run fails before any spreadsheet-content checks matter.
+
+(2) **Trajectory step that produced it:** The finalization/export step (end of trajectory) saved or left the edited workbook at a non-required location/name (`data/test-rar.xlsx`) and then terminated without doing a “save-as to required absolute path + existence check” gate.
+
+(3) **Relevant skill rule or missing rule:** This directly violates the **XLSX skill “Workflow: Deliver the required artifact (mandatory)”**—specifically steps 1, 3, and 4: extract exact required output path, explicitly save to that absolute path, and verify the file exists there before stopping.
+
+(4) **General corrective behavior:** Always treat the required output path as a completion gate:
+- Parse the exact required absolute filename from the task.
+- Perform an explicit Save As to that path (create parent dirs).
+- Immediately verify the file exists at that exact path (optionally reopen).
+- Do not end the run until the existence check passes.
+
+This is a skill-controllable failure (not an API/harness/grader issue), because the agent had execution success and simply didn’t write the artifact to the mandated location/name.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/iter_4/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/iter_4/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/reserves-at-risk-calc/workspace

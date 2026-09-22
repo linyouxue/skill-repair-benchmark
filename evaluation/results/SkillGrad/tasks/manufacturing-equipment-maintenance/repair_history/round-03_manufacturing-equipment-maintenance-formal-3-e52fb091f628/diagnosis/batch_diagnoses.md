@@ -1,0 +1,28 @@
+# Batch Diagnoses
+
+## Task manufacturing-equipment-maintenance (reward: 0.0)
+
+<label>Missing required output artifacts</label>
+
+(1) First observable failure:
+- No required `/app/output/q01.json`–`q05.json` files were produced; the run ends without any output artifacts to grade.
+
+(2) Trajectory step that produced it:
+- The final agent termination (`end_turn`) occurred without running any “write + validate outputs” step; i.e., the last agent message ended the run while outputs were still absent.
+
+(3) Relevant skill rule or missing rule:
+- Violates **reflow-machine-maintenance-guidance → “Write required output artifacts (blocking pre-termination gate)”**:
+  - “Always materialize answers into the exact required JSON files under `/app/output/`… Treat output validation as a blocking gate… immediately before `end_turn`, re-run the validation gate over all required files…”
+- Also aligns with the same requirement echoed in **reflow-profile-compliance-toolkit → “Output construction guardrails / Minimal end-to-end scaffold”** (write outputs, sorting, rounding, nulls).
+
+(4) General corrective behavior:
+- Implement a hard “output gate” early and again right before termination:
+  - Create placeholder JSONs for all required deliverables at the start.
+  - Compute metrics, overwrite the placeholders, then verify: files exist, non-empty, valid JSON, required keys/types present, arrays sorted, floats rounded, NaN/Inf replaced with null.
+  - If any check fails, do not terminate; fix and re-write until the gate passes.
+- This is skill-controllable (not an API/dependency/grader issue): execution succeeded, but the agent omitted mandatory artifact writing/validation.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/manufacturing-equipment-maintenance/iter_2/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/manufacturing-equipment-maintenance/iter_2/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/manufacturing-equipment-maintenance/workspace

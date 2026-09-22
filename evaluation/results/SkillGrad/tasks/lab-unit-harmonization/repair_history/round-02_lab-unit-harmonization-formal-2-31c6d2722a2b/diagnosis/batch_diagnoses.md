@@ -1,0 +1,23 @@
+# Batch Diagnoses
+
+## Task lab-unit-harmonization (reward: 0.938)
+
+<label>Missing required output artifact</label>
+
+(1) First observable failure:
+- The run finishes without producing the required output file at the specified path (`/root/ckd_lab_data_harmonized.csv`). This is the earliest externally observable failure because the verifier cannot validate formatting/ranges if the deliverable CSV is absent.
+
+(2) Trajectory step that produced it:
+- The final agent termination step (“end_turn”) occurred without a prior successful “persist deliverable” action. In the trace, there is no evidence of a write-to-disk step for the output CSV before completion.
+
+(3) Relevant skill rule or missing rule:
+- Skill rule exists but was not followed: **“Step 4: Persist Deliverable + Post-save Verification”** which explicitly requires `to_csv(...)` to the exact requested path and a round-trip read/assertions as a completion gate.
+- This is a skill-controllable planning/execution omission (not an API, permission, or harness error).
+
+(4) General corrective behavior:
+- Always treat artifact creation as a hard completion gate: before ending, explicitly write the harmonized dataframe to the exact required output path, then immediately re-open the saved CSV to verify (a) file exists and non-empty, (b) column count/order matches input, and (c) all numeric fields are formatted as fixed two-decimal strings with no scientific notation/commas. Only after these checks pass should the agent end the turn.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/iter_1/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/iter_1/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/lab-unit-harmonization/workspace

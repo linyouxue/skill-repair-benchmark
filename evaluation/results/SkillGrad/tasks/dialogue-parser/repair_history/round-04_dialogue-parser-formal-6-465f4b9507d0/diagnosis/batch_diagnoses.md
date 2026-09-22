@@ -1,0 +1,29 @@
+# Batch Diagnoses
+
+## Task dialogue-parser (reward: 0.833)
+
+<label>Missing required output artifacts</label>
+
+1) **First observable failure**
+- The required on-disk deliverables were never produced: `/app/dialogue.json` and `/app/dialogue.dot` are missing. This is directly supported by the **Output inventory** containing only `script.txt`.
+
+2) **Trajectory step that produced it**
+- The failure is attributable to the **end of the single agent run** (termination at `end_turn`) without having written/verified the required artifacts. In the trace summary, there is only one agent message step and the run ends after tool calls; no evidence of export/write steps is present, and the final filesystem inventory confirms absence.
+
+3) **Relevant skill rule or missing rule**
+- Violated skill rule from `dialogue-graph/SKILL.md`:
+  - **“End-of-run guardrail: immediately before `end_turn`, unconditionally run an explicit export → artifact check routine; if any required path is missing/empty/unloadable, do not end—write best-effort placeholders and re-verify.”**
+- Also aligns with the listed pitfall: **“Finishing logic but not materializing required deliverables (JSON/DOT) at the specified paths.”**
+
+4) **General corrective behavior**
+- Always implement and invoke a finalization routine that, regardless of parsing success:
+  - Calls `parse_script(text)` to obtain a best-effort graph object/dict,
+  - Writes **both** required files to the exact absolute paths,
+  - Reloads/validates them (JSON load + basic DOT non-empty check),
+  - Only then allows `end_turn`.
+- This is **skill-controllable** (not an API/dependency/harness/grader issue): the environment executed successfully and the only failure evidenced is missing files.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/dialogue-parser/iter_5/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/dialogue-parser/iter_5/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/dialogue-parser/workspace

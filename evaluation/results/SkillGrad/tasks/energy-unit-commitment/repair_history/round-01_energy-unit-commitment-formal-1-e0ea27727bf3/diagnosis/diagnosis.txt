@@ -1,0 +1,16 @@
+<label>Missing required output file</label>
+
+(1) **First observable failure:** No `/root/report.json` (or any report artifact) was produced. This is visible in the **Output inventory: `[]`**, meaning the agent never wrote the required JSON schedule for the verifier to evaluate.
+
+(2) **Trajectory step that produced it:** The failure occurs at the point the run ends (`termination_reason: end_turn`) without executing the mandatory “write report to `/root/report.json`” action. In other words, the *finalization/write-output step is absent* from the trajectory (no output-producing step is recorded).
+
+(3) **Relevant skill rule or missing rule:** This is a **missing “always emit required artifact” rule** in the unit-commitment MILP workflow skill. The skill should explicitly require:
+- constructing a schedule (even heuristic-feasible if needed),
+- then **serializing it exactly to the required schema**, and
+- **writing it to `/root/report.json`** before ending the turn.
+
+(4) **General corrective behavior:** Add/strengthen a terminal-phase behavior: *Before ending, verify the required files exist and match schema.* Concretely:
+- enforce a checklist: “solver run (or fallback heuristic) → build arrays for all generators & hours → compute hourly_summary → fill summary fields → set all constraint_check keys → write `/root/report.json`”.
+- if optimization fails, still output a **feasible** schedule with `solver_status: heuristic_feasible` rather than ending without a file.
+
+**Controllability:** Skill-controllable (agent behavior/output discipline), not an API, permission, dependency, or verifier/harness issue.
