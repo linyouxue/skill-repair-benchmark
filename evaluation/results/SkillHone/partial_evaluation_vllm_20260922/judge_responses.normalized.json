@@ -1,0 +1,661 @@
+{
+  "task_count": 5,
+  "total_gold_defect_count": 11,
+  "skipped_original_pass_task_count": 0,
+  "skipped_gold_defect_count": 0,
+  "evaluated_task_count": 5,
+  "evaluated_gold_defect_count": 11,
+  "skipped_original_pass_rate": 0.0,
+  "skipped_original_pass_task_ids": [],
+  "method_id": "skillhone-v2",
+  "benchmark_version": "core25-gold-defects-20260909-v1",
+  "judge_model": "gpt-5.2",
+  "prompt_version": "skill-diagnosis-repair-v2.1",
+  "scoring_version": "skill-diagnosis-repair-scoring-v1.4",
+  "original_pass_policy": "local_executor_verified_skip",
+  "evidence_policy": "local_executor_artifacts",
+  "executor_runs_dir": "/home/zhaokai/skill-repair-benchmark/evaluation/results/SkillHone/evaluator_runs",
+  "evaluation_scope": "all_gold_tasks",
+  "verified_original_passes": null,
+  "mode": "llm",
+  "maximum_judge_requests": 10,
+  "temperature": null,
+  "confidence_threshold": 0.8,
+  "reasoning_effort": null,
+  "confidence_policy": "warn_only",
+  "regression_basis": "content_judgment",
+  "max_output_tokens": 8192,
+  "base_url": "https://api.gpt.ge/v1",
+  "tasks": [
+    {
+      "task_id": "dialogue-parser",
+      "diagnosis_raw": {
+        "response_id": "chatcmpl-EQlvFz7zM7jHpI04gEx0wWLtnBrm3",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"diagnoses\":[{\"prediction_id\":\"P001\",\"matched_defect_id\":null,\"same_defect\":false,\"location_correct\":false,\"confidence\":0.78,\"reason\":\"预测称“未提供可复用的 parse_script 入口点（solution.py）”。但 Gold D001 讨论的是 Skill 文档在“终止 edge target（End）与可序列化 content node 区分、以及 terminal-aware 可达性”不清，导致实现者在无显式 [End] 段时仍创建并序列化 End 节点从而可达性失败；对应位置在 dialogue-graph/SKILL.md 的“How to use > 3. Adding Edges（示例 Edge(... target='End' ...)）以及 4. Export（to_dict/to_json 序列化）”。预测既未提到 End 节点序列化/可达性，也未指向 SKILL.md 的相关章节，而是指向不存在于 Gold 的 solution.py 入口问题，因此不匹配。\"}]}",
+        "usage": {
+          "completion_tokens": 227,
+          "prompt_tokens": 3233,
+          "total_tokens": 3460,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 11,
+            "engine_ttft_ms": 94,
+            "engine_ttlt_ms": 2634,
+            "pre_inference_ms": 82,
+            "service_tbt_ms": 11,
+            "service_ttft_ms": 570,
+            "service_ttlt_ms": 3105,
+            "user_visible_ttft_ms": 487
+          }
+        }
+      },
+      "diagnosis_result": {
+        "diagnoses": [
+          {
+            "prediction_id": "P001",
+            "matched_defect_id": null,
+            "same_defect": false,
+            "location_correct": false,
+            "confidence": 0.78,
+            "reason": "预测称“未提供可复用的 parse_script 入口点（solution.py）”。但 Gold D001 讨论的是 Skill 文档在“终止 edge target（End）与可序列化 content node 区分、以及 terminal-aware 可达性”不清，导致实现者在无显式 [End] 段时仍创建并序列化 End 节点从而可达性失败；对应位置在 dialogue-graph/SKILL.md 的“How to use > 3. Adding Edges（示例 Edge(... target='End' ...)）以及 4. Export（to_dict/to_json 序列化）”。预测既未提到 End 节点序列化/可达性，也未指向 SKILL.md 的相关章节，而是指向不存在于 Gold 的 solution.py 入口问题，因此不匹配。"
+          }
+        ]
+      },
+      "repair_raw": {
+        "response_id": "chatcmpl-EQlvJwm3ycmxQzUBMhXXNCcyx9WbD",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"repairs\":[{\"defect_id\":\"D001\",\"repair_present\":true,\"repair_correct\":false,\"confidence\":0.63,\"reason\":\"虽然在实现里部分引入了“End 作为终止目标而非 JSON content node”的语义（见 final/scripts/dialogue_graph.py 的 validate(): `if nxt == \\\"End\\\": continue`，以及 to_dot(): `if any(e.target == \\\"End\\\" ...)` 才在 DOT 加 End 节点），但 Gold 要求还包括“Skill 文档需明确 End 默认仅为终止 edge target；没有显式且含内容的 [End] section 时不得建立/序列化 Node(id=\\\"End\\\")；DOT 中 End marker 不等于 JSON node”。final/SKILL.md 在 `### 3. Adding Edges` 仍示例 `target=\\\"End\\\"`，但未声明“不得序列化 End 节点/End 仅为终止目标/显式 [End] 才能作为内容节点”等规则；同时实现中的 visualize() 仍无条件 `dot.node('End', 'END', ...)`（final/scripts/dialogue_graph.py），与“DOT End marker 不等于 JSON node”的区分也未在文档中明确。尽管 parse_script() 当前不会创建 `Node(id=\\\"End\\\")`（final/solution.py 仅对 `e.target != \\\"End\\\"` 才 `_ensure_section`），但文档修复未完成且实现仍保留可混淆行为（visualize 强制 End）。\"}],\"extra_modifications\":[{\"item_id\":\"E1\",\"classification\":\"benign\",\"confidence\":0.86,\"reason\":\"新增无依赖 DOT 导出能力：final/scripts/dialogue_graph.py 增加 `Graph.to_dot()`，并在 final/SKILL.md 增加 `### 6. Visualization` 的 “A) No-dependency DOT export”。属于功能增强且不直接违反既有约束。\"},{\"item_id\":\"E2\",\"classification\":\"benign\",\"confidence\":0.78,\"reason\":\"新增导入路径 shim：final/dialogue_graph.py 将 `from scripts.dialogue_graph import Edge, Graph, Node` 暴露为顶层模块，匹配文档 `from dialogue_graph import ...`，属于兼容性修复/增强。\"},{\"item_id\":\"E3\",\"classification\":\"possible_new_defect\",\"confidence\":0.68,\"reason\":\"仓库结构重排/路径变化：原文件位于 `dialogue-graph/scripts/dialogue_graph.py` 与 `dialogue-graph/SKILL.md`，Final 变为 `scripts/dialogue_graph.py` 与根目录 `SKILL.md`（见 diff 删除 original/dialogue-graph/... 并新增 final/...）。若评测/打包流程依赖原目录结构，可能导致加载失败；但仅凭 diff 无法确认运行环境路径约束。\"},{\"item_id\":\"E4\",\"classification\":\"benign\",\"confidence\":0.83,\"reason\":\"新增脚本解析入口与 CLI：final/solution.py 实现 `parse_script(text: str)` 并输出 `/app/dialogue.json` 和 `/app/dialogue.dot`，与任务上下文要求一致（虽非 Gold 缺陷修复点）。\"},{\"item_id\":\"E5\",\"classification\":\"benign\",\"confidence\":0.8,\"reason\":\"validate() 增加可达性检查：final/scripts/dialogue_graph.py 在 `validate()` 中新增从首个插入节点 DFS 的 unreachable 报错逻辑 `Unreachable nodes from ...`，属于一致性增强。\"}],\"regression\":{\"substantive_change\":true,\"detected\":true,\"new_defects\":[{\"defect_id\":\"R01\",\"description\":\"Graph.visualize() 仍会无条件在 DOT/渲染图中加入 End 节点，可能与“仅在引用 End 时才显示终止标记”的终止语义不一致并造成混淆。\",\"evidence\":\"Final 的 `Graph.to_dot()` 已改为 `if any(e.target == \\\"End\\\" for e in self.edges)` 才添加 End（final/scripts/dialogue_graph.py），但 `Graph.visualize()` 仍固定执行 `# Add End node\\\\n dot.node('End', 'END', ...)`（final/scripts/dialogue_graph.py）。若图中无 End 边仍出现 End，违反了更严格的 terminal-aware 表达（且与新增 to_dot 行为不一致）。\"}],\"confidence\":0.64,\"reason\":\"Final 引入了新的 to_dot 条件 End 行为，但 visualize() 仍无条件绘制 End（final/scripts/dialogue_graph.py），属于新增/暴露的不一致缺陷；其是否触发取决于是否调用 visualize()，但作为库行为已发生实质变化并可能误导。\"}}",
+        "usage": {
+          "completion_tokens": 1028,
+          "prompt_tokens": 16365,
+          "total_tokens": 17393,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 12,
+            "engine_ttft_ms": 595,
+            "engine_ttlt_ms": 13174,
+            "pre_inference_ms": 133,
+            "service_tbt_ms": 12,
+            "service_ttft_ms": 1162,
+            "service_ttlt_ms": 13710,
+            "user_visible_ttft_ms": 1029
+          }
+        }
+      },
+      "repair_result": {
+        "repairs": [
+          {
+            "defect_id": "D001",
+            "repair_present": true,
+            "repair_correct": false,
+            "confidence": 0.63,
+            "reason": "虽然在实现里部分引入了“End 作为终止目标而非 JSON content node”的语义（见 final/scripts/dialogue_graph.py 的 validate(): `if nxt == \"End\": continue`，以及 to_dot(): `if any(e.target == \"End\" ...)` 才在 DOT 加 End 节点），但 Gold 要求还包括“Skill 文档需明确 End 默认仅为终止 edge target；没有显式且含内容的 [End] section 时不得建立/序列化 Node(id=\"End\")；DOT 中 End marker 不等于 JSON node”。final/SKILL.md 在 `### 3. Adding Edges` 仍示例 `target=\"End\"`，但未声明“不得序列化 End 节点/End 仅为终止目标/显式 [End] 才能作为内容节点”等规则；同时实现中的 visualize() 仍无条件 `dot.node('End', 'END', ...)`（final/scripts/dialogue_graph.py），与“DOT End marker 不等于 JSON node”的区分也未在文档中明确。尽管 parse_script() 当前不会创建 `Node(id=\"End\")`（final/solution.py 仅对 `e.target != \"End\"` 才 `_ensure_section`），但文档修复未完成且实现仍保留可混淆行为（visualize 强制 End）。"
+          }
+        ],
+        "extra_modifications": [
+          {
+            "item_id": "E1",
+            "classification": "benign",
+            "confidence": 0.86,
+            "reason": "新增无依赖 DOT 导出能力：final/scripts/dialogue_graph.py 增加 `Graph.to_dot()`，并在 final/SKILL.md 增加 `### 6. Visualization` 的 “A) No-dependency DOT export”。属于功能增强且不直接违反既有约束。"
+          },
+          {
+            "item_id": "E2",
+            "classification": "benign",
+            "confidence": 0.78,
+            "reason": "新增导入路径 shim：final/dialogue_graph.py 将 `from scripts.dialogue_graph import Edge, Graph, Node` 暴露为顶层模块，匹配文档 `from dialogue_graph import ...`，属于兼容性修复/增强。"
+          },
+          {
+            "item_id": "E3",
+            "classification": "possible_new_defect",
+            "confidence": 0.68,
+            "reason": "仓库结构重排/路径变化：原文件位于 `dialogue-graph/scripts/dialogue_graph.py` 与 `dialogue-graph/SKILL.md`，Final 变为 `scripts/dialogue_graph.py` 与根目录 `SKILL.md`（见 diff 删除 original/dialogue-graph/... 并新增 final/...）。若评测/打包流程依赖原目录结构，可能导致加载失败；但仅凭 diff 无法确认运行环境路径约束。"
+          },
+          {
+            "item_id": "E4",
+            "classification": "benign",
+            "confidence": 0.83,
+            "reason": "新增脚本解析入口与 CLI：final/solution.py 实现 `parse_script(text: str)` 并输出 `/app/dialogue.json` 和 `/app/dialogue.dot`，与任务上下文要求一致（虽非 Gold 缺陷修复点）。"
+          },
+          {
+            "item_id": "E5",
+            "classification": "benign",
+            "confidence": 0.8,
+            "reason": "validate() 增加可达性检查：final/scripts/dialogue_graph.py 在 `validate()` 中新增从首个插入节点 DFS 的 unreachable 报错逻辑 `Unreachable nodes from ...`，属于一致性增强。"
+          }
+        ],
+        "regression": {
+          "substantive_change": true,
+          "detected": true,
+          "new_defects": [
+            {
+              "defect_id": "R01",
+              "description": "Graph.visualize() 仍会无条件在 DOT/渲染图中加入 End 节点，可能与“仅在引用 End 时才显示终止标记”的终止语义不一致并造成混淆。",
+              "evidence": "Final 的 `Graph.to_dot()` 已改为 `if any(e.target == \"End\" for e in self.edges)` 才添加 End（final/scripts/dialogue_graph.py），但 `Graph.visualize()` 仍固定执行 `# Add End node\\n dot.node('End', 'END', ...)`（final/scripts/dialogue_graph.py）。若图中无 End 边仍出现 End，违反了更严格的 terminal-aware 表达（且与新增 to_dot 行为不一致）。"
+            }
+          ],
+          "confidence": 0.64,
+          "reason": "Final 引入了新的 to_dot 条件 End 行为，但 visualize() 仍无条件绘制 End（final/scripts/dialogue_graph.py），属于新增/暴露的不一致缺陷；其是否触发取决于是否调用 visualize()，但作为库行为已发生实质变化并可能误导。"
+        }
+      }
+    },
+    {
+      "task_id": "python-scala-translation",
+      "diagnosis_raw": {
+        "response_id": "chatcmpl-EQlvYGPpZGA0lM3P6TuszmZBtp7N6",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"diagnoses\":[{\"prediction_id\":\"P001\",\"matched_defect_id\":\"D001\",\"same_defect\":true,\"location_correct\":false,\"confidence\":0.62,\"reason\":\"P001指出“未强制检查保留公开API/required symbol list”，与Gold D001“未强制先读取现有build/package/测试契约导致遗漏package与多项公开API、测试无法引用”语义一致（都是缺少强制流程来保证对外API/可被测试引用）。但P001给的定位在不存在于DATA中的“skills/python-scala-api-compile-guardrails/SKILL.md”，而D001定位在“python-scala-libraries/SKILL.md 的 description、Testing 与 Build Tools Comparison”，文件与section不对应，故location_correct=false。\"}]}",
+        "usage": {
+          "completion_tokens": 177,
+          "prompt_tokens": 15045,
+          "total_tokens": 15222,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 12,
+            "engine_ttft_ms": 249,
+            "engine_ttlt_ms": 2425,
+            "pre_inference_ms": 135,
+            "service_tbt_ms": 12,
+            "service_ttft_ms": 1114,
+            "service_ttlt_ms": 3286,
+            "user_visible_ttft_ms": 979
+          }
+        }
+      },
+      "diagnosis_result": {
+        "diagnoses": [
+          {
+            "prediction_id": "P001",
+            "matched_defect_id": "D001",
+            "same_defect": true,
+            "location_correct": false,
+            "confidence": 0.62,
+            "reason": "P001指出“未强制检查保留公开API/required symbol list”，与Gold D001“未强制先读取现有build/package/测试契约导致遗漏package与多项公开API、测试无法引用”语义一致（都是缺少强制流程来保证对外API/可被测试引用）。但P001给的定位在不存在于DATA中的“skills/python-scala-api-compile-guardrails/SKILL.md”，而D001定位在“python-scala-libraries/SKILL.md 的 description、Testing 与 Build Tools Comparison”，文件与section不对应，故location_correct=false。"
+          }
+        ]
+      },
+      "repair_raw": {
+        "response_id": "chatcmpl-EQlveFd0zXN343LQ3N0qQvhK5e8lb",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"repairs\":[{\"defect_id\":\"D001\",\"repair_present\":false,\"repair_correct\":false,\"confidence\":0.86,\"reason\":\"Gold 要求在 Skill 中“新增 mandatory project-contract gate：实现前读取 build、package 与测试；提取依赖类型、构造器、companion 和公开方法；…以项目级全部测试通过作为完成条件”。最终新增的仅是 `skills/python-scala-api-compile-guardrails/SKILL.md`，强调“required symbol list”“single-file module layout”“static scan”，并未要求读取现有 `build.sbt`/package/test 契约；`skills/python-scala-translation-playbook/SKILL.md` 也仅有“inventory the Python module/Compilation readiness checklist”，没有“先读取 build、package 与测试”的强制门禁条款。\"} ,{\"defect_id\":\"D002\",\"repair_present\":false,\"repair_correct\":false,\"confidence\":0.83,\"reason\":\"Gold 要求明确“standalone scalac 仅中间语法检查，不能替代 sbt test；项目级测试通过才是完成门槛”。新增 `skills/python-scala-api-compile-guardrails/SKILL.md` 反而写“Static 'compile hygiene' scan (when scalac isn’t available)”与 grep 符号检查，且“Done criteria”仅是“required symbol list satisfied / no placeholders / idiomatic Scala 2.13”，未提 `sbt test`；`skills/python-scala-libraries/SKILL.md` 的 Testing/Build Tools 章节在 Final 中也未新增项目级验收门槛描述。\"} ,{\"defect_id\":\"D003\",\"repair_present\":false,\"repair_correct\":false,\"confidence\":0.82,\"reason\":\"Gold 要求在 Optional→Option 映射规则中补充“仅语义可选才用 Option；已有构造器/公开方法若被 build/test 固定必须保留 caller-facing API”。Final 的 `skills/python-scala-syntax-mapping/SKILL.md` 在 Type Mappings 仍仅写“`Optional[T]` | `Option[T]`”，没有增加任何“保持已有公开接口/构造器签名”的约束；新增 `skills/python-scala-api-compile-guardrails/SKILL.md` 也只做“required symbol list”名称级检查，未覆盖签名保持。\"}],\"extra_modifications\":[{\"item_id\":\"E1\",\"classification\":\"benign\",\"confidence\":0.74,\"reason\":\"新增顶层占位文件 `final/SKILL.md`（bundle 说明）与 `final/references/EXPLORATION.md`（探索日志），以及新增技能 `skills/python-scala-api-compile-guardrails/SKILL.md`、`skills/python-scala-translation-playbook/SKILL.md`；这些属于文档/技能组织与通用流程补充，不直接改变既有规则语义约束，且未与 Gold 修复要求冲突（但也未满足）。\"}],\"regression\":{\"substantive_change\":true,\"detected\":true,\"new_defects\":[{\"defect_id\":\"R01\",\"description\":\"新增的“translation-playbook”模板包含 `???` 占位符，且与 guardrails“避免 placeholders（???）”自相矛盾，可能误导使用者生成不可编译代码。\",\"evidence\":\"`skills/python-scala-translation-playbook/SKILL.md` 的“Minimal Scala 2.13 module skeleton”里出现 `Token(tokenType = ???, value = w)`、`def toToken(...): Token = ???`；但 `skills/python-scala-api-compile-guardrails/SKILL.md` 明确写“Avoid placeholders (`???`)”，两份技能对“是否允许 ???”给出相反指引。\"}],\"confidence\":0.71,\"reason\":\"Final 新增了可部署技能文件且包含相互矛盾的规则：guardrails 禁止 `???`，playbook 提供带 `???` 的可复制模板；这属于变更引入的新一致性缺陷。\"}}",
+        "usage": {
+          "completion_tokens": 889,
+          "prompt_tokens": 69267,
+          "total_tokens": 70156,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 12,
+            "engine_ttft_ms": 2630,
+            "engine_ttlt_ms": 13395,
+            "pre_inference_ms": 210,
+            "service_tbt_ms": 12,
+            "service_ttft_ms": 3534,
+            "service_ttlt_ms": 14295,
+            "user_visible_ttft_ms": 3324
+          }
+        }
+      },
+      "repair_result": {
+        "repairs": [
+          {
+            "defect_id": "D001",
+            "repair_present": false,
+            "repair_correct": false,
+            "confidence": 0.86,
+            "reason": "Gold 要求在 Skill 中“新增 mandatory project-contract gate：实现前读取 build、package 与测试；提取依赖类型、构造器、companion 和公开方法；…以项目级全部测试通过作为完成条件”。最终新增的仅是 `skills/python-scala-api-compile-guardrails/SKILL.md`，强调“required symbol list”“single-file module layout”“static scan”，并未要求读取现有 `build.sbt`/package/test 契约；`skills/python-scala-translation-playbook/SKILL.md` 也仅有“inventory the Python module/Compilation readiness checklist”，没有“先读取 build、package 与测试”的强制门禁条款。"
+          },
+          {
+            "defect_id": "D002",
+            "repair_present": false,
+            "repair_correct": false,
+            "confidence": 0.83,
+            "reason": "Gold 要求明确“standalone scalac 仅中间语法检查，不能替代 sbt test；项目级测试通过才是完成门槛”。新增 `skills/python-scala-api-compile-guardrails/SKILL.md` 反而写“Static 'compile hygiene' scan (when scalac isn’t available)”与 grep 符号检查，且“Done criteria”仅是“required symbol list satisfied / no placeholders / idiomatic Scala 2.13”，未提 `sbt test`；`skills/python-scala-libraries/SKILL.md` 的 Testing/Build Tools 章节在 Final 中也未新增项目级验收门槛描述。"
+          },
+          {
+            "defect_id": "D003",
+            "repair_present": false,
+            "repair_correct": false,
+            "confidence": 0.82,
+            "reason": "Gold 要求在 Optional→Option 映射规则中补充“仅语义可选才用 Option；已有构造器/公开方法若被 build/test 固定必须保留 caller-facing API”。Final 的 `skills/python-scala-syntax-mapping/SKILL.md` 在 Type Mappings 仍仅写“`Optional[T]` | `Option[T]`”，没有增加任何“保持已有公开接口/构造器签名”的约束；新增 `skills/python-scala-api-compile-guardrails/SKILL.md` 也只做“required symbol list”名称级检查，未覆盖签名保持。"
+          }
+        ],
+        "extra_modifications": [
+          {
+            "item_id": "E1",
+            "classification": "benign",
+            "confidence": 0.74,
+            "reason": "新增顶层占位文件 `final/SKILL.md`（bundle 说明）与 `final/references/EXPLORATION.md`（探索日志），以及新增技能 `skills/python-scala-api-compile-guardrails/SKILL.md`、`skills/python-scala-translation-playbook/SKILL.md`；这些属于文档/技能组织与通用流程补充，不直接改变既有规则语义约束，且未与 Gold 修复要求冲突（但也未满足）。"
+          }
+        ],
+        "regression": {
+          "substantive_change": true,
+          "detected": true,
+          "new_defects": [
+            {
+              "defect_id": "R01",
+              "description": "新增的“translation-playbook”模板包含 `???` 占位符，且与 guardrails“避免 placeholders（???）”自相矛盾，可能误导使用者生成不可编译代码。",
+              "evidence": "`skills/python-scala-translation-playbook/SKILL.md` 的“Minimal Scala 2.13 module skeleton”里出现 `Token(tokenType = ???, value = w)`、`def toToken(...): Token = ???`；但 `skills/python-scala-api-compile-guardrails/SKILL.md` 明确写“Avoid placeholders (`???`)”，两份技能对“是否允许 ???”给出相反指引。"
+            }
+          ],
+          "confidence": 0.71,
+          "reason": "Final 新增了可部署技能文件且包含相互矛盾的规则：guardrails 禁止 `???`，playbook 提供带 `???` 的可复制模板；这属于变更引入的新一致性缺陷。"
+        }
+      }
+    },
+    {
+      "task_id": "sec-financial-report",
+      "diagnosis_raw": {
+        "response_id": "chatcmpl-EQlvt4sbh6T8eGE8zwmaI9WmBRhwe",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"diagnoses\":[{\"prediction_id\":\"P001\",\"matched_defect_id\":null,\"same_defect\":false,\"location_correct\":false,\"confidence\":0.32,\"reason\":\"预测称“脚本依赖的 package imports 不可解析、需要自包含并避免第三方依赖”，并指向 13f-analyzer/scripts/one_fund_analysis.py 的“imports”。但代码中仅有标准库 argparse 与第三方 pandas（未见不可解析的相对/包内 import），且其核心问题不在 import 解析。Gold D001 具体是 SKILL.md 里使用相对路径调用 `python3 scripts/...`，在 executor 中实际安装路径为 `/skills/<skill>/scripts`，导致从 /root 执行找不到脚本；预测未提到该“相对 scripts 路径/安装路径不匹配”的语义，也未引用 13f-analyzer/SKILL.md 或 fuzzy-name-search/SKILL.md 的调用代码块。另预测 locations 含 `_shared/tsv_utils.py`，在提交原始文件列表中不存在，进一步表明未对准 Gold 缺陷位置。\"}]}",
+        "usage": {
+          "completion_tokens": 254,
+          "prompt_tokens": 6410,
+          "total_tokens": 6664,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 15,
+            "engine_ttft_ms": 381,
+            "engine_ttlt_ms": 4163,
+            "pre_inference_ms": 76,
+            "service_tbt_ms": 15,
+            "service_ttft_ms": 980,
+            "service_ttlt_ms": 4757,
+            "user_visible_ttft_ms": 904
+          }
+        }
+      },
+      "diagnosis_result": {
+        "diagnoses": [
+          {
+            "prediction_id": "P001",
+            "matched_defect_id": null,
+            "same_defect": false,
+            "location_correct": false,
+            "confidence": 0.32,
+            "reason": "预测称“脚本依赖的 package imports 不可解析、需要自包含并避免第三方依赖”，并指向 13f-analyzer/scripts/one_fund_analysis.py 的“imports”。但代码中仅有标准库 argparse 与第三方 pandas（未见不可解析的相对/包内 import），且其核心问题不在 import 解析。Gold D001 具体是 SKILL.md 里使用相对路径调用 `python3 scripts/...`，在 executor 中实际安装路径为 `/skills/<skill>/scripts`，导致从 /root 执行找不到脚本；预测未提到该“相对 scripts 路径/安装路径不匹配”的语义，也未引用 13f-analyzer/SKILL.md 或 fuzzy-name-search/SKILL.md 的调用代码块。另预测 locations 含 `_shared/tsv_utils.py`，在提交原始文件列表中不存在，进一步表明未对准 Gold 缺陷位置。"
+          }
+        ]
+      },
+      "repair_raw": {
+        "response_id": "chatcmpl-EQlvz0WXsfPoJXhwEwTGz6CaZ6I3a",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"repairs\":[{\"defect_id\":\"D001\",\"repair_present\":false,\"repair_correct\":false,\"confidence\":0.88,\"reason\":\"Gold要求将SKILL.md中的helper调用改为稳定的“/skills/<skill>/scripts/...”。但final里两处文档仍是相对路径：`13f-analyzer/SKILL.md` 仍写 `python3 scripts/one_fund_analysis.py`/`python scripts/holding_analysis.py`；`fuzzy-name-search/SKILL.md` 仍写 `python3 scripts/search_fund.py`/`python3 scripts/search_stock_cusip.py`。代码侧虽在多个脚本加入`sys.path` hack（如`13f-analyzer/scripts/one_fund_analysis.py`的`_REPO_ROOT ... sys.path.insert`），但这不是按要求的“稳定 /skills/... 路径”修复，也未在helper未找到时检查Skill安装路径（文档未体现）。\"},{\"defect_id\":\"D002\",\"repair_present\":true,\"repair_correct\":false,\"confidence\":0.72,\"reason\":\"final对“多少只股票”语义做了代码层澄清：`13f-analyzer/scripts/one_fund_analysis.py`新增输出 `- Number of stock holdings (rows)` 与 `- Number of stocks held (unique CUSIPs)`，并在stats里区分`total_holdings_rows`/`unique_stock_cusips`。但Gold要求在`13f-analyzer/SKILL.md`“helper 输出字段说明”中明确语义差异并指导问题应使用stock holdings字段；final的`13f-analyzer/SKILL.md`并未增加任何字段解释，仍是笼统描述“including total number of holdings, AUM, total number of stock holdings”。因此修复不完整。\"},{\"defect_id\":\"D003\",\"repair_present\":true,\"repair_correct\":true,\"confidence\":0.86,\"reason\":\"`13f-analyzer/scripts/one_fund_analysis.py`对跨季度差分流程做了实质性重写，符合Gold步骤：1) 每季度分别用对应accession读取并过滤股票：`_aggregate_by_cusip()`里按`ACCESSION_NUMBER`过滤，并用`TITLEOFCLASS` in `title_class_of_stocks`做股票过滤；2) 按CUSIP聚合VALUE：`cusip_value[cusip] = ... + v`；3) outer join并补0：`all_cusips = set(cusip_value) | set(base_cusip_value)`，缺失用`.get(...,0.0)`；4) 计算current-baseline：`abs_change = v - vb`；5) 仅保留正值并降序排序：`merged.sort(..., reverse=True)`后`buys = [t for t in merged if t[4] > 0][:10]`，输出CUSIP列表（打印中CUSIP唯一键）。满足“Top Buys”语义与流程要求。\"}],\"extra_modifications\":[{\"item_id\":\"E1\",\"classification\":\"benign\",\"confidence\":0.7,\"reason\":\"为减少依赖，将多处脚本从pandas/rapidfuzz改为stdlib TSV流式读取与`SequenceMatcher`模糊匹配：新增`_shared/tsv_utils.py`，并在`fuzzy-name-search/scripts/search_fund.py`、`search_stock_cusip.py`、`13f-analyzer/scripts/*.py`改用`iter_tsv/topk_fuzzy/safe_float`。该变更不直接对应Gold修复目的（路径/文档/Top Buys说明），但总体上仍实现原功能（搜索、聚合、排名）。\"},{\"item_id\":\"E2\",\"classification\":\"possible_new_defect\",\"confidence\":0.62,\"reason\":\"新增脚本通过`from skills._shared.tsv_utils import ...`导入，但仓库新增文件路径是顶层`_shared/tsv_utils.py`与顶层`__init__.py`，并未看到`skills/_shared/tsv_utils.py`或`skills/__init__.py`（final_files列表中不存在`skills/`目录）。同时脚本加的`_REPO_ROOT = .../../../..`再插入`sys.path`也未必能让`skills._shared`解析成功，可能导致运行时ImportError：例如`13f-analyzer/scripts/one_fund_analysis.py`顶部`from skills._shared.tsv_utils import iter_tsv, safe_float`。是否实际存在`skills`包不确定，因此归类为possible_new_defect。\"}],\"regression\":{\"substantive_change\":true,\"detected\":true,\"new_defects\":[{\"defect_id\":\"R01\",\"description\":\"脚本导入路径可能错误：引用了不存在的`skills._shared.tsv_utils`模块，导致直接运行helper失败。\",\"evidence\":\"final新增公共工具文件为顶层`_shared/tsv_utils.py`与顶层`__init__.py`，但多个脚本写死`from skills._shared.tsv_utils import ...`（如`13f-analyzer/scripts/holding_analysis.py`、`13f-analyzer/scripts/one_fund_analysis.py`、`fuzzy-name-search/scripts/search_fund.py`、`fuzzy-name-search/scripts/search_stock_cusip.py`）。在final_files清单中未提供`skills/_shared/tsv_utils.py`或`skills/__init__.py`来满足该import，属于变更引入的潜在新缺陷。\"}],\"confidence\":0.63,\"reason\":\"相比original（直接import pandas/rapidfuzz、无需`skills._shared`），final引入新的import链且文件结构证据不足，存在新增运行失败风险；因此判定检测到新缺陷但置信度中等。\"}}",
+        "usage": {
+          "completion_tokens": 1265,
+          "prompt_tokens": 20619,
+          "total_tokens": 21884,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 11,
+            "engine_ttft_ms": 405,
+            "engine_ttlt_ms": 14962,
+            "pre_inference_ms": 121,
+            "service_tbt_ms": 12,
+            "service_ttft_ms": 908,
+            "service_ttlt_ms": 15460,
+            "user_visible_ttft_ms": 788
+          }
+        }
+      },
+      "repair_result": {
+        "repairs": [
+          {
+            "defect_id": "D001",
+            "repair_present": false,
+            "repair_correct": false,
+            "confidence": 0.88,
+            "reason": "Gold要求将SKILL.md中的helper调用改为稳定的“/skills/<skill>/scripts/...”。但final里两处文档仍是相对路径：`13f-analyzer/SKILL.md` 仍写 `python3 scripts/one_fund_analysis.py`/`python scripts/holding_analysis.py`；`fuzzy-name-search/SKILL.md` 仍写 `python3 scripts/search_fund.py`/`python3 scripts/search_stock_cusip.py`。代码侧虽在多个脚本加入`sys.path` hack（如`13f-analyzer/scripts/one_fund_analysis.py`的`_REPO_ROOT ... sys.path.insert`），但这不是按要求的“稳定 /skills/... 路径”修复，也未在helper未找到时检查Skill安装路径（文档未体现）。"
+          },
+          {
+            "defect_id": "D002",
+            "repair_present": true,
+            "repair_correct": false,
+            "confidence": 0.72,
+            "reason": "final对“多少只股票”语义做了代码层澄清：`13f-analyzer/scripts/one_fund_analysis.py`新增输出 `- Number of stock holdings (rows)` 与 `- Number of stocks held (unique CUSIPs)`，并在stats里区分`total_holdings_rows`/`unique_stock_cusips`。但Gold要求在`13f-analyzer/SKILL.md`“helper 输出字段说明”中明确语义差异并指导问题应使用stock holdings字段；final的`13f-analyzer/SKILL.md`并未增加任何字段解释，仍是笼统描述“including total number of holdings, AUM, total number of stock holdings”。因此修复不完整。"
+          },
+          {
+            "defect_id": "D003",
+            "repair_present": true,
+            "repair_correct": true,
+            "confidence": 0.86,
+            "reason": "`13f-analyzer/scripts/one_fund_analysis.py`对跨季度差分流程做了实质性重写，符合Gold步骤：1) 每季度分别用对应accession读取并过滤股票：`_aggregate_by_cusip()`里按`ACCESSION_NUMBER`过滤，并用`TITLEOFCLASS` in `title_class_of_stocks`做股票过滤；2) 按CUSIP聚合VALUE：`cusip_value[cusip] = ... + v`；3) outer join并补0：`all_cusips = set(cusip_value) | set(base_cusip_value)`，缺失用`.get(...,0.0)`；4) 计算current-baseline：`abs_change = v - vb`；5) 仅保留正值并降序排序：`merged.sort(..., reverse=True)`后`buys = [t for t in merged if t[4] > 0][:10]`，输出CUSIP列表（打印中CUSIP唯一键）。满足“Top Buys”语义与流程要求。"
+          }
+        ],
+        "extra_modifications": [
+          {
+            "item_id": "E1",
+            "classification": "benign",
+            "confidence": 0.7,
+            "reason": "为减少依赖，将多处脚本从pandas/rapidfuzz改为stdlib TSV流式读取与`SequenceMatcher`模糊匹配：新增`_shared/tsv_utils.py`，并在`fuzzy-name-search/scripts/search_fund.py`、`search_stock_cusip.py`、`13f-analyzer/scripts/*.py`改用`iter_tsv/topk_fuzzy/safe_float`。该变更不直接对应Gold修复目的（路径/文档/Top Buys说明），但总体上仍实现原功能（搜索、聚合、排名）。"
+          },
+          {
+            "item_id": "E2",
+            "classification": "possible_new_defect",
+            "confidence": 0.62,
+            "reason": "新增脚本通过`from skills._shared.tsv_utils import ...`导入，但仓库新增文件路径是顶层`_shared/tsv_utils.py`与顶层`__init__.py`，并未看到`skills/_shared/tsv_utils.py`或`skills/__init__.py`（final_files列表中不存在`skills/`目录）。同时脚本加的`_REPO_ROOT = .../../../..`再插入`sys.path`也未必能让`skills._shared`解析成功，可能导致运行时ImportError：例如`13f-analyzer/scripts/one_fund_analysis.py`顶部`from skills._shared.tsv_utils import iter_tsv, safe_float`。是否实际存在`skills`包不确定，因此归类为possible_new_defect。"
+          }
+        ],
+        "regression": {
+          "substantive_change": true,
+          "detected": true,
+          "new_defects": [
+            {
+              "defect_id": "R01",
+              "description": "脚本导入路径可能错误：引用了不存在的`skills._shared.tsv_utils`模块，导致直接运行helper失败。",
+              "evidence": "final新增公共工具文件为顶层`_shared/tsv_utils.py`与顶层`__init__.py`，但多个脚本写死`from skills._shared.tsv_utils import ...`（如`13f-analyzer/scripts/holding_analysis.py`、`13f-analyzer/scripts/one_fund_analysis.py`、`fuzzy-name-search/scripts/search_fund.py`、`fuzzy-name-search/scripts/search_stock_cusip.py`）。在final_files清单中未提供`skills/_shared/tsv_utils.py`或`skills/__init__.py`来满足该import，属于变更引入的潜在新缺陷。"
+            }
+          ],
+          "confidence": 0.63,
+          "reason": "相比original（直接import pandas/rapidfuzz、无需`skills._shared`），final引入新的import链且文件结构证据不足，存在新增运行失败风险；因此判定检测到新缺陷但置信度中等。"
+        }
+      }
+    },
+    {
+      "task_id": "software-dependency-audit",
+      "diagnosis_raw": {
+        "response_id": "chatcmpl-EQlwGGZaLd9UWFlFfGSh87IJ20BGU",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"diagnoses\":[{\"prediction_id\":\"P001\",\"matched_defect_id\":null,\"same_defect\":false,\"location_correct\":false,\"confidence\":0.4,\"reason\":\"P001指向的是“缺少确定性离线审计/缺少fallback导致可能不产出CSV”的流程性问题，且定位在不存在的“dependency-security-audit/SKILL.md / Offline audit workflow”。Gold D001的语义是：在加guard诊断运行中，Agent越过提前结束点后误判缓存不可用，进而“删除 /root/trivy-cache 链接并下载当前 Trivy 数据库，最终输出24条记录；CSV结构通过但记录集合不匹配固定ground truth”，并且证据位置在“trivy-offline-vulnerability-scanning/SKILL.md 的 Step 1 数据库存在性检查与 Common Issues/下载更新建议”。两者机制不一致：P001未提到删除缓存链接、在线下载DB导致结果漂移/不匹配ground truth的问题。\"}]}",
+        "usage": {
+          "completion_tokens": 227,
+          "prompt_tokens": 8862,
+          "total_tokens": 9089,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 13,
+            "engine_ttft_ms": 2502,
+            "engine_ttlt_ms": 5501,
+            "pre_inference_ms": 89,
+            "service_tbt_ms": 13,
+            "service_ttft_ms": 3290,
+            "service_ttlt_ms": 6282,
+            "user_visible_ttft_ms": 3201
+          }
+        }
+      },
+      "diagnosis_result": {
+        "diagnoses": [
+          {
+            "prediction_id": "P001",
+            "matched_defect_id": null,
+            "same_defect": false,
+            "location_correct": false,
+            "confidence": 0.4,
+            "reason": "P001指向的是“缺少确定性离线审计/缺少fallback导致可能不产出CSV”的流程性问题，且定位在不存在的“dependency-security-audit/SKILL.md / Offline audit workflow”。Gold D001的语义是：在加guard诊断运行中，Agent越过提前结束点后误判缓存不可用，进而“删除 /root/trivy-cache 链接并下载当前 Trivy 数据库，最终输出24条记录；CSV结构通过但记录集合不匹配固定ground truth”，并且证据位置在“trivy-offline-vulnerability-scanning/SKILL.md 的 Step 1 数据库存在性检查与 Common Issues/下载更新建议”。两者机制不一致：P001未提到删除缓存链接、在线下载DB导致结果漂移/不匹配ground truth的问题。"
+          }
+        ]
+      },
+      "repair_raw": {
+        "response_id": "chatcmpl-EQlwOduNtOaWAypJa7pSW6oN1H10r",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"repairs\":[{\"defect_id\":\"D001\",\"repair_present\":true,\"repair_correct\":false,\"confidence\":0.55,\"reason\":\"虽新增了离线扫描脚本并强调离线（final/dependency-security-audit/audit_package_lock.py 使用了“--skip-db-update”、“--offline-scan”、“--cache-dir”），但未满足Gold对“必须且仅使用 /root/trivy-cache/db/trivy.db 与 metadata.json；扫描必须使用 --cache-dir /root/trivy-cache；固定快照不可读应报告阻塞而不是换库”的硬性要求：1) 路径未固定为 /root/trivy-cache，默认是“./trivy-cache”（dependency-security-audit/SKILL.md: “TRIVY_CACHE_DIR env var, else ./trivy-cache”；audit_package_lock.py:_default_trivy_cache_dir 返回 os.path.abspath(\\\"./trivy-cache\\\")），允许偏离固定缓存；2) DB校验是“heuristically detect”（audit_package_lock.py:_trivy_db_exists）且接受任意“.db/.sqlite/.sqlite3”或仅“metadata.json/trivy.db.gz”，并未强制同时存在“db/trivy.db 与 metadata.json”，也无法确保不替换/重建；3) 当Trivy DB不可用或Trivy失败时，脚本会回退到“npm audit”甚至写header-only（audit_package_lock.py: 失败后 _run_npm_audit_offline；最终“Deterministic output: header-only.”），而Gold要求“固定快照确实不可读时应报告输入阻塞，而不是换用新数据库”，此回退会导致输出集合与固定ground truth不一致的风险。另：Gold指出需修订 trivy-offline-vulnerability-scanning/SKILL.md 的Step1与Common Issues的下载/更新建议，但该文件在final中仍包含“Download database first with: trivy image --download-db-only ...”与“Download newer database (before going offline)”。\"}],\"extra_modifications\":[{\"item_id\":\"E1\",\"classification\":\"possible_new_defect\",\"confidence\":0.6,\"reason\":\"新增技能与脚本引入与任务约束可能冲突的“静默成功”行为：audit_package_lock.py 在无离线数据源时仍返回0并输出仅表头CSV（main: “_write_csv(args.output, []); return 0”）。若上层期望在无法读取固定离线DB时显式失败/阻塞（Gold: “应报告输入阻塞”），这种“成功但无结果”会掩盖问题，可能导致误判“无漏洞”。\"}],\"regression\":{\"substantive_change\":true,\"detected\":true,\"new_defects\":[{\"defect_id\":\"R01\",\"description\":\"新增离线审计脚本未强制使用固定的 /root/trivy-cache 快照，且在Trivy失败时回退到其他来源或输出空结果，破坏确定性/ground truth一致性要求。\",\"evidence\":\"final/dependency-security-audit/audit_package_lock.py:_default_trivy_cache_dir 默认“./trivy-cache”且可通过TRIVY_CACHE_DIR/--trivy-cache-dir改变；_trivy_db_exists 为启发式；main中Trivy失败后调用 _run_npm_audit_offline 并最终“header-only”。与Gold约束“只使用 /root/trivy-cache/db/trivy.db 与 metadata.json；固定快照不可读应阻塞而非换库”相冲突。\"}],\"confidence\":0.6,\"reason\":\"相对Original仅为文档技能，无脚本执行路径；Final新增可执行脚本且其默认缓存路径/回退策略引入确定性与固定缓存约束的潜在违反，属于实质性新增行为缺陷。\"}}",
+        "usage": {
+          "completion_tokens": 826,
+          "prompt_tokens": 25134,
+          "total_tokens": 25960,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 11,
+            "engine_ttft_ms": 443,
+            "engine_ttlt_ms": 9470,
+            "pre_inference_ms": 157,
+            "service_tbt_ms": 11,
+            "service_ttft_ms": 1002,
+            "service_ttlt_ms": 10025,
+            "user_visible_ttft_ms": 845
+          }
+        }
+      },
+      "repair_result": {
+        "repairs": [
+          {
+            "defect_id": "D001",
+            "repair_present": true,
+            "repair_correct": false,
+            "confidence": 0.55,
+            "reason": "虽新增了离线扫描脚本并强调离线（final/dependency-security-audit/audit_package_lock.py 使用了“--skip-db-update”、“--offline-scan”、“--cache-dir”），但未满足Gold对“必须且仅使用 /root/trivy-cache/db/trivy.db 与 metadata.json；扫描必须使用 --cache-dir /root/trivy-cache；固定快照不可读应报告阻塞而不是换库”的硬性要求：1) 路径未固定为 /root/trivy-cache，默认是“./trivy-cache”（dependency-security-audit/SKILL.md: “TRIVY_CACHE_DIR env var, else ./trivy-cache”；audit_package_lock.py:_default_trivy_cache_dir 返回 os.path.abspath(\"./trivy-cache\")），允许偏离固定缓存；2) DB校验是“heuristically detect”（audit_package_lock.py:_trivy_db_exists）且接受任意“.db/.sqlite/.sqlite3”或仅“metadata.json/trivy.db.gz”，并未强制同时存在“db/trivy.db 与 metadata.json”，也无法确保不替换/重建；3) 当Trivy DB不可用或Trivy失败时，脚本会回退到“npm audit”甚至写header-only（audit_package_lock.py: 失败后 _run_npm_audit_offline；最终“Deterministic output: header-only.”），而Gold要求“固定快照确实不可读时应报告输入阻塞，而不是换用新数据库”，此回退会导致输出集合与固定ground truth不一致的风险。另：Gold指出需修订 trivy-offline-vulnerability-scanning/SKILL.md 的Step1与Common Issues的下载/更新建议，但该文件在final中仍包含“Download database first with: trivy image --download-db-only ...”与“Download newer database (before going offline)”。"
+          }
+        ],
+        "extra_modifications": [
+          {
+            "item_id": "E1",
+            "classification": "possible_new_defect",
+            "confidence": 0.6,
+            "reason": "新增技能与脚本引入与任务约束可能冲突的“静默成功”行为：audit_package_lock.py 在无离线数据源时仍返回0并输出仅表头CSV（main: “_write_csv(args.output, []); return 0”）。若上层期望在无法读取固定离线DB时显式失败/阻塞（Gold: “应报告输入阻塞”），这种“成功但无结果”会掩盖问题，可能导致误判“无漏洞”。"
+          }
+        ],
+        "regression": {
+          "substantive_change": true,
+          "detected": true,
+          "new_defects": [
+            {
+              "defect_id": "R01",
+              "description": "新增离线审计脚本未强制使用固定的 /root/trivy-cache 快照，且在Trivy失败时回退到其他来源或输出空结果，破坏确定性/ground truth一致性要求。",
+              "evidence": "final/dependency-security-audit/audit_package_lock.py:_default_trivy_cache_dir 默认“./trivy-cache”且可通过TRIVY_CACHE_DIR/--trivy-cache-dir改变；_trivy_db_exists 为启发式；main中Trivy失败后调用 _run_npm_audit_offline 并最终“header-only”。与Gold约束“只使用 /root/trivy-cache/db/trivy.db 与 metadata.json；固定快照不可读应阻塞而非换库”相冲突。"
+            }
+          ],
+          "confidence": 0.6,
+          "reason": "相对Original仅为文档技能，无脚本执行路径；Final新增可执行脚本且其默认缓存路径/回退策略引入确定性与固定缓存约束的潜在违反，属于实质性新增行为缺陷。"
+        }
+      }
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnosis_raw": {
+        "response_id": "chatcmpl-EQlwZbnZD1q9Xv8LQ9pcTFk76L0wf",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"diagnoses\":[{\"prediction_id\":\"P001\",\"matched_defect_id\":\"D002\",\"same_defect\":false,\"location_correct\":false,\"confidence\":0.4,\"reason\":\"预测P001主张“segment-combiner 未合并重叠/越界区间，需要 overlap merging、boundary clamping”（见其定位 segment-combiner/SKILL.md “Interval normalization and merging”、segment-combiner/scripts/combine_segments.py “segment normalization”）。Gold D002 的语义是“规范/文档未明确要求保留检测区间之间的每个正长度间隔，导致可能跨短教学间隔合并删除区间、误删有效内容（precision降低）”，核心在于合并策略会吞掉中间应保留的短间隔，而不是‘未合并重叠/未裁剪越界导致区间不合法’。现有 segment-combiner/scripts/combine_segments.py 也只是简单‘Segments are sorted by start time’（segment-combiner/SKILL.md Notes）并不讨论跨间隔合并删除的问题，因此P001与D002仅在“合并/规范化”字面相近但缺陷机制不一致，判为不匹配。\"}]}",
+        "usage": {
+          "completion_tokens": 273,
+          "prompt_tokens": 11228,
+          "total_tokens": 11501,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 12,
+            "engine_ttft_ms": 202,
+            "engine_ttlt_ms": 3534,
+            "pre_inference_ms": 96,
+            "service_tbt_ms": 12,
+            "service_ttft_ms": 1008,
+            "service_ttlt_ms": 4323,
+            "user_visible_ttft_ms": 912
+          }
+        }
+      },
+      "diagnosis_result": {
+        "diagnoses": [
+          {
+            "prediction_id": "P001",
+            "matched_defect_id": null,
+            "same_defect": false,
+            "location_correct": false,
+            "confidence": 0.4,
+            "reason": "预测P001主张“segment-combiner 未合并重叠/越界区间，需要 overlap merging、boundary clamping”（见其定位 segment-combiner/SKILL.md “Interval normalization and merging”、segment-combiner/scripts/combine_segments.py “segment normalization”）。Gold D002 的语义是“规范/文档未明确要求保留检测区间之间的每个正长度间隔，导致可能跨短教学间隔合并删除区间、误删有效内容（precision降低）”，核心在于合并策略会吞掉中间应保留的短间隔，而不是‘未合并重叠/未裁剪越界导致区间不合法’。现有 segment-combiner/scripts/combine_segments.py 也只是简单‘Segments are sorted by start time’（segment-combiner/SKILL.md Notes）并不讨论跨间隔合并删除的问题，因此P001与D002仅在“合并/规范化”字面相近但缺陷机制不一致，判为不匹配。"
+          }
+        ]
+      },
+      "repair_raw": {
+        "response_id": "chatcmpl-EQlwfBBJTSpUduVL0IK68dF4PjPqy",
+        "model": "gpt-5.2-2025-12-11",
+        "finish_reason": "stop",
+        "raw_text": "{\"repairs\":[{\"defect_id\":\"D001\",\"repair_present\":false,\"repair_correct\":false,\"confidence\":0.92,\"reason\":\"未见对 silence-detector 的时间对齐做任何修改：final/silence-detector/scripts/detect_silence.py 仍用 `np.convolve(..., mode=\\\"valid\\\")` 后直接 `for i in range(len(smoothed)) ... silence_end = i` 并把 `silence_end` 作为 `segments.append({\\\"start\\\": 0, \\\"end\\\": silence_end, ...})` 的边界，未补偿 valid 卷积的窗口对齐偏移；final/silence-detector/SKILL.md 的 How It Works/Notes 也未新增“crossing 映射到来源窗口中心、边界已时间对齐且后续不得再偏移”的说明。\"} ,{\"defect_id\":\"D002\",\"repair_present\":false,\"repair_correct\":false,\"confidence\":0.86,\"reason\":\"虽然 final/segment-combiner/scripts/combine_segments.py 新增 `merge_segments(..., merge_gap_seconds=0.05)` 做 union，但 Gold 要求是文档层面明确“所有正长度 gap 必须保留、只允许合并 overlap/touch 不得跨正长度 gap”。final/segment-combiner/SKILL.md Notes 仍仅写 `Segments are sorted by start time`，未写禁止跨 gap 合并；同时代码默认允许把 `seg[\\\"start\\\"] <= prev[\\\"end\\\"] + merge_gap_seconds` 视为可合并，存在跨“正长度 gap(<=0.05s)”合并的行为，与“不得跨正长度 gap 合并”不符；final/video-processor/SKILL.md 也未补充端到端的 segment combination/检查规则。\"} ,{\"defect_id\":\"D003\",\"repair_present\":false,\"repair_correct\":false,\"confidence\":0.9,\"reason\":\"未修正文档对 threshold_ratio 调参方向：final/pause-detector/SKILL.md 的 Parameters Tuning 表仍为 `threshold_ratio | More aggressive | More conservative`，未明确更高/更低 ratio 对检测敏感度的正确方向，也未加入“先运行默认值，只能基于观测信号调整，不得凭猜测改动”的约束（Notes 未变）。代码变更仅为 SciPy 可选依赖回退，不满足该缺陷修复要求。\"}],\"extra_modifications\":[{\"item_id\":\"E1\",\"classification\":\"benign\",\"confidence\":0.78,\"reason\":\"为 pause-detector 增加 SciPy 缺失时的 NumPy 回退实现：final/pause-detector/scripts/detect_pauses.py 增加 `try: from scipy... except ... uniform_filter1d=None` 与 `_moving_average_nearest`，并在计算 `local_avg` 时二选一；同时 final/pause-detector/SKILL.md Dependencies 改为 “scipy (optional...)”。该变更提升可移植性，未直接涉及 Gold 修复目标。\"} ,{\"item_id\":\"E2\",\"classification\":\"benign\",\"confidence\":0.74,\"reason\":\"多处文档示例路径从 `/root/.claude/skills/...` 改为相对 `skills/...`：final/report-generator/SKILL.md、final/segment-combiner/SKILL.md、final/video-processor/SKILL.md 的 Usage/Example 命令行。属用法展示调整，不改变脚本行为。\"} ,{\"item_id\":\"E3\",\"classification\":\"possible_new_defect\",\"confidence\":0.72,\"reason\":\"segment-combiner 新增默认 `merge_gap_seconds=0.05` 的“跨微小间隙合并”策略：final/segment-combiner/scripts/combine_segments.py `if seg[\\\"start\\\"] <= prev[\\\"end\\\"] + merge_gap_seconds:`。若下游严格依赖“任何正长度间隙都保留”，该默认会造成误合并；且 final/segment-combiner/SKILL.md 未解释该默认可能的精度影响，仅在参数列表描述“treat gaps smaller than this as adjacent and merge”。\"}],\"regression\":{\"substantive_change\":true,\"detected\":true,\"new_defects\":[{\"defect_id\":\"R01\",\"description\":\"segment-combiner 默认允许跨 0.05s 的正长度间隙合并删除段，可能导致误删间隙内的有效内容\",\"evidence\":\"原始约束（工具合理默认应避免扩大删除范围、保持精确切割）下，final/segment-combiner/scripts/combine_segments.py 以 `merge_gap_seconds=0.05` 作为默认并执行 `seg[\\\"start\\\"] <= prev[\\\"end\\\"] + merge_gap_seconds` 的合并条件，会把 (prev.end, seg.start) 之间存在的正长度间隙也并入删除 union，从而扩大删除区间。\"}],\"confidence\":0.72,\"reason\":\"检测到新增的默认合并策略会在存在微小正间隙时扩大删除范围（R01）。其余改动（pause-detector 回退、文档路径）未形成明确新违反。\"}}",
+        "usage": {
+          "completion_tokens": 1128,
+          "prompt_tokens": 25784,
+          "total_tokens": 26912,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 13,
+            "engine_ttft_ms": 971,
+            "engine_ttlt_ms": 15441,
+            "pre_inference_ms": 158,
+            "service_tbt_ms": 13,
+            "service_ttft_ms": 1655,
+            "service_ttlt_ms": 16120,
+            "user_visible_ttft_ms": 1497
+          }
+        }
+      },
+      "repair_result": {
+        "repairs": [
+          {
+            "defect_id": "D001",
+            "repair_present": false,
+            "repair_correct": false,
+            "confidence": 0.92,
+            "reason": "未见对 silence-detector 的时间对齐做任何修改：final/silence-detector/scripts/detect_silence.py 仍用 `np.convolve(..., mode=\"valid\")` 后直接 `for i in range(len(smoothed)) ... silence_end = i` 并把 `silence_end` 作为 `segments.append({\"start\": 0, \"end\": silence_end, ...})` 的边界，未补偿 valid 卷积的窗口对齐偏移；final/silence-detector/SKILL.md 的 How It Works/Notes 也未新增“crossing 映射到来源窗口中心、边界已时间对齐且后续不得再偏移”的说明。"
+          },
+          {
+            "defect_id": "D002",
+            "repair_present": false,
+            "repair_correct": false,
+            "confidence": 0.86,
+            "reason": "虽然 final/segment-combiner/scripts/combine_segments.py 新增 `merge_segments(..., merge_gap_seconds=0.05)` 做 union，但 Gold 要求是文档层面明确“所有正长度 gap 必须保留、只允许合并 overlap/touch 不得跨正长度 gap”。final/segment-combiner/SKILL.md Notes 仍仅写 `Segments are sorted by start time`，未写禁止跨 gap 合并；同时代码默认允许把 `seg[\"start\"] <= prev[\"end\"] + merge_gap_seconds` 视为可合并，存在跨“正长度 gap(<=0.05s)”合并的行为，与“不得跨正长度 gap 合并”不符；final/video-processor/SKILL.md 也未补充端到端的 segment combination/检查规则。"
+          },
+          {
+            "defect_id": "D003",
+            "repair_present": false,
+            "repair_correct": false,
+            "confidence": 0.9,
+            "reason": "未修正文档对 threshold_ratio 调参方向：final/pause-detector/SKILL.md 的 Parameters Tuning 表仍为 `threshold_ratio | More aggressive | More conservative`，未明确更高/更低 ratio 对检测敏感度的正确方向，也未加入“先运行默认值，只能基于观测信号调整，不得凭猜测改动”的约束（Notes 未变）。代码变更仅为 SciPy 可选依赖回退，不满足该缺陷修复要求。"
+          }
+        ],
+        "extra_modifications": [
+          {
+            "item_id": "E1",
+            "classification": "benign",
+            "confidence": 0.78,
+            "reason": "为 pause-detector 增加 SciPy 缺失时的 NumPy 回退实现：final/pause-detector/scripts/detect_pauses.py 增加 `try: from scipy... except ... uniform_filter1d=None` 与 `_moving_average_nearest`，并在计算 `local_avg` 时二选一；同时 final/pause-detector/SKILL.md Dependencies 改为 “scipy (optional...)”。该变更提升可移植性，未直接涉及 Gold 修复目标。"
+          },
+          {
+            "item_id": "E2",
+            "classification": "benign",
+            "confidence": 0.74,
+            "reason": "多处文档示例路径从 `/root/.claude/skills/...` 改为相对 `skills/...`：final/report-generator/SKILL.md、final/segment-combiner/SKILL.md、final/video-processor/SKILL.md 的 Usage/Example 命令行。属用法展示调整，不改变脚本行为。"
+          },
+          {
+            "item_id": "E3",
+            "classification": "possible_new_defect",
+            "confidence": 0.72,
+            "reason": "segment-combiner 新增默认 `merge_gap_seconds=0.05` 的“跨微小间隙合并”策略：final/segment-combiner/scripts/combine_segments.py `if seg[\"start\"] <= prev[\"end\"] + merge_gap_seconds:`。若下游严格依赖“任何正长度间隙都保留”，该默认会造成误合并；且 final/segment-combiner/SKILL.md 未解释该默认可能的精度影响，仅在参数列表描述“treat gaps smaller than this as adjacent and merge”。"
+          }
+        ],
+        "regression": {
+          "substantive_change": true,
+          "detected": true,
+          "new_defects": [
+            {
+              "defect_id": "R01",
+              "description": "segment-combiner 默认允许跨 0.05s 的正长度间隙合并删除段，可能导致误删间隙内的有效内容",
+              "evidence": "原始约束（工具合理默认应避免扩大删除范围、保持精确切割）下，final/segment-combiner/scripts/combine_segments.py 以 `merge_gap_seconds=0.05` 作为默认并执行 `seg[\"start\"] <= prev[\"end\"] + merge_gap_seconds` 的合并条件，会把 (prev.end, seg.start) 之间存在的正长度间隙也并入删除 union，从而扩大删除区间。"
+            }
+          ],
+          "confidence": 0.72,
+          "reason": "检测到新增的默认合并策略会在存在微小正间隙时扩大删除范围（R01）。其余改动（pause-detector 回退、文档路径）未形成明确新违反。"
+        }
+      },
+      "error": "ValueError: Invalid or unknown matched_defect_id for P001"
+    }
+  ]
+}
