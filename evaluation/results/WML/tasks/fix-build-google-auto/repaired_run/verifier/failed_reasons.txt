@@ -1,0 +1,34 @@
+Repository: /home/travis/build/failed/google/auto
+
+Build command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure (Java 11 / Maven 3.6.3):
+  BUILD FAILURE
+  Failed to execute goal on project auto-common/auto-factory/auto-service:
+    Could not resolve dependencies ... Could not find artifact com.sun:tools:jar:11.0.27
+    at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause analysis:
+- The modules common/, factory/, service/, value/ declare their parent as:
+    com.google.auto:auto-parent:3
+  so Maven downloads auto-parent-3.pom from Maven Central.
+- That released parent POM (v3) includes a system-scoped dependency on the old JDK "tools.jar"
+  (artifact com.sun:tools) via systemPath ${java.home}/../lib/tools.jar.
+- On JDK 9+ (including JDK 11 used here), tools.jar no longer exists, so Maven dependency
+  resolution fails before compilation starts.
+
+Conclusion:
+- This is a build configuration compatibility issue with modern JDKs, not a Java source bug.
+
+Plan:
+1) Stop inheriting the published parent (auto-parent:3) and instead inherit the repository's
+   local parent POM (auto-parent:4-SNAPSHOT) so the build does not pull the legacy tools.jar
+   dependency.
+   - Update common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml:
+     * parent version -> 4-SNAPSHOT
+     * add relativePath -> ../pom.xml
+2) Ensure the local parent builds on JDK 11:
+   - Bump java language level from 1.6 to at least 1.7 (JDK 11 no longer supports -source 1.6).
+   - Update maven-compiler-plugin to a modern version to avoid JDK11 incompatibilities.
+3) Re-run the Travis verify command to confirm the reactor builds successfully.

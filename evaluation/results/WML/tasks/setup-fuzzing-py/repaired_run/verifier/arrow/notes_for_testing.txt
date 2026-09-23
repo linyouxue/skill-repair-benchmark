@@ -1,0 +1,33 @@
+Important functions / fuzz targets (Arrow)
+
+High-value modules
+- arrow/api.py: public arrow.get() wrapper
+- arrow/factory.py: ArrowFactory.get() dispatches parsing modes
+- arrow/parser.py: DateTimeParser.parse_iso(), DateTimeParser.parse(), regex/tokenization, tz parsing
+
+Primary functions-under-test (FUTs)
+1) arrow.get(...)
+   - Delegates to ArrowFactory.get(). Wide, user-controlled input surface.
+   - Best for fuzzing: 1-arg string (ISO-ish) and 2-arg (string, format or list-of-formats).
+2) arrow.factory.ArrowFactory.get(...)
+   - Key branching on arg types; routes into DateTimeParser.
+3) arrow.parser.DateTimeParser.parse_iso(datetime_string, normalize_whitespace=False)
+   - Regex-heavy ISO-8601-like parser; lots of edge cases (week dates, separators, tz offsets, fractional seconds).
+4) arrow.parser.DateTimeParser.parse(datetime_string, fmt_or_fmts, normalize_whitespace=False)
+   - Format-driven parsing; error handling via ParserError / ParserMatchError.
+5) arrow.parser.TzinfoParser.parse(tz_expr)
+   - Timezone expression parsing (e.g. "+02:00", "US/Pacific", "local").
+
+Existing tests / oracles (from /tests)
+- tests/test_parser.py directly exercises DateTimeParser.parse() and parse_iso() with many valid/invalid examples.
+- Typical oracle: parser returns datetime OR raises ParserError/ParserMatchError/ValueError; should not hang.
+
+Fuzzing oracle ideas
+- No crash other than expected parse failures.
+- No excessive time for pathological strings (very long digits / repeated separators).
+
+Seed ideas
+- ISO: "2013-09-29T01:26:43.830580", "20160413T133656.456289", "2013-02-03T04:05:06Z"
+- Week date: "1998-W06-3"
+- Offsets: "+00:00", "-1130"
+- Format-driven: "2013-05-05 12:30:45 America/Chicago" with "YYYY-MM-DD HH:mm:ss ZZZ"

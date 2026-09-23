@@ -1,0 +1,173 @@
+diff --git a/core/src/main/java/org/apache/druid/data/input/impl/JavaScriptParseSpec.java b/core/src/main/java/org/apache/druid/data/input/impl/JavaScriptParseSpec.java
+index fe6d80e5c6..29ced9d384 100644
+--- a/core/src/main/java/org/apache/druid/data/input/impl/JavaScriptParseSpec.java
++++ b/core/src/main/java/org/apache/druid/data/input/impl/JavaScriptParseSpec.java
+@@ -20,6 +20,7 @@
+ package org.apache.druid.data.input.impl;
+ 
+ import com.fasterxml.jackson.annotation.JacksonInject;
++import com.fasterxml.jackson.annotation.OptBoolean;
+ import com.fasterxml.jackson.annotation.JsonCreator;
+ import com.fasterxml.jackson.annotation.JsonProperty;
+ import com.google.common.base.Preconditions;
+@@ -42,7 +43,7 @@ public class JavaScriptParseSpec extends ParseSpec
+       @JsonProperty("timestampSpec") TimestampSpec timestampSpec,
+       @JsonProperty("dimensionsSpec") DimensionsSpec dimensionsSpec,
+       @JsonProperty("function") String function,
+-      @JacksonInject JavaScriptConfig config
++      @JacksonInject(useInput = OptBoolean.FALSE) JavaScriptConfig config
+   )
+   {
+     super(timestampSpec, dimensionsSpec);
+diff --git a/core/src/main/java/org/apache/druid/guice/GuiceAnnotationIntrospector.java b/core/src/main/java/org/apache/druid/guice/GuiceAnnotationIntrospector.java
+index 7862c977ee..4476061398 100644
+--- a/core/src/main/java/org/apache/druid/guice/GuiceAnnotationIntrospector.java
++++ b/core/src/main/java/org/apache/druid/guice/GuiceAnnotationIntrospector.java
+@@ -36,7 +36,8 @@ public class GuiceAnnotationIntrospector extends NopAnnotationIntrospector
+   @Override
+   public Object findInjectableValueId(AnnotatedMember m)
+   {
+-    if (m.getAnnotation(JacksonInject.class) == null) {
++    final JacksonInject inject = m.getAnnotation(JacksonInject.class);
++    if (inject == null) {
+       return null;
+     }
+ 
+@@ -48,12 +49,16 @@ public class GuiceAnnotationIntrospector extends NopAnnotationIntrospector
+       }
+     }
+ 
++    final Key key;
+     if (guiceAnnotation == null) {
+       if (m instanceof AnnotatedMethod) {
+         throw new IAE("Annotated methods don't work very well yet...");
+       }
+-      return Key.get(m.getGenericType());
++      key = Key.get(m.getGenericType());
++    } else {
++      key = Key.get(m.getGenericType(), guiceAnnotation);
+     }
+-    return Key.get(m.getGenericType(), guiceAnnotation);
++
++    return JacksonInject.Value.construct(key, inject.useInput().asBoolean());
+   }
+ }
+diff --git a/core/src/main/java/org/apache/druid/guice/GuiceInjectableValues.java b/core/src/main/java/org/apache/druid/guice/GuiceInjectableValues.java
+index d12497e019..5f970cde59 100644
+--- a/core/src/main/java/org/apache/druid/guice/GuiceInjectableValues.java
++++ b/core/src/main/java/org/apache/druid/guice/GuiceInjectableValues.java
+@@ -19,6 +19,7 @@
+ 
+ package org.apache.druid.guice;
+ 
++import com.fasterxml.jackson.annotation.JacksonInject;
+ import com.fasterxml.jackson.databind.BeanProperty;
+ import com.fasterxml.jackson.databind.DeserializationContext;
+ import com.fasterxml.jackson.databind.InjectableValues;
+@@ -47,8 +48,21 @@ public class GuiceInjectableValues extends InjectableValues
+   {
+     // From the docs:   "Object that identifies value to inject; may be a simple name or more complex identifier object,
+     //                  whatever provider needs"
++    //
++    // Jackson 2.9+ may wrap the id inside JacksonInject.Value to carry additional
++    // metadata like useInput.
++    if (valueId instanceof JacksonInject.Value) {
++      valueId = ((JacksonInject.Value) valueId).getId();
++      if (valueId == null) {
++        throw new IAE(
++            "Missing injectable id for property [%s]",
++            forProperty == null ? "unknown" : forProperty.getName()
++        );
++      }
++    }
++
+     // Currently we should only be dealing with `Key` instances, and anything more advanced should be handled with
+-    // great care
++    // great care.
+     if (valueId instanceof Key) {
+       return injector.getInstance((Key) valueId);
+     }
+diff --git a/processing/src/main/java/org/apache/druid/query/aggregation/JavaScriptAggregatorFactory.java b/processing/src/main/java/org/apache/druid/query/aggregation/JavaScriptAggregatorFactory.java
+index ef3c151aa1..4148b20c68 100644
+--- a/processing/src/main/java/org/apache/druid/query/aggregation/JavaScriptAggregatorFactory.java
++++ b/processing/src/main/java/org/apache/druid/query/aggregation/JavaScriptAggregatorFactory.java
+@@ -20,6 +20,7 @@
+ package org.apache.druid.query.aggregation;
+ 
+ import com.fasterxml.jackson.annotation.JacksonInject;
++import com.fasterxml.jackson.annotation.OptBoolean;
+ import com.fasterxml.jackson.annotation.JsonCreator;
+ import com.fasterxml.jackson.annotation.JsonProperty;
+ import com.google.common.annotations.VisibleForTesting;
+@@ -79,7 +80,7 @@ public class JavaScriptAggregatorFactory extends AggregatorFactory
+       @JsonProperty("fnAggregate") final String fnAggregate,
+       @JsonProperty("fnReset") final String fnReset,
+       @JsonProperty("fnCombine") final String fnCombine,
+-      @JacksonInject JavaScriptConfig config
++      @JacksonInject(useInput = OptBoolean.FALSE) JavaScriptConfig config
+   )
+   {
+     Preconditions.checkNotNull(name, "Must have a valid, non-null aggregator name");
+diff --git a/processing/src/main/java/org/apache/druid/query/aggregation/post/JavaScriptPostAggregator.java b/processing/src/main/java/org/apache/druid/query/aggregation/post/JavaScriptPostAggregator.java
+index b19c59f836..b83bd7bc59 100644
+--- a/processing/src/main/java/org/apache/druid/query/aggregation/post/JavaScriptPostAggregator.java
++++ b/processing/src/main/java/org/apache/druid/query/aggregation/post/JavaScriptPostAggregator.java
+@@ -20,6 +20,7 @@
+ package org.apache.druid.query.aggregation.post;
+ 
+ import com.fasterxml.jackson.annotation.JacksonInject;
++import com.fasterxml.jackson.annotation.OptBoolean;
+ import com.fasterxml.jackson.annotation.JsonCreator;
+ import com.fasterxml.jackson.annotation.JsonProperty;
+ import com.google.common.base.Preconditions;
+@@ -98,7 +99,7 @@ public class JavaScriptPostAggregator implements PostAggregator
+       @JsonProperty("name") String name,
+       @JsonProperty("fieldNames") final List<String> fieldNames,
+       @JsonProperty("function") final String function,
+-      @JacksonInject JavaScriptConfig config
++      @JacksonInject(useInput = OptBoolean.FALSE) JavaScriptConfig config
+   )
+   {
+     Preconditions.checkNotNull(name, "Must have a valid, non-null post-aggregator name");
+diff --git a/processing/src/main/java/org/apache/druid/query/extraction/JavaScriptExtractionFn.java b/processing/src/main/java/org/apache/druid/query/extraction/JavaScriptExtractionFn.java
+index 679121b699..deaf11910e 100644
+--- a/processing/src/main/java/org/apache/druid/query/extraction/JavaScriptExtractionFn.java
++++ b/processing/src/main/java/org/apache/druid/query/extraction/JavaScriptExtractionFn.java
+@@ -20,6 +20,7 @@
+ package org.apache.druid.query.extraction;
+ 
+ import com.fasterxml.jackson.annotation.JacksonInject;
++import com.fasterxml.jackson.annotation.OptBoolean;
+ import com.fasterxml.jackson.annotation.JsonCreator;
+ import com.fasterxml.jackson.annotation.JsonProperty;
+ import com.google.common.base.Function;
+@@ -86,7 +87,7 @@ public class JavaScriptExtractionFn implements ExtractionFn
+   public JavaScriptExtractionFn(
+       @JsonProperty("function") String function,
+       @JsonProperty("injective") boolean injective,
+-      @JacksonInject JavaScriptConfig config
++      @JacksonInject(useInput = OptBoolean.FALSE) JavaScriptConfig config
+   )
+   {
+     Preconditions.checkNotNull(function, "function must not be null");
+diff --git a/processing/src/main/java/org/apache/druid/query/filter/JavaScriptDimFilter.java b/processing/src/main/java/org/apache/druid/query/filter/JavaScriptDimFilter.java
+index 62a379a36a..5d3d1eca0c 100644
+--- a/processing/src/main/java/org/apache/druid/query/filter/JavaScriptDimFilter.java
++++ b/processing/src/main/java/org/apache/druid/query/filter/JavaScriptDimFilter.java
+@@ -20,6 +20,7 @@
+ package org.apache.druid.query.filter;
+ 
+ import com.fasterxml.jackson.annotation.JacksonInject;
++import com.fasterxml.jackson.annotation.OptBoolean;
+ import com.fasterxml.jackson.annotation.JsonCreator;
+ import com.fasterxml.jackson.annotation.JsonInclude;
+ import com.fasterxml.jackson.annotation.JsonProperty;
+@@ -70,7 +71,7 @@ public class JavaScriptDimFilter extends AbstractOptimizableDimFilter implements
+       @JsonProperty("function") String function,
+       @JsonProperty("extractionFn") @Nullable ExtractionFn extractionFn,
+       @JsonProperty("filterTuning") @Nullable FilterTuning filterTuning,
+-      @JacksonInject JavaScriptConfig config
++      @JacksonInject(useInput = OptBoolean.FALSE) JavaScriptConfig config
+   )
+   {
+     Preconditions.checkArgument(dimension != null, "dimension must not be null");
