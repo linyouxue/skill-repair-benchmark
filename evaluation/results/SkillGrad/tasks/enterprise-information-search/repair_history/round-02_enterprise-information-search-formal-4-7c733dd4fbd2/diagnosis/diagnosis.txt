@@ -1,0 +1,19 @@
+<label>Missing required output write</label>
+
+(1) **First observable failure**
+- The agent finished the run **without creating the required `/root/answer.json`** (or any answer artifact). This violates the task’s explicit requirement to write all answers in a dict schema and include per-question token counts.
+
+(2) **Trajectory step that produced it**
+- The **final agent termination step** (the last “agent_message” / end_turn) occurred **before** executing any “finalize/write + read-back validation” action. In the trace summary there are tool calls, but no evidence of a write/read-back of `/root/answer.json`, and the output inventory does not contain the answer file—so the failure is produced at the “end the run” step.
+
+(3) **Relevant skill rule or missing rule**
+- Relevant existing rule in `enterprise-artifact-search/SKILL.md`: **“Finalize (Required): write `/root/answer.json` + validate before terminating”** with the explicit completion gate: build dict `{"qX": {"answer": [...], "tokens": int}}`, write to `/root/answer.json`, then read it back and schema-check.
+- The run shows **0 skill invocations**, so the rule was **not applied** (a skill-controllable failure: the agent didn’t invoke/adhere to the completion gate).
+
+(4) **General corrective behavior**
+- Before terminating, always run a **completion gate**:
+  1) read `/root/question.txt` to enumerate q-keys,
+  2) compute answers via grounded search,
+  3) build the required JSON with **`answer` always a list** and **`tokens` an int per question**,
+  4) **write `/root/answer.json`**, then **read it back and validate schema**.
+- If a skill providing this gate exists, **invoke it**, or replicate its finalize procedure verbatim. This is within the agent/skill’s control (not an API/permission/grader issue).
