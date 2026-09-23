@@ -1,0 +1,251 @@
+{
+  "method_id": "wml-gpt52-failed39-verified",
+  "benchmark_version": "core25-gold-defects-20260909-v1",
+  "tasks": [
+    {
+      "task_id": "dialogue-parser",
+      "diagnoses": [
+        {
+          "prediction_id": "wml-1-terminal-node-sentinel-policy-alignment",
+          "description": "When allowing special sentinel/terminal nodes, either (a) exclude them from reachability requirements, or (b) ensure they are included in the traversal model used by validators (e.g., as an explicit node reachable via explicit edges). Mismatches cause false 'unreachable' failures even when edges refer to the sentinel.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "5. Validation"
+            }
+          ],
+          "evidence": "Verifier failure: `AssertionError: Unreachable nodes found: ['End']...` and verifier BFS explicitly skips enqueueing `tgt == 'End'` while computing reachability. Trajectory shows generated JSON includes node `{'id': 'End', ...}` and edges referencing `-> End` exist in script (grep shows lines 725/728). Therefore 'End' will never be marked reachable by the verifier's algorithm, making it unreachable by construction if included as a node."
+        },
+        {
+          "prediction_id": "wml-2-use-canonical-skill-graph-apis-to-avoid-semantic-drift",
+          "description": "When a skill package provides canonical builders/validators/serializers, bypassing them often leads to subtle schema/logic mismatches (sentinel handling, node typing rules, visualization conventions).",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "How to use"
+            }
+          ],
+          "evidence": "Run metadata: `n_skill_invocations: 0` despite skill being preloaded. The implemented solution writes JSON/DOT manually (seen in trajectory: custom parse_script building lists/dicts; custom dot printing). Only failure is a semantic edge case (End reachability) that a canonical validator might have handled or documented."
+        }
+      ],
+      "repaired_bundle": "tasks/dialogue-parser/repaired_skill",
+      "executor_run_id": "dialogue-parser-a01"
+    },
+    {
+      "task_id": "exoplanet-detection-period",
+      "diagnoses": [
+        {
+          "prediction_id": "wml-1-period-alias-adjudication-harmonics",
+          "description": "When period search returns a strong candidate, the highest peak can correspond to an alias (half/double period) due to sampling, transit shape symmetry, or detrending artifacts. A robust workflow must explicitly test harmonics (P/2, 2P) and select based on physical/diagnostic consistency (odd-even, transit count consistency, phase-fold shape), not just maximum power.",
+          "locations": [
+            {
+              "file": "exoplanet-workflows/SKILL.md",
+              "section": "Common Issues and Solutions / Issue: Period is 2x or 0.5x expected"
+            }
+          ],
+          "evidence": "Verifier expected 5.35699 d but output was 1.39825 d. In-run evidence shows multiple strong candidates: TLS broad best at 2.798475 d (SDE~6.54) and also peaks near 1.394978 d; BLS global best at ~1.39823 d with 2P~2.79862 d having lower but still substantial power. The run explicitly computed half/double neighborhoods yet did not use them to override the final choice."
+        },
+        {
+          "prediction_id": "wml-2-detrending-parameter-selection-by-timescale-and-stability",
+          "description": "Flattening/detrending choices (window length, polynomial order, break handling) can distort transit shapes and relative depths, amplifying aliases or suppressing the true period. A workflow should select detrending parameters based on cadence, expected transit duration, and stellar variability timescale, and confirm that candidate periods are stable across reasonable detrending settings.",
+          "locations": [
+            {
+              "file": "light-curve-preprocessing/SKILL.md",
+              "section": "Removing Long-Term Trends / Flattening with Lightkurve"
+            }
+          ],
+          "evidence": "Run shows flatten window_length sweeps and that BLS period near 1.398 d is extremely stable across window lengths (1201–3001), while TLS reported a longer duration (~0.3086 d) and BLS refinement often maxed at duration=0.45 d (upper bound). This suggests duration grid and detrending may be absorbing variability and favoring certain periods; no stability test comparing candidate periods (including longer-period possibilities like 5.35699 d) across detrending was performed."
+        },
+        {
+          "prediction_id": "wml-3-baseline-informed-period-bounds-and-transit-count-gating",
+          "description": "Period searches must set bounds informed by observation baseline and expected planet periods. If the true period is near a significant fraction of the baseline, missing or underweighting that region can yield spurious shorter-period detections. Workflows should set period_min/max and resolution based on baseline, and verify that multiple transits are expected/observed.",
+          "locations": [
+            {
+              "file": "exoplanet-workflows/SKILL.md",
+              "section": "Period Range Guidelines"
+            }
+          ],
+          "evidence": "Data baseline printed as ~25.43 days. Output period was 1.398 d; verifier expected 5.35699 d (still within 15 d, so not excluded), but the workflow did not explicitly ensure candidates correspond to plausible transit counts and did not present transit_count-based gating before writeback."
+        }
+      ],
+      "repaired_bundle": "tasks/exoplanet-detection-period/repaired_skill",
+      "executor_run_id": "exoplanet-detection-period-a02"
+    },
+    {
+      "task_id": "python-scala-translation",
+      "diagnoses": [
+        {
+          "prediction_id": "wml-1-skill-gated translation planning (select skills → derive plan → implement)",
+          "description": "When a task provides a skill bundle, the agent proceeds with ad-hoc implementation without explicitly applying any skill guidance, increasing risk of convention drift, missed requirements, and unnecessary complexity.",
+          "locations": [
+            {
+              "file": "python-scala-idioms/SKILL.md",
+              "section": "Core Principles"
+            }
+          ],
+          "evidence": "Run metadata shows `n_skill_invocations: 0` with six preloaded skills; task explicitly requests idiomatic Scala and standard-library usage; the agent produced a large custom implementation (including JSON ADT, functor/monad simulation) that is not obviously mandated by the task instruction excerpt."
+        },
+        {
+          "prediction_id": "wml-2-full-source inventory before translation (read-all → enumerate → map)",
+          "description": "Generating a full reimplementation while having only partial visibility of the source code can cause omissions or incorrect behavior even if compilation succeeds.",
+          "locations": [
+            {
+              "file": "python-scala-syntax-mapping/SKILL.md",
+              "section": "Type Mappings"
+            }
+          ],
+          "evidence": "First file view shows `/root/Tokenizer.py` truncated after line ~94; second view covers 220–581 but is also truncated in the middle with `...[truncated]` around the TokenRegistry section. Implementation begins before any evidence of a complete read of all lines (no full `view_range` to cover missing middle)."
+        },
+        {
+          "prediction_id": "wml-3-compile + behavioral parity checks (golden cases)",
+          "description": "Stopping verification after achieving compilation can miss semantic mismatches, API completeness gaps, and edge-case handling differences.",
+          "locations": [
+            {
+              "file": "python-scala-idioms/SKILL.md",
+              "section": "Core Principles"
+            }
+          ],
+          "evidence": "Tool calls show repeated `scalac` compilation until success; no evidence of executing Scala code, running sample tokenizations, or comparing to Python behavior. Agent message claims functional completeness but provides no test evidence."
+        },
+        {
+          "prediction_id": "wml-4-scope control for translations (implement required API + minimal supporting internals)",
+          "description": "Introducing additional abstractions (e.g., custom JSON ADTs, functor/monad simulation) not clearly required by the source can increase bug surface and reduce fidelity.",
+          "locations": [
+            {
+              "file": "python-scala-idioms/SKILL.md",
+              "section": "Anti-Patterns to Avoid"
+            }
+          ],
+          "evidence": "Agent message and compilation log show added components: `JsonValue` ADT, pretty rendering, `TokenFunctor`/`TokenMonad`, registry/containers; task requirement only mandates presence of specific named classes/functions. The Python excerpt does mention “JSON structure tokenization”/generics later, but the run evidence does not show full mapping is necessary or accurate because of truncated input visibility."
+        }
+      ],
+      "repaired_bundle": "tasks/python-scala-translation/repaired_skill",
+      "executor_run_id": "python-scala-translation-a06"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "diagnoses": [
+        {
+          "prediction_id": "wml-1-deliverable-contract: always materialize required artifact at specified path before termination",
+          "description": "Agent performs partial exploration but never produces the specified output artifact at the required path, causing downstream evaluation to fail immediately.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "Overview"
+            }
+          ],
+          "evidence": "Verifier fails test_file_exists: /root/answers.json missing. Trajectory shows only one tool call (search_fund) and no writeback step; agent message says it will rerun search but run ends."
+        },
+        {
+          "prediction_id": "wml-2-multi-question checklist gating: do not terminate until each question has a computed value and mapped into schema",
+          "description": "Workflow halts mid-plan (e.g., after initial lookup) without executing subsequent required steps, often due to not chaining tool calls or not verifying progress against the question list.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "Overview"
+            }
+          ],
+          "evidence": "n_tool_calls=1; only action is search_fund for 'renaissance technologies' in 2025-q3. Agent states intent to rerun search but does not. No evidence of one_fund_analysis.py, holding_analysis.py, or stock CUSIP search."
+        },
+        {
+          "prediction_id": "wml-3-entity-binding validation: confirm fuzzy match identity (name/quarter/amendment) before using accession downstream",
+          "description": "After fuzzy search, agent does not validate the selected entity against the intended fund/manager identity, risking wrong accession number selection.",
+          "locations": [
+            {
+              "file": "fuzzy-name-search/SKILL.md",
+              "section": "Exact search a fund using accession number"
+            }
+          ],
+          "evidence": "Search results shown do not include 'Renaissance Technologies' and instead include 'Renaissance Other Investments Holdings II Ltd.' and 'Renaissance Investment Holdings Ltd.'; agent says it will rerun to catch rank-1 but does not perform validation steps (normalize/confirm manager name, prefer non-amendment)."
+        }
+      ],
+      "repaired_bundle": "tasks/sec-financial-report/repaired_skill",
+      "executor_run_id": "sec-financial-report-a01"
+    },
+    {
+      "task_id": "paratransit-routing",
+      "original_pass": true,
+      "original_run_id": "paratransit-routing-original-skill-guard-r002"
+    },
+    {
+      "task_id": "software-dependency-audit",
+      "diagnoses": [
+        {
+          "prediction_id": "wml-1-Dependency-scope binding for lockfile scans (prod vs dev/test; lockfile-only vs filesystem context)",
+          "description": "When using a vulnerability scanner on dependency lockfiles, default flags/target mode can change the dependency scope (e.g., include dev/test deps, include transitive graphs differently, or analyze filesystem context). This yields a superset/different set of findings versus an evaluation ground truth built on a specific scope policy.",
+          "locations": [
+            {
+              "file": "trivy-offline-vulnerability-scanning/SKILL.md",
+              "section": "Offline Scanning Workflow / Step 2: Construct Trivy Command"
+            }
+          ],
+          "evidence": "Verifier: generated CSV had 5 more items than expected (\"Left contains 5 more items\"). Trajectory: Trivy emitted \"Suppressing dependencies for development and testing. To display them, try the '--include-dev-deps' flag.\" Yet output still contained many findings (24) and included multiple packages/versions; mismatch indicates scan scope differed from the ground truth's expected vulnerability set. No step binds scope to match expected (e.g., production-only vs include-dev, lockfile-only parsing mode, or npm-specific mode)."
+        },
+        {
+          "prediction_id": "wml-2-Canonical vulnerability record identity & deterministic selection across multiple advisories",
+          "description": "A package/version may have multiple vulnerabilities; scanners may emit multiple IDs (CVE vs vendor advisory IDs), multiple fixed versions, and multiple source records. If the reporting pipeline de-duplicates or selects records without a stable identity rule, it can substitute one advisory for another or report the wrong fixed version/CVSS for the same package/version.",
+          "locations": [
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "Field Mapping from JSON to CSV / Severity-Based Filtering"
+            }
+          ],
+          "evidence": "Verifier diff shows for key ('tar','6.1.11') the generated row had CVE_ID 'CVE-2026-73566' with CVSS_Score 7.5 and Fixed_Version 7.5.21, but expected 'CVE-2026-23745' with CVSS 8.2 and Fixed_Version 7.5.3. This indicates the pipeline reported a different advisory record for the same package/version than the ground truth expected. The script also deduplicates by (pkg, ver, cve) but does not implement a canonicalization/preference rule among multiple advisories for the same package/version."
+        },
+        {
+          "prediction_id": "wml-3-CVSS source/version priority binding & validation against selected advisory",
+          "description": "Different data sources (NVD/GHSA/RedHat) can report different CVSS scores for the same CVE. If the extraction policy differs from the evaluator’s expected priority/version, reported scores will mismatch even if the right CVE is selected.",
+          "locations": [
+            {
+              "file": "cvss-score-extraction/SKILL.md",
+              "section": "Source Priority Strategy"
+            }
+          ],
+          "evidence": "Verifier shows for ('tar','6.1.11') expected CVSS_Score 8.2 whereas generated CSV shows different CVSS values for tar HIGH (example head shows tar CVE-2026-23745 HIGH had 6.1). The script uses `SOURCE_PRIORITY=['nvd','ghsa','redhat']` and V3 then V2 fallback, but the earlier sample vulnerability showed CVSS keys only ['ghsa','redhat'], indicating NVD may be absent for some; expected may prefer a different source or metric mapping for those cases."
+        },
+        {
+          "prediction_id": "wml-4-Two-stage verification: schema + semantic record-set reconciliation",
+          "description": "Pipelines that verify only formatting (headers, required fields, severity filter) can still be wrong on record selection, ID choice, and score/fix correctness. A missing verification step allows silent semantic drift.",
+          "locations": [
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "Best Practices"
+            }
+          ],
+          "evidence": "Trajectory includes a validation script that checks column presence and severity counts, but no step checks for duplicates beyond (pkg,ver,cve) or reconciles the finding set. Verifier failure is precisely a content mismatch (extra rows and differing tar record), which would not be caught by the agent’s verification."
+        }
+      ],
+      "repaired_bundle": "tasks/software-dependency-audit/repaired_skill",
+      "executor_run_id": "software-dependency-audit-a02"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "wml-1-Plan-to-execution closure (do not stop on unexecuted commands)",
+          "description": "Agent performs some preprocessing, then outputs a planned next command in text instead of executing it, and stops without producing required artifacts.",
+          "locations": [
+            {
+              "file": "video-processor/SKILL.md",
+              "section": "Usage"
+            }
+          ],
+          "evidence": "Trajectory shows only 2 completed tool calls (ls/ffmpeg check; extract_audio + calc_energy). Next step is an agent_message containing a command to run silence-detector, but there is no subsequent tool_call executing it. Verifier fails because compressed_video.mp4 and compression_report.json do not exist."
+        },
+        {
+          "prediction_id": "wml-2-Pre-submit artifact & schema validation gate",
+          "description": "Agent lacks an end-of-run checklist (existence, schema validity, and consistency checks) and thus can terminate with missing/invalid outputs.",
+          "locations": [
+            {
+              "file": "report-generator/SKILL.md",
+              "section": "Notes"
+            }
+          ],
+          "evidence": "Verifier errors are exclusively missing-file errors (compressed_video.mp4 not found; compression_report.json not found), indicating no final existence check. Trajectory has no tool call like ls -la, jq/python json load, ffprobe duration checks, etc., after attempted planning."
+        }
+      ],
+      "repaired_bundle": "tasks/video-silence-remover/repaired_skill",
+      "executor_run_id": "video-silence-remover-a02"
+    }
+  ]
+}

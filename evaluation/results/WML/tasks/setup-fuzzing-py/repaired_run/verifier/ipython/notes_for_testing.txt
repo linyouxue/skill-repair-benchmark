@@ -1,0 +1,30 @@
+Important functions / fuzz targets (IPython)
+
+High-value modules
+- IPython/core/inputtransformer2.py: TransformerManager.transform_cell(), check_complete(), token transforms
+- IPython/core/splitinput.py: split_user_input() (lexing / command splitting)
+
+Primary functions-under-test (FUTs)
+1) IPython.core.inputtransformer2.TransformerManager.transform_cell(cell: str) -> str
+   - Widest text-based entry point for user input transformations.
+   - Runs cleanup transforms, line transforms, then token-based transforms.
+   - Has an internal transform loop limit (TRANSFORM_LOOP_LIMIT=500) to prevent infinite rewriting.
+2) IPython.core.inputtransformer2.TransformerManager.check_complete(cell: str)
+   - Similar pipeline but produces a completion status; fuzz can find tokenization edge cases.
+3) IPython.core.splitinput.split_user_input(line: str)
+   - Separates line into command + args; parser boundary.
+
+Existing tests / oracles (from /tests)
+- tests/test_inputtransformer2.py covers transform_cell() and check_complete().
+- tests/test_splitinput.py covers split_user_input().
+- Oracle: invalid input should be handled gracefully (often via SyntaxError/TokenError paths), never hang.
+
+Fuzzing oracle ideas
+- No unexpected exceptions; TokenError/SyntaxError are acceptable for malformed code.
+- Ensure transform_cell does not blow up CPU (loop limit helps; still good for DoS hunting).
+
+Seed ideas
+- IPython prompts: "In [1]: x=1"
+- Magics: "%timeit x", "%%bash\necho hi"
+- Help syntax: "foo?", "foo??"
+- System escapes: "!ls"

@@ -1,0 +1,30 @@
+Important functions / fuzz targets (Black)
+
+High-value modules
+- src/black/__init__.py: format_str(), format_file_contents(), core formatting pipeline
+- src/black/parsing.py: parse_ast() (AST parsing + error handling)
+
+Primary functions-under-test (FUTs)
+1) black.format_str(src_contents: str, mode: black.Mode, lines=())
+   - Widest string-based input surface.
+   - Exercises lib2to3 parsing, formatting passes, newline normalization.
+2) black.format_file_contents(src_contents: str, fast: bool, mode: black.Mode)
+   - Adds "NothingChanged" and (when fast=False) stability/equivalence checks.
+3) black.parsing.parse_ast(src: str)
+   - Parser boundary; good for invalid tokens / edge unicode.
+
+Existing tests / oracles (from /tests)
+- tests/test_black.py and tests/test_format.py heavily exercise format_str and format_file_contents.
+- Key oracles used by Black itself:
+  - Stability: formatting twice should be idempotent.
+  - Equivalence: reformatted code should be AST-equivalent to original (when fast=False).
+
+Fuzzing oracle ideas
+- Primarily "no unexpected exception" and "no hang".
+- For valid Python, idempotence: format_str(format_str(x)) == format_str(x).
+  (We avoid running stability checks inside the fuzzer for speed; can be added later.)
+
+Seed ideas
+- Minimal statements: "pass\n", "x=1\n", "def f():...\n"
+- Edge newlines: CRLF, stray CR
+- Unicode identifiers/strings
