@@ -1,0 +1,160 @@
+diff --git a/src/benchflow/agents/openhands_benchmark_adapter.py b/src/benchflow/agents/openhands_benchmark_adapter.py
+index f95d10ad..7bcd3b14 100644
+--- a/src/benchflow/agents/openhands_benchmark_adapter.py
++++ b/src/benchflow/agents/openhands_benchmark_adapter.py
+@@ -35,6 +35,43 @@ PRELOAD_END = "</BENCHMARK_EXECUTOR_PRELOADED_TASK_SKILLS>"
+ _PATCHED = False
+ 
+ 
++def _disable_uncontrolled_skill_discovery() -> None:
++    """Keep OpenHands from adding project, user, or public skills.
++
++    The benchmark executor injects the complete, digest-verified task bundle in
++    ``configure_agent``.  OpenHands CLI 1.28.1 otherwise performs a second skill
++    discovery pass while creating the session, including a network clone of its
++    public skill repository.  That changes the model-visible skill set and makes
++    an offline rollout depend on unrelated infrastructure.
++    """
++
++    from openhands.sdk.context import AgentContext
++    from openhands_cli.locations import get_work_dir
++    from openhands_cli.stores.agent_store import AgentStore
++    from openhands_cli.utils import get_os_description
++
++    if getattr(AgentStore, "_benchmark_executor_skill_isolation", False):
++        return
++
++    def executor_agent_context(self: Any) -> Any:
++        del self
++        system_suffix = "\n".join(
++            [
++                f"Your current working directory is: {get_work_dir()}",
++                f"User operating system: {get_os_description()}",
++            ]
++        )
++        return AgentContext(
++            skills=[],
++            system_message_suffix=system_suffix,
++            load_user_skills=False,
++            load_public_skills=False,
++        )
++
++    AgentStore._build_agent_context = executor_agent_context
++    AgentStore._benchmark_executor_skill_isolation = True
++
++
+ def _positive_int(env: Mapping[str, str], key: str) -> int:
+     raw = env.get(key, "")
+     try:
+@@ -310,6 +347,8 @@ def install_adapter(env: Mapping[str, str] | None = None) -> None:
+ 
+     from openhands_cli.acp_impl.agent import base_agent, local_agent
+ 
++    _disable_uncontrolled_skill_discovery()
++
+     original_conversation = local_agent.Conversation
+ 
+     @wraps(original_conversation)
+diff --git a/tests/agents/test_openhands_benchmark_adapter.py b/tests/agents/test_openhands_benchmark_adapter.py
+index 0a800d99..2dbb87bb 100644
+--- a/tests/agents/test_openhands_benchmark_adapter.py
++++ b/tests/agents/test_openhands_benchmark_adapter.py
+@@ -53,11 +53,35 @@ def test_render_preload_fails_closed_on_digest_mismatch(tmp_path: Path) -> None:
+ 
+ 
+ class _Context:
+-    def __init__(self, suffix: str | None = None):
+-        self.system_message_suffix = suffix
++    def __init__(
++        self,
++        suffix: str | None = None,
++        *,
++        system_message_suffix: str | None = None,
++        skills: list | None = None,
++        load_user_skills: bool = True,
++        load_public_skills: bool = True,
++    ):
++        self.system_message_suffix = (
++            system_message_suffix if system_message_suffix is not None else suffix
++        )
++        self.skills = skills
++        self.load_user_skills = load_user_skills
++        self.load_public_skills = load_public_skills
+ 
+     def model_copy(self, *, update: dict):
+-        return _Context(update["system_message_suffix"])
++        return _Context(
++            system_message_suffix=update.get(
++                "system_message_suffix", self.system_message_suffix
++            ),
++            skills=update.get("skills", self.skills),
++            load_user_skills=update.get(
++                "load_user_skills", self.load_user_skills
++            ),
++            load_public_skills=update.get(
++                "load_public_skills", self.load_public_skills
++            ),
++        )
+ 
+ 
+ class _Agent:
+@@ -114,6 +138,19 @@ def _install_fake_openhands(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType
+     monkeypatch.setitem(sys.modules, "openhands.sdk", ModuleType("openhands.sdk"))
+     monkeypatch.setitem(sys.modules, "openhands.sdk.context", context_module)
+ 
++    locations_module = ModuleType("openhands_cli.locations")
++    locations_module.get_work_dir = lambda: "/app"
++    utils_module = ModuleType("openhands_cli.utils")
++    utils_module.get_os_description = lambda: "test-os"
++    stores_package = ModuleType("openhands_cli.stores")
++    agent_store_module = ModuleType("openhands_cli.stores.agent_store")
++
++    class AgentStore:
++        def _build_agent_context(self):
++            return _Context("uncontrolled")
++
++    agent_store_module.AgentStore = AgentStore
++
+     local_agent = ModuleType("openhands_cli.acp_impl.agent.local_agent")
+ 
+     class Conversation:
+@@ -145,6 +182,12 @@ def _install_fake_openhands(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType
+     agent_package.base_agent = base_agent
+     agent_package.local_agent = local_agent
+     monkeypatch.setitem(sys.modules, "openhands_cli", ModuleType("openhands_cli"))
++    monkeypatch.setitem(sys.modules, "openhands_cli.locations", locations_module)
++    monkeypatch.setitem(sys.modules, "openhands_cli.utils", utils_module)
++    monkeypatch.setitem(sys.modules, "openhands_cli.stores", stores_package)
++    monkeypatch.setitem(
++        sys.modules, "openhands_cli.stores.agent_store", agent_store_module
++    )
+     monkeypatch.setitem(
+         sys.modules, "openhands_cli.acp_impl", ModuleType("openhands_cli.acp_impl")
+     )
+@@ -158,6 +201,26 @@ def _install_fake_openhands(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType
+     return local_agent, BaseOpenHandsACPAgent
+ 
+ 
++def test_adapter_disables_all_openhands_skill_autodiscovery(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """Guards the local skill-isolation fix against shared commit b88b4b9."""
++    _install_fake_openhands(monkeypatch)
++    monkeypatch.setattr(adapter, "_PATCHED", False)
++
++    adapter.install_adapter({adapter.ENV_MAX_ITERATIONS: "60"})
++
++    from openhands_cli.stores.agent_store import AgentStore
++
++    context = AgentStore()._build_agent_context()
++    assert context.system_message_suffix == (
++        "Your current working directory is: /app\nUser operating system: test-os"
++    )
++    assert context.skills == []
++    assert context.load_user_skills is False
++    assert context.load_public_skills is False
++
++
+ @pytest.mark.asyncio
+ async def test_adapter_preloads_before_conversation_and_caps_each_run(
+     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -1,0 +1,295 @@
+import os
+from typing import Dict, List, Any, Optional
+from trace_logger import TraceLogger, Step
+from causal_attribution import CausalAttribution
+from llm_client import MultiAgentLLM
+from utils import summarize_step
+
+class CritiqueResult:
+
+    def __init__(
+        self,
+        step_id: int,
+        proposed_by: str,
+        critiques: List[Dict[str, Any]],
+        consensus_score: float,
+        final_verdict: bool
+    ):
+
+        self.step_id = step_id #The step that is being critiqued
+        self.proposed_by = proposed_by #Which agent proposed this as causal
+        self.critiques = critiques #List of critique responses from agents
+        self.consensus_score = consensus_score # Agreement score (0-1)
+        self.final_verdict = final_verdict #Whether the step is confirmed as causal
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "proposed_by": self.proposed_by,
+            "critiques": self.critiques,
+            "consensus_score": self.consensus_score,
+            "final_verdict": self.final_verdict
+        }
+
+class MultiAgentCritique:
+    """
+    Employs multiple LLM agents to critique and validate causal attributions.
+
+    Process:
+    1. Agent A (proposer) identifies causal steps
+    2. Agent B (critic 1) critiques the proposal
+    3. Agent C (critic 2) provides additional critique
+    4. System synthesizes consensus
+
+    This triangulation reduces variance and improves robustness.
+    """
+
+    def __init__(
+        self,
+        trace: TraceLogger,
+        causal_attribution: CausalAttribution,
+        multi_agent_llm: Optional[MultiAgentLLM] = None,
+        num_agents: int = 3
+    ):
+        self.trace = trace
+        self.causal_attribution = causal_attribution
+
+        if multi_agent_llm is None:
+            self.multi_agent_llm = MultiAgentLLM(num_agents=num_agents)
+        else:
+            self.multi_agent_llm = multi_agent_llm
+
+        self.num_agents = self.multi_agent_llm.num_agents
+
+        self.critique_results: Dict[int, CritiqueResult] = {}
+
+    def critique_causal_attributions(
+        self
+    ) -> Dict[int, CritiqueResult]:
+        causal_steps = self.causal_attribution.get_causal_steps()
+
+        for step_id in causal_steps:
+            self.critique_results[step_id] = self._critique_step(step_id)
+
+        return self.critique_results
+
+    def _critique_step(self, step_id: int) -> CritiqueResult:
+
+        step = self.trace.get_step(step_id)
+        if not step:
+            return CritiqueResult(step_id, "unknown", [], 0.0, False)
+
+        # Agent A (proposer) - already done by causal attribution
+        crs_score = self.causal_attribution.crs_scores.get(step_id, 0.0)
+
+        # Generate critiques from multiple agents
+        critiques = []
+
+        # Agent B (first critic)
+        critique_b = self._generate_critique(
+            step_id,
+            agent_index=1,
+            role="critic",
+            model_name=os.getenv(
+                "CAUSALFLOW_CRITIC_MODEL",
+                os.getenv("CAUSALFLOW_MODEL", "anthropic/claude-opus-4.7"),
+            ),
+        )
+        critiques.append({
+            "agent": "Agent_B",
+            "role": "critic",
+            "response": critique_b["response"],
+            "agrees": critique_b["agrees"],
+            "confidence": critique_b["confidence"]
+        })
+
+        # Agent C (second critic)
+        critique_c = self._generate_critique(
+            step_id,
+            agent_index=2,
+            role="meta-critic",
+            model_name=os.getenv(
+                "CAUSALFLOW_META_CRITIC_MODEL",
+                os.getenv("CAUSALFLOW_MODEL", "anthropic/claude-opus-4.7"),
+            ),
+            previous_critique=critique_b["response"]
+        )
+        critiques.append({
+            "agent": "Agent_C",
+            "role": "meta-critic",
+            "response": critique_c["response"],
+            "agrees": critique_c["agrees"],
+            "confidence": critique_c["confidence"]
+        })
+
+        # Synthesize consensus
+        consensus_score = self._calculate_consensus(crs_score, critiques)
+        final_verdict = consensus_score >= 0.5
+
+        return CritiqueResult(
+            step_id=step_id,
+            proposed_by="Agent_A",
+            critiques=critiques,
+            consensus_score=consensus_score,
+            final_verdict=final_verdict
+        )
+
+    def _generate_critique(
+        self,
+        step_id: int,
+        agent_index: int,
+        role: str,
+        model_name: Optional[str] = None,
+        previous_critique: Optional[str] = None
+    ) -> Dict[str, Any]:
+
+        step = self.trace.get_step(step_id)
+        crs_score = self.causal_attribution.crs_scores.get(step_id, 0.0)
+
+        prompt = self._create_critique_prompt(
+            step, crs_score, role, previous_critique
+        )
+
+        try:
+            agent = self.multi_agent_llm.get_agent(agent_index)
+            result = agent.generate_structured(
+                prompt,
+                schema_name="critique",
+                system_message=f"You are a critical evaluator (role: {role}) analyzing causal claims. Always respond using the providedschema in JSON format.",
+                temperature=0.3,
+                model_name=model_name
+            )
+
+            agrees = result.agreement in ["AGREE", "PARTIAL"]
+            confidence = result.confidence
+            reasoning = result.reasoning
+
+            return {
+                "response": reasoning,
+                "agrees": agrees,
+                "confidence": confidence,
+                "agreement": result.agreement,
+                "evidence_strength": result.evidence_strength
+            }
+
+        except Exception as e:
+            print(f"Error generating critique for step {step_id}: {e}")
+            return {
+                "response": f"Error: {str(e)}",
+                "agrees": False,
+                "confidence": 0.0,
+                "agreement": "DISAGREE",
+                "evidence_strength": "WEAK"
+            }
+
+    def _create_critique_prompt(
+        self,
+        step: Step,
+        crs_score: float,
+        role: str,
+        previous_critique: Optional[str] = None
+    ) -> str:
+
+        prompt = f"""You are critically evaluating a causal attribution claim.
+
+PROBLEM STATEMENT:
+{self.trace.problem_statement}
+
+EXECUTION TRACE SUMMARY:
+- Task outcome: FAILED
+- Final answer: {self.trace.final_answer}
+- Correct answer: {self.trace.gold_answer}
+- Total steps: {len(self.trace.steps)}
+
+CAUSAL CLAIM:
+Agent A claims that Step {step.step_id} is causally responsible for the failure.
+Causal Responsibility Score (CRS): {crs_score}
+
+STEP DETAILS:
+- Step ID: {step.step_id}
+- Type: {step.step_type.value}
+- Content: {summarize_step(step)}
+- Dependencies: {step.dependencies}
+
+DESCENDANTS (affected by this step):
+"""
+        # Add descendant information
+        descendants = list(self.causal_attribution.causal_graph.get_descendants(step.step_id))
+        for desc_id in descendants:
+            desc_step = self.trace.get_step(desc_id)
+            if desc_step:
+                prompt += f"  Step {desc_id}: {summarize_step(desc_step)}\n"
+
+        if previous_critique:
+            prompt += f"\nPREVIOUS CRITIQUE:\n{previous_critique}\n"
+
+        prompt += f"""
+YOUR TASK ({role}):
+Critically evaluate whether Step {step.step_id} is truly causally responsible for the failure.
+
+IMPORTANT:
+- Focus on the CONTENT of Step {step.step_id} shown above. Do not be confused by any internal numbering (e.g. "Step 1") within the text content.
+- If the step contains multiple parts (e.g. a full reasoning chain), evaluate if ANY part of it is incorrect and causes the failure.
+
+Consider:
+1. Is this step actually incorrect or problematic?
+2. Would fixing this step alone lead to success?
+3. Are there alternative explanations for the failure?
+4. Is the causal chain from this step to the final failure clear?
+
+Provide your structured critique with:
+- 'agreement': AGREE if you believe the step contains an error that contributes to the failure. DISAGREE if you believe the step is correct. PARTIAL if uncertain.
+- 'confidence': A number between 0.0 and 1.0
+- 'reasoning': Your detailed explanation
+- 'alternative_explanation': If disagreeing, provide an alternative explanation
+- 'evidence_strength': STRONG, MODERATE, or WEAK based on evidence quality
+
+Be thorough and critical. Challenge weak causal claims.
+"""
+
+        return prompt
+
+    def _calculate_consensus(
+        self,
+        crs_score: float,
+        critiques: List[Dict[str, Any]]
+    ) -> float:
+        """
+        Calculate consensus score from multiple agents.
+
+        Args:
+            crs_score: Original CRS from Agent A
+            critiques: List of critiques from other agents
+
+        Returns:
+            Consensus score (0-1)
+        """
+        # Weight each agent's input
+        weights = {
+            "Agent_A": 0.33,  # Proposer
+            "Agent_B": 0.33,  # First critic
+            "Agent_C": 0.33   # Second critic
+        }
+
+        # Agent A's score (proposer)
+        total_score = weights["Agent_A"] * crs_score
+
+        # Add weighted critique scores
+        for critique in critiques:
+            agent = critique["agent"]
+            agrees = critique["agrees"]
+            confidence = critique["confidence"]
+
+            # Score is 1.0 if agrees, 0.0 if disagrees, weighted by confidence
+            critique_score = (1.0 if agrees else 0.0) * confidence
+
+            total_score += weights.get(agent, 0.1) * critique_score
+
+        return max(0.0, min(1.0, total_score))
+
+    def get_consensus_causal_steps(self, threshold: float = 0.5) -> List[Step]:
+
+        return [
+            self.trace.get_step(step_id) for step_id in self.critique_results.keys()
+            if self.critique_results[step_id].consensus_score >= threshold
+        ]
