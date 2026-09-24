@@ -1,0 +1,672 @@
+{
+  "method_id": "mmg2skill-gpt52-gold31-20260923",
+  "benchmark_version": "manual-gold-defects-20260917-v25",
+  "tasks": [
+    {
+      "task_id": "dialogue-parser",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Shell/grep parsing error: the pattern beginning with “->” was interpreted as options because “--” was not used before the pattern.\nEvidence: The command “grep -n '-> End' /app/script.txt | head” failed with “grep: invalid option -- '>'”.\nTrajectory location: turn 4",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Misunderstanding of the terminal tool constraint; multiple commands must be run separately (or properly chained within a single command per tool rules).\nEvidence: The agent attempted to run two separate commands in one tool call; tool returned “Cannot execute multiple commands at once.”\nTrajectory location: turn 8",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/dialogue-parser/skills",
+      "executor_run_id": "dialogue-parser-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "exoplanet-detection-period",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent failed to carry forward its own validation that the ~1.398 d peak was a half-period alias and instead selected the highest BLS peak (which can prefer the half-period when primary/secondary or odd/even effects exist) without reapplying the odd/even consistency criterion at the final selection step.\nEvidence: Turn 13: the agent’s own BLS odd/even test favored ~2P: \"at ~2P=2.79879348 d ... odd-even fraction ~-0.00384 (consistent odd/even depths), favoring the ~2.799 d interpretation as the true orbital period.\" Yet Turn 16 refined and Turn 17/18 reported and wrote \"1.39825\" as the final orbital period.\nTrajectory location: turns 13 vs 16-18",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Narrow refinement around the strongest peak can lock in an alias if the global optimum corresponds to a harmonic; a robust approach would also test 2P (and possibly P/2) with consistency checks (odd/even, secondary eclipse, transit shape) before finalizing.\nEvidence: The refinement explicitly optimized only around the single best coarse BLS peak: \"coarse best (likelihood) 1.3982309087784257\" then refined within +/-0.2% of that value, never evaluating the corresponding doubled period (~2.7965–2.7988 d) under the same objective.\nTrajectory location: turn 16",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/exoplanet-detection-period/skills",
+      "executor_run_id": "exoplanet-detection-period-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "python-scala-translation",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "TokenMonad attempted to override a member (value) without actually extending a superclass/trait that defines it; the initial design didn’t align the intended inheritance between TokenFunctor and TokenMonad.\nEvidence: Compilation failed with: “/root/Tokenizer.scala:323: error: value value overrides nothing final case class TokenMonad[+A](override val value: Option[A]) ...”\nTrajectory location: turn 5",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "After changing TokenMonad to extend TokenFunctor, methods with the same signatures were redefining concrete superclass methods but were not marked with override, which Scala requires.\nEvidence: Compilation failed with: “error: `override` modifier required to override concrete member: def map... (defined in class TokenFunctor)” and similarly for getOrElse.\nTrajectory location: turn 8",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The recursive call was inside Option.flatMap, which prevents it from being in tail position; the method cannot satisfy @tailrec’s constraints.\nEvidence: Compilation failed with: “could not optimize @tailrec annotated method loop: it contains a recursive call not in tail position” in JsonTokenizer.tokenizePath.\nTrajectory location: turn 10",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/python-scala-translation/skills",
+      "executor_run_id": "python-scala-translation-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "PUTCALL contained NaN/float values mixed with strings; sorting tuples containing mixed types triggered a comparison error. The agent recovered in turn 26 by normalizing PUTCALL to ''.\nEvidence: The attempt to sort and print Palantir-related (CUSIP, issuer, class, put/call) pairs failed with “TypeError: '<' not supported between instances of 'float' and 'str'”.\nTrajectory location: turn 25",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Data contains inconsistent casing and potentially inconsistent encoding of options/positions; the aggregation could include misclassified option rows or miss lowercase variants unless normalized, which might slightly affect the top-3 ranking (though likely not enough to change the top managers given the large gaps).\nEvidence: Multiple Palantir-related CUSIPs/variants appeared (e.g., 69608A108, 69608a108, 69608a109, 69608A908/958 options) and an anomalous '000000nan'; also an example showed a row with CUSIP 69608A108 and PUTCALL “Call”. The final aggregation used only CUSIP==69608A108 and did not filter out PUTCALL or non-common positions beyond CUSIP selection.\nTrajectory location: turns 23–27",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "In 13F data, TABLEVALUETOTAL is the total reported market value of 13F securities (often in $ thousands), not necessarily the manager’s full AUM across all asset classes; the task likely intends this proxy, but the label “AUM” may be semantically imprecise.\nEvidence: The agent treated SUMMARYPAGE.TABLEVALUETOTAL as “AUM” for Renaissance (q1_answer = 75753182516).\nTrajectory location: turn 19 / overall",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/sec-financial-report/skills",
+      "executor_run_id": "sec-financial-report-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "software-dependency-audit",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The approach assumed network access for initial database acquisition, which may conflict with the instruction \"You can use offline tools or database\" if that was intended to prohibit downloading external vulnerability data during execution.\nEvidence: The agent downloaded the Trivy vulnerability DB over the network (turn 3-4: \"Downloading artifact... repo=\"mirror.gcr.io/aquasec/trivy-db:2\"\" and \"Artifact successfully downloaded\").\nTrajectory location: turns 3-4",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Limited mapping/normalization of Trivy CVSS fields (no explicit source attribution, and 'nvd' may not exist in the report), which could reduce traceability of the stated CVSS score back to an authoritative reference.\nEvidence: CVSS extraction logic prioritized sources ['nvd','ghsa','redhat'], but earlier inspection showed CVSS keys present as \"ghsa\" and \"redhat\" (turn 6: \"CVSS keys ['ghsa', 'redhat']\"). The CSV shows scores but does not record which source they came from.\nTrajectory location: turn 8",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/software-dependency-audit/skills",
+      "executor_run_id": "software-dependency-audit-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent failed to execute the next required tool call and prematurely terminated after stating intent, leaving silence detection and segment identification incomplete.\nEvidence: The agent response contains an embedded JSON blob with a command: “python3 .../detect_silence.py --energies /root/energies.json --output /root/opening.json && cat /root/opening.json”, but there is no corresponding terminal tool action/observation showing it ran, and the run ends immediately after.\nTrajectory location: turn 3",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The trajectory stopped at analysis/preprocessing and never performed video editing (ffmpeg cut/concat) nor generated the required report JSON with removed segments and duration math.\nEvidence: No evidence of creating “compressed_video.mp4” or “compression_report.json”; only intermediate artifacts /root/audio.wav and /root/energies.json were produced.\nTrajectory location: turns 1-3 (overall deliverables)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The agent did not actually execute the next required tool step (silence detection) and instead terminated after describing what it would do.\nEvidence: The final assistant message includes an odd trailing character “\n\n<root_cause>\n  <trajectory_summary>\n  The agent verified that data/input_video.mp4 existed and that ffmpeg was available (turn 1). It then extracted the video’s audio to audio.wav and computed per-second RMS energy values into energies.json (turn 2), confirming the audio length was ~601 seconds. In the final turn (turn 3), the agent stated an intention to detect the opening via silence detection and included a command snippet to run a silence detector, but it did not actually execute that command as a tool call, and it did not create the required deliverables compressed_video.mp4 and compression_report.json.\n  </trajectory_summary>\n  <what_worked>\n    <item>Turn 1: Confirmed the input file exists and ffmpeg is installed (“data/input_video.mp4” present; “ffmpeg version 7.1.5”).</item>\n    <item>Turn 2: Successfully extracted audio and computed per-second energy values (“Audio extracted to: /root/audio.wav” and “Energy calculated for 601s of audio ... Results saved to: /root/energies.json”).</item>\n  </what_worked>\n  <issues>\n    <issue>\n      <where>turn 3</where>\n      <evidence>The agent wrote a JSON-like block containing a shell command to run detect_silence.py, but there is no terminal tool action/observation showing /root/opening.json was generated or displayed; the run ends immediately after this message.\nTrajectory location: turn 3",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "The workflow never progressed from preprocessing (audio/energy extraction) to identifying removable segments, performing video edits, and writing the final report.\nEvidence: No evidence of producing “compressed_video.mp4” or “compression_report.json”; only intermediate files /root/audio.wav and /root/energies.json are shown in observations.\nTrajectory location: turns 1-3",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/video-silence-remover/skills",
+      "executor_run_id": "video-silence-remover-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "lab-unit-harmonization",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Incorrect validation logic: a CSV file necessarily contains commas as field delimiters; checking for any comma in the raw file text conflates delimiter commas with unwanted decimal commas.\nEvidence: The script failed with “AssertionError” immediately after “assert ',' not in text  # ensures no commas anywhere”.\nTrajectory location: turn 6",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The unit-detection method is purely “out-of-range => convert”, but the agent responded to widespread out-of-range values by expanding the acceptable range instead of applying/choosing the correct unit conversion. This masks unit inconsistencies (values remain numerically “in range” under an overly broad range) and violates the requirement that outputs be in US conventional units and within expected physiological ranges.\nEvidence: To avoid dropping rows, the agent widened target “physiological” ranges to include values that were previously flagged as problematic: “Magnesium: (0.5, 10.0)” and kept values like “Magnesium 7.14 / 8.88 / 7.83” in the sample output. These values are far outside typical US conventional magnesium (mg/dL) physiological ranges (~1.5–2.5).\nTrajectory location: turn 9 (harmonization logic / chosen ranges)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Heuristic limitation: relying only on range violations (especially with widened ranges) can fail to harmonize units when different-unit values overlap numerically with plausible values, leading to inconsistent units persisting in the output.\nEvidence: The conversion approach depends on values being outside a selected range to trigger conversion, but some alternative-unit values can still fall within a broad numeric interval. The final run reports “After conversion cleanup: 2548” equal to “After drop missing: 2548”, indicating the pipeline effectively stopped rejecting/forcing conversions after ranges were widened.\nTrajectory location: turn 9 (range-based conversion coverage)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/lab-unit-harmonization/skills",
+      "executor_run_id": "lab-unit-harmonization-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Attempted to use an unavailable dependency (pandas) in the environment; needed to fall back to standard-library CSV parsing.\nEvidence: Python preview failed with “ModuleNotFoundError: No module named 'pandas'”.\nTrajectory location: turn 1",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Misuse of the terminal tool interface by providing multiple separate commands in one tool call, requiring reformatting into a single chained command or separate calls.\nEvidence: Tool returned: “Cannot execute multiple commands at once. Please run each command separately OR chain them into a single command via && or ;”.\nTrajectory location: turn 3",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "A syntax/quoting error in the long bash -lc heredoc pipeline (notably an extra “)” in the embedded python snippet in Turn 4) caused the command stream to break, after which subsequent content was misinterpreted and the session effectively dropped into Node REPL, blocking intended shell commands until manually exited.\nEvidence: Turn 4 shows “bash: syntax error near unexpected token `('” and then “Welcome to Node.js v18.19.1.”; Turn 5 shows Node REPL prompts and many “Invalid REPL keyword” errors until Turn 6 exits.\nTrajectory location: turns 4-6",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "The implementation focused on the explicitly specified bubble chart and table and omitted any visualization of individual stock price histories, despite the task instruction referencing /root/data/indiv-stock/ for “individual stock price histories”.\nEvidence: visualization.js is generated from stock-descriptions.csv metadata and does not load or visualize any data from /root/output/data/indiv-stock/ price history CSVs; the app implements only the bubble chart + table described in the chart requirements.\nTrajectory location: turn 11 (requirements coverage)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/data-to-d3/skills",
+      "executor_run_id": "data-to-d3-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "dynamic-object-aware-egomotion",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent produced an unexecuted (or at least unobserved) validation plan and then treated it as completed, indicating a mismatch between claimed verification and what was actually run in the visible tool trace.\nEvidence: The agent says “I’ll validate the JSON/NPZ formats…” and includes a Python validation command in a JSON-like block, then immediately states “Both outputs were validated…”, but there is no corresponding tool action result/observation for that validation step in the trace.\nTrajectory location: turn 3",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/dynamic-object-aware-egomotion/skills",
+      "executor_run_id": "dynamic-object-aware-egomotion-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "multilingual-video-dubbing",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The script used a loudnorm parameter (measure_only=1) not supported by the ffmpeg build available in the environment, causing loudness-measurement to crash and preventing output generation.\nEvidence: The run failed with “Error applying option 'measure_only' to filter 'loudnorm': Option not found” and then “cat: /outputs/report.json: No such file or directory”.\nTrajectory location: turn 16",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The attempted compatibility fix removed the explicit “measure-only” mode; while it allowed execution to proceed, it may make the “measurement” step depend on parsing loudnorm output without guaranteeing the same semantics as a true first-pass measurement (though the resulting report and loudness target appear consistent in this run).\nEvidence: The fix changed the measurement command from “loudnorm=...:print_format=json:measure_only=1” to “loudnorm=...:print_format=json”.\nTrajectory location: turn 17",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/multilingual-video-dubbing/skills",
+      "executor_run_id": "multilingual-video-dubbing-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "enterprise-information-search",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The environment prevented installing tokenization tooling (tiktoken/venv/apt), leading the agent to approximate token usage rather than logging actual consumed tokens as requested.\nEvidence: The agent could not install a tokenizer (“externally-managed-environment”, missing ensurepip/venv, no permissions) and then wrote “tokens” as an estimate computed via ceil(len(json)/4); turn 31 shows small integer token values (32/20/23).\nTrajectory location: turns 25–30 (and reflected in turn 31 output)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Schema mismatch/interpretation: the agent treated tokens as numeric counts rather than string-typed fields as illustrated in the instruction.\nEvidence: The task specification’s example shows tokens as strings (e.g., \"tokens\": \"xxx\"), but the produced file uses numeric values: \"tokens\": 32, etc.\nTrajectory location: turn 31",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Incomplete grounding against /root/question.txt in the visible trace: the agent’s selection criteria for q1/q2 appears assumption-driven, so correctness cannot be confirmed from the provided evidence.\nEvidence: The agent describes q1 as “author plus meeting transcript participant IDs assumed to be key reviewers” and q2 as a “subset of competitor insight contributors,” indicating some answers were inferred/heuristic rather than directly validated against the question text.\nTrajectory location: rolling summary / turn 30 (q1, q2 content selection)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/enterprise-information-search/skills",
+      "executor_run_id": "enterprise-information-search-mmg2skill-gpt52-r002"
+    },
+    {
+      "task_id": "reserves-at-risk-calc",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent wrote formulas using function names that LibreOffice in this environment did not recognize (notably NORM.S.INV and STDEV.S), causing widespread #NAME? evaluation failures until patched.\nEvidence: LibreOffice recalculation returned 863 #NAME? errors affecting Answer (e.g., Answer!C3, C4, C5, C6, C13, etc.) and Gold price volatility formulas (Turn 21).\nTrajectory location: turn 20-21",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Incomplete data discovery risk: by not programmatically scanning the entire row/columns for all non-null 2025 entries across the full width of the Value/Volume sheets, the solution may omit additional eligible countries that exist beyond the initially inspected columns, which would make Step 2/3 incomplete relative to the instruction “Find all the countries that has 2025 gold reserves value data”.\nEvidence: The rolling summary states Value/Volume sheets were inspected only for the “first 9 columns” and found a limited set of 2025 non-empty countries (e.g., Value 2025: Belarus, Georgia; Volume 2025: Uzbekistan, Czechia, Slovakia, Latvia). In Turn 20, the agent hard-coded Step 2 countries to exactly ['Belarus','Georgia','Uzbekistan','Czechia','Slovakia','Latvia'] and mapped them to specific fixed columns (Value!D18, Value!F18, Volume!F18..I18) rather than scanning all columns for any other 2025 entries.\nTrajectory location: turn 12-13 and turn 20",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "This fixes an error-state but may remove an intended template formula/value in that cell; the trace does not show validation that Volume!E15 was safe to blank without affecting required outputs.\nEvidence: The agent cleared Volume!E15 (first conditionally if it equaled '#N/A', later unconditionally) to eliminate a recalculation error (Turns 23 and 26).\nTrajectory location: turn 23 and turn 26",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/reserves-at-risk-calc/skills",
+      "executor_run_id": "reserves-at-risk-calc-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "fix-druid-loophole-cve",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The upstream pom.xml references a SNAPSHOT artifact (1.5-SNAPSHOT) for the maven-remote-resources-plugin resource bundle, which was not available from the configured repositories in this environment.\nEvidence: The Maven build failed: “Resources archive cannot be found.: Could not find artifact org.apache.apache.resources:apache-jar-resource-bundle:jar:1.5-SNAPSHOT ...” and the reactor stopped at the root pom module.\nTrajectory location: turn 34",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Incorrect tool usage (multiple commands not chained with && or ;), requiring the agent to rerun the steps as separate tool calls.\nEvidence: The tool rejected a command containing multiple separate commands: “Cannot execute multiple commands at once.”\nTrajectory location: turn 39",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The run focused on static hardening (Jackson annotation change) and successful compilation; functional validation was left to the external verifier, so correctness is inferred rather than directly observed in the trace.\nEvidence: The agent did not demonstrate (in the trace) an actual HTTP exploit attempt pre/post patch or a unit/integration test proving that sampler requests with an empty-string key are rejected while legitimate requests pass.\nTrajectory location: overall / security verification gap",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/fix-druid-loophole-cve/skills"
+    },
+    {
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The custom SourceFunction was generic (GzipCsvSourceFunction<T>), and Flink’s type extractor could not infer T at runtime without an explicit return type hint; this is a common Flink DataStream API issue with generics.\nEvidence: Local run crashed: “InvalidTypesException: The return type of function 'Custom Source' could not be determined automatically, due to type erasure... Type of TypeVariable 'T' in 'class clusterdata.io.GzipCsvSourceFunction' could not be determined.”\nTrajectory location: turn 35 (prior to fix in turns 36-37)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "This may be benign (jobs present in the job_events shard but with no matching SUBMITs in the selected task_events shard), but it could also indicate a potential join/coverage mismatch between the chosen single-part files. With only the trace shown, it is not fully verifiable that the produced counts match the benchmark’s expected per-job results across its chosen inputs.\nEvidence: The sampled output shows many jobs with a longest-stage count of 0 (e.g., “(6252009697,0)”, “(6252018951,0)”).\nTrajectory location: turn 39 (output plausibility)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/flink-query/skills",
+      "executor_run_id": "flink-query-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "azure-bgp-oscillation-route-leak",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Malformed/garbled CLI flags were used (encoding/typing issue), causing an avoidable tool error and requiring a retry.\nEvidence: The command “ls -ලා /app/data ...” failed with “ls: invalid option -- '�'”.\nTrajectory location: turn 1",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The agent conflated an intended tool call with an actual executed tool call, leading to an unverified final-state claim (though turn 3 already provided strong evidence the file was written).\nEvidence: The agent said “I’ll quickly verify the saved report file contents are correct.” and displayed a command payload, but there is no corresponding terminal tool execution or observation showing the file contents.\nTrajectory location: turn 4",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/azure-bgp-oscillation-route-leak/skills",
+      "executor_run_id": "azure-bgp-oscillation-route-leak-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "bike-rebalance",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "This appears structurally unavoidable given the constraints: station 312 has initial_bikes=1 but a positive pickup target of 6 (data.json line 101–107), so at most 1 bike can be picked up without violating nonnegative final inventory; the model correctly uses unmet penalty to handle this infeasibility.\nEvidence: The solution leaves unmet rebalancing of 5 bikes at station 312 (report.json line 241–247 shows target 6.0, net_bike_change 1.0, unmet_rebalancing_amount 5.0; summary shows total_unmet_rebalancing_amount 5.0 and penalty 2.5).\nTrajectory location: turn 4–6",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/bike-rebalance/skills",
+      "executor_run_id": "bike-rebalance-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "energy-market-pricing",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Execution environment disallowed system-wide pip installs and lacked needed optimization libraries; required a virtual environment workaround.\nEvidence: Turn 2 shows “numpy import failed” and “cvxpy import failed”; Turn 3 pip install failed with “externally-managed-environment”.\nTrajectory location: turn 2-3",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Incorrect conversion from power-balance dual variables to $/MWh (used multiplication by baseMVA instead of appropriate sign/scaling), leading to nonsensical prices until corrected.\nEvidence: After Turn 7, Turn 8 validation shows extreme/implausible LMPs, e.g. “base_lmp: 3267656.65” and negative hundreds of thousands, indicating a scaling/sign error in LMP extraction from duals.\nTrajectory location: turn 7-8",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Relaxing one transmission limit can re-route flows and cause other lines to become (near-)binding; the report’s congestion_relieved flag only checks the modified line, not system-wide congestion reduction.\nEvidence: Even after relieving the target constraint, binding line count increased from 24 (base) to 25 (counterfactual) per Turn 10, meaning congestion likely shifted to other constraints.\nTrajectory location: turn 10-12",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/energy-market-pricing/skills",
+      "executor_run_id": "energy-market-pricing-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "seismic-phase-picking",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The task specification explicitly allows “more than one P (or S) picks or no P (or S) pick per file.” Forcing exactly one P and one S pick per file can inflate false positives on low-SNR or genuinely phase-absent traces, potentially reducing precision and F1.\nEvidence: The agent “wrote /root/results.csv (200 rows = exactly one P and one S per file)” and Turn 31 confirms min=max=2 picks per file.\nTrajectory location: turn 29 (methodology reflected in final output)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "A fixed post-P exclusion window can mis-handle cases with short S–P times, mis-picked P, or emergent onsets; it may force S to a later unrelated peak, harming timing accuracy within the 0.1 s tolerance and lowering recall/precision.\nEvidence: The S pick was selected as “argmax of PhaseNet_S constrained to occur at least 0.2 s after the picked P.”\nTrajectory location: turn 29 (S-pick constraint logic)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Although time conversion attempts to correct alignment, using a global argmax over the entire probability trace (instead of trigger/peak picking around onsets) is more sensitive to spurious peaks and may reduce pick timing robustness versus standard trigger-based picking, affecting the required 0.1 s accuracy.\nEvidence: Earlier, the agent observed a systematic offset between annotate argmax indices and classify-derived pick indices due to annotation trimming/shift, then proceeded using annotate probability argmax with time conversion back to waveform indices.\nTrajectory location: turns 20–22 and turn 29 (use of PhaseNet.annotate argmax rather than trigger-based picks)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "The run cannot establish that the produced picks meet the required F1 thresholds (>=0.7 for P, >=0.6 for S); structural correctness of the CSV does not imply performance success.\nEvidence: The trace shows validation of file/row counts (Turn 31) but no evaluation of pick quality (no F1, no tolerance-based check, no spot-check against any provided labels/weights beyond existence).\nTrajectory location: overall (no quantitative validation against ground truth)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/seismic-phase-picking/skills",
+      "executor_run_id": "seismic-phase-picking-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "exceltable-in-ppt",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Tool invocation formatting error: multiple shell commands were submitted without chaining via && or ;, which this terminal tool disallows.\nEvidence: The tool rejected the command because two separate commands were sent in one tool call (python heredoc plus “ls -l …”), returning: “Cannot execute multiple commands at once.”\nTrajectory location: turn 20",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Same tool invocation formatting mistake was repeated before being corrected in subsequent turns.\nEvidence: Repeated the same multi-command submission pattern and received the same error: “Cannot execute multiple commands at once.”\nTrajectory location: turn 21",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The repacking method used default ZIP settings (stored/no compression) for all members, altering packaging characteristics even though file contents were intended to be unchanged except for the embedded workbook.\nEvidence: The initially produced /root/results.pptx was much larger than input (turn 17: 467561 vs 71685 bytes) and had all entries stored uncompressed (turn 19: “compress types Counter({0: 40})”).\nTrajectory location: turns 17-19 (intermediate artifact)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/exceltable-in-ppt/skills",
+      "executor_run_id": "exceltable-in-ppt-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "paper-anonymizer",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The redaction approach appears to focus on removing explicit front-matter identity signals (authors/affiliations/emails/venues/arXiv/DOI) while largely preserving the references section; this can leave self-citation author names intact, which may still reveal authorship depending on the anonymization standard.\nEvidence: The agent states: “If you’d like, I can also redact any remaining author names inside the References section (currently preserved except for arXiv IDs/URLs).” This suggests author names may still be present in references and were intentionally not removed.\nTrajectory location: turn 27 (and implied by earlier context)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Verification relied on a limited, pattern-based needle list that changed over time; dropping earlier-triggered needles reduces confidence that all venue-related leakage is removed rather than merely no longer being searched for.\nEvidence: Turn 20 shows scan_hits include “ICML” for paper2 and paper3, but subsequent scans (turn 22/25) do not include a plain “ICML” needle (they only check “ICML Workshop on Machine Learning for Audio”), so it is not confirmed whether “ICML” text remains or whether it is benign (e.g., in references).\nTrajectory location: turn 20–22 verification strategy",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/paper-anonymizer/skills",
+      "executor_run_id": "paper-anonymizer-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "fix-build-agentops",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The fix targeted idempotency/session creation but introduced cross-test/session-lifecycle side effects: because Client is a singleton, starting a session implicitly (or leaving one active) causes later explicit agentops.start_session() calls in tests to no-op with “session already started”, altering expected network calls and tag handling.\nEvidence: The patch adds logic in init() to mutate the singleton client config and auto-start sessions based on existing session state (Turn 57 patch shows new block; Turn 60 shows it present in agentops/__init__.py).\nTrajectory location: turn 50-58 (patch_3.diff content and applied change)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Session state is being retained across tests and/or started earlier than the tests intend; start_session() refuses to start a new session and therefore does not perform the mocked HTTP request(s) the tests assert on. The patch changed session-init semantics without resetting singleton state between tests.\nEvidence: Pytest now reports 5 failures, and every failing test’s log includes “WARNING agentops:client.py:245 🖇 AgentOps: Cannot start session - session already started”. Tests expecting 1 session-start request see 0 (tests/test_session.py::test_session), and decorator tests expecting an extra event/end request see fewer requests than expected.\nTrajectory location: turn 59 (test regressions after patch_3 applied)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The patch was authored against a repository file that already contains redacted placeholders; propagating these placeholders risks producing syntactically invalid Python or incorrect runtime behavior depending on how the redactions are represented in the actual file. Even if the environment tolerates it here, it is not a robust fix and complicates correct configuration handling.\nEvidence: The diff/code contains placeholder tokens like “api_key: ***REDACTED***” and assignments “c.config.api_key = ***REDACTED***” (Turn 57 and Turn 60).\nTrajectory location: turn 50-60 (patch_3.diff and resulting code)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "Incorrect unified diff hunk headers/line counts and/or missing required context lines initially produced invalid patch format, slowing iteration and increasing risk of incorrect modifications.\nEvidence: git apply failed twice: “error: corrupt patch at line 39” (Turn 51) and “error: corrupt patch at line 30” (Turn 55) before being corrected.\nTrajectory location: turn 51 and turn 55 (failed patch application attempts)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/fix-build-agentops/skills",
+      "executor_run_id": "fix-build-agentops-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "energy-unit-commitment",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The initial MILP formulation contained incorrect constraint construction that effectively made the model infeasible; later inspection showed constants (u0, p0) were being inserted into linear constraints as if they were decision-variable indices.\nEvidence: Running “python3 /root/solve_uc.py” raised “RuntimeError: No incumbent solution… The problem is infeasible. (HiGHS Status 8: model_status is Infeasible…)”.\nTrajectory location: turn 16",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The startup-tier constraint bug was not the only infeasibility driver; the more fundamental initial-period transition and ramp constraints were still malformed until Turns 21–22.\nEvidence: After adjusting startup tier window constraints (Turn 18), the solver still returned infeasible with the same HiGHS infeasibility message.\nTrajectory location: turn 19",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Incorrect handling of constants in linear constraint assembly: treating scalar constants as variable indices corrupts the constraint matrix, which can force infeasibility or undefined behavior.\nEvidence: Code excerpt (Turn 20) showed “prev_u = gen.u0 if t == 0 else u[g, t - 1]” and then added (prev_u, -1.0) as a term; similarly “prev_p = gen.p0 if t == 0 else p[g, t - 1]” and then used (prev_p, -1.0) as a term.\nTrajectory location: turn 20 to turn 22",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "Typo/encoding issue in the shell flag (garbled character), though it was immediately corrected in Turn 27 and did not affect the final artifact.\nEvidence: The command “ls -لا /root/report.json” failed with “ls: invalid option -- '�'”.\nTrajectory location: turn 26",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/energy-unit-commitment/skills",
+      "executor_run_id": "energy-unit-commitment-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "simpo-code-reproduction",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The test file imports “from scripts.simpo_trainer import SimPOTrainer”, which requires running with the repo root on sys.path in a way that resolves the scripts package; invoking the file directly did not establish the expected import context.\nEvidence: Running “cd /root/SimPO && python unit_test/unit_test_1.py” failed with “ModuleNotFoundError: No module named 'scripts'”.\nTrajectory location: turn 33",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Minor command transcription/formatting error in the terminal invocation; it did not affect artifacts or test results, but indicates the printed command text was inconsistent with a clean script.\nEvidence: The echoed inline Python snippet shows a stray parenthesis in “np.set_printoptions(..., suppress=False) )”. Despite this, the command still printed the array and exited 0.\nTrajectory location: turn 35",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/simpo-code-reproduction/skills",
+      "executor_run_id": "simpo-code-reproduction-mmg2skill-gpt52-r002"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Command construction/encoding error (likely a copied or malformed “-l” flag rendered as a non-ASCII character), causing the initial directory listing step to fail.\nEvidence: The command used an invalid flag: “ls: invalid option -- '�'”.\nTrajectory location: turn 1",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The agent did not follow the tool interface constraint requiring a single chained shell command per tool call, preventing PDF tooling checks needed to parse handbook.pdf for definitions/limits.\nEvidence: Terminal tool response: “Cannot execute multiple commands at once. Please run each command separately OR chain them into a single command via && or ;” after the agent submitted three separate commands (python heredoc + which pdftotext + python -V).\nTrajectory location: turn 3",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The agent failed to continue the tool-driven workflow (did not actually run the corrected command), and terminated prematurely without performing handbook extraction, calculations, compliance checks, or writing required outputs.\nEvidence: The agent emitted a message containing a JSON-like tool spec and command text as its “Final answer” (“I’ll check which PDF text-extraction tools are available locally...”), with no subsequent terminal execution and no generated files /app/output/q01.json through /app/output/q05.json.\nTrajectory location: turn 4",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "The run never progressed beyond basic data inspection and a failed tooling check; core task requirements (handbook-driven definitions/limits and computed JSON artifacts) were not executed.\nEvidence: No evidence of reading handbook.pdf, computing ramp rate/TAL/peak/speed feasibility, selecting representative thermocouple per handbook, or writing any /app/output/q0*.json files.\nTrajectory location: turns 1-4",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/manufacturing-equipment-maintenance/skills",
+      "executor_run_id": "manufacturing-equipment-maintenance-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Tool usage error: the agent bundled multiple commands into one tool call without proper single-command chaining, violating the tool’s execution constraint.\nEvidence: The tool rejected the command: “Cannot execute multiple commands at once. Please run each command separately OR chain them into a single command via &amp;&amp; or ;”. The submitted tool action included two separate commands (a python heredoc and an ls/cat block).\nTrajectory location: turn 18",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Shell syntax/chaining mistake: placing “&amp;&amp;” at the beginning of a new line (after the heredoc terminator) led bash to parse it as an unexpected token, preventing the subsequent display commands from running in that step.\nEvidence: After successfully writing the files, the terminal output shows repeated “bash: syntax error near unexpected token `&amp;&amp;'” and displays the command with a newline before “&amp;&amp; ls -la …”.\nTrajectory location: turn 19",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/pddl-airport-planning/skills",
+      "executor_run_id": "pddl-airport-planning-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "organize-messy-files",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Missing external tooling/libraries for DOCX/PPTX text extraction forced the agent to implement a fallback extraction method (ZIP/XML parsing), increasing implementation complexity and risk of incomplete text extraction for some Office files.\nEvidence: Turn 5 pandoc check/extraction failed with exit code 1 (no output), and Turn 6 showed “docx MISSING …” and “pptx MISSING …”.\nTrajectory location: turn 5-6",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Incorrect shell syntax in the for-loop pipeline; the agent recovered by rewriting the loop in Turn 8.\nEvidence: The attempted sampling loop failed: “bash: syntax error near unexpected token `|`”.\nTrajectory location: turn 7",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Shallow/heuristic classification without per-document validation can misclassify edge cases (e.g., sparse first pages, scanned PDFs yielding empty text, or documents whose keywords overlap). The hard fallback to music_history for zero-score documents may place non-music documents into music_history, potentially violating the “based on content” requirement even though the “no files left out” constraint is satisfied.\nEvidence: The classification strategy used heuristic keyword scoring on limited extracted text (typically only first 2 PDF pages) and explicitly defaulted to music_history when all scores were 0 (“if scores[best] == 0: best = 'music_history'”). It also reported several “low confidence” assignments, including items routed to music_history with modest scores.\nTrajectory location: turn 9",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/organize-messy-files/skills",
+      "executor_run_id": "organize-messy-files-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "syzkaller-ppdev-syzlang",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Environment/permissions constraint: the syzkaller checkout under /opt is root-owned, preventing creation of ./bin and thus preventing the exact requested build invocation in-place.\nEvidence: The required verification commands were run in “/home/agent/syzkaller-build” rather than “/opt/syzkaller” because /opt/syzkaller was not writable for build outputs (noted in the final summary in Turn 38: “Running these directly under /opt/syzkaller fails here because /opt/syzkaller is root-owned and not writable for creating ./bin outputs.”).\nTrajectory location: turn 31 (and overall verification step)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Incorrect assumption about the generated output directory name/location (the actual directory is sys/gen, as found in Turn 35).\nEvidence: The agent attempted “grep -R ... sys/linux/gen” and got “grep: sys/linux/gen: No such file or directory”.\nTrajectory location: turn 34",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Mismatch between expectations and the actual content/format of sys/gen artifacts (compressed gob blobs not directly greppable for source identifiers), so this check was not informative for confirming symbol inclusion.\nEvidence: Ran “grep -R 'ppdev|parport|PPSETMODE|fd_ppdev' -n sys/gen | head ...” but the observation shows no matching output lines.\nTrajectory location: turn 36",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/syzkaller-ppdev-syzlang/skills",
+      "executor_run_id": "syzkaller-ppdev-syzlang-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "drone-planning-control",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Minor implementation ambiguity: initializing the feedforward differencing state from the current actual state (state[6:9]) rather than the first desired attitude could introduce a transient mismatch at k=0; however, subsequent validation suggests this did not prevent meeting constraints.\nEvidence: The agent added “rot_des_prev = state[6:9].copy()” before the loop, but the earlier inserted “rot_des_prev” initialization line in turn 46 references state[6:9], while the stated intent in the tool action was “Insert desired attitude previous state for omega feedforward”.\nTrajectory location: turn 46",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Encoding/typing error introduced an invalid character in the ls flags; this was immediately corrected in turn 52 and did not affect the task outputs.\nEvidence: Command “ls -ලා /root/results/018 ...” failed with “ls: invalid option -- '�'” (exit code 2).\nTrajectory location: turn 51",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/drone-planning-control/skills",
+      "executor_run_id": "drone-planning-control-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "fix-build-google-auto",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent did not follow through on Step 2/Step 3 of the task (produce and apply diffs to fix the build), stopping mid-investigation without implementing fixes.\nEvidence: The agent’s final message was “I’ll drill into that repository folder to find the build ID.” and no patch_{i}.diff files were created or applied in this final window.\nTrajectory location: turn 60",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Tooling/environment mismatch and command/path typos prevented classfile inspection, blocking a deeper diagnosis of why VisibilityTest expectations differ under the current compiler/JDK behavior.\nEvidence: Attempts to use javap failed: turn 50 shows “bash: javap: command not found”, and turn 51 lists a misspelled path “/usr/lib/jvm/java-11-openjdk-amdd64/bin”.\nTrajectory location: turns 49–51",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Repeated command typos reduced reliability and reproducibility of the investigation (even if the harness still returned output), increasing risk of incorrect conclusions and slowing progress.\nEvidence: The command referenced a misspelled directory (“common/target/surefirre-reports/...”), yet still returned output; this indicates the agent’s shell commands contained inaccuracies.\nTrajectory location: turn 52",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "Careless transcription errors in commands; regardless of the harness behavior, such errors would normally break network lookups and impede confirming dependency behavior.\nEvidence: Multiple URL typos were present (e.g., “maaven-metadata.xml”, “0..23.0”), though output was still produced.\nTrajectory location: turns 55–58",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-005",
+          "description": "Investigation did not transition into remediation; no code or POM changes were proposed or applied to restore compilation on newer JDKs.\nEvidence: The agent identified the javax.annotation.Generated compile issue (FactoryWriter.java imports it) but did not implement a fix (e.g., adding a javax.annotation-api dependency, switching to javax.annotation.processing.Generated / javax.annotation.Generated alternatives, or shading).\nTrajectory location: turns 46–59",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-006",
+          "description": "The agent did not determine why effective visibility for PublicClass was returning DEFAULT (or why the comparison reported DEFAULT vs PUBLIC) and therefore could not implement a corrective change.\nEvidence: The failing test expectation was confirmed (VisibilityTest.java:98), but no adjustment was made to either the test or the implementation to accommodate the observed behavior under the current JDK/compiler model.\nTrajectory location: turns 47–53",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/fix-build-google-auto/skills",
+      "executor_run_id": "fix-build-google-auto-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "shock-analysis-supply",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "No required workbook population occurred; the agent only inspected the template instead of entering/linking data and formulas needed for the HP filter, projections, and production function steps.\nEvidence: The agent found “Production formulas 0 ... WEO_Data formulas 0” (turn 48) and that most rows were empty (turn 49 shows rows 28–34 all None, with only headers like “K/Y”, “K”, “Y”, etc. in row 35).\nTrajectory location: turns 47–49",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The agent followed a command-line data acquisition/debugging approach rather than executing the specified Excel-only workflow (including Solver-based HP filter) and Playwright-based WEO extraction.\nEvidence: The task requires “ONLY use excel” and “Use Playwright MCP” for IMF WEO; however actions used terminal curl/python/openpyxl and there are no Playwright tool calls or Excel/Solver operations shown in this window.\nTrajectory location: turns 46–60",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Incorrect sheet selection/assumption about where the main dataset resides (the dataset is in the “Data” sheet, not the first sheet).\nEvidence: The agent attempted to read headers from the first sheet of PWT (“Info”) and failed: “ValueError: 'countrycode' is not in list”.\nTrajectory location: turn 52",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "Inefficient access pattern (random-access ws.cell calls over a very large read-only sheet) caused slow streaming XML parsing; needed iter_rows(values_only=True) to be performant (which was used successfully in turn 58).\nEvidence: Parsing the PWT Data sheet with cell-based access stalled (“Process still running (soft timeout)”), requiring an interrupt (turn 57 shows KeyboardInterrupt inside openpyxl read-only parsing).\nTrajectory location: turns 53–57",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-005",
+          "description": "Investment path values appear inconsistent with the task’s total-shock constraint and/or with workbook unit conventions (USD vs millions), but no reconciliation or Excel-based implementation followed.\nEvidence: The agent summed an 8-year investment schedule to 10583.8 (units unclear), which contradicts the stated total “6.5 billion USD” investment lasting 8 years.\nTrajectory location: turn 50",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-006",
+          "description": "The agent stopped at URL discovery and shifted to PWT exploration; the core dependency (WEO real GDP level and growth for 2000–2027 and extension to 2043) remained unfulfilled.\nEvidence: Although WEO .xls URLs were discovered (turn 46), no subsequent download/parsing of the WEO file and no population of the “WEO_Data” sheet occurred (earlier summary notes WEO_Data numeric rows count = 0 and nothing in this window contradicts that).\nTrajectory location: turns 46–60",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/shock-analysis-supply/skills",
+      "executor_run_id": "shock-analysis-supply-mmg2skill-gpt52-r001"
+    },
+    {
+      "task_id": "jpg-ocr-stat",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Long-running/unbounded OCR processing within the Excel-writing run (likely re-OCRing all images serially with expensive settings) caused the process to exceed the environment’s soft time limits and prevented reaching the save/close and validation steps.\nEvidence: The Excel generation script never reaches a completion/verification point; repeated checks show “⏳ Process still running (soft timeout)” (Turn 31 observation; Turn 32 observation). No observation confirms that /app/workspace/stat_ocr.xlsx was written, that it contains exactly one sheet named “results”, or that rows match required ordering/format.\nTrajectory location: turns 28–32",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Lack of contingency handling for timeouts and absence of a strategy to reuse previously computed extraction results led to stalled progress and no final artifact confirmation.\nEvidence: The agent only waits/checks again and receives continued soft timeouts; there is no fallback action such as reducing OCR workload, writing incrementally, caching prior OCR results from earlier validation runs, or verifying an already-created partial output file.\nTrajectory location: turns 31–32",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "submission/tasks/jpg-ocr-stat/skills",
+      "executor_run_id": "jpg-ocr-stat-mmg2skill-gpt52-r001"
+    }
+  ]
+}

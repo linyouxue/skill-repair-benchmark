@@ -1,0 +1,39 @@
+<root_cause>
+  <trajectory_summary>
+  The agent built /app/workspace/extract.py to OCR 22 receipts under dataset/img and produce /app/workspace/stat_ocr.xlsx with columns (filename, date, total_amount). The script uses pytesseract with several preprocessing variants (default, grayscale+autocontrast psm6, 2x upscale psm6, and later a 3x upscale psm4), keyword tier matching (GRAND TOTAL, TOTAL RM, TOTAL AMOUNT, TOTAL/AMOUNT/NET), exclusion regexes (SUBTOTAL, TAX, GST, SST, DISCOUNT, CHANGE, CASH TENDERED/RECEIVED/PAYMENT, EXCLUDING, header lines, TOTAL GST/TAX/SST, TOTAL ITEMS/QTY/SAVINGS, etc.), a summary-header cutoff, a strict 2-decimal number regex, a next-line fallback (only when the keyword line has no digits), and multi-variant voting that first picks the lowest tier index, then majority within that tier. Date extraction handles DD/MM/YYYY, DD/MM/YY→20YY, YYYY/MM/DD.
+
+  In the final window (Turns 31–43), the agent hunted three problem receipts: 064 (misreading "Total RM" fallback to a Visa line as 688.17), 074 (a garbled "Total Amt Rounded 702.00" line beating the true 102.00), and 078 (fragmented "Grand Total 92.80" line with the fallback picking Cash Received 100.00). Turn 32 restricted the split-line fallback to keyword lines that contain no digits, which fixed 064 → 88.17 (Turn 33). Turns 34–36 refactored candidate collection and added CASH RECEIVED/PAYMENT to the exclusion list. Turn 37's run showed 064 fixed at 88.17, but 074 still 702.00 and 078 now 20.00 (a spurious tier-3 match on the column header "Description Qty Price Amount"). Turn 40 added exclusions for DESCRIPTION and QTY/PRICE AMOUNT header lines; Turn 41's run then gave 078 = None because none of the three variants produced a clean digit-bearing Total line. Turns 42–43 explored more preprocessing and added a 4th variant (3x upscale psm4), which had shown "Grand Total 92.80" cleanly, but the run of the modified extract.py was NOT executed after this final edit — the trace ends before rerunning the pipeline and re-saving the xlsx.
+
+  Consequently the xlsx on disk is the one saved at Turn 41, which contains 078=None (extraction failure claimed as null, per spec) and 074=702.00 (still wrong).
+  </trajectory_summary>
+  <what_worked>
+    <item>Turn 32/33: Restricting the two-line fallback to keyword lines containing no digits fixed 064: run at Turn 33 shows "064.jpg: date=2018-02-21, total=88.17".</item>
+    <item>Turn 34/35: Refactor to extract_total_candidates + variant-aggregating pick_best_total is coherent and preserves priority-tier semantics.</item>
+    <item>Turn 36/37: Adding CASH RECEIVED/PAYMENT to EXCLUDE_PATTERNS correctly prevents the "Cash Received 100.00" line from being harvested (Turn 37 output no longer shows 100.00 for 078).</item>
+    <item>Most receipts have plausible and stable outputs across Turns 33/37/41: 007=20.00, 009=26.60, 010=14.10, 011=15.00 (date 2017-06-15), 019=86.00, 034=2018-08-09/332.30, 039=189.75, 052=10.00, 063=85.54, 069=9.90, 071=2018-02-19/17.70, 077=23.25/23.26, 080=10.40, 083=18.80, 087=538.00, 088=99.80, 090=5.00, 094=5.90, 097=21.00.</item>
+    <item>Turn 42 diagnostic confirms that a 3x upscale with psm 4 OCRs 078 as a clean "Grand Total 92.80", giving a concrete evidence base for the Turn 43 variant addition.</item>
+  </what_worked>
+  <issues>
+    <issue>
+      <where>Turn 43 (final action)</where>
+      <evidence>Turn 43 edits ocr_variants to add a 4th variant (3x upscale psm4), but there is no subsequent `python3 extract.py` invocation in the trace. The last saved workbook is from Turn 41, which shows "078.jpg: date=2017-02-02, total=None".</evidence>
+      <cause>The agent ran out of turns / didn't re-execute after the last edit, so the change intended to recover 078=92.80 was never applied to the on-disk xlsx.</cause>
+    </issue>
+    <issue>
+      <where>Turns 37, 41 (074 row)</where>
+      <evidence>Every run in the final window still reports "074.jpg: ... total=702.00". The garbage "Total Amt Rounded 702.00" line consistently beats or ties the correct 102.00 in voting because two of the three OCR variants misread it as 702.00 at the same tier.</evidence>
+      <cause>The chosen aggregation (majority within best tier) has no way to prefer the upscaled variant that reads 102.00; the "Rounded" line is not covered by any exclusion pattern and shares tier 3 with the true total, so 702.00 wins on count.</cause>
+    </issue>
+    <issue>
+      <where>Turn 41 (078 row)</where>
+      <evidence>"078.jpg: date=2017-02-02, total=None".</evidence>
+      <cause>After adding the header/DESCRIPTION exclusion, none of the three original variants produced a keyword line with a valid 2-decimal number for 078; the Turn 43 attempt to remedy this by adding a 4th variant was not followed by a run.</cause>
+    </issue>
+    <issue>
+      <where>Overall pipeline</where>
+      <evidence>Task requires the workbook to be written; the final saved workbook (Turn 41) contains at least two rows that disagree with what the agent's own diagnostics show as correct (074 should be 102.00, 078 should be 92.80).</evidence>
+      <cause>The task's line-by-line comparison against the oracle will fail on at least these two rows; possibly also on 077 (23.25 vs 23.26 fluctuates between runs) depending on the oracle value.</cause>
+    </issue>
+  </issues>
+  <outcome_assessment value="likely_failure">The final on-disk xlsx (saved at Turn 41) contains at least one confirmed wrong total (074=702.00) and one null where a value should exist (078=None), and the last edit intended to fix 078 was never executed, so a line-by-line comparison to the oracle will almost certainly mismatch.</outcome_assessment>
+</root_cause>

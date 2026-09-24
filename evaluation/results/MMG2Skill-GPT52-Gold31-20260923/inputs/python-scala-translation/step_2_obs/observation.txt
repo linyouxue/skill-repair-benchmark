@@ -1,0 +1,366 @@
+Tool: file_editor
+Result:
+NOTE: We only show up to 581 since there're only 581 lines in this file.
+Here's the result of running `cat -n` on /root/Tokenizer.py:
+   220	
+   221	    def __init__(self, format_str: str | None = None) -> None:
+   222	        self.format_str = format_str
+   223	
+   224	    def tokenize(self, value: datetime | date) -> Token:
+   225	        if self.format_str:
+   226	            fmt = self.format_str
+   227	        elif isinstance(value, datetime):
+   228	            fmt = self.ISO_FORMAT
+   229	        else:
+   230	            fmt = self.DATE_FORMAT
+   231	
+   232	        return Token(value.strftime(fmt), TokenType.TEMPORAL)
+   233	
+   234	
+   235	# ============================================================================
+   236	# Advanced: Union Types and Overloads
+   237	# ============================================================================
+   238	
+   239	
+   240	class UniversalTokenizer:
+   241	    """Tokenizer that handles multiple types with overloaded methods."""
+   242	
+   243	    def __init__(self) -> None:
+   244	        self._string_tokenizer = StringTokenizer()
+   245	        self._numeric_tokenizer = NumericTokenizer()
+   246	        self._temporal_tokenizer = TemporalTokenizer()
+   247	
+   248	    # Overloaded signatures for type-specific behavior
+   249	    @overload
+   250	    def tokenize(self, value: str) -> Token: ***REDACTED***
+   251	    @overload
+   252	    def tokenize(self, value: bytes) -> Token: ***REDACTED***
+   253	    @overload
+   254	    def tokenize(self, value: int) -> Token: ***REDACTED***
+   255	    @overload
+   256	    def tokenize(self, value: float) -> Token: ***REDACTED***
+   257	    @overload
+   258	    def tokenize(self, value: datetime) -> Token: ***REDACTED***
+   259	    @overload
+   260	    def tokenize(self, value: None) -> Token: ***REDACTED***
+   261	    @overload
+   262	    def tokenize(self, value: Tokenizable) -> Token: ***REDACTED***
+   263	
+   264	    def tokenize(self, value: Any) -> Token:
+   265	        """
+   266	        Dispatch to appropriate tokenizer based on runtime type.
+   267	
+   268	        Note: Python allows this duck-typing dispatch that Scala's
+   269	        static type system would reject without explicit type classes.
+   270	        """
+   271	        if value is None:
+   272	            return Token("NULL", TokenType.NULL)
+   273	
+   274	        if isinstance(value, Tokenizable):
+   275	            return Token(value.to_token(), TokenType.STRUCTURED)
+   276	
+   277	        if isinstance(value, (str, bytes)):
+   278	            return self._string_tokenizer.tokenize(value)
+   279	
+   280	        if isinstance(value, (int, float, Decimal)):
+   281	            return self._numeric_tokenizer.tokenize(value)
+   282	
+   283	        if isinstance(value, (datetime, date)):
+   284	            return self._temporal_tokenizer.tokenize(value)
+   285	
+   286	        # Fallback: try str() conversion
+   287	        return Token(str(value), TokenType.STRING, {"fallback": True})
+   288	
+   289	
+   290	# ============================================================================
+   291	# Complex Nested Generics
+   292	# ============================================================================
+   293	
+   294	
+   295	class TokenRegistry(Generic[T]):
+   296	    """
+   297	    Registry with complex nested generic types.
+   298	
+   299	    This pattern is particularly challenging to translate to Scala
+   300	    due to the mixing of mutable and immutable collections with generics.
+   301	    """
+   302	
+   303	    def __init__(self) -> None:
+   304	        # Nested generics with mixed mutability
+   305	        self._registry: dict[str, TokenContainer[T]] = {}
+   306	        self._handlers: list[Callable[[T], Token | None]] = []
+   307	
+   308	    def register(self, key: str, container: TokenContainer[T]) -> None:
+   309	        self._registry[key] = container
+   310	
+   311	    def add_handler(self, handler: Callable[[T], Token | None]) -> None:
+   312	        self._handlers.append(handler)
+   313	
+   314	    def process(self, key: str) -> list[Token | None]:
+   315	        """Process all items in a container through all handlers."""
+   316	        container = self._registry.get(key)
+   317	        if container is None:
+   318	            return []
+   319	
+   320	        results: list[Token | None] = []
+   321	        for item in container.get_all():
+   322	            for handler in self._handlers:
+   323	                result = handler(item)
+   324	                if result is not None:
+   325	                    results.append(result)
+   326	                    break
+   327	            else:
+   328	                results.append(None)
+   329	
+   330	        return results
+   331	
+   332	
+   333	# ============================================================================
+   334	# Higher-Kinded Type Simulation
+   335	# ============================================================================
+   336	
+   337	F = TypeVar("F")  # Type constructor placeholder
+   338	
+   339	
+   340	class TokenFunctor(Generic[T]):
+   341	    """
+   342	    Simulated functor for tokens.
+   343	
+   344	    Python can't express true higher-kinded types (HKT), but Scala can.
+   345	    This simulation needs to become a proper type class in Scala.
+   346	    """
+   347	
+   348	    def __init__(self, value: T) -> None:
+   349	        self._value = value
+   350	
+   351	    def map(self, func: Callable[[T], Any]) -> "TokenFunctor[Any]":
+   352	        return TokenFunctor(func(self._value))
+   353	
+   354	    def flat_map(self, func: Callable[[T], "TokenFunctor[Any]"]) -> "TokenFunctor[Any]":
+   355	        return func(self._value)
+   356	
+   357	    def get_or_else(self, default: T) -> T:
+   358	        return self._value if self._value is not None else default
+   359	
+   360	
+   361	class TokenMonad(TokenFunctor[T]):
+   362	    """Extended monad operations."""
+   363	
+   364	    @classmethod
+   365	    def pure(cls, value: T) -> "TokenMonad[T]":
+   366	        return cls(value)
+   367	
+   368	    def ap(self, func_wrapped: "TokenMonad[Callable[[T], Any]]") -> "TokenMonad[Any]":
+   369	        """Applicative apply."""
+   370	        return TokenMonad(func_wrapped._value(self._value))
+   371	
+   372	
+   373	# ============================================================================
+   374	# JSON Structure Tokenization
+   375	# ============================================================================
+   376	
+   377	JsonValue = Union[str, int, float, bool, None, list["JsonValue"], dict[str, "JsonValue"]]  # noqa UP007
+   378	
+   379	
+   380	class JsonTokenizer:
+   381	    """
+   382	    Tokenizer for JSON structures with recursive types.
+   383	
+   384	    The recursive JsonValue type alias is tricky in Scala
+   385	    due to the need for explicit recursive type definitions.
+   386	    """
+   387	
+   388	    def __init__(self, pretty: bool = False) -> None:
+   389	        self.pretty = pretty
+   390	
+   391	    def tokenize(self, value: JsonValue) -> Token:
+   392	        if self.pretty:
+   393	            json_str = json.dumps(value, indent=2)
+   394	        else:
+   395	            json_str = json.dumps(value)
+   396	
+   397	        return Token(json_str, TokenType.STRUCTURED, {"json": True})
+   398	
+   399	    def tokenize_path(self, value: JsonValue, path: str) -> Token | None:
+   400	        """Extract and tokenize a value at a JSON path."""
+   401	        parts = path.split(".")
+   402	        current: Any = value
+   403	
+   404	        for part in parts:
+   405	            if isinstance(current, dict) and part in current:
+   406	                current = current[part]
+   407	            elif isinstance(current, list) and part.isdigit():
+   408	                idx = int(part)
+   409	                if 0 <= idx < len(current):
+   410	                    current = current[idx]
+   411	                else:
+   412	                    return None
+   413	            else:
+   414	                return None
+   415	
+   416	        return self.tokenize(current)
+   417	
+   418	
+   419	# ============================================================================
+   420	# Whitespace Tokenizer - Basic Text Tokenization
+   421	# ============================================================================
+   422	
+   423	
+   424	class WhitespaceTokenizer:
+   425	    """
+   426	    Basic tokenizer that splits text by whitespace.
+   427	
+   428	    This is a fundamental tokenization operation used in NLP and text processing.
+   429	    Demonstrates a simple, practical use case for the tokenizer module.
+   430	    """
+   431	
+   432	    def __init__(self, lowercase: bool = False, min_length: int = 0, max_length: int | None = None, strip_punctuation: bool = False) -> None:
+   433	        """
+   434	        Initialize whitespace tokenizer with options.
+   435	
+   436	        Args:
+   437	            lowercase: Convert all tokens to lowercase
+   438	            min_length: Minimum token length (shorter tokens are filtered out)
+   439	            max_length: Maximum token length (longer tokens are truncated)
+   440	            strip_punctuation: Remove leading/trailing punctuation from tokens
+   441	        """
+   442	        self.lowercase = lowercase
+   443	        self.min_length = min_length
+   444	        self.max_length = max_length
+   445	        self.strip_punctuation = strip_punctuation
+   446	        self._punctuation = set(".,!?;:'\"()[]{}")
+   447	
+   448	    def _process_token(self, word: str) -> str | None:
+   449	        """Process a single word into a token string."""
+   450	        if self.strip_punctuation:
+   451	            word = word.strip("".join(self._punctuation))
+   452	
+   453	        if self.lowercase:
+   454	            word = word.lower()
+   455	
+   456	        if len(word) < self.min_length:
+   457	            return None
+   458	
+   459	        if self.max_length is not None and len(word) > self.max_length:
+   460	            word = word[: self.max_length]
+   461	
+   462	        return word if word else None
+   463	
+   464	    def tokenize(self, text: str) -> list[Token]:
+   465	        """
+   466	        Split text by whitespace and return list of tokens.
+   467	
+   468	        Args:
+   469	            text: Input text to tokenize
+   470	
+   471	        Returns:
+   472	            List of Token objects, one per word
+   473	        """
+   474	        words = text.split()
+   475	        tokens: list[Token] = []
+   476	
+   477	        for i, word in enumerate(words):
+   478	            processed = self._process_token(word)
+   479	            if processed is not None:
+   480	                token = ***REDACTED***, token_type=TokenType.STRING, metadata={"position": i, "original": word})
+   481	                tokens.append(token)
+   482	
+   483	        return tokens
+   484	
+   485	    def tokenize_to_strings(self, text: str) -> list[str]:
+   486	        """
+   487	        Split text by whitespace and return list of token strings.
+   488	
+   489	        Convenience method that returns just the string values.
+   490	
+   491	        Args:
+   492	            text: Input text to tokenize
+   493	
+   494	        Returns:
+   495	            List of token strings
+   496	        """
+   497	        return [t.value for t in self.tokenize(text)]
+   498	
+   499	    def tokenize_with_positions(self, text: str) -> list[tuple[str, int, int]]:
+   500	        """
+   501	        Tokenize text and return tokens with character positions.
+   502	
+   503	        Args:
+   504	            text: Input text to tokenize
+   505	
+   506	        Returns:
+   507	            List of tuples (token_string, start_pos, end_pos)
+   508	        """
+   509	        result: list[tuple[str, int, int]] = []
+   510	        current_pos = 0
+   511	
+   512	        for word in text.split():
+   513	            # Find the actual position in the original text
+   514	            start = text.find(word, current_pos)
+   515	            end = start + len(word)
+   516	
+   517	            processed = self._process_token(word)
+   518	            if processed is not None:
+   519	                result.append((processed, start, end))
+   520	
+   521	            current_pos = end
+   522	
+   523	        return result
+   524	
+   525	    def count_tokens(self, text: str) -> int:
+   526	        """Return the number of tokens in the text."""
+   527	        return len(self.tokenize(text))
+   528	
+   529	
+   530	# ============================================================================
+   531	# Builder Pattern with Fluent Interface
+   532	# ============================================================================
+   533	
+   534	
+   535	class TokenizerBuilder(Generic[T]):
+   536	    """
+   537	    Fluent builder for creating tokenizers.
+   538	
+   539	    The method chaining with generic return types requires
+   540	    careful handling of type bounds in Scala.
+   541	    """
+   542	
+   543	    def __init__(self) -> None:
+   544	        self._normalizers: list[Callable[[str], str]] = []
+   545	        self._validators: list[Callable[[T], bool]] = []
+   546	        self._metadata: dict[str, Any] = {}
+   547	
+   548	    def with_normalizer(self, normalizer: Callable[[str], str]) -> "TokenizerBuilder[T]":
+   549	        self._normalizers.append(normalizer)
+   550	        return self
+   551	
+   552	    def with_validator(self, validator: Callable[[T], bool]) -> "TokenizerBuilder[T]":
+   553	        self._validators.append(validator)
+   554	        return self
+   555	
+   556	    def with_metadata(self, **kwargs: Any) -> "TokenizerBuilder[T]":
+   557	        self._metadata.update(kwargs)
+   558	        return self
+   559	
+   560	    def build(self) -> Callable[[T], Token]:
+   561	        """Build the final tokenizer function."""
+   562	        normalizers = self._normalizers.copy()
+   563	        validators = self._validators.copy()
+   564	        metadata = self._metadata.copy()
+   565	
+   566	        def tokenize(value: T) -> Token:
+   567	            # Validate
+   568	            for validator in validators:
+   569	                if not validator(value):
+   570	                    raise ValueError(f"Validation failed for {value}")
+   571	
+   572	            # Convert to string
+   573	            str_value = str(value)
+   574	
+   575	            # Normalize
+   576	            for normalizer in normalizers:
+   577	                str_value = normalizer(str_value)
+   578	
+   579	            return Token(str_value, TokenType.STRING, metadata)
+   580	
+   581	        return tokenize

@@ -1,0 +1,48 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+fn=[f for f in sorted(glob.glob('/root/data/*.npz')) if 'NC.MDH..HN.0358192' in f][0]
+z=np.load(fn, allow_pickle=True)
+data=z['data']; dt=float(z['dt']); sr=1/dt
+chs=str(z['channels']).split(',')
+stime=UTCDateTime(str(z.get('start_time','1970-01-01T00:00:00Z')))
+st=Stream()
+for i,ch in enumerate(chs):
+    tr=Trace(data=data[:,i].astype('float32'))
+    tr.stats.network=str(z.get('network','XX'))
+    tr.stats.station=str(z.get('station','STA'))
+    tr.stats.location=str(z.get('location_code',''))
+    tr.stats.channel=ch
+    tr.stats.starttime=stime
+    tr.stats.sampling_rate=sr
+    st+=tr
+model=sbm.PhaseNet.from_pretrained('original')
+ann=model.annotate(st)
+P=ann.select(channel='*PhaseNet_P')[0]
+S=ann.select(channel='*PhaseNet_S')[0]
+p_idx=int(P.data.argmax())
+s_idx=int(S.data.argmax())
+print('annotate argmax P idx',p_idx,'val',float(P.data[p_idx]))
+print('annotate argmax S idx',s_idx,'val',float(S.data[s_idx]))
+out=model.classify(st, P_threshold=0.05, S_threshold=0.05)
+for p in out.picks:
+    if p.phase=='P':
+        print('classify P idx',int(round((p.peak_time-stime)*sr)),'val',float(p.peak_value))
+    if p.phase=='S':
+        print('classify S idx',int(round((p.peak_time-stime)*sr)),'val',float(p.peak_value))
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+annotate argmax P idx 5752 val 0.9712428450584412
+annotate argmax S idx 5969 val 0.8060704469680786
+classify P idx 6002 val 0.9712428450584412
+classify S idx 6219 val 0.8060704469680786
+classify P idx 10033 val 0.16141749918460846
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

@@ -1,0 +1,71 @@
+Tool: terminal
+Result:
+cd /root && python3 <<'EOF'
+import numpy as np
+from openpyxl import load_workbook
+# Read LnZ values (K column, rows 6-27)
+wb = load_workbook("test-supply.xlsx", data_only=True)
+p = wb["Production"]
+lnz = np.array([p.cell(r, 11).value for r in range(6, 28)])
+print("LnZ:", lnz)
+n = len(lnz)
+lam = 100.0
+# Build K: (n-2) x n second-difference matrix
+K = np.zeros((n-2, n))
+for i in range(n-2):
+    K[i, i]   =  1.0
+    K[i, i+1] = -2.0
+    K[i, i+2] =  1.0
+I = np.eye(n)
+tau = np.linalg.solve(I + lam * K.T @ K, lnz)
+print("\nHP trend LnZ_HP:")
+for i, v in enumerate(tau):
+    print(f"  row {6+i}: LnZ={lnz[i]:.5f}  LnZ_HP={v:.5f}  resid={lnz[i]-v:.5f}")
+# Compute objective for verification
+resid = lnz - tau
+sec = np.diff(tau, 2)
+obj = np.sum(resid**2) + lam * np.sum(sec**2)
+print(f"\nObjective (verification): {obj:.6f}")
+# Now write these values into L6:L27
+wb2 = load_workbook("test-supply.xlsx")
+p2 = wb2["Production"]
+for i, v in enumerate(tau):
+    p2.cell(row=6+i, column=12).value = float(v)  # overwrite the =K{r} formula with the solved value
+wb2.save("test-supply.xlsx")
+print("Saved HP-filtered values into L6:L27")
+EOF
+LnZ: [-1.33636571 -1.23411322 -1.18293635 -1.0977904  -1.0132279  -0.90164308
+ -0.88098733 -0.91604597 -0.85094148 -0.77861181 -0.72004711 -0.67292082
+ -0.6397789  -0.61629098 -0.59264162 -0.55219667 -0.502777   -0.46293502
+ -0.5382279  -0.44740069 -0.35373689 -0.28864757]
+
+HP trend LnZ_HP:
+  row 6: LnZ=-1.33637  LnZ_HP=-1.28695  resid=-0.04941
+  row 7: LnZ=-1.23411  LnZ_HP=-1.22311  resid=-0.01101
+  row 8: LnZ=-1.18294  LnZ_HP=-1.15976  resid=-0.02318
+  row 9: LnZ=-1.09779  LnZ_HP=-1.09751  resid=-0.00029
+  row 10: LnZ=-1.01323  LnZ_HP=-1.03719  resid=0.02396
+  row 11: LnZ=-0.90164  LnZ_HP=-0.97964  resid=0.07800
+  row 12: LnZ=-0.88099  LnZ_HP=-0.92547  resid=0.04448
+  row 13: LnZ=-0.91605  LnZ_HP=-0.87449  resid=-0.04155
+  row 14: LnZ=-0.85094  LnZ_HP=-0.82608  resid=-0.02486
+  row 15: LnZ=-0.77861  LnZ_HP=-0.78002  resid=0.00141
+  row 16: LnZ=-0.72005  LnZ_HP=-0.73636  resid=0.01631
+  row 17: LnZ=-0.67292  LnZ_HP=-0.69511  resid=0.02219
+  row 18: LnZ=-0.63978  LnZ_HP=-0.65615  resid=0.01637
+  row 19: LnZ=-0.61629  LnZ_HP=-0.61910  resid=0.00281
+  row 20: LnZ=-0.59264  LnZ_HP=-0.58346  resid=-0.00919
+  row 21: LnZ=-0.55220  LnZ_HP=-0.54865  resid=-0.00355
+  row 22: LnZ=-0.50278  LnZ_HP=-0.51423  resid=0.01145
+  row 23: LnZ=-0.46294  LnZ_HP=-0.47976  resid=0.01683
+  row 24: LnZ=-0.53823  LnZ_HP=-0.44472  resid=-0.09351
+  row 25: LnZ=-0.44740  LnZ_HP=-0.40838  resid=-0.03902
+  row 26: LnZ=-0.35374  LnZ_HP=-0.37098  resid=0.01725
+  row 27: LnZ=-0.28865  LnZ_HP=-0.33314  resid=0.04449
+
+Objective (verification): 0.035492
+Saved HP-filtered values into L6:L27
+
+
+📁 Working directory: /root
+✅ Exit code: 0

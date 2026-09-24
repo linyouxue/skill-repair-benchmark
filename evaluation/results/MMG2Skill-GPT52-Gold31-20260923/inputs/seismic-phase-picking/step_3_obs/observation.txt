@@ -1,0 +1,48 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob, os
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+fn=sorted(glob.glob('/root/data/*.npz'))[0]
+z=np.load(fn, allow_pickle=True)
+data=z['data']
+dt=float(z['dt'])
+channels=str(z['channels']).split(',')
+start=str(z.get('start_time','1970-01-01T00:00:00.0Z'))
+try:
+    stime=UTCDateTime(start)
+except Exception:
+    stime=UTCDateTime(0)
+sr=1.0/dt
+st=Stream()
+for i,ch in enumerate(channels):
+    tr=Trace(data=data[:,i].astype('float32'))
+    tr.stats.network=str(z.get('network','XX'))
+    tr.stats.station=str(z.get('station','STA'))
+    tr.stats.location=str(z.get('location_code',''))
+    tr.stats.channel=ch
+    tr.stats.starttime=stime
+    tr.stats.sampling_rate=sr
+    st+=tr
+model=sbm.PhaseNet.from_pretrained('original')
+# Try classify
+picks=model.classify(st)
+print('num picks',len(picks))
+print('first 5',picks[:5])
+if picks:
+    p=picks[0]
+    print('pick attrs', [a for a in dir(p) if not a.startswith('_')][:30])
+    print('phase',p.phase,'time',p.time,'peak_time',getattr(p,'peak_time',None),'prob',getattr(p,'probability',None))
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+
+Traceback (most recent call last):
+  File "<stdin>", line 31, in <module>
+TypeError: object of type 'ClassifyOutput' has no len()
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+❌ Exit code: 1

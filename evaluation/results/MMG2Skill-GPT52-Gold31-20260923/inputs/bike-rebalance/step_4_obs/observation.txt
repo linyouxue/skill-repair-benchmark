@@ -1,0 +1,262 @@
+Tool: terminal
+Result:
+python - <<'PY'
+import json, math
+from pathlib import Path
+from pyscipopt import Model, quicksum
+DATA_PATH = Path('/root/data.json')
+REPORT_PATH = Path('/root/report.json')
+data = json.loads(DATA_PATH.read_text())
+vehicle_count = int(data['vehicle_count'])
+vehicle_capacity = int(data['vehicle_capacity'])
+penalty_weight = float(data['penalty_weight'])
+depot = {'latitude': float(data['depot']['latitude']), 'longitude': float(data['depot']['longitude'])}
+stations_data = data['stations']
+station_ids = [int(s['id']) for s in stations_data]
+if len(station_ids) != len(set(station_ids)):
+    raise ValueError('duplicate station ids')
+id_to_idx = {sid: i for i, sid in enumerate(station_ids)}
+idx_to_id = {i: sid for sid, i in id_to_idx.items()}
+n = len(station_ids)
+S = list(range(n))
+V = list(range(vehicle_count))
+lat = {i: float(stations_data[i]['latitude']) for i in S}
+lon = {i: float(stations_data[i]['longitude']) for i in S}
+target = {i: int(stations_data[i]['net_rebalancing_target']) for i in S}
+initial = {i: int(stations_data[i]['initial_bikes']) for i in S}
+cap_station = {i: int(stations_data[i]['station_capacity']) for i in S}
+START = 'depot_start'
+END = 'depot_end'
+def great_circle_miles(a_lat, a_lon, b_lat, b_lon, radius=3960.0):
+    deg_to_rad = math.pi / 180.0
+    phi1 = (90.0 - a_lat) * deg_to_rad
+    phi2 = (90.0 - b_lat) * deg_to_rad
+    theta1 = a_lon * deg_to_rad
+    theta2 = b_lon * deg_to_rad
+    cos_arc = (
+        math.sin(phi1) * math.sin(phi2) * math.cos(theta1 - theta2)
+        + math.cos(phi1) * math.cos(phi2)
+    )
+    cos_arc = max(-1.0, min(1.0, cos_arc))
+    return math.acos(cos_arc) * radius
+# Node locations for distance computation
+def node_loc(node):
+    if node in (START, END):
+        return depot['latitude'], depot['longitude']
+    return lat[int(node)], lon[int(node)]
+from_nodes = [START] + S
+to_nodes = S + [END]
+arcs = []
+for i in from_nodes:
+    for j in to_nodes:
+        if i == j:
+            continue
+        if i == START and j == END:
+            continue
+        arcs.append((i, j))
+# distances on arcs
+dist = {}
+for i, j in arcs:
+    a_lat, a_lon = node_loc(i)
+    b_lat, b_lon = node_loc(j)
+    dist[i, j] = great_circle_miles(a_lat, a_lon, b_lat, b_lon)
+model = Model('bike_rebalancing')
+model.hideOutput(True)
+# Determinism
+for name, value in [
+    ('randomization/randomseedshift', 0),
+    ('randomization/permutationseed', 0),
+    ('randomization/lpseed', 0),
+]:
+    try:
+        model.setParam(name, value)
+    except Exception:
+        pass
+for name in ['randomization/permutevars', 'randomization/permuteconss']:
+    try:
+        model.setParam(name, False)
+    except Exception:
+        pass
+try:
+    model.setParam('parallel/maxnthreads', 1)
+except Exception:
+    pass
+x = {(v, i, j): model.addVar(vtype='B', name=f'x_{v}_{i}_{j}') for v in V for (i, j) in arcs}
+visit = {(v, i): model.addVar(vtype='B', name=f'visit_{v}_{i}') for v in V for i in S}
+pick = {(v, i): model.addVar(vtype='B', name=f'pick_{v}_{i}') for v in V for i in S}
+pu = {(v, i): model.addVar(vtype='I', lb=0, ub=vehicle_capacity, name=f'pu_{v}_{i}') for v in V for i in S}
+do = {(v, i): model.addVar(vtype='I', lb=0, ub=vehicle_capacity, name=f'do_{v}_{i}') for v in V for i in S}
+service = {(v, i): model.addVar(vtype='I', lb=-vehicle_capacity, ub=vehicle_capacity, name=f'svc_{v}_{i}') for v in V for i in S}
+load_start = {v: model.addVar(vtype='I', lb=0, ub=vehicle_capacity, name=f'load_start_{v}') for v in V}
+load_end = {v: model.addVar(vtype='I', lb=0, ub=vehicle_capacity, name=f'load_end_{v}') for v in V}
+load = {(v, i): model.addVar(vtype='I', lb=0, ub=vehicle_capacity, name=f'load_{v}_{i}') for v in V for i in S}
+# Route constraints
+for v in V:
+    model.addCons(quicksum(x[v, START, j] for j in S) == 1, name=f'start_{v}')
+    model.addCons(quicksum(x[v, i, END] for i in S) == 1, name=f'end_{v}')
+    for i in S:
+        incoming = quicksum(x[v, j, i] for j in from_nodes if j != i and (j, i) in dist)
+        outgoing = quicksum(x[v, i, j] for j in to_nodes if j != i and (i, j) in dist)
+        model.addCons(incoming == outgoing, name=f'flow_{v}_{i}')
+        model.addCons(outgoing <= 1, name=f'atmostonce_{v}_{i}')
+        model.addCons(visit[v, i] == outgoing, name=f'visitlink_{v}_{i}')
+# Subtour elimination (MTZ)
+order = {(v, i): model.addVar(vtype='C', lb=0.0, ub=float(n), name=f'ord_{v}_{i}') for v in V for i in S}
+for v in V:
+    for i in S:
+        model.addCons(order[v, i] <= n * visit[v, i], name=f'ordlink_{v}_{i}')
+    for i in S:
+        for j in S:
+            if i == j:
+                continue
+            if (i, j) in dist:
+                model.addCons(order[v, i] - order[v, j] + n * x[v, i, j] <= n - 1, name=f'mtz_{v}_{i}_{j}')
+# Operation constraints
+for v in V:
+    for i in S:
+        model.addCons(service[v, i] == pu[v, i] - do[v, i], name=f'svcdef_{v}_{i}')
+        model.addCons(pu[v, i] <= vehicle_capacity * visit[v, i], name=f'pulink_{v}_{i}')
+        model.addCons(do[v, i] <= vehicle_capacity * visit[v, i], name=f'dolink_{v}_{i}')
+        model.addCons(pu[v, i] <= vehicle_capacity * pick[v, i], name=f'pusign_{v}_{i}')
+        model.addCons(do[v, i] <= vehicle_capacity * (1 - pick[v, i]), name=f'dosign_{v}_{i}')
+# Load propagation along arcs
+M = 2 * vehicle_capacity
+for v in V:
+    # START -> station
+    for j in S:
+        model.addCons(load[v, j] - load_start[v] - service[v, j] <= M * (1 - x[v, START, j]), name=f'loadS_up_{v}_{j}')
+        model.addCons(load[v, j] - load_start[v] - service[v, j] >= -M * (1 - x[v, START, j]), name=f'loadS_lo_{v}_{j}')
+    # station -> station
+    for i in S:
+        for j in S:
+            if i == j:
+                continue
+            if (i, j) not in dist:
+                continue
+            model.addCons(load[v, j] - load[v, i] - service[v, j] <= M * (1 - x[v, i, j]), name=f'load_up_{v}_{i}_{j}')
+            model.addCons(load[v, j] - load[v, i] - service[v, j] >= -M * (1 - x[v, i, j]), name=f'load_lo_{v}_{i}_{j}')
+    # station -> END
+    for i in S:
+        model.addCons(load_end[v] - load[v, i] <= M * (1 - x[v, i, END]), name=f'loadE_up_{v}_{i}')
+        model.addCons(load_end[v] - load[v, i] >= -M * (1 - x[v, i, END]), name=f'loadE_lo_{v}_{i}')
+# Station inventory and unmet penalty
+net_change = {i: quicksum(service[v, i] for v in V) for i in S}
+dev = {i: model.addVar(vtype='I', lb=0, name=f'dev_{i}') for i in S}
+for i in S:
+    # final inventory bounds: 0 <= initial - net_change <= cap
+    model.addCons(net_change[i] <= initial[i], name=f'inv_lb_{i}')
+    model.addCons(net_change[i] >= initial[i] - cap_station[i], name=f'inv_ub_{i}')
+    model.addCons(target[i] - net_change[i] <= dev[i], name=f'dev1_{i}')
+    model.addCons(net_change[i] - target[i] <= dev[i], name=f'dev2_{i}')
+travel_cost = quicksum(dist[i, j] * x[v, i, j] for v in V for (i, j) in arcs)
+penalty_cost = penalty_weight * quicksum(dev[i] for i in S)
+model.setObjective(travel_cost + penalty_cost, 'minimize')
+model.setParam('limits/time', 60.0)
+model.setParam('limits/gap', 0.0)
+model.optimize()
+if model.getNSols() == 0:
+    raise RuntimeError(f'No solution found, status={model.getStatus()}')
+# Extract solution
+def is_one(var):
+    return model.getVal(var) > 0.5
+vehicle_reports = []
+# Precompute distances for extraction
+def route_distance(route_nodes):
+    total = 0.0
+    for a, b in zip(route_nodes, route_nodes[1:]):
+        total += dist[a, b]
+    return total
+for v in V:
+    succ = {}
+    for (i, j) in arcs:
+        if is_one(x[v, i, j]):
+            succ[i] = j
+    # follow route from START
+    route = [START]
+    cur = START
+    seen = {START}
+    while cur != END:
+        if cur not in succ:
+            raise RuntimeError(f'vehicle {v} route disconnected at {cur!r}')
+        cur = succ[cur]
+        if cur in seen and cur != END:
+            raise RuntimeError(f'vehicle {v} cycle detected at {cur!r}')
+        route.append(cur)
+        seen.add(cur)
+    stops = []
+    for node in route[1:-1]:
+        i = int(node)
+        sid = idx_to_id[i]
+        pu_val = int(round(model.getVal(pu[v, i])))
+        do_val = int(round(model.getVal(do[v, i])))
+        load_val = int(round(model.getVal(load[v, i])))
+        # sanity: no both positive
+        if pu_val > 0 and do_val > 0:
+            raise RuntimeError('pickup and dropoff both positive at a stop')
+        stops.append({
+            'station_id': sid,
+            'bikes_picked_up': float(pu_val),
+            'bikes_dropped_off': float(do_val),
+            'load_after_stop': float(load_val),
+        })
+    vehicle_reports.append({
+        'vehicle_id': v + 1,
+        'start_load': float(int(round(model.getVal(load_start[v])))),
+        'route': [route[0]] + [idx_to_id[int(n)] for n in route[1:-1]] + [route[-1]],
+        'stops': stops,
+        'end_load': float(int(round(model.getVal(load_end[v])))),
+    })
+# Station totals
+station_reports = []
+total_unmet = 0.0
+for i in S:
+    sid = idx_to_id[i]
+    total_pu = 0
+    total_do = 0
+    for v in V:
+        total_pu += int(round(model.getVal(pu[v, i])))
+        total_do += int(round(model.getVal(do[v, i])))
+    net = total_pu - total_do
+    unmet = abs(float(target[i] - net))
+    total_unmet += unmet
+    station_reports.append({
+        'station_id': sid,
+        'net_rebalancing_target': float(target[i]),
+        'total_bikes_picked_up': float(total_pu),
+        'total_bikes_dropped_off': float(total_do),
+        'net_bike_change': float(net),
+        'unmet_rebalancing_amount': float(unmet),
+    })
+# Travel distance (from extracted routes)
+travel_distance = 0.0
+for vr in vehicle_reports:
+    internal_route = [START] + [id_to_idx[int(sid)] for sid in vr['route'][1:-1]] + [END]
+    travel_distance += route_distance(internal_route)
+unmet_penalty = penalty_weight * total_unmet
+objective = travel_distance + unmet_penalty
+report = {
+    'summary': {
+        'objective': float(objective),
+        'travel_distance_miles': float(travel_distance),
+        'unmet_rebalancing_penalty': float(unmet_penalty),
+        'total_unmet_rebalancing_amount': float(total_unmet),
+    },
+    'vehicles': vehicle_reports,
+    'stations': station_reports,
+}
+REPORT_PATH.write_text(json.dumps(report, indent=2, sort_keys=False) + '\n')
+# Basic verification
+print('WROTE', str(REPORT_PATH))
+print('objective', objective)
+print('travel', travel_distance)
+print('unmet', total_unmet, 'penalty', unmet_penalty)
+PY
+WROTE /root/report.json
+objective 8.771931727631486
+travel 6.271931727631486
+unmet 5.0 penalty 2.5
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

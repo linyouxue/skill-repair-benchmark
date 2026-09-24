@@ -1,0 +1,103 @@
+Tool: terminal
+Result:
+python - <<'PY'
+import json, math
+from pathlib import Path
+data = json.loads(Path('/root/data.json').read_text())
+rep = json.loads(Path('/root/report.json').read_text())
+vehicle_capacity = data['vehicle_capacity']
+penalty_weight = float(data['penalty_weight'])
+START='depot_start'; END='depot_end'
+def great_circle_miles(a, b, radius=3960.0):
+    lat1, lon1 = a
+    lat2, lon2 = b
+    deg_to_rad = math.pi / 180.0
+    phi1 = (90.0 - lat1) * deg_to_rad
+    phi2 = (90.0 - lat2) * deg_to_rad
+    theta1 = lon1 * deg_to_rad
+    theta2 = lon2 * deg_to_rad
+    cos_arc = (
+        math.sin(phi1) * math.sin(phi2) * math.cos(theta1 - theta2)
+        + math.cos(phi1) * math.cos(phi2)
+    )
+    cos_arc = max(-1.0, min(1.0, cos_arc))
+    return math.acos(cos_arc) * radius
+stations = {int(s['id']): s for s in data['stations']}
+depot = (float(data['depot']['latitude']), float(data['depot']['longitude']))
+def loc(node):
+    if node in (START, END):
+        return depot
+    s = stations[int(node)]
+    return (float(s['latitude']), float(s['longitude']))
+# vehicle checks and accumulate station totals
+pu_tot = {sid: 0.0 for sid in stations}
+do_tot = {sid: 0.0 for sid in stations}
+travel = 0.0
+for veh in rep['vehicles']:
+    assert veh['route'][0] == START
+    assert veh['route'][-1] == END
+    route_stations = [x for x in veh['route'][1:-1]]
+    assert len(route_stations) >= 1
+    assert len(route_stations) == len(set(route_stations)), 'vehicle visits a station twice'
+    for sid in route_stations:
+        assert int(sid) in stations
+    # stops correspond to route stations
+    stop_ids = [st['station_id'] for st in veh['stops']]
+    assert stop_ids == route_stations, 'stops must match route order'
+    load = float(veh['start_load'])
+    assert 0 <= load <= vehicle_capacity
+    prev_node = START
+    for st in veh['stops']:
+        sid = int(st['station_id'])
+        pu = float(st['bikes_picked_up'])
+        do = float(st['bikes_dropped_off'])
+        assert pu >= 0 and do >= 0
+        assert not (pu > 0 and do > 0)
+        load = load + pu - do
+        assert abs(load - float(st['load_after_stop'])) < 1e-6
+        assert 0 <= load <= vehicle_capacity
+        pu_tot[sid] += pu
+        do_tot[sid] += do
+        # distance
+        travel += great_circle_miles(loc(prev_node), loc(sid))
+        prev_node = sid
+    # last leg to depot
+    travel += great_circle_miles(loc(prev_node), loc(END))
+    assert abs(load - float(veh['end_load'])) < 1e-6
+# station checks
+unmet_sum = 0.0
+for st in rep['stations']:
+    sid = int(st['station_id'])
+    assert sid in stations
+    tgt = float(st['net_rebalancing_target'])
+    assert tgt == float(stations[sid]['net_rebalancing_target'])
+    assert abs(float(st['total_bikes_picked_up']) - pu_tot[sid]) < 1e-6
+    assert abs(float(st['total_bikes_dropped_off']) - do_tot[sid]) < 1e-6
+    net = pu_tot[sid] - do_tot[sid]
+    assert abs(float(st['net_bike_change']) - net) < 1e-6
+    unmet = abs(tgt - net)
+    assert abs(float(st['unmet_rebalancing_amount']) - unmet) < 1e-6
+    unmet_sum += unmet
+    final_inv = float(stations[sid]['initial_bikes']) - pu_tot[sid] + do_tot[sid]
+    assert 0 - 1e-6 <= final_inv <= float(stations[sid]['station_capacity']) + 1e-6
+penalty = penalty_weight * unmet_sum
+objective = travel + penalty
+sumrep = rep['summary']
+assert abs(float(sumrep['travel_distance_miles']) - travel) < 1e-6
+assert abs(float(sumrep['total_unmet_rebalancing_amount']) - unmet_sum) < 1e-6
+assert abs(float(sumrep['unmet_rebalancing_penalty']) - penalty) < 1e-6
+assert abs(float(sumrep['objective']) - objective) < 1e-6
+print('VALID')
+print('travel', travel)
+print('unmet', unmet_sum)
+print('objective', objective)
+PY
+VALID
+travel 6.271931727631486
+unmet 5.0
+objective 8.771931727631486
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

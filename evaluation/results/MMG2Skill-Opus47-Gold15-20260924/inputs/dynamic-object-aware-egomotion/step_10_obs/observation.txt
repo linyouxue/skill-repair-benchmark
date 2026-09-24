@@ -1,0 +1,142 @@
+Tool: file_editor
+Result:
+[File /root/solve.py edited with 2 changes.]
+[begin of edit 1 / 2]
+(content before edit)
+ 113|
+ 114|# ---------- Dynamic object masks ----------
+-115|# Re-estimate homography for each pair for better global alignment (handles parallax better than affine).
+ 116|k3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+-117|k7 = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+-118|k11 = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
+-119|MIN_AREA = max(800, int(0.002 * H * W))  # ~1840 px for 720p
+ 120|
+ 121|npz_dict = {"shape": np.array([H, W], dtype=np.int32)}
+ 122|
+ 123|for k in range(n):
+(content after edit)
+ 113|
+ 114|# ---------- Dynamic object masks ----------
++115|# Approach: dense optical flow (Farneback) + global 2D affine flow model fit via IRLS/RANSAC,
++116|# threshold on residual flow magnitude. This is more robust to parallax than image differencing
++117|# because parallax residual flow scales with depth but a dynamic object has flow inconsistent
++118|# in direction with the global camera-induced flow field.
+ 119|k3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
++120|k5 = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
++121|k9 = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
++122|k15 = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
++123|MIN_AREA = max(1500, int(0.003 * H * W))
+ 124|
+ 125|npz_dict = {"shape": np.array([H, W], dtype=np.int32)}
++126|
++127|
++128|def fit_affine_flow(x, y, u, v, iters=3):
++129|    """Fit u = a1*x + a2*y + a3;  v = a4*x + a5*y + a6 via IRLS to be robust to outliers."""
++130|    A = np.stack([x, y, np.ones_like(x)], axis=1).astype(np.float64)
++131|    w = np.ones_like(x, dtype=np.float64)
++132|    pu = pv = None
++133|    for _ in range(iters):
++134|        Aw = A * w[:, None]
++135|        pu, *_ = np.linalg.lstsq(Aw, u * w, rcond=None)
++136|        pv, *_ = np.linalg.lstsq(Aw, v * w, rcond=None)
++137|        ru = u - A @ pu
++138|        rv = v - A @ pv
++139|        r = np.sqrt(ru * ru + rv * rv)
++140|        sigma = 1.4826 * np.median(np.abs(r - np.median(r))) + 1e-6
++141|        # Tukey biweight
++142|        z = r / (4.685 * sigma + 1e-6)
++143|        w = np.where(z < 1, (1 - z * z) ** 2, 0.0)
++144|    return pu, pv
++145|
+ 146|
+ 147|for k in range(n):
+[end of edit 1 / 2]
+-------------------------
+[begin of edit 2 / 2]
+(content before edit)
+ 128|        curr = frames_gray[k]
+ 129|
+-130|        # Estimate homography with dense features for better alignment
+-131|        p0 = cv2.goodFeaturesToTrack(prev, maxCorners=3000, qualityLevel=0.005,
+-132|                                     minDistance=6, blockSize=7)
+-133|        Hmat = None
+-134|        if p0 is not None and len(p0) >= 10:
+-135|            p1, st, _ = cv2.calcOpticalFlowPyrLK(prev, curr, p0, None, **lk_params)
+-136|            if p1 is not None:
+-137|                st = st.reshape(-1)
+-138|                g0 = p0[st == 1]
+-139|                g1 = p1[st == 1]
+-140|                if len(g0) >= 10:
+-141|                    Hmat, _ = cv2.findHomography(g0, g1, cv2.RANSAC, 3.0)
+-142|
+-143|        if Hmat is not None:
+-144|            warped_prev = cv2.warpPerspective(prev, Hmat, (W, H),
+-145|                                              flags=cv2.INTER_LINEAR, borderValue=0)
+-146|            valid = cv2.warpPerspective(np.ones((H, W), np.uint8), Hmat, (W, H),
+-147|                                        flags=cv2.INTER_NEAREST) > 0
+-148|        else:
+-149|            M = transforms[k]
+-150|            warped_prev = cv2.warpAffine(prev, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=0)
+-151|            valid = cv2.warpAffine(np.ones((H, W), np.uint8), M, (W, H),
+-152|                                   flags=cv2.INTER_NEAREST) > 0
+-153|
+-154|        # Blur to reduce residual misalignment noise
+-155|        warped_blur = cv2.GaussianBlur(warped_prev, (5, 5), 0)
+-156|        curr_blur = cv2.GaussianBlur(curr, (5, 5), 0)
+-157|        diff = cv2.absdiff(curr_blur, warped_blur)
+-158|
+-159|        vals = diff[valid]
+-160|        if vals.size > 0:
+-161|            med = float(np.median(vals))
+-162|            mad = float(np.median(np.abs(vals - med)))
+-163|            thr = max(25.0, med + 4.5 * 1.4826 * mad)
+-164|        else:
+-165|            thr = 25.0
+-166|        raw = (diff > thr) & valid
+-167|        # Erode valid region a few px to discard warping border artifacts
+-168|        valid_er = cv2.erode(valid.astype(np.uint8), k7, iterations=1) > 0
+-169|        raw = raw & valid_er
+-170|
+-171|        m = cv2.morphologyEx(raw.astype(np.uint8) * 255, cv2.MORPH_OPEN, k3)
+-172|        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k11)
+ 173|        ncc, cc, stats, _ = cv2.connectedComponentsWithStats(
+ 174|            (m > 0).astype(np.uint8), connectivity=8)
+(content after edit)
+ 152|        curr = frames_gray[k]
+ 153|
++154|        flow = cv2.calcOpticalFlowFarneback(
++155|            prev, curr, None,
++156|            pyr_scale=0.5, levels=4, winsize=25,
++157|            iterations=3, poly_n=7, poly_sigma=1.5, flags=0)
++158|        u = flow[..., 0]
++159|        v = flow[..., 1]
++160|
++161|        # Fit robust affine flow model on a downsampled grid
++162|        ys, xs = np.mgrid[0:H:8, 0:W:8]
++163|        xs_f = xs.ravel().astype(np.float64)
++164|        ys_f = ys.ravel().astype(np.float64)
++165|        us_f = u[ys, xs].ravel().astype(np.float64)
++166|        vs_f = v[ys, xs].ravel().astype(np.float64)
++167|        pu, pv = fit_affine_flow(xs_f, ys_f, us_f, vs_f, iters=4)
++168|
++169|        # Predict global flow at every pixel
++170|        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
++171|        pred_u = (pu[0] * xx + pu[1] * yy + pu[2]).astype(np.float32)
++172|        pred_v = (pv[0] * xx + pv[1] * yy + pv[2]).astype(np.float32)
++173|        res_u = u - pred_u
++174|        res_v = v - pred_v
++175|        res_mag = np.sqrt(res_u * res_u + res_v * res_v)
++176|
++177|        # Robust threshold
++178|        vals = res_mag.ravel()
++179|        med = float(np.median(vals))
++180|        mad = float(np.median(np.abs(vals - med)))
++181|        # Higher K to be conservative in high-parallax scenes
++182|        thr = max(3.0, med + 5.0 * 1.4826 * mad)
++183|        raw = res_mag > thr
++184|
++185|        m = cv2.morphologyEx(raw.astype(np.uint8) * 255, cv2.MORPH_OPEN, k5)
++186|        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k15)
+ 187|        ncc, cc, stats, _ = cv2.connectedComponentsWithStats(
+ 188|            (m > 0).astype(np.uint8), connectivity=8)
+[end of edit 2 / 2]

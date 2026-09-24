@@ -1,0 +1,91 @@
+Tool: file_editor
+Result:
+NOTE: We only show up to 87 since there're only 87 lines in this file.
+Here's the result of running `cat -n` on /root/simulate.py:
+     1	import numpy as np
+     2	
+     3	from position_controller import position_controller, make_position_integral
+     4	from attitude_planner import attitude_planner
+     5	from attitude_controller import attitude_controller, make_attitude_integral
+     6	from motor_model import motor_model, thrust_moment_from_rpm
+     7	from dynamics import dynamics
+     8	
+     9	
+    10	def _hover_rpm(params: dict) -> float:
+    11	    m = float(params['mass'])
+    12	    g = float(params['gravity'])
+    13	    cT = float(params['thrust_coefficient'])
+    14	    F = m * g
+    15	    return float(np.sqrt((F / 4.0) / cT))
+    16	
+    17	
+    18	def simulate_trajectory(params: dict, planned: np.ndarray):
+    19	    planned = np.array(planned, dtype=float)
+    20	    max_iter = planned.shape[1]
+    21	    dt = 1.0 / float(params['sample_rate'])
+    22	
+    23	    state = np.zeros(16, dtype=float)
+    24	    state[0:3] = planned[0:3, 0]
+    25	    state[3:6] = planned[3:6, 0]
+    26	    state[6:9] = planned[6:9, 0]
+    27	    state[9:12] = planned[9:12, 0]
+    28	
+    29	    rpm0 = _hover_rpm(params)
+    30	    state[12:16] = rpm0
+    31	
+    32	    actual = np.zeros((15, max_iter), dtype=float)
+    33	
+    34	    pos_int = make_position_integral()
+    35	    att_int = make_attitude_integral()
+    36	
+    37	    for k in range(max_iter):
+    38	        actual[0:3, k] = state[0:3]
+    39	        actual[3:6, k] = state[3:6]
+    40	        actual[6:9, k] = state[6:9]
+    41	        actual[9:12, k] = state[9:12]
+    42	
+    43	        if k == 0:
+    44	            actual[12:15, k] = planned[12:15, 0]
+    45	        else:
+    46	            F_now, _M_now = thrust_moment_from_rpm(params, state[12:16])
+    47	            sdot = dynamics(params, state, F_now, np.zeros(3))
+    48	            actual[12:15, k] = sdot[3:6]
+    49	
+    50	        if k == max_iter - 1:
+    51	            break
+    52	
+    53	        des_pos = planned[0:3, k]
+    54	        des_vel = planned[3:6, k]
+    55	        des_acc = planned[12:15, k]
+    56	        yaw_des = float(planned[8, k])
+    57	        yaw_rate_des = float(planned[11, k])
+    58	
+    59	        F_cmd, acc_cmd = position_controller(
+    60	            current_pos=state[0:3],
+    61	            current_vel=state[3:6],
+    62	            desired_pos=des_pos,
+    63	            desired_vel=des_vel,
+    64	            desired_acc=des_acc,
+    65	            params=params,
+    66	            integral=pos_int,
+    67	        )
+    68	
+    69	        rot_des, omega_des = attitude_planner(acc_cmd, yaw_des, yaw_rate_des, gravity=float(params['gravity']))
+    70	
+    71	        M_cmd = attitude_controller(
+    72	            current_rot=state[6:9],
+    73	            current_omega=state[9:12],
+    74	            desired_rot=rot_des,
+    75	            desired_omega=omega_des,
+    76	            params=params,
+    77	            integral=att_int,
+    78	        )
+    79	
+    80	        _rpm_des, rpm_dot = motor_model(params, F_cmd, M_cmd, state[12:16])
+    81	        state[12:16] = np.clip(state[12:16] + rpm_dot * dt, float(params['rpm_min']), float(params['rpm_max']))
+    82	
+    83	        F_act, M_act = thrust_moment_from_rpm(params, state[12:16])
+    84	        sdot = dynamics(params, state, F_act, M_act)
+    85	        state[0:12] = state[0:12] + sdot[0:12] * dt
+    86	
+    87	    return actual

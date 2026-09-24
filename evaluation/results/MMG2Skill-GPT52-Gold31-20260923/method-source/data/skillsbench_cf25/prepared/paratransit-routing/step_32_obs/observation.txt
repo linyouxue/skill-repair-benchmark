@@ -1,0 +1,74 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json
+from collections import defaultdict
+cfg=json.load(open('/root/instance_config.json'))
+N=cfg['nb_trips']
+end_node=2*N+1
+allowed_starts=set(range(300, 841, 60))
+report=json.load(open('/root/report.json'))
+assert isinstance(report, dict) and 'routes' in report
+routes=report['routes']
+assert isinstance(routes, list)
+# Load requests to build passenger trip sets in flattened order
+req=json.load(open('/root/requests.json'))
+passenger_sets=[]
+trip_idx=0
+for p in req:
+    idxs=list(range(trip_idx, trip_idx+len(p['trips'])))
+    passenger_sets.append(i
+[... 535 characters omitted ...]
+ for node in seq:
+        assert isinstance(node, int)
+        assert 0 <= node <= end_node
+    # identify pickups/dropoffs
+    for pos,node in enumerate(seq):
+        if 1 <= node <= N:
+            i=node-1
+            assert pickup_route[i] is None, f'pickup duplicated for trip {i}'
+            pickup_route[i]=r_i
+            pickup_pos[i]=pos
+        elif N+1 <= node <= 2*N:
+            i=node-(N+1)
+            assert drop_route[i] is None, f'dropoff duplicated for trip {i}'
+            drop_route[i]=r_i
+            drop_pos[i]=pos
+# Check pairing + precedence
+served_trips=[]
+for i in range(N):
+    if pickup_route[i] is None and drop_route[i] is None:
+        continue
+    assert pickup_route[i] is not None and drop_route[i] is not None, f'incomplete pair trip {i}'
+    assert pickup_route[i]==drop_route[i], f'trip {i} split across routes'
+    assert pickup_pos[i] < drop_pos[i], f'trip {i} dropoff before pickup'
+    served_trips.append(i)
+served_set=set(served_trips)
+# Check passenger all-or-none in output
+violations=[]
+served_passengers=0
+served_trips_count=0
+for p_i, idxs in enumerate(passenger_sets):
+    k=sum(1 for i in idxs if i in served_set)
+    if k==0:
+        continue
+    if k != len(idxs):
+        violations.append((p_i, len(idxs), k))
+    else:
+        served_passengers += 1
+        served_trips_count += len(idxs)
+assert not violations, f'Passenger all-or-none violations: {violations[:3]}'
+print('routes:', len(routes))
+print('served passengers:', served_passengers, '/', len(passenger_sets))
+print('served trips:', served_trips_count, '/', N)
+print('unserved trips:', N-served_trips_count)
+PY
+routes: 32
+served passengers: 221 / 252
+served trips: 453 / 515
+unserved trips: 62
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

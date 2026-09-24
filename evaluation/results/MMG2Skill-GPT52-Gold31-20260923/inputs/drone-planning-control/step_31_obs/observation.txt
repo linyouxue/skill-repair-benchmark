@@ -1,0 +1,49 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, os
+import numpy as np
+import yaml
+with open('/root/system_params.yaml','r') as f:
+    params=yaml.safe_load(f)
+fail=[]
+labels=sorted([d for d in os.listdir('/root/results') if d.isdigit()])
+for label in labels:
+    out=f'/root/results/{label}'
+    planned=np.load(os.path.join(out,'planned_trajectory.npy'))
+    actual=np.load(os.path.join(out,'actual_trajectory.npy'))
+    with open(os.path.join(out,'metrics_3d.json')) as f:
+        metrics=json.load(f)
+    acc=planned[12:15,:]
+    ax,ay,az=acc
+    horiz=np.sqrt(ax**2+ay**2)
+    ok_acc = (az<=params['accel_limit_up']+1e-9).all() and (az>=-params['accel_limit_down']-1e-9).all() and (horiz<=params['accel_limit_horiz']+1e-9).all()
+    pos_err=np.linalg.norm((actual[0:3,:]-planned[0:3,:]).T,axis=1)
+    ok_pos = (pos_err<0.05+1e-12).all()
+    ok_metrics = metrics['SteadyStateError'] < 0.05 and metrics['Overshoot_pct'] < 5
+    if not (ok_acc and ok_pos and ok_metrics):
+        fail.append((label, ok_acc, ok_pos, ok_metrics, float(pos_err.max()), metrics))
+print('commands', len(labels))
+print('failures', len(fail))
+if fail:
+    for item in fail:
+        label, ok_acc, ok_pos, ok_metrics, maxerr, metrics=item
+        print(label,'ok_acc',ok_acc,'ok_pos',ok_pos,'ok_metrics',ok_metrics,'maxerr',maxerr,'metrics',metrics)
+else:
+    maxes=[]
+    for label in labels:
+        out=f'/root/results/{label}'
+        planned=np.load(os.path.join(out,'planned_trajectory.npy'))
+        actual=np.load(os.path.join(out,'actual_trajectory.npy'))
+        pos_err=np.linalg.norm((actual[0:3,:]-planned[0:3,:]).T,axis=1)
+        maxes.append((float(pos_err.max()), label, float(pos_err[-1])))
+    maxes.sort(reverse=True)
+    print('worst max pos err,label,final', maxes[0])
+PY
+commands 30
+failures 1
+018 ok_acc True ok_pos False ok_metrics False maxerr 0.08061948830505102 metrics {'mode': 'fly', 'RiseTime': 1.61, 'SettlingTime': 2.1, 'Overshoot_pct': 4.030974415252551, 'SteadyStateError': 0.08061948830505102}
+
+
+📁 Working directory: /root
+✅ Exit code: 0

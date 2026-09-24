@@ -1,0 +1,78 @@
+Tool: file_editor
+Result:
+[File /root/pick.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import os
++2|import glob
++3|import csv
++4|import numpy as np
++5|import obspy
++6|from obspy import UTCDateTime, Stream, Trace
++7|import seisbench.models as sbm
++8|import torch
+ 9|
++10|DATA_DIR = "/root/data"
++11|OUT_CSV = "/root/results.csv"
++12|
++13|device = "cuda" if torch.cuda.is_available() else "cpu"
++14|model = sbm.PhaseNet.from_pretrained("scedc")
++15|model.to(device)
++16|model.eval()
++17|
++18|SCALE = 1e10  # data is O(1e-14), scale up to avoid epsilon issues in normalization
++19|
++20|def load_stream(path):
++21|    d = np.load(path, allow_pickle=True)
++22|    data = d["data"].astype(np.float64) * SCALE  # (12000, 3)
++23|    dt = float(d["dt"])
++24|    channels = str(d["channels"]).split(",")
++25|    network = str(d["network"]) if "network" in d.files else "XX"
++26|    station = str(d["station"]) if "station" in d.files else "STA"
++27|    loc = str(d["location_code"]) if "location_code" in d.files else ""
++28|    try:
++29|        starttime = UTCDateTime(str(d["start_time"]))
++30|    except Exception:
++31|        starttime = UTCDateTime(0)
++32|    traces = []
++33|    for i, ch in enumerate(channels):
++34|        tr = Trace(data=np.ascontiguousarray(data[:, i]))
++35|        tr.stats.network = network
++36|        tr.stats.station = station
++37|        tr.stats.location = loc if loc != "nan" else ""
++38|        tr.stats.channel = ch
++39|        tr.stats.delta = dt
++40|        tr.stats.starttime = starttime
++41|        traces.append(tr)
++42|    return Stream(traces), starttime, dt
++43|
++44|rows = []
++45|files = sorted(glob.glob(os.path.join(DATA_DIR, "*.npz")))
++46|print(f"Processing {len(files)} files with device={device}")
++47|
++48|for i, path in enumerate(files):
++49|    fname = os.path.basename(path)
++50|    stream, t0, dt = load_stream(path)
++51|    try:
++52|        picks = model.classify(stream, P_threshold=0.3, S_threshold=0.3).picks
++53|    except Exception as e:
++54|        print(f"Error on {fname}: {e}")
++55|        continue
++56|    for p in picks:
++57|        idx = int(round((p.peak_time - t0) / dt))
++58|        if idx < 0 or idx >= 12000:
++59|            continue
++60|        rows.append((fname, p.phase, idx))
++61|    if (i + 1) % 20 == 0:
++62|        print(f"  done {i+1}/{len(files)}, picks so far: {len(rows)}")
++63|
++64|with open(OUT_CSV, "w", newline="") as f:
++65|    w = csv.writer(f)
++66|    w.writerow(["file_name", "phase", "pick_idx"])
++67|    w.writerows(rows)
++68|
++69|print(f"Wrote {len(rows)} picks to {OUT_CSV}")
++70|
+[end of edit 1 / 1]

@@ -1,0 +1,37 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, numpy as np
+from ortools.constraint_solver import pywrapcp
+cfg=json.load(open('/root/instance_config.json'))
+nb_trips=cfg['nb_trips']
+nb_vehicles=cfg['nb_vehicles']
+num_nodes=2*nb_trips+2
+start=0
+end=2*nb_trips+1
+travel=np.loadtxt('/root/t_matrix.csv', delimiter=',', dtype=np.int32)
+travel_clean=travel.copy(); travel_clean[travel_clean<0]=10**6; travel_clean[0,0]=0; travel_clean[end,end]=0
+service=np.zeros(num_nodes, dtype=np.int32)
+time_mat=(travel_clean+service.reshape(-1,1)).astype(np.int32)
+time_mat[end,end]=0
+time_matrix=time_mat.tolist()
+manager=pywrapcp.RoutingIndexManager(num_nodes, nb_vehicles, [start]*nb_vehicles, [end]*nb_vehicles)
+routing=pywrapcp.RoutingModel(manager)
+cb=routing.RegisterTransitMatrix(time_matrix)
+routing.SetArcCostEvaluatorOfAllVehicles(cb)
+# compare cost from start index of vehicle 0 to pickup node 1
+s=routing.Start(0)
+p=manager.NodeToIndex(1)
+print('start index', s, 'node', manager.IndexToNode(s))
+print('pickup index', p, 'node', manager.IndexToNode(p))
+print('arc cost start->pickup:', routing.GetArcCostForVehicle(s,p,0))
+print('expected travel[0][1]=', int(travel_clean[0,1]))
+PY
+start index 0 node 0
+pickup index 1 node 1
+Segmentation fault
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+❌ Exit code: 139

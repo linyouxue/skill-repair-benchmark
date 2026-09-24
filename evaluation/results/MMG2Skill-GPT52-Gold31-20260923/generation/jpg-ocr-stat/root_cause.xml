@@ -1,0 +1,23 @@
+<root_cause>
+  <trajectory_summary>
+  The agent iteratively developed and validated OCR parsing logic for dates and totals across all receipt images, diagnosing earlier mis-extractions (e.g., GST summary amounts, subtotal-like lines) and refining keyword priorities and exclusion handling. By Turns 23–27 it produced a full printed table of filename/date/total values that appeared consistent with manual spot-checks for previously problematic receipts. In Turn 28 it started a script intended to generate /app/workspace/stat_ocr.xlsx with a single sheet “results” and columns [filename, date, total_amount] in filename order, but the process did not finish within the remaining trace window. Turns 31–32 repeatedly checked for completion and observed only “Process still running (soft timeout)”, leaving no visible confirmation that the Excel file was created correctly (or at all).
+  </trajectory_summary>
+  <what_worked>
+    <item>Refined total extraction logic to avoid GST/tax summary traps and prefer correct “TOTAL” variants: the rolling summary reports regressions fixed (e.g., “011.jpg returned 15.00; 071.jpg returned 17.70; 077.jpg returned 23.25; 078.jpg returned 92.80”) after the refinement run (Turns 23–27).</item>
+    <item>Produced a complete printed listing of extracted (filename, ISO date, total_amount) for all images (Turns 23–27 rolling summary), demonstrating end-to-end OCR+parsing for the dataset prior to Excel writing.</item>
+    <item>Initiated an Excel generation script using openpyxl with the required single sheet name and required columns (“one sheet titled ‘results’ and columns [filename, date, total_amount]”, Turn 28 rolling summary).</item>
+  </what_worked>
+  <issues>
+    <issue>
+      <where>turns 28–32</where>
+      <evidence>The Excel generation script never reaches a completion/verification point; repeated checks show “⏳ Process still running (soft timeout)” (Turn 31 observation; Turn 32 observation). No observation confirms that /app/workspace/stat_ocr.xlsx was written, that it contains exactly one sheet named “results”, or that rows match required ordering/format.</evidence>
+      <cause>Long-running/unbounded OCR processing within the Excel-writing run (likely re-OCRing all images serially with expensive settings) caused the process to exceed the environment’s soft time limits and prevented reaching the save/close and validation steps.</cause>
+    </issue>
+    <issue>
+      <where>turns 31–32</where>
+      <evidence>The agent only waits/checks again and receives continued soft timeouts; there is no fallback action such as reducing OCR workload, writing incrementally, caching prior OCR results from earlier validation runs, or verifying an already-created partial output file.</evidence>
+      <cause>Lack of contingency handling for timeouts and absence of a strategy to reuse previously computed extraction results led to stalled progress and no final artifact confirmation.</cause>
+    </issue>
+  </issues>
+  <outcome_assessment value="likely_failure">The run provides no evidence that the required Excel file was successfully created and saved (the only final observations are repeated “Process still running (soft timeout)”), so completion of the task cannot be substantiated and is unlikely within the observed execution.</outcome_assessment>
+</root_cause>

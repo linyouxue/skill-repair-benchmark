@@ -1,0 +1,271 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import csv, json
+from pathlib import Path
+src = Path('/root/data/stock-descriptions.csv')
+rows=[]
+with src.open(newline='', encoding='utf-8') as f:
+    r = csv.DictReader(f)
+    for row in r:
+        ticker = (row.get('ticker') or '').strip()
+        sector = (row.get('sector') or '').strip() or 'Unknown'
+        full_name = (row.get('full name') or '').strip()
+        mc_raw = (row.get('marketCap') or '').strip()
+        mc = None
+        try:
+            if mc_raw != '':
+                mc = float(mc_raw)
+        except ValueError:
+            mc = None
+        is_etf = (sector == 'ETF') or (mc is None)
+        rows.append({
+            'ticker': ticker,
+            'sector': sector,
+            'fullName': full_name,
+            'marketCap': mc,
+            'isETF': is_etf,
+        })
+rows = [r for r in rows if r['ticker']]
+embedded = json.dumps(rows, ensure_ascii=False, separators=(',', ':'))
+js = f"""/* global d3 */
+// This app prefers loading /output/data/stock-descriptions.csv.
+// If you open index.html directly with file://, fetch() may be blocked,
+// so we embed the minimal metadata needed for the bubble chart + table.
+const EMBEDDED_STOCKS = {embedded};
+const STATE = {{ selectedTicker: null }};
+function formatMarketCap(n) {{
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  const abs = Math.abs(n);
+  const units = [
+    ['T', 1e12],
+    ['B', 1e9],
+    ['M', 1e6],
+    ['K', 1e3],
+  ];
+  for (const [suffix, v] of units) {{
+    if (abs >= v) return `${{d3.format('.2f')(n / v)}}${{suffix}}`;
+  }}
+  return d3.format(',')(Math.round(n));
+}}
+function normalizeRows(rows) {{
+  return rows.map(r => {{
+    const ticker = (r.ticker ?? '').trim();
+    const sector = (r.sector ?? '').trim() || 'Unknown';
+    const fullName = (r['full name'] ?? r.fullName ?? '').trim();
+    const marketCap = Number.isFinite(r.marketCap) ? +r.marketCap : NaN;
+    const isETF = sector === 'ETF' || !Number.isFinite(marketCap);
+    return {{
+      ticker,
+      sector,
+      fullName,
+      marketCap: Number.isFinite(marketCap) ? marketCap : null,
+      isETF,
+    }};
+  }}).filter(d => d.ticker);
+}}
+async function loadStocks() {{
+  try {{
+    const res = await fetch('data/stock-descriptions.csv', {{ cache: 'no-store' }});
+    const text = await res.text();
+    const rows = d3.csvParse(text, d3.autoType);
+    return normalizeRows(rows);
+  }} catch (err) {{
+    console.warn('Using embedded stock metadata (CSV fetch failed).', err);
+    return normalizeRows(EMBEDDED_STOCKS);
+  }}
+}}
+function buildLegend(sectors, color) {{
+  const legend = d3.select('#legend');
+  legend.selectAll('*').remove();
+  legend.append('div')
+    .attr('class', 'legend__title')
+    .text('Sector');
+  const items = legend.selectAll('.legend__item')
+    .data(sectors, d => d)
+    .enter()
+    .append('div')
+    .attr('class', 'legend__item');
+  items.append('div')
+    .attr('class', 'legend__swatch')
+    .style('background', d => color(d));
+  items.append('div')
+    .attr('class', 'legend__label')
+    .text(d => d);
+}}
+function setSelection(ticker) {{
+  STATE.selectedTicker = ticker;
+  d3.selectAll('.bubbleNode')
+    .classed('selected', d => d.ticker === ticker);
+  d3.selectAll('tr.stockRow')
+    .classed('selected', d => d.ticker === ticker);
+  const row = document.querySelector(`tr.stockRow[data-ticker="${{ticker}}"]`);
+  if (row) row.scrollIntoView({{ block: 'nearest' }});
+}}
+function clearSelection() {{
+  STATE.selectedTicker = null;
+  d3.selectAll('.bubbleNode').classed('selected', false);
+  d3.selectAll('tr.stockRow').classed('selected', false);
+}}
+function renderTable(stocks) {{
+  const tbody = d3.select('#tableBody');
+  const rows = tbody.selectAll('tr.stockRow')
+    .data(stocks, d => d.ticker);
+  rows.exit().remove();
+  const rowsEnter = rows.enter()
+    .append('tr')
+    .attr('class', 'stockRow')
+    .attr('data-ticker', d => d.ticker)
+    .on('click', (event, d) => {{
+      event.stopPropagation();
+      setSelection(d.ticker);
+    }});
+  rowsEnter.append('td').attr('class', 'ticker');
+  rowsEnter.append('td').attr('class', 'name');
+  rowsEnter.append('td').attr('class', 'sector');
+  rowsEnter.append('td').attr('class', 'num marketCap');
+  const merged = rowsEnter.merge(rows);
+  merged.select('td.ticker').text(d => d.ticker);
+  merged.select('td.name').text(d => d.fullName || '—');
+  merged.select('td.sector').text(d => d.sector || '—');
+  merged.select('td.marketCap').text(d => formatMarketCap(d.marketCap));
+}}
+function renderBubbles(stocks) {{
+  const wrap = document.getElementById('bubbleWrap');
+  const rect = wrap.getBoundingClientRect();
+  const width = Math.max(520, Math.floor(rect.width));
+  const height = Math.max(520, Math.floor(rect.height));
+  const svg = d3.select('#bubbleSvg');
+  svg.selectAll('*').remove();
+  svg.attr('viewBox', `0 0 ${{width}} ${{height}}`);
+  const tooltip = d3.select('#tooltip');
+  const sectors = Array.from(new Set(stocks.map(d => d.sector))).sort(d3.ascending);
+  const color = d3.scaleOrdinal()
+    .domain(sectors)
+    .range(sectors.map((s, i) => d3.interpolateRainbow((i + 0.15) / (sectors.length + 0.3))));
+  buildLegend(sectors, color);
+  const nonEtfCaps = stocks
+    .filter(d => !d.isETF && Number.isFinite(d.marketCap))
+    .map(d => d.marketCap);
+  const capExtent = d3.extent(nonEtfCaps);
+  const rScale = d3.scaleSqrt()
+    .domain([Math.max(1, capExtent[0] ?? 1), capExtent[1] ?? 1])
+    .range([14, 48])
+    .clamp(true);
+  const ETF_R = 16;
+  // Cluster centers are intentionally close and centered.
+  const cx = width / 2;
+  const cy = height / 2;
+  const ringR = Math.min(width, height) * 0.20;
+  const centers = new Map();
+  sectors.forEach((s, i) => {{
+    const a = (i / sectors.length) * 2 * Math.PI - Math.PI / 2;
+    centers.set(s, {{
+      x: cx + ringR * Math.cos(a),
+      y: cy + ringR * Math.sin(a),
+    }});
+  }});
+  // Stable initial positions: sorted by ticker.
+  const nodes = stocks
+    .slice()
+    .sort((a, b) => d3.ascending(a.ticker, b.ticker))
+    .map((d, i) => {{
+      const c = centers.get(d.sector) ?? {{ x: cx, y: cy }};
+      const r = d.isETF ? ETF_R : rScale(d.marketCap);
+      const phi = i * 0.61;
+      const rad = 8 + (i % 12) * 1.7;
+      return Object.assign({{}}, d, {{
+        r,
+        x: c.x + Math.cos(phi) * rad,
+        y: c.y + Math.sin(phi) * rad,
+      }});
+    }});
+  const g = svg.append('g');
+  const node = g.selectAll('g.bubbleNode')
+    .data(nodes, d => d.ticker)
+    .enter()
+    .append('g')
+    .attr('class', 'bubbleNode')
+    .style('cursor', 'pointer')
+    .on('click', (event, d) => {{
+      event.stopPropagation();
+      setSelection(d.ticker);
+    }});
+  node.append('circle')
+    .attr('r', d => d.r)
+    .attr('fill', d => color(d.sector))
+    .attr('fill-opacity', d => d.isETF ? 0.55 : 0.78)
+    .attr('stroke', 'rgba(255,255,255,0.30)')
+    .attr('stroke-width', 1);
+  node.append('text')
+    .text(d => d.ticker)
+    .attr('text-anchor', 'middle')
+    .attr('dy', '0.35em')
+    .attr('fill', 'rgba(255,255,255,0.94)')
+    .attr('font-weight', 720)
+    .attr('font-size', d => Math.max(9, Math.min(14, d.r * 0.55)));
+  // Tooltip only for non-ETFs (per requirement).
+  node
+    .filter(d => !d.isETF)
+    .on('mousemove', (event, d) => {{
+      tooltip
+        .classed('visible', true)
+        .attr('aria-hidden', 'false')
+        .html(
+          `<div class="tooltip__ticker">${{d.ticker}}</div>` +
+          `<div class="tooltip__name">${{d.fullName}}</div>` +
+          `<div class="tooltip__meta">Sector: ${{d.sector}}</div>`
+        )
+        .style('left', `${{event.pageX + 12}}px`)
+        .style('top', `${{event.pageY - 12}}px`);
+    }})
+    .on('mouseleave', () => {{
+      tooltip.classed('visible', false).attr('aria-hidden', 'true');
+    }});
+  // Force simulation with sector clustering.
+  const sim = d3.forceSimulation(nodes)
+    .force('x', d3.forceX(d => (centers.get(d.sector) ?? {{ x: cx }}).x).strength(0.18))
+    .force('y', d3.forceY(d => (centers.get(d.sector) ?? {{ y: cy }}).y).strength(0.18))
+    .force('collide', d3.forceCollide(d => d.r + 2).iterations(2))
+    .force('charge', d3.forceManyBody().strength(-10))
+    .force('center', d3.forceCenter(cx, cy));
+  // Run a fixed number of ticks for a stable settled layout.
+  for (let i = 0; i < 260; i += 1) sim.tick();
+  sim.stop();
+  node.attr('transform', d => `translate(${{d.x}},${{d.y}})`);
+  svg.append('style').text(`
+    .bubbleNode.selected circle {{
+      stroke: rgba(255, 215, 106, 0.95);
+      stroke-width: 3px;
+      filter: drop-shadow(0 10px 20px rgba(0,0,0,0.4));
+    }}
+  `);
+  svg.on('click', () => {{
+    tooltip.classed('visible', false).attr('aria-hidden', 'true');
+    clearSelection();
+  }});
+  // Re-apply selection after rerender.
+  if (STATE.selectedTicker) setSelection(STATE.selectedTicker);
+}}
+async function main() {{
+  const stocks = await loadStocks();
+  const tableStocks = stocks.slice().sort((a, b) => d3.ascending(a.ticker, b.ticker));
+  renderTable(tableStocks);
+  renderBubbles(stocks);
+  const ro = new ResizeObserver(() => renderBubbles(stocks));
+  ro.observe(document.getElementById('bubbleWrap'));
+}}
+main().catch(err => {{
+  console.error(err);
+  const legend = document.getElementById('legend');
+  if (legend) legend.textContent = 'Failed to load or render data.';
+}});
+"""
+Path('/root/output/js/visualization.js').write_text(js, encoding='utf-8')
+print('wrote /root/output/js/visualization.js with', len(rows), 'stocks embedded')
+PY
+wrote /root/output/js/visualization.js with 50 stocks embedded
+
+
+📁 Working directory: /root
+✅ Exit code: 0

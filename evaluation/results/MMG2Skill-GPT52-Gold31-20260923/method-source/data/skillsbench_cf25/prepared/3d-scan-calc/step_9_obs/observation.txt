@@ -1,0 +1,50 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, re, sys
+from pathlib import Path
+sys.path.append('/root/.claude/skills/mesh-analysis/scripts')
+from mesh_tool import MeshAnalyzer
+stl_path = Path('/root/scan_data.stl')
+density_path = Path('/root/material_density_table.md')
+out_path = Path('/root/mass_report.json')
+an = MeshAnalyzer(str(stl_path))
+report = an.analyze_largest_component()
+mat_id = int(report['main_part_material_id'])
+vol_units3 = float(report['main_part_volume'])
+# Density table uses g/cm^3; convert STL mm^3 -> cm^3.
+vol_cm3 = vol_units3 / 1000.0
+text = density_path.read_text(encoding='utf-8')
+row_re = re.compile(
+    rf"^\|\s*(?:\*\*)?{mat_id}(?:\*\*)?\s*\|.*?\|\s*([0-9]+(?:\.[0-9]+)?)\s*\|", ,
+    re.MULTILINE,
+)
+m = row_re.search(text)
+if not m:
+    raise SystemExit(f"Density not found for material_id={mat_id}")
+density_g_per_cm3 = float(m.group(1))
+mass_g = vol_cm3 * density_g_per_cm3
+out = {"main_part_mass": mass_g, "material_id": mat_id}
+out_path.write_text(json.dumps(out, indent=1) + "\n", encoding='utf-8')
+print(json.dumps({
+    **out,
+    "_debug": {
+        "volume_mm3": vol_units3,
+        "volume_cm3": vol_cm3,
+        "density_g_per_cm3": density_g_per_cm3,
+    }
+}, indent=1))
+PY
+{
+ "main_part_mass": 34.6480412349018,
+ "material_id": 42,
+ "_debug": {
+  "volume_mm3": 6242.890312594918,
+  "volume_cm3": 6.242890312594918,
+  "density_g_per_cm3": 5.55
+ }
+}
+
+
+📁 Working directory: /root
+✅ Exit code: 0

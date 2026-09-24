@@ -1,0 +1,88 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import os, glob, csv
+import numpy as np
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+DATA_DIR='/root/data'
+OUT_CSV='/root/results.csv'
+# Heuristic: ensure waveform scale is not << PhaseNet normalization epsilon.
+TARGET_STD=1e-6  # bring trace std to at least this
+model = sbm.PhaseNet.from_pretrained('original')
+def build_stream(npz_path: str):
+    z = np.load(npz_path, allow_pickle=True)
+    data = z['data'].astype('float32')  # (n,3)
+    dt = float(z['dt'])
+    sr = 1.0 / dt
+    chs = str(z['channels']).split(',')
+    # Basic preprocessing
+    data = data - np.nanmean(data, axis=0, keepdims=True)
+    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+    std = float(data.std())
+    if std > 0 and std < TARGET_STD:
+        data = data * (TARGET_STD / std)
+    stime_raw = str(z.get('start_time', '1970-01-01T00:00:00Z'))
+    try:
+        stime = UTCDateTime(stime_raw)
+    except Exception:
+        stime = UTCDateTime(0)
+    st = Stream()
+    for i, ch in enumerate(chs):
+        tr = Trace(data=data[:, i].astype('float32'))
+        tr.stats.network = str(z.get('network', 'XX'))
+        tr.stats.station = str(z.get('station', 'STA'))
+        tr.stats.location = str(z.get('location_code', ''))
+        tr.stats.channel = ch
+        tr.stats.starttime = stime
+        tr.stats.sampling_rate = sr
+        st += tr
+    return st, stime, sr
+def pick_from_annotations(ann: Stream, stime: UTCDateTime, sr_orig: float):
+    # PhaseNet produces channels PhaseNet_P and PhaseNet_S
+    p_tr = ann.select(channel='*PhaseNet_P')[0]
+    s_tr = ann.select(channel='*PhaseNet_S')[0]
+    p_i = int(np.argmax(p_tr.data))
+    p_time = p_tr.stats.starttime + p_i * p_tr.stats.delta
+    # constrain S to be after P (by at least 0.2s)
+    s_sr = float(s_tr.stats.sampling_rate)
+    p_on_s = int(round((p_time - s_tr.stats.starttime) * s_sr))
+    s_start = max(0, min(len(s_tr.data), p_on_s + int(round(0.2 * s_sr))))
+    if s_start < len(s_tr.data) - 1:
+        s_i_rel = int(np.argmax(s_tr.data[s_start:]))
+        s_i = s_start + s_i_rel
+    else:
+        s_i = int(np.argmax(s_tr.data))
+    s_time = s_tr.stats.starttime + s_i * s_tr.stats.delta
+    p_idx = int(round((p_time - stime) * sr_orig))
+    s_idx = int(round((s_time - stime) * sr_orig))
+    return p_idx, s_idx
+rows=[]
+files = sorted(glob.glob(os.path.join(DATA_DIR, '*.npz')))
+for path in files:
+    st, stime, sr = build_stream(path)
+    ann = model.annotate(st)
+    p_idx, s_idx = pick_from_annotations(ann, stime, sr)
+    # clip to waveform bounds
+    npts = st[0].stats.npts
+    p_idx = max(0, min(int(npts - 1), int(p_idx)))
+    s_idx = max(0, min(int(npts - 1), int(s_idx)))
+    fn = os.path.basename(path)
+    rows.append((fn, 'P', p_idx))
+    rows.append((fn, 'S', s_idx))
+with open(OUT_CSV, 'w', newline='') as f:
+    w = csv.writer(f)
+    w.writerow(['file_name','phase','pick_idx'])
+    w.writerows(rows)
+print('wrote', OUT_CSV, 'rows', len(rows))
+print('first rows:', rows[:6])
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+wrote /root/results.csv rows 200
+first rows: [('BG.ACR..DP.0215954.npz', 'P', 5999), ('BG.ACR..DP.0215954.npz', 'S', 6063), ('BG.ACR..DP.0346833.npz', 'P', 6002), ('BG.ACR..DP.0346833.npz', 'S', 6061), ('BG.AL6..DP.0301915.npz', 'P', 6001), ('BG.AL6..DP.0301915.npz', 'S', 6119)]
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

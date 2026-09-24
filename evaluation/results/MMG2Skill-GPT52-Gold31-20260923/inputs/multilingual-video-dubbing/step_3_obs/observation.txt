@@ -1,0 +1,507 @@
+Tool: file_editor
+Result:
+[File /root/dub_multilingual.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|import asyncio
++2|import json
++3|import math
++4|import os
++5|import re
++6|import subprocess
++7|from dataclasses import dataclass
++8|from pathlib import Path
++9|from typing import List, Optional, Tuple
++10|
++11|import edge_tts
++12|
++13|
++14|@dataclass
++15|class SrtSegment:
++16|    start_sec: float
++17|    end_sec: float
++18|    text: str
++19|
++20|
++21|def run(cmd: List[str]) -> subprocess.CompletedProcess:
++22|    return subprocess.run(cmd, check=True, text=True, capture_output=True)
++23|
++24|
++25|def ffprobe_duration(path: str) -> float:
++26|    p = run(
++27|        [
++28|            "ffprobe",
++29|            "-v",
++30|            "error",
++31|            "-show_entries",
++32|            "format=duration",
++33|            "-of",
++34|            "default=noprint_wrappers=1:nokey=1",
++35|            path,
++36|        ]
++37|    )
++38|    return float(p.stdout.strip())
++39|
++40|
++41|def ffprobe_audio_props(path: str) -> Tuple[int, int]:
++42|    p = run(
++43|        [
++44|            "ffprobe",
++45|            "-v",
++46|            "error",
++47|            "-select_streams",
++48|            "a:0",
++49|            "-show_entries",
++50|            "stream=sample_rate,channels",
++51|            "-of",
++52|            "json",
++53|            path,
++54|        ]
++55|    )
++56|    j = json.loads(p.stdout)
++57|    s = j["streams"][0]
++58|    return int(s["sample_rate"]), int(s["channels"])
++59|
++60|
++61|def parse_srt_time(t: str) -> float:
++62|    # 00:00:12,116
++63|    hh, mm, rest = t.split(":")
++64|    ss, ms = rest.split(",")
++65|    return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
++66|
++67|
++68|def parse_srt(path: str) -> List[SrtSegment]:
++69|    content = Path(path).read_text(encoding="utf-8").strip()
++70|    if not content:
++71|        return []
++72|
++73|    blocks = re.split(r"\n\s*\n", content)
++74|    segs: List[SrtSegment] = []
++75|    for b in blocks:
++76|        lines = [l.rstrip("\r") for l in b.splitlines() if l.strip() != ""]
++77|        if len(lines) < 2:
++78|            continue
++79|        # lines[0] is index
++80|        times = lines[1]
++81|        m = re.match(r"(\d\d:\d\d:\d\d,\d\d\d)\s*-->\s*(\d\d:\d\d:\d\d,\d\d\d)", times)
++82|        if not m:
++83|            continue
++84|        start_sec = parse_srt_time(m.group(1))
++85|        end_sec = parse_srt_time(m.group(2))
++86|        text = " ".join(lines[2:]).strip()
++87|        segs.append(SrtSegment(start_sec=start_sec, end_sec=end_sec, text=text))
++88|    return segs
++89|
++90|
++91|def language_code_from_target_file(path: str) -> str:
++92|    v = Path(path).read_text(encoding="utf-8").strip().lower()
++93|    v = re.sub(r"\s+", " ", v)
++94|    # Common fast-paths
++95|    if re.fullmatch(r"[a-z]{2}(-[a-z]{2})?", v):
++96|        return v.split("-")[0]
++97|    mapping = {
++98|        "japanese": "ja",
++99|        "jp": "ja",
++100|        "english": "en",
++101|        "korean": "ko",
++102|        "chinese": "zh",
++103|        "french": "fr",
++104|        "german": "de",
++105|        "spanish": "es",
++106|        "portuguese": "pt",
++107|        "italian": "it",
++108|        "russian": "ru",
++109|    }
++110|    return mapping.get(v, v[:2] if len(v) >= 2 else v)
++111|
++112|
++113|def choose_edge_voice(lang_code: str) -> str:
++114|    # Keep it deterministic with a small mapping.
++115|    voices = {
++116|        "ja": "ja-JP-NanamiNeural",
++117|        "en": "en-US-JennyNeural",
++118|        "fr": "fr-FR-DeniseNeural",
++119|        "de": "de-DE-KatjaNeural",
++120|        "es": "es-ES-ElviraNeural",
++121|        "it": "it-IT-ElsaNeural",
++122|        "pt": "pt-BR-FranciscaNeural",
++123|        "ko": "ko-KR-SunHiNeural",
++124|        "zh": "zh-CN-XiaoxiaoNeural",
++125|        "ru": "ru-RU-SvetlanaNeural",
++126|    }
++127|    return voices.get(lang_code, "en-US-JennyNeural")
++128|
++129|
++130|async def edge_tts_to_mp3(text: str, voice: str, out_mp3: str) -> None:
++131|    communicate = edge_tts.Communicate(text=text, voice=voice)
++132|    await communicate.save(out_mp3)
++133|
++134|
++135|def build_atempo_chain(tempo: float) -> Optional[str]:
++136|    # atempo supports 0.5..2.0 per filter; chain if needed.
++137|    if tempo <= 0:
++138|        return None
++139|    parts: List[float] = []
++140|    t = tempo
++141|    while t > 2.0:
++142|        parts.append(2.0)
++143|        t /= 2.0
++144|    while t < 0.5:
++145|        parts.append(0.5)
++146|        t /= 0.5
++147|    parts.append(t)
++148|    return ",".join([f"atempo={p:.8f}" for p in parts])
++149|
++150|
++151|def loudnorm_measure_json(in_wav: str) -> dict:
++152|    cmd = [
++153|        "ffmpeg",
++154|        "-hide_banner",
++155|        "-y",
++156|        "-i",
++157|        in_wav,
++158|        "-af",
++159|        "loudnorm=I=-23:TP=-1.5:LRA=11:print_format=json:measure_only=1",
++160|        "-f",
++161|        "null",
++162|        "-",
++163|    ]
++164|    p = subprocess.run(cmd, text=True, capture_output=True)
++165|    if p.returncode != 0:
++166|        raise RuntimeError(p.stderr)
++167|
++168|    m = re.search(r"\{\s*\"input_i\".*?\}\s*", p.stderr, flags=re.DOTALL)
++169|    if not m:
++170|        raise RuntimeError("Could not parse loudnorm JSON")
++171|    return json.loads(m.group(0))
++172|
++173|
++174|def loudnorm_two_pass(in_wav: str, out_wav: str) -> float:
++175|    meas = loudnorm_measure_json(in_wav)
++176|
++177|    af = (
++178|        "loudnorm=I=-23:TP=-1.5:LRA=11:"
++179|        f"measured_I={meas['input_i']}:"
++180|        f"measured_TP={meas['input_tp']}:"
++181|        f"measured_LRA={meas['input_lra']}:"
++182|        f"measured_thresh={meas['input_thresh']}:"
++183|        f"offset={meas['target_offset']}:"
++184|        "linear=true:print_format=summary"
++185|    )
++186|
++187|    run(
++188|        [
++189|            "ffmpeg",
++190|            "-hide_banner",
++191|            "-y",
++192|            "-i",
++193|            in_wav,
++194|            "-af",
++195|            af,
++196|            "-ar",
++197|            "48000",
++198|            "-ac",
++199|            "1",
++200|            "-c:a",
++201|            "pcm_s16le",
++202|            out_wav,
++203|        ]
++204|    )
++205|
++206|    # Return measured integrated loudness after normalization (should be ~ -23).
++207|    meas2 = loudnorm_measure_json(out_wav)
++208|    return float(meas2["input_i"])
++209|
++210|
++211|def make_segment_wav(
++212|    target_text: str,
++213|    voice: str,
++214|    target_duration_sec: float,
++215|    out_wav: str,
++216|) -> Tuple[float, str]:
++217|    tmp_dir = Path("/tmp/openhands_dub")
++218|    tmp_dir.mkdir(parents=True, exist_ok=True)
++219|
++220|    raw_mp3 = str(tmp_dir / "seg_raw.mp3")
++221|    raw_wav = str(tmp_dir / "seg_raw.wav")
++222|    pre_norm_wav = str(tmp_dir / "seg_pre_norm.wav")
++223|
++224|    asyncio.run(edge_tts_to_mp3(target_text, voice, raw_mp3))
++225|
++226|    run(
++227|        [
++228|            "ffmpeg",
++229|            "-hide_banner",
++230|            "-y",
++231|            "-i",
++232|            raw_mp3,
++233|            "-ar",
++234|            "48000",
++235|            "-ac",
++236|            "1",
++237|            "-c:a",
++238|            "pcm_s16le",
++239|            raw_wav,
++240|        ]
++241|    )
++242|
++243|    raw_dur = ffprobe_duration(raw_wav)
++244|
++245|    # Decide duration control
++246|    duration_control: str
++247|    use_atempo = False
++248|
++249|    if raw_dur <= 0.0:
++250|        raise RuntimeError("Generated empty TTS audio")
++251|
++252|    ratio = raw_dur / target_duration_sec
++253|
++254|    if abs(raw_dur - target_duration_sec) <= 0.05:
++255|        duration_control = "pad_silence" if raw_dur < target_duration_sec else "trim"
++256|        atempo_chain = None
++257|    elif raw_dur > target_duration_sec:
++258|        if ratio <= 1.25:
++259|            duration_control = "rate_adjust"
++260|            use_atempo = True
++261|            atempo_chain = build_atempo_chain(ratio)
++262|        else:
++263|            duration_control = "trim"
++264|            atempo_chain = None
++265|    else:
++266|        # raw shorter than target
++267|        if ratio >= 0.8:
++268|            duration_control = "rate_adjust"
++269|            use_atempo = True
++270|            atempo_chain = build_atempo_chain(ratio)
++271|        else:
++272|            duration_control = "pad_silence"
++273|            atempo_chain = None
++274|
++275|    fade_d = 0.05
++276|    fade_out_start = max(0.0, target_duration_sec - fade_d)
++277|
++278|    filters: List[str] = [
++279|        "highpass=f=20",
++280|        "lowpass=f=16000",
++281|    ]
++282|    if use_atempo and atempo_chain:
++283|        filters.append(atempo_chain)
++284|
++285|    filters.extend(
++286|        [
++287|            "apad",
++288|            f"atrim=0:{target_duration_sec:.6f}",
++289|            f"afade=t=in:st=0:d={fade_d}",
++290|            f"afade=t=out:st={fade_out_start:.6f}:d={fade_d}",
++291|        ]
++292|    )
++293|
++294|    run(
++295|        [
++296|            "ffmpeg",
++297|            "-hide_banner",
++298|            "-y",
++299|            "-i",
++300|            raw_wav,
++301|            "-af",
++302|            ",".join(filters),
++303|            "-ar",
++304|            "48000",
++305|            "-ac",
++306|            "1",
++307|            "-c:a",
++308|            "pcm_s16le",
++309|            pre_norm_wav,
++310|        ]
++311|    )
++312|
++313|    loudnorm_two_pass(pre_norm_wav, out_wav)
++314|    out_dur = ffprobe_duration(out_wav)
++315|    return out_dur, duration_control
++316|
++317|
++318|def main() -> None:
++319|    input_video = "/root/input.mp4"
++320|    segments_srt = "/root/segments.srt"
++321|    source_text_srt = "/root/source_text.srt"
++322|    target_language_file = "/root/target_language.txt"
++323|    reference_target_srt = "/root/reference_target_text.srt"
++324|
++325|    out_dir = Path("/outputs")
++326|    tts_dir = out_dir / "tts_segments"
++327|    out_dir.mkdir(parents=True, exist_ok=True)
++328|    tts_dir.mkdir(parents=True, exist_ok=True)
++329|
++330|    windows = parse_srt(segments_srt)
++331|    sources = parse_srt(source_text_srt)
++332|    targets = parse_srt(reference_target_srt)
++333|
++334|    if not windows:
++335|        raise RuntimeError("No timing windows found in segments.srt")
++336|    if len(windows) != len(targets) or len(windows) != len(sources):
++337|        raise RuntimeError(
++338|            f"SRT count mismatch: windows={len(windows)} sources={len(sources)} targets={len(targets)}"
++339|        )
++340|
++341|    target_lang = language_code_from_target_file(target_language_file)
++342|    source_lang = "en"
++343|    voice = choose_edge_voice(target_lang)
++344|
++345|    video_dur = ffprobe_duration(input_video)
++346|
++347|    segment_reports = []
++348|
++349|    # This benchmark input contains a single window, but keep it general.
++350|    placed_audio_files = []
++351|
++352|    for i, w in enumerate(windows):
++353|        window_start = w.start_sec
++354|        window_end = w.end_sec
++355|        target_text = targets[i].text
++356|        source_text = sources[i].text
++357|
++358|        # Constrain to the actual video duration so we don't exceed the container.
++359|        effective_window_end = min(window_end, video_dur)
++360|        target_duration = max(0.0, effective_window_end - window_start)
++361|
++362|        seg_out = str(tts_dir / f"seg_{i}.wav")
++363|        tts_dur, duration_control = make_segment_wav(
++364|            target_text=target_text,
++365|            voice=voice,
++366|            target_duration_sec=target_duration,
++367|            out_wav=seg_out,
++368|        )
++369|
++370|        placed_start = window_start
++371|        placed_end = placed_start + tts_dur
++372|        drift = placed_end - window_end
++373|
++374|        segment_reports.append(
++375|            {
++376|                "window_start_sec": round(window_start, 3),
++377|                "window_end_sec": round(window_end, 3),
++378|                "placed_start_sec": round(placed_start, 3),
++379|                "placed_end_sec": round(placed_end, 3),
++380|                "source_text": source_text,
++381|                "target_text": target_text,
++382|                "window_duration_sec": round(window_end - window_start, 3),
++383|                "tts_duration_sec": round(tts_dur, 3),
++384|                "drift_sec": round(drift, 3),
++385|                "duration_control": duration_control,
++386|            }
++387|        )
++388|
++389|        placed_audio_files.append(seg_out)
++390|
++391|    # Build full-length audio (48k mono) and normalize.
++392|    # For this dataset, there is only one segment starting at 0, but we support N.
++393|    mixed_raw = str(out_dir / "dubbed_raw.wav")
++394|    mixed_norm = str(out_dir / "dubbed_audio.wav")
++395|
++396|    # Create silent bed to match video duration exactly.
++397|    ffmpeg_inputs = [
++398|        "ffmpeg",
++399|        "-hide_banner",
++400|        "-y",
++401|        "-f",
++402|        "lavfi",
++403|        "-t",
++404|        f"{video_dur:.6f}",
++405|        "-i",
++406|        "anullsrc=r=48000:cl=mono",
++407|    ]
++408|    for f in placed_audio_files:
++409|        ffmpeg_inputs.extend(["-i", f])
++410|
++411|    filter_parts = []
++412|    mix_inputs = ["[0:a]"]
++413|
++414|    for idx, w in enumerate(windows):
++415|        start_ms = int(round(w.start_sec * 1000.0))
++416|        in_label = f"[{idx+1}:a]"
++417|        out_label = f"[a{idx}]"
++418|        # Mono adelay takes single value in ms.
++419|        filter_parts.append(f"{in_label}adelay={start_ms}:all=1,apad{out_label}")
++420|        mix_inputs.append(out_label)
++421|
++422|    filter_parts.append(
++423|        f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=longest:normalize=0,atrim=0:{video_dur:.6f}[mix]"
++424|    )
++425|
++426|    run(
++427|        ffmpeg_inputs
++428|        + [
++429|            "-filter_complex",
++430|            ";".join(filter_parts),
++431|            "-map",
++432|            "[mix]",
++433|            "-ar",
++434|            "48000",
++435|            "-ac",
++436|            "1",
++437|            "-c:a",
++438|            "pcm_s16le",
++439|            mixed_raw,
++440|        ]
++441|    )
++442|
++443|    measured_lufs = loudnorm_two_pass(mixed_raw, mixed_norm)
++444|
++445|    audio_sr, audio_ch = ffprobe_audio_props(mixed_norm)
++446|    new_dur = ffprobe_duration(mixed_norm)
++447|
++448|    # Create dubbed video.
++449|    dubbed_video = str(out_dir / "dubbed.mp4")
++450|    run(
++451|        [
++452|            "ffmpeg",
++453|            "-hide_banner",
++454|            "-y",
++455|            "-i",
++456|            input_video,
++457|            "-i",
++458|            mixed_norm,
++459|            "-map",
++460|            "0:v:0",
++461|            "-map",
++462|            "1:a:0",
++463|            "-c:v",
++464|            "copy",
++465|            "-c:a",
++466|            "aac",
++467|            "-b:a",
++468|            "192k",
++469|            "-ar",
++470|            "48000",
++471|            "-ac",
++472|            "1",
++473|            "-movflags",
++474|            "+faststart",
++475|            "-shortest",
++476|            dubbed_video,
++477|        ]
++478|    )
++479|
++480|    report = {
++481|        "source_language": source_lang,
++482|        "target_language": target_lang,
++483|        "audio_sample_rate_hz": audio_sr,
++484|        "audio_channels": audio_ch,
++485|        "original_duration_sec": round(video_dur, 3),
++486|        "new_duration_sec": round(new_dur, 3),
++487|        "measured_lufs": round(float(measured_lufs), 1),
++488|        "speech_segments": segment_reports,
++489|    }
++490|
++491|    (out_dir / "report.json").write_text(
++492|        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
++493|        encoding="utf-8",
++494|    )
++495|
++496|
++497|if __name__ == "__main__":
++498|    main()
++499|
+[end of edit 1 / 1]

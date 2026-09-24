@@ -1,0 +1,59 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import pandas as pd, numpy as np
+from netCDF4 import Dataset
+obs=pd.read_csv('/root/field_temp_oxy.csv')
+obs['datetime']=pd.to_datetime(obs['datetime'])
+obs['depth']=obs['depth'].round().astype(int)
+obs=obs.rename(columns={'temp':'temp_obs'})[['datetime','depth','temp_obs']]
+nc=Dataset('/root/output/output.nc','r')
+time=nc.variables['time'][:]
+z=nc.variables['z'][:]
+temp=nc.variables['temp'][:]
+start=pd.Timestamp('2009-01-01 12:00:00')
+units=getattr(nc.variables['time'],'units',None)
+if units and 'since' in units:
+    u,since=units.split(' since ')
+    start=pd.to_datetime(since)
+    time_hours=np.array(time,dtype=float)*(24.0 if u.strip().startswith('day') else 1.0)
+else:
+    time_hours=np.array(time,dtype=float)
+recs=[]
+for t_idx,h in enumerate(time_hours):
+    dt=start + pd.Timedelta(hours=float(h))
+    heights=z[t_idx,:,0,0]
+    temps=temp[t_idx,:,0,0]
+    for hv,tv in zip(heights,temps):
+        if np.ma.is_masked(hv) or np.ma.is_masked(tv):
+            continue
+        depth=25.0 - float(hv)
+        if 0<=depth<=25.0:
+            recs.append((dt,int(round(depth)),float(tv)))
+sim=pd.DataFrame(recs,columns=['datetime','depth','temp_sim']).groupby(['datetime','depth'],as_index=False)['temp_sim'].mean()
+m=obs.merge(sim,on=['datetime','depth'],how='inner')
+print('merged',len(m))
+print('obs nan',obs.temp_obs.isna().sum(),'sim nan',sim.temp_sim.isna().sum(),'m nan sim',m.temp_sim.isna().sum(),'m nan obs',m.temp_obs.isna().sum())
+err=(m.temp_sim-m.temp_obs)
+print('err nan',err.isna().sum(),'err finite',np.isfinite(err).sum())
+print('err min/max',err.min(),err.max())
+# show a few rows with NaNs if any
+print(m[m.temp_sim.isna() | m.temp_obs.isna()].head())
+rmse=np.sqrt(np.mean(err.to_numpy()**2))
+print('rmse',rmse)
+PY
+merged 2813
+obs nan 4 sim nan 0 m nan sim 0 m nan obs 4
+err nan 4 err finite 2809
+err min/max -5.1712587578051465 11.736523677058356
+                datetime  ...  temp_sim
+1230 2012-02-28 12:00:00  ...  3.078377
+1231 2012-02-28 12:00:00  ...  3.078377
+1232 2012-02-28 12:00:00  ...  3.078377
+1233 2012-02-28 12:00:00  ...  3.078377
+
+[4 rows x 4 columns]
+rmse nan
+
+📁 Working directory: /root
+✅ Exit code: 0

@@ -1,0 +1,187 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /home/travis/build/failed/google/auto/value/src/test/java/com/google/auto/value/processor/GeneratedDoesNotExistTest.java:
+     1	package com.google.auto.value.processor;
+     2	
+     3	import static com.google.common.truth.Truth.assertAbout;
+     4	import static com.google.common.truth.Truth.assertThat;
+     5	import static com.google.testing.compile.JavaSourceSubjectFactory.javaSource;
+     6	
+     7	import com.google.common.reflect.Reflection;
+     8	import com.google.testing.compile.JavaFileObjects;
+     9	
+    10	import org.junit.Test;
+    11	import org.junit.runner.RunWith;
+    12	import org.junit.runners.JUnit4;
+    13	
+    14	import java.lang.reflect.InvocationHandler;
+    15	import java.lang.reflect.Method;
+    16	import java.util.concurrent.atomic.AtomicBoolean;
+    17	
+    18	import javax.annotation.Generated;
+    19	import javax.annotation.processing.ProcessingEnvironment;
+    20	import javax.annotation.processing.Processor;
+    21	import javax.lang.model.element.TypeElement;
+    22	import javax.lang.model.util.Elements;
+    23	import javax.tools.JavaFileObject;
+    24	
+    25	/**
+    26	 * Tests that {@link AutoValueProcessor} works even if run in a context where the
+    27	 * {@code @Generated} annotation does not exist.
+    28	 *
+    29	 * @author emcmanus@google.com (Éamonn McManus)
+    30	 */
+    31	@RunWith(JUnit4.class)
+    32	public class GeneratedDoesNotExistTest {
+    33	  // The classes here are basically just rigmarole to ensure that
+    34	  // Types.getTypeElement("javax.annotation.Generated") returns null, and to check that something
+    35	  // called that. We want a Processor that forwards everything to AutoValueProcessor, except that
+    36	  // the init(ProcessingEnvironment) method should forward a ProcessingEnvironment that filters
+    37	  // out the Generated class. So that ProcessingEnvironment forwards everything to the real
+    38	  // ProcessingEnvironment, except the ProcessingEnvironment.getElementUtils() method. That method
+    39	  // returns an Elements object that forwards everything to the real Elements except
+    40	  // getTypeElement("javax.annotation.Generated").
+    41	
+    42	  /**
+    43	   * InvocationHandler that forwards every method to an original object, except methods where
+    44	   * there is an implementation in this class with the same signature. So for example in the
+    45	   * subclass {@link ElementsHandler} there is a method
+    46	   * {@link ElementsHandler#getTypeElement(CharSequence)}, which means that a call of
+    47	   * {@link Elements#getTypeElement(CharSequence)} on the proxy with this invocation handler will
+    48	   * end up calling that method, but a call of any of the other methods of {@code Elements} will
+    49	   * end up calling the method on the original object.
+    50	   */
+    51	  private abstract static class OverridableInvocationHandler<T> implements InvocationHandler {
+    52	    final T original;
+    53	
+    54	    OverridableInvocationHandler(T original) {
+    55	      this.original = original;
+    56	    }
+    57	
+    58	    @Override
+    59	    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    60	      try {
+    61	        Method override = getClass().getMethod(method.getName(), method.getParameterTypes());
+    62	        if (override.getDeclaringClass() == getClass()) {
+    63	          return override.invoke(this, args);
+    64	        }
+    65	      } catch (NoSuchMethodException ignored) {
+    66	        // OK: we don't have an override for this method, so just invoke the original method.
+    67	      }
+    68	      return method.invoke(original, args);
+    69	    }
+    70	  }
+    71	
+    72	  private static <T> T partialProxy(Class<T> type, OverridableInvocationHandler<T> handler) {
+    73	    return Reflection.newProxy(type, handler);
+    74	  }
+    75	
+    76	  private static class ElementsHandler extends OverridableInvocationHandler<Elements> {
+    77	    private final AtomicBoolean ignoredGenerated;
+    78	
+    79	    ElementsHandler(Elements original, AtomicBoolean ignoredGenerated) {
+    80	      super(original);
+    81	      this.ignoredGenerated = ignoredGenerated;
+    82	    }
+    83	
+    84	    public TypeElement getTypeElement(CharSequence name) {
+    85	      if (name.toString().equals(Generated.class.getName())) {
+    86	        ignoredGenerated.set(true);
+    87	        return null;
+    88	      } else {
+    89	        return original.getTypeElement(name);
+    90	      }
+    91	    }
+    92	  }
+    93	
+    94	  private static class ProcessingEnvironmentHandler
+    95	      extends OverridableInvocationHandler<ProcessingEnvironment> {
+    96	    private final Elements noGeneratedElements;
+    97	
+    98	    ProcessingEnvironmentHandler(
+    99	        ProcessingEnvironment original, AtomicBoolean ignoredGenerated) {
+   100	      super(original);
+   101	      ElementsHandler elementsHandler =
+   102	          new ElementsHandler(original.getElementUtils(), ignoredGenerated);
+   103	      this.noGeneratedElements = partialProxy(Elements.class, elementsHandler);
+   104	    }
+   105	
+   106	    public Elements getElementUtils() {
+   107	      return noGeneratedElements;
+   108	    }
+   109	  }
+   110	
+   111	  private static class ProcessorHandler extends OverridableInvocationHandler<Processor> {
+   112	    private final AtomicBoolean ignoredGenerated;
+   113	
+   114	    ProcessorHandler(Processor original, AtomicBoolean ignoredGenerated) {
+   115	      super(original);
+   116	      this.ignoredGenerated = ignoredGenerated;
+   117	    }
+   118	
+   119	    public void init(ProcessingEnvironment processingEnv) {
+   120	      ProcessingEnvironmentHandler processingEnvironmentHandler =
+   121	          new ProcessingEnvironmentHandler(processingEnv, ignoredGenerated);
+   122	      ProcessingEnvironment noGeneratedProcessingEnvironment =
+   123	          partialProxy(ProcessingEnvironment.class, processingEnvironmentHandler);
+   124	      original.init(noGeneratedProcessingEnvironment);
+   125	    }
+   126	  }
+   127	
+   128	  @Test
+   129	  public void test() {
+   130	    JavaFileObject javaFileObject = JavaFileObjects.forSourceLines(
+   131	        "foo.bar.Baz",
+   132	        "package foo.bar;",
+   133	        "",
+   134	        "import com.google.auto.value.AutoValue;",
+   135	        "",
+   136	        "@AutoValue",
+   137	        "public abstract class Baz {",
+   138	        "  public static Baz create() {",
+   139	        "    return new AutoValue_Baz();",
+   140	        "  }",
+   141	        "}");
+   142	    JavaFileObject expectedOutput = JavaFileObjects.forSourceLines(
+   143	        "foo.bar.AutoValue_Baz",
+   144	        "package foo.bar;",
+   145	        "",
+   146	        "final class AutoValue_Baz extends Baz {",
+   147	        "  AutoValue_Baz() {",
+   148	        "  }",
+   149	        "",
+   150	        "  @Override public String toString() {",
+   151	        "    return \"Baz{\"",
+   152	        "        + \"}\";",
+   153	        "  }",
+   154	        "",
+   155	        "  @Override public boolean equals(Object o) {",
+   156	        "    if (o == this) {",
+   157	        "      return true;",
+   158	        "    }",
+   159	        "    if (o instanceof Baz) {",
+   160	        "      return true;",
+   161	        "    }",
+   162	        "    return false;",
+   163	        "  }",
+   164	        "",
+   165	        "  @Override public int hashCode() {",
+   166	        "    int h = 1;",
+   167	        "    return h;",
+   168	        "  }",
+   169	        "}"
+   170	    );
+   171	    AtomicBoolean ignoredGenerated = new AtomicBoolean();
+   172	    Processor autoValueProcessor = new AutoValueProcessor();
+   173	    ProcessorHandler handler = new ProcessorHandler(autoValueProcessor, ignoredGenerated);
+   174	    Processor noGeneratedProcessor = partialProxy(Processor.class, handler);
+   175	    assertAbout(javaSource())
+   176	        .that(javaFileObject)
+   177	        .processedWith(noGeneratedProcessor)
+   178	        .compilesWithoutError()
+   179	        .and()
+   180	        .generatesSources(expectedOutput);
+   181	    assertThat(ignoredGenerated.get()).isTrue();
+   182	  }
+   183	}
+   184	

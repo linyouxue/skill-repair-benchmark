@@ -1,0 +1,56 @@
+Tool: file_editor
+Result:
+[File /home/github/build/failed/failed_reasons.txt edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|Repository: /home/github/build/failed/AgentOps-AI/agentops
+ 2|
++3|=== Failure summary ===
++4|Running `pytest` (per tox.ini command `coverage run --source agentops -m pytest`)
++5|fails during test collection with:
++6|
++7|    ModuleNotFoundError: No module named 'langchain_core'
++8|
++9|Trace:
++10|    tests/test_*.py -> `import agentops`
++11|    agentops/__init__.py:12 -> `from .langchain_callback_handler import ...`
++12|    agentops/langchain_callback_handler.py:5 -> `from langchain_core.agents import ...`
++13|
++14|=== Root cause ===
++15|`agentops/langchain_callback_handler.py` unconditionally imports third-party
++16|packages (`langchain_core`, `langchain`, `tenacity`) that are declared as
++17|OPTIONAL dependencies in `pyproject.toml`:
++18|
++19|    [project.optional-dependencies]
++20|    langchain = ["langchain>=0.0.354"]
++21|
++22|`agentops/__init__.py` unconditionally imports the callback handler module,
++23|so simply installing the base package (or the [dev] extra used for testing)
++24|raises ImportError as soon as `agentops` is imported. That is why every
++25|test module fails to be collected.
++26|
++27|The build/test workflow uses `pip install .[dev]` (or the equivalent) which
++28|does NOT pull the langchain extra, so the tests must not require langchain
++29|just to import `agentops`.
++30|
++31|=== Plan / fix ===
++32|Make the langchain callback handler import in `agentops/__init__.py`
++33|optional: wrap the `from .langchain_callback_handler import ...` in a
++34|try/except ImportError, so `agentops` can still be imported when the
++35|langchain (or tenacity) packages are not installed.
++36|
++37|Users that install the `langchain` extra continue to get
++38|`LangchainCallbackHandler` and `AsyncLangchainCallbackHandler` at the
++39|`agentops` namespace, matching current behavior when the extra is present.
++40|
++41|Files to change:
++42|- agentops/__init__.py
++43|
++44|=== Verification ===
++45|After the fix, `python -m pytest` should collect and run all tests without
++46|the ImportError. (Other test failures unrelated to the missing optional
++47|dependency are out of scope for this build-fix task.)
++48|
+[end of edit 1 / 1]

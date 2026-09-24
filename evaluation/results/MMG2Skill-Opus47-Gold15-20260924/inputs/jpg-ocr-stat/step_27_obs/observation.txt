@@ -1,0 +1,81 @@
+Tool: file_editor
+Result:
+[File /app/workspace/extract.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 144|
+ 145|def ocr_variants(path: Path):
+-146|    """Yield multiple OCR text passes to increase robustness."""
+ 147|    img = Image.open(path)
+-148|    yield pytesseract.image_to_string(img)
+ 149|    gray = ImageOps.autocontrast(img.convert('L'))
+-150|    yield pytesseract.image_to_string(gray, config='--psm 6')
+ 151|
+ 152|
+ 153|def process_image(path: Path):
+-154|    date, total = None, None
+ 155|    for text in ocr_variants(path):
+-156|        if date is None:
+-157|            date = extract_date(text)
+-158|        if total is None:
+-159|            total = extract_total(text)
+-160|        if date is not None and total is not None:
+-161|            break
+ 162|    total_str = f"{total:.2f}" if total is not None else None
+ 163|    return date, total_str
+(content after edit)
+ 144|
+ 145|def ocr_variants(path: Path):
++146|    """Yield multiple OCR text passes for improved robustness."""
+ 147|    img = Image.open(path)
++148|    yield pytesseract.image_to_string(img)  # default
+ 149|    gray = ImageOps.autocontrast(img.convert('L'))
++150|    yield pytesseract.image_to_string(gray, config='--psm 6')  # preprocessed
++151|    w, h = img.size
++152|    big = ImageOps.autocontrast(img.resize((w * 2, h * 2), Image.LANCZOS).convert('L'))
++153|    yield pytesseract.image_to_string(big, config='--psm 6')  # upscaled
++154|
++155|
++156|def pick_best_total(candidates):
++157|    """Pick best (tier_idx, value) across OCR variants.
++158|
++159|    Preference:
++160|      1. Highest priority (smallest tier_idx).
++161|      2. Among the tier winners, the value appearing in the most variants.
++162|      3. Break ties by the ordering (earliest occurrence wins).
++163|    """
++164|    candidates = [c for c in candidates if c[1] is not None]
++165|    if not candidates:
++166|        return None
++167|    best_tier = min(c[0] for c in candidates)
++168|    tier_vals = [c[1] for c in candidates if c[0] == best_tier]
++169|    counts = {}
++170|    for v in tier_vals:
++171|        counts[v] = counts.get(v, 0) + 1
++172|    # Pick value with highest count; on tie, first occurrence in tier_vals wins.
++173|    best_val = max(tier_vals, key=lambda v: (counts[v], -tier_vals.index(v)))
++174|    return best_val
++175|
++176|
++177|def pick_best_date(dates):
++178|    """Return the first non-null date, preferring dates that appear in >=2 variants."""
++179|    dates = [d for d in dates if d is not None]
++180|    if not dates:
++181|        return None
++182|    counts = {}
++183|    for d in dates:
++184|        counts[d] = counts.get(d, 0) + 1
++185|    return max(dates, key=lambda d: (counts[d], -dates.index(d)))
+ 186|
+ 187|
+ 188|def process_image(path: Path):
++189|    totals = []
++190|    dates = []
+ 191|    for text in ocr_variants(path):
++192|        totals.append(extract_total_with_tier(text))
++193|        dates.append(extract_date(text))
++194|    total = pick_best_total(totals)
++195|    date = pick_best_date(dates)
+ 196|    total_str = f"{total:.2f}" if total is not None else None
+ 197|    return date, total_str
+[end of edit 1 / 1]

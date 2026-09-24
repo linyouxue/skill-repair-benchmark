@@ -1,0 +1,187 @@
+Tool: terminal
+Result:
+cd /root && python3 <<'EOF'
+import fitz
+# Check paper 2 acknowledgements more thoroughly
+doc = fitz.open('paper2.pdf')
+print(doc[2].get_text())
+doc.close()
+EOF
+3. Experiments
+3.1. Experimental tasks
+To fully investigate the proposed corpora, we conduct three
+tasks in this work, including:
+• Direct SVS: This task involves direct SVS using the pro-
+posed corpora, where we evaluate the performance of dif-
+ferent SVS models.
+We opt for two emblematic mod-
+els from ESPnet-Muskits [16], namely Xiaoice [5] and
+VISinger2 [10].
+These models represent the two-stage
+SVS model (Xiaoice, comprising an acoustic model and a
+vocoder) and the end-to-end SVS model (VISinger2), respec-
+tively. Given VISinger2’s superior performance comapred to
+Xiaoice, it is selected for subsequent tasks.
+• Transfer learning: This task leverages the pre-trained model
+from ACE-Opencpop, utilizing its substantial data volume
+(around 130 hours), to implement transfer learning on other
+smaller-scale singing synthesis benchmarks. We evaluate this
+in two contexts: an in-domain transfer (ACE-Opencpop to
+Opencpop) and an out-of-domain transfer (ACE-Opencpop
+to Kiritan). The latter presents a significant domain shift,
+with ACE-Opencpop centered on Mandarin Pop songs and
+Kiritan on Japanese Animation songs. This task also includes
+a comparative analysis with SVS systems trained exclusively
+on the original datasets.
+• Joint training: In the joint training task, we merge the pro-
+posed corpus with other established SVS benchmarks, using
+it as an augmentation resource to enrich the training data. The
+original KiSing study [16] highlighted difficulties in synthe-
+sizing high-quality singing voices with the database. This
+is due in particular to the prevalent use of the melisma tech-
+nique, which is also examined in Section 2.3. In this research,
+we aim to assess how our data curation approach for KiSing
+(i.e., the generated corpus, ACE-KiSing) can address these
+challenges. By incorporating ACE-KiSing for supplemen-
+tary training alongside the original KiSing corpus, we intend
+to enhance the model’s learning experience and improve its
+performance. The effectiveness of this task is evaluated using
+the original KiSing test set, providing a measure of how our
+proposed corpus influences the quality of SVS (especially in
+contexts where complex vocal techniques like melisma are
+involved).
+3.2. Experimental model details
+As mentioned in Section 3.1,
+we use Xiaoice [5] and
+VISinger2 [10] for the experiments:
+• Xiaoice: The Xiaoice model follows the XiaoiceSing2 [31]
+by using conformer blocks [32, 33] in both the encoder and
+decoder. Additionally, voice/unvoiced and log F0 prediction
+losses are added along with the Mel spectrogram prediction.
+For multi-singer SVS, the singer ID embedding is repeated
+along the time axis and concatenated with the hidden states
+before feeding to the decoder. The training and network hy-
+perparameters align with the Xiaoice configuration detailed
+in the Opencpop recipe.4 A HiFi-GAN vocoder, pre-trained
+for 250k steps on the relevant corpora, is used for voice gen-
+eration, with parameters sourced from the ParallelWaveGAN
+repository.5
+4https://github.com/espnet/espnet/blob/master/egs2/
+opencpop/svs1
+5https://github.com/kan-bayashi/ParallelWaveGAN/
+blob/master/egs/opencpop/voc1/conf/hifigan.v1.yaml
+Table 2: Direct SVS of ACE-Opencpop. 95% confidence inter-
+vals of MOS are presented in parentheses. G.T.# are test sam-
+ples in ACE-Opencpop test set. Source G.T. stands for the same
+singing phrases from the original Opencpop test set.
+Model
+MCD ↓
+S. Acc. ↑
+F0 RMSE ↓
+SECS ↑
+MOS ↑
+Xiaoice
+5.81
+64.33
+0.162
+0.75
+3.53 (± 0.05)
+VISinger2
+5.08
+65.19
+0.140
+0.78
+3.81 (± 0.05)
+G.T.#
+-
+-
+-
+-
+4.35 (± 0.06)
+Source G.T.
+-
+-
+-
+-
+4.69 (± 0.06)
+Table 3: Direct SVS of ACE-KiSing. 95% confidence intervals
+of MOS are presented in parentheses. G.T.# are test samples in
+ACE-KiSing test set. Source G.T. are the same singing phrases
+from original KiSing test set.
+Model
+MCD ↓
+S. Acc. ↑
+F0 RMSE ↓
+SECS ↑
+MOS ↑
+Xiaoice
+6.10
+62.93
+0.199
+0.77
+3.29 (± 0.06)
+VISinger2
+5.24
+64.50
+0.185
+0.80
+3.64 (± 0.06)
+G.T.#
+-
+-
+-
+-
+4.49 (± 0.05)
+Source G.T.
+-
+-
+-
+-
+4.51 (± 0.07)
+• VISinger2: This model [10] advances the VISinger [9] by in-
+corporating a differentiable digital signal processing (DDSP)
+vocoder. Mirroring the VITS model [34] in TTS, VISinger2
+uses a conditional variational autoencoder, which is trained
+alongside adversarial objectives. It processes musical score
+input and employs a frame prior network with pitch predic-
+tion to enhance the flow learning process. The configura-
+tion for VISinger2 adheres to the specifications in ESPnet-
+Muskits. To facilitate multi-singer SVS, singer ID embed-
+dings are integrated as global information within the VITS
+framework, affecting both the generator and discriminators.
+To evaluate the models in different sampling rates, we
+conduct cascaded acoustic models with the vocoder (i.e., Xi-
+aoice) in 24kHz and 44.1kHz for end-to-end SVS systems (i.e.,
+VISinger2).
+3.3. Evaluation metrics
+In our study, we conduct both objective and subjective evalu-
+ations on the synthesized singing voice samples. For the ob-
+jective assessment, we utilize Mel cepstral distortion (MCD),
+semitone accuracy (S. Acc.), and logarithmic F0 root mean
+square error (F0 RMSE) as our metrics, consistent with the stan-
+dards in previous research [11, 16, 35, 36]. Given that the two
+SVS models employed have different output sampling rates, we
+resample all generated singing voices to 24kHz for the above
+metrics calculation to ensure a fair comparison. For direct SVS
+experiments, which support multi-singer synthesis, we intro-
+duce an additional objective metric, speaker embedding cosine
+similarity (SECS), using a pre-trained Rawnet3-based speaker
+embedding extractor [37] provided by ESPnet-SPK [38].
+In the subjective evaluation, we conduct a Mean Opinion
+Score (MOS) test to evaluate the perceptual quality of the syn-
+thesized voices. We randomly select 30 synthesized samples
+from each system for this test. These samples are then eval-
+uated by 30 listeners using a 5-point scale, where 1 indicates
+“unreasonable singing” and 5 signifies “natural singing compa-
+rable to human performance”. For all the experiments, we in-
+clude ground truth (G.T.) MOS for comparison. In Direct SVS,
+the G.T. from our corpora (ACE-Opencpop and ACE-KiSing) is
+labeled as G.T.#. Additionally, for reference, we provide MOS
+results for the source audios from the original Opencpop and
+KiSing databases.
+1882
+
+
+
+📁 Working directory: /root
+✅ Exit code: 0

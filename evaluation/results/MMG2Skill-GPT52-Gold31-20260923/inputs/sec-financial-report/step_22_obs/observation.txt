@@ -1,0 +1,53 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import pandas as pd
+from collections import defaultdict
+q2_acc='0000950123-25-008343'
+q3_acc='0001193125-25-282901'
+def load_values(path, acc):
+    vals=defaultdict(int)
+    for chunk in pd.read_csv(path, sep='\t', dtype={'ACCESSION_NUMBER':str,'CUSIP':str,'VALUE':str}, usecols=['ACCESSION_NUMBER','CUSIP','VALUE'], chunksize=1_000_000):
+        sub=chunk[chunk['ACCESSION_NUMBER']==acc]
+        if sub.empty:
+            continue
+        # VALUE numeric
+        for cusip, v in zip(sub['CUSIP'], sub['VALUE']):
+            if pd.isna(cusip) or pd.isna(v):
+                continue
+            try:
+                vals[cusip] += int(float(v))
+            except Exception:
+                pass
+    return vals
+q2_vals = load_values('/root/2025-q2/INFOTABLE.tsv', q2_acc)
+q3_vals = load_values('/root/2025-q3/INFOTABLE.tsv', q3_acc)
+# compute deltas for cusips present in either
+all_cusips=set(q2_vals)|set(q3_vals)
+deltas=[]
+for c in all_cusips:
+    d=q3_vals.get(c,0)-q2_vals.get(c,0)
+    if d>0:
+        deltas.append((d,c))
+deltas.sort(reverse=True)
+print('top10 increases:')
+for d,c in deltas[:10]:
+    print(c,d)
+print('top5', [c for d,c in deltas[:5]])
+PY
+top10 increases:
+02079K305 4338397121
+037833100 3208516097
+025816109 1998229026
+166764100 1476983982
+674599105 1388293099
+H1467J104 1011481714
+060505104 665479734
+531229722 172608221
+91324P102 167968668
+829933100 153615035
+top5 ['02079K305', '037833100', '025816109', '166764100', '674599105']
+
+
+📁 Working directory: /root
+✅ Exit code: 0

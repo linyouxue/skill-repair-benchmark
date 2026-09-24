@@ -1,0 +1,55 @@
+Tool: terminal
+Result:
+python -c "
+import numpy as np, glob, os, csv, obspy
+from obspy import UTCDateTime, Stream, Trace
+import seisbench.models as sbm
+# Load missing files
+picked = set()
+with open('/root/results.csv') as f:
+    r=csv.reader(f); next(r)
+    for row in r: picked.add(row[0])
+files = sorted(glob.glob('/root/data/*.npz'))
+missing = [f for f in files if os.path.basename(f) not in picked]
+print(f'Missing files: {len(missing)}')
+def make_stream(path):
+    d = np.load(path, allow_pickle=True)
+    data = d['data'].astype(np.float64) * 1e10
+    dt = float(d['dt'])
+    channels = str(d['channels']).split(',')
+    traces = []
+    for i, ch in enumerate(channels):
+        tr = Trace(data=np.ascontiguousarray(data[:,i]))
+        tr.stats.network=str(d['network']); tr.stats.station=str(d['station']); tr.stats.channel=ch; tr.stats.delta=dt
+        tr.stats.starttime = UTCDateTime(str(d['start_time']))
+        traces.append(tr)
+    st = Stream(traces)
+    st.detrend('demean').detrend('linear').taper(0.05)
+    st.filter('bandpass', freqmin=2.0, freqmax=min(20.0, 0.45/dt), corners=4, zerophase=True)
+    return st
+m = sbm.PhaseNet.from_pretrained('scedc')
+# Check first 5 missing files
+for path in missing[:5]:
+    st = make_stream(path)
+    ann = m.annotate(st)
+    p_tr = ann.select(channel='PhaseNet_P')[0]
+    s_tr = ann.select(channel='PhaseNet_S')[0]
+    # argmax within window [3000, 9000]
+    p_win = p_tr.data[3000:9000]
+    s_win = s_tr.data[3000:9000]
+    print(os.path.basename(path), 'P_max_in_win:', float(p_win.max()), '@idx', int(p_win.argmax())+3000, 
+          'S_max_in_win:', float(s_win.max()), '@idx', int(s_win.argmax())+3000) )
+"
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+Missing files: 35
+BG.DRK..DP.0351524.npz P_max_in_win: 0.09480678290128708 @idx 8379 S_max_in_win: 0.04431968182325363 @idx 3196
+NC.BAV..EH.0095557.npz P_max_in_win: 0.0028946101665496826 @idx 4170 S_max_in_win: 0.0012399641564115882 @idx 4108
+NC.BJO..EH.0170855.npz P_max_in_win: 0.0028946101665496826 @idx 4170 S_max_in_win: 0.0012399641564115882 @idx 4108
+NC.CHR..EH.0195970.npz P_max_in_win: 0.0028946101665496826 @idx 4170 S_max_in_win: 0.0012399641564115882 @idx 4108
+NC.CLCB..EH.0336071.npz P_max_in_win: 0.0028946101665496826 @idx 4170 S_max_in_win: 0.0012399641564115882 @idx 4108
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

@@ -1,0 +1,94 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /root/dub_multilingual.py:
+    80	        if not m:
+    81	            continue
+    82	        start_sec = parse_srt_time(m.group(1))
+    83	        end_sec = parse_srt_time(m.group(2))
+    84	        text = " ".join(lines[2:]).strip()
+    85	        segs.append(SrtSegment(start_sec=start_sec, end_sec=end_sec, text=text))
+    86	    return segs
+    87	
+    88	
+    89	def language_code_from_target_file(path: str) -> str:
+    90	    v = Path(path).read_text(encoding="utf-8").strip().lower()
+    91	    v = re.sub(r"\s+", " ", v)
+    92	    # Common fast-paths
+    93	    if re.fullmatch(r"[a-z]{2}(-[a-z]{2})?", v):
+    94	        return v.split("-")[0]
+    95	    mapping = {
+    96	        "japanese": "ja",
+    97	        "jp": "ja",
+    98	        "english": "en",
+    99	        "korean": "ko",
+   100	        "chinese": "zh",
+   101	        "french": "fr",
+   102	        "german": "de",
+   103	        "spanish": "es",
+   104	        "portuguese": "pt",
+   105	        "italian": "it",
+   106	        "russian": "ru",
+   107	    }
+   108	    return mapping.get(v, v[:2] if len(v) >= 2 else v)
+   109	
+   110	
+   111	def choose_edge_voice(lang_code: str) -> str:
+   112	    # Keep it deterministic with a small mapping.
+   113	    voices = {
+   114	        "ja": "ja-JP-NanamiNeural",
+   115	        "en": "en-US-JennyNeural",
+   116	        "fr": "fr-FR-DeniseNeural",
+   117	        "de": "de-DE-KatjaNeural",
+   118	        "es": "es-ES-ElviraNeural",
+   119	        "it": "it-IT-ElsaNeural",
+   120	        "pt": "pt-BR-FranciscaNeural",
+   121	        "ko": "ko-KR-SunHiNeural",
+   122	        "zh": "zh-CN-XiaoxiaoNeural",
+   123	        "ru": "ru-RU-SvetlanaNeural",
+   124	    }
+   125	    return voices.get(lang_code, "en-US-JennyNeural")
+   126	
+   127	
+   128	async def edge_tts_to_mp3(text: str, voice: str, out_mp3: str) -> None:
+   129	    communicate = edge_tts.Communicate(text=text, voice=voice)
+   130	    await communicate.save(out_mp3)
+   131	
+   132	
+   133	def build_atempo_chain(tempo: float) -> Optional[str]:
+   134	    # atempo supports 0.5..2.0 per filter; chain if needed.
+   135	    if tempo <= 0:
+   136	        return None
+   137	    parts: List[float] = []
+   138	    t = tempo
+   139	    while t > 2.0:
+   140	        parts.append(2.0)
+   141	        t /= 2.0
+   142	    while t < 0.5:
+   143	        parts.append(0.5)
+   144	        t /= 0.5
+   145	    parts.append(t)
+   146	    return ",".join([f"atempo={p:.8f}" for p in parts])
+   147	
+   148	
+   149	def loudnorm_measure_json(in_wav: str) -> dict:
+   150	    cmd = [
+   151	        "ffmpeg",
+   152	        "-hide_banner",
+   153	        "-y",
+   154	        "-i",
+   155	        in_wav,
+   156	        "-af",
+   157	        "loudnorm=I=-23:TP=-1.5:LRA=11:print_format=json:measure_only=1",
+   158	        "-f",
+   159	        "null",
+   160	        "-",
+   161	    ]
+   162	    p = subprocess.run(cmd, text=True, capture_output=True)
+   163	    if p.returncode != 0:
+   164	        raise RuntimeError(p.stderr)
+   165	
+   166	    m = re.search(r"\{\s*\"input_i\".*?\}\s*", p.stderr, flags=re.DOTALL)
+   167	    if not m:
+   168	        raise RuntimeError("Could not parse loudnorm JSON")
+   169	    return json.loads(m.group(0))
+   170	

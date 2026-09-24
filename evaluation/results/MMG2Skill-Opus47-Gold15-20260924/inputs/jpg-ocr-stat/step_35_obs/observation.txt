@@ -1,0 +1,83 @@
+Tool: file_editor
+Result:
+[File /app/workspace/extract.py edited with 2 changes.]
+[begin of edit 1 / 2]
+(content before edit)
+ 168|
+ 169|
+-170|def pick_best_total(candidates):
+-171|    """Pick best (tier_idx, value) across OCR variants.
+-172|
+-173|    Preference:
+-174|      1. Highest priority (smallest tier_idx).
+-175|      2. Among the tier winners, the value appearing in the most variants.
+-176|      3. Break ties by the ordering (earliest occurrence wins).
+ 177|    """
+-178|    candidates = [c for c in candidates if c[1] is not None]
+-179|    if not candidates:
+-180|        return None
+-181|    best_tier = min(c[0] for c in candidates)
+-182|    tier_vals = [c[1] for c in candidates if c[0] == best_tier]
+ 183|    counts = {}
+ 184|    for v in tier_vals:
+ 185|        counts[v] = counts.get(v, 0) + 1
+-186|    # Pick value with highest count; on tie, first occurrence in tier_vals wins.
+-187|    best_val = max(tier_vals, key=lambda v: (counts[v], -tier_vals.index(v)))
+-188|    return best_val
+ 189|
+ 190|
+ 191|def pick_best_date(dates):
+-192|    """Return the first non-null date, preferring dates that appear in >=2 variants."""
+ 193|    dates = [d for d in dates if d is not None]
+ 194|    if not dates:
+(content after edit)
+ 168|
+ 169|
++170|def pick_best_total(all_candidates_per_variant):
++171|    """Pick the best total value given candidate lists from multiple OCR variants.
++172|
++173|    Strategy:
++174|      1. Determine the best (lowest-index) tier that has any candidate anywhere.
++175|      2. Collect all values matched at that tier across all variants.
++176|      3. Return the value with the highest occurrence count (with earlier-preference tiebreak).
+ 177|    """
++178|    all_pairs = [pair for variant_cands in all_candidates_per_variant for pair in variant_cands]
++179|    if not all_pairs:
++180|        return None
++181|    best_tier = min(t for t, _ in all_pairs)
++182|    tier_vals = [v for t, v in all_pairs if t == best_tier]
+ 183|    counts = {}
+ 184|    for v in tier_vals:
+ 185|        counts[v] = counts.get(v, 0) + 1
++186|    return max(tier_vals, key=lambda v: (counts[v], -tier_vals.index(v)))
+ 187|
+ 188|
+ 189|def pick_best_date(dates):
+ 190|    dates = [d for d in dates if d is not None]
+ 191|    if not dates:
+[end of edit 1 / 2]
+-------------------------
+[begin of edit 2 / 2]
+(content before edit)
+ 201|
+ 202|def process_image(path: Path):
+-203|    totals = []
+ 204|    dates = []
+ 205|    for text in ocr_variants(path):
+-206|        totals.append(extract_total_with_tier(text))
+ 207|        dates.append(extract_date(text))
+-208|    total = pick_best_total(totals)
+ 209|    date = pick_best_date(dates)
+ 210|    total_str = f"{total:.2f}" if total is not None else None
+(content after edit)
+ 198|
+ 199|def process_image(path: Path):
++200|    all_cands = []
+ 201|    dates = []
+ 202|    for text in ocr_variants(path):
++203|        all_cands.append(extract_total_candidates(text))
+ 204|        dates.append(extract_date(text))
++205|    total = pick_best_total(all_cands)
+ 206|    date = pick_best_date(dates)
+ 207|    total_str = f"{total:.2f}" if total is not None else None
+[end of edit 2 / 2]

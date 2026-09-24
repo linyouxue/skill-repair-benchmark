@@ -1,0 +1,60 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+fn=sorted(glob.glob('/root/data/*.npz'))[0]
+z=np.load(fn, allow_pickle=True)
+data=z['data']; dt=float(z['dt']); sr=1/dt
+channels=str(z['channels']).split(',')
+start=str(z.get('start_time','1970-01-01T00:00:00.0Z'))
+stime=UTCDateTime(start)
+st=Stream()
+for i,ch in enumerate(channels):
+    tr=Trace(data=data[:,i].astype('float32'))
+    tr.stats.network=str(z.get('network','XX'))
+    tr.stats.station=str(z.get('station','STA'))
+    tr.stats.location=str(z.get('location_code',''))
+    tr.stats.channel=ch
+    tr.stats.starttime=stime
+    tr.stats.sampling_rate=sr
+    st+=tr
+model=sbm.PhaseNet.from_pretrained('original')
+out=model.classify(st)
+print('type',type(out))
+print('dir', [a for a in dir(out) if not a.startswith('_')])
+# try common accessors
+for attr in ['picks','detections','phases','items','to_dataframe','__iter__']:
+    if hasattr(out, attr):
+        print('has',attr)
+# attempt iterate
+try:
+    it=list(out)
+    print('iter len',len(it),'first',it[:2])
+except Exception as e:
+    print('cannot iterate',e)
+# maybe dict-like
+try:
+    print('keys',out.keys())
+except Exception as e:
+    print('no keys',e)
+# print repr
+print('repr',out)
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+type <class 'seisbench.util.annotations.ClassifyOutput'>
+dir ['creator', 'picks']
+has picks
+has __iter__
+cannot iterate This method is not implemented. Most likely you are trying to use an old interface to access the list of picks. To access the list of picks, just use `classify_output.picks` instead.
+no keys 'ClassifyOutput' object has no attribute 'keys'
+repr ClassifyOutput(creator='PhaseNet', picks=PickList with 0 entries:
+
+)
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

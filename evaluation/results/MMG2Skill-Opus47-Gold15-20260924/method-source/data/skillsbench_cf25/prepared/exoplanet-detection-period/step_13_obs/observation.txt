@@ -1,0 +1,61 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+from astropy.timeseries import BoxLeastSquares
+import astropy.units as u
+path='/root/data/tess_lc.txt'
+t, f, q, fe = np.genfromtxt(path).T
+m=(q==0)
+t,f,fe=t[m],f[m],fe[m]
+idx=np.argsort(t)
+t,f,fe=t[idx],f[idx],fe[idx]
+wl=2001
+lc=lk.LightCurve(time=t, flux=f, flux_err=fe).remove_outliers(sigma=10)
+lc_flat=lc.flatten(window_length=wl, polyorder=2, break_tolerance=5).remove_outliers(sigma=6)
+t_rel=(lc_flat.time.value - lc_flat.time.value.min())*u.day
+flux=lc_flat.flux.value
+err=lc_flat.flux_err.value
+bls=BoxLeastSquares(t_rel, flux, dy=err)
+durations=np.linspace(0.05,0.45,20)*u.day
+pg=bls.autopower(durations, minimum_period=0.5*u.day, maximum_period=15*u.day, objective='snr')
+ix=int(np.argmax(pg.power))
+P=float(pg.period[ix].to_value(u.day))
+D=float(pg.duration[ix].to_value(u.day))
+T0=float(pg.transit_time[ix].to_value(u.day))
+def val(x):
+    if isinstance(x, tuple):
+        return float(x[0]), float(x[1])
+    return float(x), None
+stats=bls.compute_stats(P*u.day, D*u.day, T0*u.day)
+dep,dep_err=val(stats['depth'])
+odd,_=val(stats['depth_odd'])
+even,_=val(stats['depth_even'])
+print('P',P,'D',D,'ntrans',len(stats['transit_times']),'depth_snr',stats.get('depth_snr'))
+print('depth',dep,'odd-even frac', (odd-even)/dep)
+# Double-period fit: search a tight grid around 2P
+P2_center=2*P
+per_grid=np.linspace(P2_center*0.995, P2_center*1.005, 20000)*u.day
+pg2=bls.power(per_grid, durations, objective='snr')
+ix2=int(np.argmax(pg2.power))
+P2=float(pg2.period[ix2].to_value(u.day))
+D2=float(pg2.duration[ix2].to_value(u.day))
+T02=float(pg2.transit_time[ix2].to_value(u.day))
+stats2=bls.compute_stats(P2*u.day, D2*u.day, T02*u.day)
+dep2,_=val(stats2['depth'])
+odd2,_=val(stats2['depth_odd'])
+even2,_=val(stats2['depth_even'])
+print('\n2P best',P2,'D',D2,'ntrans',len(stats2['transit_times']),'depth_snr',stats2.get('depth_snr'))
+print('depth',dep2,'odd-even frac', (odd2-even2)/dep2)
+PY
+P 1.3982309087784257 D 0.45 ntrans 18 depth_snr None
+depth 0.006540139859011362 odd-even frac 0.1267502028002455
+
+2P best 2.79879348418057 D 0.45 ntrans 9 depth_snr None
+depth 0.005814804840734156 odd-even frac -0.003835006516720152
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

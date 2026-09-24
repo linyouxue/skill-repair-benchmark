@@ -1,0 +1,26 @@
+Repository: /home/github/build/failed/AgentOps-AI/agentops
+
+Observed failure (reproduced with a clean local venv):
+- `pytest` fails during test collection with:
+  - `ModuleNotFoundError: No module named 'langchain_core'`
+  - Traceback shows `import agentops` -> `agentops/__init__.py` unconditionally imports
+    `LangchainCallbackHandler` from `agentops/langchain_callback_handler.py`, which requires
+    `langchain_core` and `langchain`.
+
+Why this breaks the build:
+- LangChain support is declared as an optional dependency (`[project.optional-dependencies].langchain`),
+  but importing the base `agentops` package currently *requires* langchain packages.
+- The test suite imports `agentops` without installing the optional extras, so tests fail at import time.
+
+Root cause classification:
+- Code issue (import-time optional dependency). Not a build configuration issue.
+
+Plan to fix:
+1) Make LangChain integration an optional import in `agentops/__init__.py`:
+   - Wrap the `langchain_callback_handler` import in `try/except ImportError`.
+   - Provide stub `LangchainCallbackHandler` / `AsyncLangchainCallbackHandler` that raise a clear
+     error on instantiation, telling users to install `agentops[langchain]`.
+2) Remove circular/self-imports inside `agentops/langchain_callback_handler.py`:
+   - Replace `from agentops import ...` with relative imports (`from .client import Client`,
+     `from .event import ...`, `from .helpers import get_ISO_time`).
+3) Re-run `pytest` to confirm all tests pass without optional langchain deps.

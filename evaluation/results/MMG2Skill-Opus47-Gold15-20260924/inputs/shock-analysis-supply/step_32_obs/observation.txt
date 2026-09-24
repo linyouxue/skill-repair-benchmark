@@ -1,0 +1,323 @@
+Tool: file_editor
+Result:
+[File /root/build.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|"""
++2|Populate test-supply.xlsx with:
++3|- PWT data (rnna capital stock for Georgia, 1990-2019 from PWT 10.01, extrapolated to 2020-2023)
++4|- WEO real GDP + growth 2000-2027 from IMF WEO; extended growth to 2043
++5|- ECB CFC data 1996-2023 for Georgia (nominal GEL, expressed in millions)
++6|- Production sheet formulas (K, Y, LnK, LnY, HP filter setup, full projection table)
++7|
++8|All CALCULATIONS use Excel formulas; only data values are hardcoded.
++9|"""
++10|from openpyxl import load_workbook
++11|from openpyxl.utils import get_column_letter
++12|
++13|PATH = "/root/test-supply.xlsx"
++14|wb = load_workbook(PATH)
++15|
++16|# -------------------------------------------------------------
++17|# 1) PWT sheet: rnna (Capital Stock, mil 2017 US$) for Georgia
++18|# -------------------------------------------------------------
++19|ws = wb["PWT"]
++20|
++21|# PWT 10.01 rnna values for Georgia (1990-2019)
++22|pwt_rnna = {
++23|    1990: 217572.265625, 1991: 219328.421875, 1992: 215882.453125,
++24|    1993: 207684.890625, 1994: 202188.812500, 1995: 198953.859375,
++25|    1996: 196366.453125, 1997: 194417.843750, 1998: 194516.296875,
++26|    1999: 194964.562500, 2000: 195327.078125, 2001: 196512.453125,
++27|    2002: 197317.593750, 2003: 199678.921875, 2004: 202658.812500,
++28|    2005: 206400.500000, 2006: 209660.250000, 2007: 213821.375000,
++29|    2008: 215825.906250, 2009: 214505.906250, 2010: 215740.281250,
++30|    2011: 218333.703125, 2012: 221570.093750, 2013: 223431.875000,
++31|    2014: 227911.968750, 2015: 234164.859375, 2016: 241138.375000,
++32|    2017: 248033.093750, 2018: 254809.796875, 2019: 264125.562500,
++33|}
++34|
++35|# Add column C header for a companion PWT variable: use PWT delta (avg depreciation rate)
++36|# Delta values for Georgia from PWT 10.01 (average depreciation rate of capital stock)
++37|# These values are also in PWT database
++38|pwt_delta = {
++39|    1990: 0.03687534, 1991: 0.03683197, 1992: 0.03668823, 1993: 0.03656033,
++40|    1994: 0.03644988, 1995: 0.03634877, 1996: 0.03635272, 1997: 0.03631127,
++41|    1998: 0.03631018, 1999: 0.03636040, 2000: 0.03643305, 2001: 0.03649920,
++42|    2002: 0.03653836, 2003: 0.03668081, 2004: 0.03680791, 2005: 0.03692063,
++43|    2006: 0.03716842, 2007: 0.03746420, 2008: 0.03784236, 2009: 0.03812862,
++44|    2010: 0.03832617, 2011: 0.03859257, 2012: 0.03871814, 2013: 0.03889691,
++45|    2014: 0.03921521, 2015: 0.03960841, 2016: 0.03996960, 2017: 0.04024869,
++46|    2018: 0.04037795, 2019: 0.04053107,
++47|}
++48|
++49|ws["C1"] = "delta"
++50|# Fill B (rnna) and C (delta) for rows 2..31 (years 1990..2019)
++51|for i, year in enumerate(range(1990, 2020)):
++52|    row = 2 + i
++53|    ws.cell(row=row, column=2).value = pwt_rnna[year]
++54|    ws.cell(row=row, column=3).value = pwt_delta[year]
++55|
++56|# For years 2020-2023 (rows 32-35), extrapolate rnna using average growth of last 5 years
++57|# and hold delta at last available (2019) value
++58|# Row indices: 2020=row32, 2021=row33, 2022=row34, 2023=row35
++59|# 2019=row31, 2014=row26
++60|# Growth factor = (B31/B26)^(1/5)
++61|for row in [32, 33, 34, 35]:
++62|    ws.cell(row=row, column=2).value = f"=B{row-1}*($B$31/$B$26)^(1/5)"
++63|    ws.cell(row=row, column=3).value = "=$C$31"
++64|
++65|# -------------------------------------------------------------
++66|# 2) WEO_Data: fix duplication issue then fill data
++67|# -------------------------------------------------------------
++68|# Delete the massive tail; keep only the first block (rows 1..51)
++69|ws_weo = wb["WEO_Data"]
++70|# We'll rewrite it from scratch by removing then recreating
++71|del wb["WEO_Data"]
++72|ws_weo = wb.create_sheet("WEO_Data")
++73|# Move to the correct position (after PWT). Doesn't strictly matter, but let's move to end.
++74|
++75|# Header rows (metadata) rebuild - copy structure from what we saw
++76|weo_header = [
++77|    ("WEO Country Code", 915, 915),
++78|    ("WEO Subject Code", "NGDP_R", "NGDP_RPCH"),
++79|    ("Country", "Georgia", "Georgia"),
++80|    ("Subject Descriptor", "Gross domestic product, constant prices", "Gross domestic product, constant prices"),
++81|    ("Units", "National currency", "Percent change"),
++82|    ("Scale", "Billions", "Units"),
++83|    ("Country/Series-specific Notes",
++84|     "Source: National Statistics Office. Historical data from 2010 revised in February 2024 Latest actual data: 2024 Notes: Data prior to 1996 cannot be confirmed by national sources. Data prior to 2010 are based on staff estimates. National accounts manual used: System of National Accounts (SNA) 2008 GDP valuation: Market prices Reporting in calendar year: Yes Start/end months of reporting year: January/December Base year: 2019 Chain-weighted: Yes, from 1996 Primary domestic currency: Georgian lari Data last updated: 04/09/2025",
++85|     "See notes for:  Gross domestic product, constant prices (National currency)."),
++86|]
++87|for i, (a, b, c) in enumerate(weo_header, start=1):
++88|    ws_weo.cell(row=i, column=2).value = a
++89|    ws_weo.cell(row=i, column=3).value = b
++90|    ws_weo.cell(row=i, column=4).value = c
++91|
++92|# Actual WEO data for Georgia, from IMF WEO Oct 2025 release (rows 8..35 → 2000..2027)
++93|weo_gdp = {
++94|    2000: 16.963, 2001: 17.772, 2002: 18.747, 2003: 20.852, 2004: 22.061,
++95|    2005: 24.176, 2006: 26.454, 2007: 29.781, 2008: 30.502, 2009: 29.388,
++96|    2010: 31.428, 2011: 33.927, 2012: 36.159, 2013: 38.015, 2014: 39.570,
++97|    2015: 40.896, 2016: 42.307, 2017: 44.490, 2018: 47.187, 2019: 49.726,
++98|    2020: 46.598, 2021: 51.558, 2022: 57.208, 2023: 61.689, 2024: 67.505,
++99|    2025: 71.540, 2026: 75.117, 2027: 78.873,
++100|}
++101|weo_growth = {
++102|    2000: 1.865, 2001: 4.769, 2002: 5.487, 2003: 11.228, 2004: 5.796,
++103|    2005: 9.588, 2006: 9.420, 2007: 12.579, 2008: 2.419, 2009: -3.651,
++104|    2010: 6.942, 2011: 7.949, 2012: 6.579, 2013: 5.134, 2014: 4.091,
++105|    2015: 3.351, 2016: 3.450, 2017: 5.161, 2018: 6.062, 2019: 5.380,
++106|    2020: -6.291, 2021: 10.644, 2022: 10.960, 2023: 7.832, 2024: 9.429,
++107|    2025: 5.977, 2026: 5.000, 2027: 5.000,
++108|}
++109|
++110|# Rows 8..35 = years 2000..2027 (actual/forecast data from WEO)
++111|for i, year in enumerate(range(2000, 2028)):
++112|    row = 8 + i
++113|    ws_weo.cell(row=row, column=2).value = year
++114|    ws_weo.cell(row=row, column=3).value = weo_gdp[year]
++115|    ws_weo.cell(row=row, column=4).value = weo_growth[year]
++116|
++117|# Rows 36..51 = years 2028..2043: growth held at 2027 value (5%), GDP compounded via formula
++118|# Row 35 = 2027. Row 36 = 2028.
++119|for i, year in enumerate(range(2028, 2044)):
++120|    row = 36 + i
++121|    ws_weo.cell(row=row, column=2).value = year
++122|    # Growth: formula referencing prior year's growth (which is 2027 = D35 = 5.000)
++123|    ws_weo.cell(row=row, column=4).value = f"=D{row-1}"
++124|    # GDP: previous GDP * (1 + growth/100)
++125|    ws_weo.cell(row=row, column=3).value = f"=C{row-1}*(1+D{row}/100)"
++126|
++127|# Estimates start marker
++128|ws_weo.cell(row=52, column=2).value = "Estimates Start After"
++129|ws_weo.cell(row=52, column=3).value = 2024
++130|ws_weo.cell(row=52, column=4).value = 2024
++131|
++132|# -------------------------------------------------------------
++133|# 3) CFC data sheet
++134|# -------------------------------------------------------------
++135|ws_cfc = wb["CFC data"]
++136|# ECB CFC values in nominal GEL (raw), expressed in millions of GEL for readability
++137|cfc_gel_raw = {
++138|    1996: 304515091.7602, 1997: 383641663.608596, 1998: 516397121.222809,
++139|    1999: 661603834.429231, 2000: 631701000.88782, 2001: 706983726.789065,
++140|    2002: 790112565.198609, 2003: 932916219.671159, 2004: 976818537.799271,
++141|    2005: 1113450058.59263, 2006: 1306373084.13224, 2007: 1617029966.25711,
++142|    2008: 1758049267.6717, 2009: 1751366684.88131, 2010: 2046413234.66733,
++143|    2011: 2350512405.90543, 2012: 2643602887.96874, 2013: 1555932152.31816,
++144|    2014: 2984890468.6878, 2015: 3657280672.54249, 2016: 4004828719.85304,
++145|    2017: 4492921334.90825, 2018: 4843616440.28627, 2019: 5452957379.35004,
++146|    2020: 6152769261.61805, 2021: 7072625348.89823, 2022: 7661448474.88107,
++147|    2023: 9410657843.71035,
++148|}
++149|# Rows 2..29 = years 1996..2023
++150|# Column C = CFC (expressed in millions of GEL to align with PWT's mil-USD scale numerically)
++151|# Column D = link to PWT rnna
++152|# Column E = C/D (depreciation rate proxy)
++153|for i, year in enumerate(range(1996, 2024)):
++154|    row = 2 + i
++155|    # Express CFC in millions of GEL (divide raw GEL by 1e6)
++156|    ws_cfc.cell(row=row, column=3).value = cfc_gel_raw[year] / 1e6
++157|    # PWT sheet: A2=1990 → year (1996) is at PWT row 2+(year-1990)=8
++158|    pwt_row = 2 + (year - 1990)
++159|    ws_cfc.cell(row=row, column=4).value = f"=PWT!B{pwt_row}"
++160|    # Depreciation rate = C / D
++161|    ws_cfc.cell(row=row, column=5).value = f"=C{row}/D{row}"
++162|
++163|# -------------------------------------------------------------
++164|# 4) Production sheet
++165|# -------------------------------------------------------------
++166|ws_p = wb["Production"]
++167|
++168|# B3: annual depreciation rate = avg of most recent 8 years (2016-2023) from CFC!E
++169|# CFC rows for 2016..2023: 2+(2016-1996)=22 .. 29
++170|ws_p["B3"] = "=AVERAGE('CFC data'!E22:E29)"
++171|
++172|# HP Filter area: D6:D27 = K (2002..2023), E6:E27 = Real GDP (2002..2023)
++173|# Years 2002..2023 → rows 6..27 (22 rows)
++174|# K comes from PWT: 2002 = PWT row 2+(2002-1990)=14; 2023 = row 35
++175|# Y comes from WEO_Data: 2002 = row 8+(2002-2000)=10; 2023 = row 31
++176|for i, year in enumerate(range(2002, 2024)):
++177|    row = 6 + i
++178|    pwt_row = 2 + (year - 1990)   # 14..35
++179|    weo_row = 8 + (year - 2000)   # 10..31
++180|    ws_p.cell(row=row, column=4).value = f"=PWT!B{pwt_row}"
++181|    ws_p.cell(row=row, column=5).value = f"=WEO_Data!C{weo_row}"
++182|    # LnK, LnY
++183|    ws_p.cell(row=row, column=6).value = f"=LN(D{row})"
++184|    ws_p.cell(row=row, column=7).value = f"=LN(E{row})"
++185|
++186|# HP Filter columns
++187|# K5: LnZ; L5: LnZ_HP; M5: Second-order difference; N5: LnA-Trend (Check); O5: objective
++188|# LnZ = LnY - alpha * LnK
++189|# LnZ_HP starts as duplicate of LnZ (place holder), solver will change it
++190|# Second-order diff at row r: LnZ_HP[r-1] - 2*LnZ_HP[r] + LnZ_HP[r+1], only for rows 7..26 (inner 20 rows)
++191|# N: LnA-Trend (Check) = LnZ - LnZ_HP  (residual/cyclical component)
++192|# Objective (at P5 per task hint): SUMSQ(LnA-Trend) + lambda * SUMSQ(Second-diff)
++193|LAMBDA = 100  # standard HP lambda for annual data
++194|
++195|for i in range(22):
++196|    row = 6 + i
++197|    # LnZ = LnY - alpha*LnK
++198|    ws_p.cell(row=row, column=11).value = f"=G{row}-$B$2*F{row}"
++199|    # LnZ_HP place-holder = LnZ initially
++200|    ws_p.cell(row=row, column=12).value = f"=K{row}"
++201|    # LnA-Trend (residual)
++202|    ws_p.cell(row=row, column=14).value = f"=K{row}-L{row}"
++203|
++204|# Second-order difference: only defined for rows 7..26 (interior)
++205|for i in range(1, 21):
++206|    row = 6 + i
++207|    ws_p.cell(row=row, column=13).value = f"=L{row-1}-2*L{row}+L{row+1}"
++208|
++209|# Objective at P5: sum-sq of residuals + lambda * sum-sq of 2nd differences
++210|ws_p["O5"] = "objective"
++211|ws_p["P5"] = f"=SUMSQ(N6:N27)+{LAMBDA}*SUMSQ(M7:M26)"
++212|
++213|# -------------------------------------------------------------
++214|# Second table (row 35+): Production function projection
++215|# -------------------------------------------------------------
++216|# Columns: C=year, D=K/Y, E=K, F=Y, G=LnZ trend, H=Ystar_base, I=Investment,
++217|#          J=ΔK, K=K_With, L=Ystar_with, M=Uplift, N=Projected GDP,
++218|#          O=Projected GDP Growth, P=Baseline GDP Growth
++219|# Rows: 36..75 = years 2002..2041
++220|
++221|# Y: link to WEO_Data (available 2002..2043, i.e., rows 10..51). Years 2002..2041 are all present.
++222|# K historical: 2002..2023 → link to PWT B14..B35 (extrapolated to 2023)
++223|# K extended: 2024..2041, use K/Y anchor * Y
++224|# K/Y historical: 2002..2023 → E/F
++225|# K/Y anchor: avg of most recent 9 years (2015..2023) → rows 49..57
++226|
++227|for i, year in enumerate(range(2002, 2042)):
++228|    row = 36 + i
++229|    weo_row = 8 + (year - 2000)  # 10..49
++230|
++231|    # F: Y
++232|    ws_p.cell(row=row, column=6).value = f"=WEO_Data!C{weo_row}"
++233|
++234|    if year <= 2023:
++235|        # E: K from PWT
++236|        pwt_row = 2 + (year - 1990)  # 14..35
++237|        ws_p.cell(row=row, column=5).value = f"=PWT!B{pwt_row}"
++238|        # D: K/Y = E/F
++239|        ws_p.cell(row=row, column=4).value = f"=E{row}/F{row}"
++240|    else:
++241|        # D: K/Y anchor = avg of most recent 9 years (2015..2023 = rows 49..57)
++242|        ws_p.cell(row=row, column=4).value = "=AVERAGE($D$49:$D$57)"
++243|        # E: K = D * F
++244|        ws_p.cell(row=row, column=5).value = f"=D{row}*F{row}"
++245|
++246|# G: LnZ trend
++247|# Rows 36..57 (2002..2023): link to HP-filtered LnZ_HP in L6:L27
++248|for i in range(22):
++249|    row = 36 + i
++250|    ws_p.cell(row=row, column=7).value = f"=L{6+i}"
++251|# Rows 58..75 (2024..2041): extend via TREND function using historical G36:G57 vs C36:C57
++252|# TREND(known_ys, known_xs, new_xs)
++253|for i, year in enumerate(range(2024, 2042)):
++254|    row = 58 + i
++255|    ws_p.cell(row=row, column=7).value = f"=TREND($G$36:$G$57,$C$36:$C$57,C{row})"
++256|
++257|# H: Ystar_base = exp(LnZ_trend) * K^alpha = exp(LnZ_trend + alpha*LnK)
++258|# Simpler: EXP(G) * E^alpha
++259|for i in range(40):
++260|    row = 36 + i
++261|    ws_p.cell(row=row, column=8).value = f"=EXP(G{row})*E{row}^$B$2"
++262|
++263|# I: Investment (from Investment sheet, only 2026..2033)
++264|# Investment sheet: B2=2026 (row2) .. B9=2033 (row9)
++265|# Fill I36..I75, only 2026..2033 have values
++266|for i, year in enumerate(range(2002, 2042)):
++267|    row = 36 + i
++268|    if 2026 <= year <= 2033:
++269|        inv_row = 2 + (year - 2026)  # 2..9
++270|        ws_p.cell(row=row, column=9).value = f"=Investment!C{inv_row}"
++271|    else:
++272|        ws_p.cell(row=row, column=9).value = 0
++273|
++274|# J: ΔK (change in capital from project relative to baseline)
++275|# ΔK_t = ΔK_{t-1} * (1 - delta) + I_t
++276|# For 2002 (row 36), initialize ΔK = 0 (no prior effect)
++277|ws_p.cell(row=36, column=10).value = 0
++278|for i in range(1, 40):
++279|    row = 36 + i
++280|    ws_p.cell(row=row, column=10).value = f"=J{row-1}*(1-$B$3)+I{row}"
++281|
++282|# K: K_With = K_base + ΔK
++283|for i in range(40):
++284|    row = 36 + i
++285|    ws_p.cell(row=row, column=11).value = f"=E{row}+J{row}"
++286|
++287|# L: Ystar_with = exp(LnZ_trend) * K_With^alpha
++288|for i in range(40):
++289|    row = 36 + i
++290|    ws_p.cell(row=row, column=12).value = f"=EXP(G{row})*K{row}^$B$2"
++291|
++292|# M: Uplift = L / H - 1
++293|for i in range(40):
++294|    row = 36 + i
++295|    ws_p.cell(row=row, column=13).value = f"=L{row}/H{row}-1"
++296|
++297|# N: Projected GDP with shock = baseline Y * (1 + Uplift)
++298|for i in range(40):
++299|    row = 36 + i
++300|    ws_p.cell(row=row, column=14).value = f"=F{row}*(1+M{row})"
++301|
++302|# O: Projected GDP growth (of N)
++303|# 2002 has no previous year, leave blank; from 2003 onward: N_t/N_{t-1} - 1
++304|for i in range(1, 40):
++305|    row = 36 + i
++306|    ws_p.cell(row=row, column=15).value = f"=N{row}/N{row-1}-1"
++307|
++308|# P: Baseline GDP growth (of F, the baseline WEO Y)
++309|for i in range(1, 40):
++310|    row = 36 + i
++311|    ws_p.cell(row=row, column=16).value = f"=F{row}/F{row-1}-1"
++312|
++313|wb.save(PATH)
++314|print("Saved:", PATH)
++315|
+[end of edit 1 / 1]

@@ -1,0 +1,216 @@
+Tool: file_editor
+Result:
+[File /app/workspace/src/main/java/clusterdata/query/LongestSessionPerJob.java.new edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|package clusterdata.query;
++2|
++3|import clusterdata.datatypes.JobEvent;
++4|import clusterdata.datatypes.TaskEvent;
++5|import clusterdata.utils.AppBase;
++6|import clusterdata.utils.FileLineSink;
++7|import clusterdata.utils.GzipCsvSources;
++8|import org.apache.flink.api.common.eventtime.WatermarkStrategy;
++9|import org.apache.flink.api.common.functions.MapFunction;
++10|import org.apache.flink.api.common.state.ValueState;
++11|import org.apache.flink.api.common.state.ValueStateDescriptor;
++12|import org.apache.flink.api.java.functions.KeySelector;
++13|import org.apache.flink.api.java.tuple.Tuple2;
++14|import org.apache.flink.api.java.utils.ParameterTool;
++15|import org.apache.flink.configuration.Configuration;
++16|import org.apache.flink.streaming.api.datastream.DataStream;
++17|import org.apache.flink.streaming.api.datastream.KeyedStream;
++18|import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
++19|import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
++20|import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
++21|import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows;
++22|import org.apache.flink.streaming.api.windowing.time.Time;
++23|import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
++24|import org.apache.flink.util.Collector;
++25|
++26|import java.time.Duration;
++27|
++28|public class LongestSessionPerJob extends AppBase {
++29|
++30|    public static void main(String[] args) throws Exception {
++31|
++32|        ParameterTool params = ParameterTool.fromArgs(args);
++33|        String taskInput = params.get("task_input", null);
++34|        String jobInput = params.get("job_input", null);
++35|        String outputPath = params.get("output", null);
++36|        System.out.println("task_input  " + taskInput);
++37|        System.out.println("job_input  " + jobInput);
++38|        System.out.println("output  " + outputPath);
++39|        // Session inactivity gap in seconds; default 600s = 10 minutes.
++40|        final int sesssize = params.getInt("sesssize", 600);
++41|
++42|        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
++43|        env.setParallelism(1);
++44|
++45|        // --- Sources -------------------------------------------------------
++46|        DataStream<TaskEvent> taskEvents = env
++47|                .addSource(taskSourceOrTest(new GzipCsvSources.TaskSource(taskInput)))
++48|                .returns(TaskEvent.class)
++49|                .name("task-events");
++50|
++51|        DataStream<JobEvent> jobEvents = env
++52|                .addSource(jobSourceOrTest(new GzipCsvSources.JobSource(jobInput)))
++53|                .returns(JobEvent.class)
++54|                .name("job-events");
++55|
++56|        // --- Session windows over SUBMIT task events -----------------------
++57|        // Only SUBMIT events (event type 0) demarcate stages.
++58|        DataStream<TaskEvent> submits = taskEvents
++59|                .filter(e -> e.getEventType() == TaskEvent.SUBMIT)
++60|                .assignTimestampsAndWatermarks(
++61|                        WatermarkStrategy.<TaskEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
++62|                                .withTimestampAssigner((e, ts) -> e.getTimestampMillis()));
++63|
++64|        DataStream<Tuple2<Long, Integer>> sessionCounts = submits
++65|                .keyBy((KeySelector<TaskEvent, Long>) TaskEvent::getJobId)
++66|                .window(EventTimeSessionWindows.withGap(Time.seconds(sesssize)))
++67|                .process(new CountSubmitsPerSession())
++68|                .name("session-count");
++69|
++70|        // Reduce to the max session size per job.
++71|        DataStream<Tuple2<Long, Integer>> perJobMax = sessionCounts
++72|                .keyBy(t -> t.f0)
++73|                .maxBy(1)
++74|                .name("per-job-max");
++75|
++76|        // --- Terminal job events (jobs that have finished) -----------------
++77|        DataStream<Long> finishedJobIds = jobEvents
++78|                .filter(e -> {
++79|                    int t = e.getEventType();
++80|                    return t == JobEvent.FINISH || t == JobEvent.FAIL
++81|                            || t == JobEvent.KILL || t == JobEvent.LOST;
++82|                })
++83|                .assignTimestampsAndWatermarks(
++84|                        WatermarkStrategy.<JobEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
++85|                                .withTimestampAssigner((e, ts) -> e.getTimestampMillis()))
++86|                .map((MapFunction<JobEvent, Long>) JobEvent::getJobId)
++87|                .returns(Long.class);
++88|
++89|        // Connect both streams keyed by jobId and emit final tuple once we
++90|        // know the job has finished and all sessions are accounted for.
++91|        KeyedStream<Tuple2<Long, Integer>, Long> keyedMax = perJobMax.keyBy(t -> t.f0);
++92|        KeyedStream<Long, Long> keyedFinished = finishedJobIds.keyBy(id -> id);
++93|
++94|        DataStream<String> output = keyedMax
++95|                .connect(keyedFinished)
++96|                .process(new EmitOnFinished())
++97|                .name("emit-on-finished");
++98|
++99|        // --- Sink ----------------------------------------------------------
++100|        if (out != null) {
++101|            @SuppressWarnings({"rawtypes", "unchecked"})
++102|            org.apache.flink.streaming.api.functions.sink.SinkFunction sink = out;
++103|            output.addSink(sink).name("out-sink");
++104|        } else {
++105|            output.addSink(new FileLineSink(outputPath)).name("file-sink");
++106|        }
++107|
++108|        env.execute("LongestSessionPerJob");
++109|    }
++110|
++111|    /**
++112|     * Counts the number of SUBMIT events falling inside a single session
++113|     * window for one job. Each SUBMIT is a task activity, and duplicate
++114|     * (task_index, resubmit) pairs are counted separately per the spec.
++115|     */
++116|    public static class CountSubmitsPerSession
++117|            extends ProcessWindowFunction<TaskEvent, Tuple2<Long, Integer>, Long, TimeWindow> {
++118|        @Override
++119|        public void process(Long jobId,
++120|                            Context ctx,
++121|                            Iterable<TaskEvent> elements,
++122|                            Collector<Tuple2<Long, Integer>> out) {
++123|            int count = 0;
++124|            for (TaskEvent ignored : elements) {
++125|                count++;
++126|            }
++127|            out.collect(Tuple2.of(jobId, count));
++128|        }
++129|    }
++130|
++131|    /**
++132|     * Buffers the per-job max session count and a "finished" flag; emits the
++133|     * final tuple once both have been observed. On bounded inputs Flink
++134|     * advances the watermark to +Inf at end-of-input, so any remaining state
++135|     * for jobs that have finished but whose max arrived late (or vice versa)
++136|     * is still flushed via the end-of-time timer.
++137|     */
++138|    public static class EmitOnFinished
++139|            extends KeyedCoProcessFunction<Long, Tuple2<Long, Integer>, Long, String> {
++140|
++141|        private transient ValueState<Integer> maxState;
++142|        private transient ValueState<Boolean> finishedState;
++143|        private transient ValueState<Boolean> emittedState;
++144|        private transient ValueState<Boolean> timerRegistered;
++145|
++146|        @Override
++147|        public void open(Configuration parameters) {
++148|            maxState = getRuntimeContext().getState(
++149|                    new ValueStateDescriptor<>("max", Integer.class));
++150|            finishedState = getRuntimeContext().getState(
++151|                    new ValueStateDescriptor<>("finished", Boolean.class));
++152|            emittedState = getRuntimeContext().getState(
++153|                    new ValueStateDescriptor<>("emitted", Boolean.class));
++154|            timerRegistered = getRuntimeContext().getState(
++155|                    new ValueStateDescriptor<>("timer", Boolean.class));
++156|        }
++157|
++158|        private void ensureTimer(Context ctx) throws Exception {
++159|            Boolean t = timerRegistered.value();
++160|            if (t == null || !t) {
++161|                // Watermark advances to Long.MAX_VALUE at end of a bounded
++162|                // input; use MAX_VALUE - 1 so the timer definitely fires.
++163|                ctx.timerService().registerEventTimeTimer(Long.MAX_VALUE - 1);
++164|                timerRegistered.update(true);
++165|            }
++166|        }
++167|
++168|        private void tryEmit(Long jobId, Collector<String> out) throws Exception {
++169|            Boolean em = emittedState.value();
++170|            if (Boolean.TRUE.equals(em)) return;
++171|            Integer m = maxState.value();
++172|            Boolean f = finishedState.value();
++173|            if (m != null && Boolean.TRUE.equals(f)) {
++174|                out.collect("(" + jobId + "," + m + ")");
++175|                emittedState.update(true);
++176|            }
++177|        }
++178|
++179|        @Override
++180|        public void processElement1(Tuple2<Long, Integer> value,
++181|                                    Context ctx,
++182|                                    Collector<String> out) throws Exception {
++183|            Integer cur = maxState.value();
++184|            if (cur == null || value.f1 > cur) {
++185|                maxState.update(value.f1);
++186|            }
++187|            ensureTimer(ctx);
++188|            tryEmit(ctx.getCurrentKey(), out);
++189|        }
++190|
++191|        @Override
++192|        public void processElement2(Long jobId,
++193|                                    Context ctx,
++194|                                    Collector<String> out) throws Exception {
++195|            finishedState.update(true);
++196|            ensureTimer(ctx);
++197|            tryEmit(ctx.getCurrentKey(), out);
++198|        }
++199|
++200|        @Override
++201|        public void onTimer(long timestamp,
++202|                            OnTimerContext ctx,
++203|                            Collector<String> out) throws Exception {
++204|            tryEmit(ctx.getCurrentKey(), out);
++205|        }
++206|    }
++207|}
++208|
+[end of edit 1 / 1]

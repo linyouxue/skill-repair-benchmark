@@ -1,0 +1,44 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob, random
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+def stream_from_npz(fn):
+    z=np.load(fn, allow_pickle=True)
+    data=z['data']; dt=float(z['dt']); sr=1/dt
+    chs=str(z['channels']).split(',')
+    stime=UTCDateTime(str(z.get('start_time','1970-01-01T00:00:00Z')))
+    st=Stream()
+    for i,ch in enumerate(chs):
+        tr=Trace(data=data[:,i].astype('float32'))
+        tr.stats.network=str(z.get('network','XX'))
+        tr.stats.station=str(z.get('station','STA'))
+        tr.stats.location=str(z.get('location_code',''))
+        tr.stats.channel=ch
+        tr.stats.starttime=stime
+        tr.stats.sampling_rate=sr
+        st+=tr
+    return st
+files=sorted(glob.glob('/root/data/*.npz'))
+random.seed(1)
+sample=random.sample(files, 20)
+ph=sbm.PhaseNet.from_pretrained('original')
+eq=sbm.EQTransformer.from_pretrained('original')
+c_ph=c_eq=0
+for fn in sample:
+    st=stream_from_npz(fn)
+    out1=ph.classify(st, P_threshold=0.03, S_threshold=0.03)
+    out2=eq.classify(st, P_threshold=0.03, S_threshold=0.03)
+    has_ph = any(p.phase=='P' for p in out1.picks)
+    has_eq = any(p.phase=='P' for p in out2.picks)
+    if has_ph: c_ph+=1
+    if has_eq: c_eq+=1
+print('sample size',len(sample))
+print('PhaseNet files with P:',c_ph)
+print('EQTransformer files with P:',c_eq)
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+
+⏳ Process still running (soft timeout)

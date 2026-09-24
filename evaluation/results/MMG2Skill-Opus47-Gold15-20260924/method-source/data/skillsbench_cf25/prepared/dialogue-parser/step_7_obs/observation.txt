@@ -1,0 +1,79 @@
+Tool: file_editor
+Result:
+[File /app/solution.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import json
++2|import re
++3|from collections import deque
++4|from typing import Dict, List, Tuple
+ 5|
++6|
++7|_SECTION_RE = re.compile(r"^\[(?P<id>[^\]]+)\]\s*$")
++8|
++9|
++10|def _split_transition(line: str) -> Tuple[str, str]:
++11|    if "->" not in line:
++12|        raise ValueError(f"Missing transition arrow '->' in line: {line!r}")
++13|    left, right = line.rsplit("->", 1)
++14|    return left.strip(), right.strip()
++15|
++16|
++17|def parse_script(t
+[... 4766 characters omitted ...]
+ble}")
++134|
++135|
++136|def graph_to_dot(graph: Dict[str, List[Dict[str, str]]]) -> str:
++137|    node_by_id = {n["id"]: n for n in graph.get("nodes", [])}
++138|
++139|    def esc(s: str) -> str:
++140|        return s.replace("\\", "\\\\").replace('"', '\\"')
++141|
++142|    out = ["digraph Dialogue {", "  rankdir=LR;"]
++143|
++144|    for node_id, n in node_by_id.items():
++145|        ntype = n.get("type", "line")
++146|        shape = "diamond" if ntype == "choice" else "box"
++147|        if ntype == "line":
++148|            speaker = n.get("speaker", "").strip()
++149|            text = n.get("text", "").strip()
++150|            label = f"{node_id}\\n{speaker}: {text}" if speaker or text else node_id
++151|        else:
++152|            label = node_id
++153|
++154|        out.append(f'  "{esc(node_id)}" [shape={shape}, label="{esc(label)}"];')
++155|
++156|    for e in graph.get("edges", []):
++157|        src = e["from"]
++158|        dst = e["to"]
++159|        label = e.get("text", "")
++160|        if label:
++161|            out.append(f'  "{esc(src)}" -> "{esc(dst)}" [label="{esc(label)}"];')
++162|        else:
++163|            out.append(f'  "{esc(src)}" -> "{esc(dst)}";')
++164|
++165|    out.append("}")
++166|    return "\n".join(out) + "\n"
++167|
++168|
++169|def main() -> None:
++170|    with open("/app/script.txt", "r", encoding="utf-8") as f:
++171|        text = f.read()
++172|
++173|    graph = parse_script(text)
++174|
++175|    with open("/app/dialogue.json", "w", encoding="utf-8") as f:
++176|        json.dump(graph, f, ensure_ascii=False, indent=2)
++177|        f.write("\n")
++178|
++179|    with open("/app/dialogue.dot", "w", encoding="utf-8") as f:
++180|        f.write(graph_to_dot(graph))
++181|
++182|
++183|if __name__ == "__main__":
++184|    main()
++185|
+[end of edit 1 / 1]

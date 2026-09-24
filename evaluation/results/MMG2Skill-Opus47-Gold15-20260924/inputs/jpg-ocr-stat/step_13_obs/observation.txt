@@ -1,0 +1,75 @@
+Tool: file_editor
+Result:
+[File /app/workspace/extract.py edited with 2 changes.]
+[begin of edit 1 / 2]
+(content before edit)
+ 59|
+ 60|
+ 61|def extract_total(text: str):
+ 62|    lines = [ln.rstrip() for ln in text.splitlines()]
+-63|    # Try each priority tier in order.
+ 64|    for tier in PRIORITY_TIERS:
+-65|        # collect all candidate line indices matching any keyword in this tier
+ 66|        candidates = []
+-67|        for i, line in enumerate(lines):
+ 68|            if is_excluded(line):
+ 69|                continue
+(content after edit)
+ 59|
+ 60|
++61|SUMMARY_HEADER_RE = re.compile(
++62|    r'\b(GST|TAX|SST)\s+SUMMARY\b|\bTAX\s+CODE\b|\bAMOUNT\s*\(RM\)\s*TAX', re.IGNORECASE
++63|)
++64|
++65|
++66|def find_summary_start(lines):
++67|    """Return index of the first summary-section header, or len(lines) if none."""
++68|    for i, line in enumerate(lines):
++69|        if SUMMARY_HEADER_RE.search(line):
++70|            return i
++71|    return len(lines)
++72|
++73|
+ 74|def extract_total(text: str):
+ 75|    lines = [ln.rstrip() for ln in text.splitlines()]
++76|    summary_start = find_summary_start(lines)
++77|
+ 78|    for tier in PRIORITY_TIERS:
++79|        # Only consider lines BEFORE the GST/tax summary section.
+ 80|        candidates = []
++81|        for i, line in enumerate(lines[:summary_start]):
+ 82|            if is_excluded(line):
+ 83|                continue
+[end of edit 1 / 2]
+-------------------------
+[begin of edit 2 / 2]
+(content before edit)
+ 72|        if not candidates:
+ 73|            continue
+-74|        # Prefer the LAST candidate line (final total usually appears last).
+-75|        i = candidates[-1]
+-76|        val = extract_last_number(lines[i])
+-77|        if val is not None:
+-78|            return val
+-79|        # Fallback: check next non-empty line for a number.
+-80|        for j in range(i + 1, min(i + 3, len(lines))):
+-81|            if lines[j].strip() and not is_excluded(lines[j]):
+ 82|                v = extract_last_number(lines[j])
+ 83|                if v is not None:
+(content after edit)
+ 86|        if not candidates:
+ 87|            continue
++88|        # Try candidates from LAST to FIRST; final total usually appears last.
++89|        for i in reversed(candidates):
++90|            val = extract_last_number(lines[i])
++91|            if val is not None:
++92|                return val
++93|            # Fallback: current line has no number → check the next non-empty line.
++94|            for j in range(i + 1, min(i + 3, len(lines))):
++95|                if not lines[j].strip():
++96|                    continue
++97|                if is_excluded(lines[j]):
++98|                    break
+ 99|                v = extract_last_number(lines[j])
+100|                if v is not None:
+[end of edit 2 / 2]

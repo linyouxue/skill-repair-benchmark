@@ -1,0 +1,128 @@
+Tool: terminal
+Result:
+bash -lc 'python - <<"PY"
+import inspect
+import trl.trainer.dpo_trainer as d
+print(inspect.getfile(d))
+PY
+FILE=/home/agent/.local/lib/python3.12/site-packages/trl/trainer/dpo_trainer.py
+grep -n "def dpo_loss" -n "$FILE"
+sed -n "650,760p" "$FILE"'
+/home/agent/.local/lib/python3.12/site-packages/trl/trainer/dpo_trainer.py
+1046:    def dpo_loss(
+            all_reference_chosen_logps = torch.cat(reference_chosen_logps).float().numpy()
+            all_reference_rejected_logps = torch.cat(reference_rejected_logps).float().numpy()
+
+            self.train_dataset = self.train_dataset.add_column(
+                name="reference_chosen_logps", column=all_reference_chosen_logps
+            )
+            self.train_dataset = self.train_dataset.add_column(
+                name="reference_rejected_logps", column=all_reference_rejected_logps
+            )
+
+            self._precomputed_train_ref_log_probs = True
+
+        return super().get_train_dataloader()
+
+    def get_eval_dataloader(self, eval_dataset: Optional[Dataset] = None) -> DataLoader:
+        """
+        Returns the evaluation [`~torch.utils.data.DataLoader`].
+
+        Subclass of transformers.src.transformers.trainer.get_eval_dataloader to precompute `ref_log_probs`.
+
+        Args:
+            eval_dataset (`torch.utils.data.Dataset`, *optional*):
+                If provided, will override `self.eval_dataset`. If it is a [`~datasets.Dataset`], columns not accepted
+                by the `model.forward()` method are automatically removed. It must implement `__len__`.
+        """
+        if eval_dataset is None and self.eval_dataset is None:
+            raise ValueError("Trainer: evaluation requires an eval_dataset.")
+        eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+
+        if self.precompute_ref_log_probs and not self._precomputed_eval_ref_log_probs:
+            dataloader_params = {
+                "batch_size": self.args.per_device_eval_batch_size,
+                "collate_fn": self.data_collator,
+                "num_workers": self.args.dataloader_num_workers,
+                "pin_memory": self.args.dataloader_pin_memory,
+                "shuffle": False,
+            }
+
+            # prepare dataloader
+            data_loader = self.accelerator.prepare(DataLoader(eval_dataset, **dataloader_params))
+
+            reference_chosen_logps = []
+            reference_rejected_logps = []
+            for padded_batch in tqdm(iterable=data_loader, desc="Eval dataset reference log probs"):
+                reference_chosen_logp, reference_rejected_logp = self.compute_reference_log_probs(padded_batch)
+                reference_chosen_logp, reference_rejected_logp = self.accelerator.gather_for_metrics(
+                    (reference_chosen_logp, reference_rejected_logp)
+                )
+                reference_chosen_logps.append(reference_chosen_logp.cpu())
+                reference_rejected_logps.append(reference_rejected_logp.cpu())
+
+            all_reference_chosen_logps = torch.cat(reference_chosen_logps).float().numpy()
+            all_reference_rejected_logps = torch.cat(reference_rejected_logps).float().numpy()
+
+            eval_dataset = eval_dataset.add_column(name="reference_chosen_logps", column=all_reference_chosen_logps)
+            eval_dataset = eval_dataset.add_column(
+                name="reference_rejected_logps", column=all_reference_rejected_logps
+            )
+
+            # Save calculated reference_chosen_logps and reference_rejected_logps to the eval_dataset for subsequent runs
+            if self.eval_dataset is not None:
+                self.eval_dataset = eval_dataset
+            self._precomputed_eval_ref_log_probs = True
+
+        return super().get_eval_dataloader(eval_dataset=eval_dataset)
+
+    def build_tokenized_answer(self, prompt, answer, images=None):
+        """
+        Llama tokenizer does satisfy `enc(a + b) = enc(a) + enc(b)`.
+        It does ensure `enc(a + b) = enc(a) + enc(a + b)[len(enc(a)):]`.
+        Reference:
+            https://github.com/EleutherAI/lm-evaluation-harness/pull/531#issuecomment-1595586257
+        """
+        if self.is_vision_model:
+            if answer.count("<image>") > 0:
+                raise NotImplementedError("Answer contains <image> token, which is not supported yet.")
+            full_tokenized = self.processor(prompt + answer, images=images, add_special_tokens=False)
+            full_tokenized = {k: v[0] for k, v in full_tokenized.items()}  # Unbatch, not done when using idefics
+            prompt_input_ids = self.processor(prompt, images=images, add_special_tokens=False)["input_ids"][0]
+        else:
+            full_tokenized = self.tokenizer(prompt + answer, add_special_tokens=False)
+            prompt_input_ids = self.tokenizer(prompt, add_special_tokens=False)["input_ids"]
+
+        answer_input_ids = full_tokenized["input_ids"][len(prompt_input_ids) :]
+        answer_attention_mask = full_tokenized["attention_mask"][len(prompt_input_ids) :]
+
+        # Concat tokens to form `enc(a) + enc(a + b)[len(enc(a)):]`
+        full_concat_input_ids = np.concatenate([prompt_input_ids, answer_input_ids])
+
+        # Prepare input tokens for token by token comparison
+        full_input_ids = np.array(full_tokenized["input_ids"])
+
+        if len(full_input_ids) != len(full_concat_input_ids):
+            raise ValueError("Prompt input ids and answer input ids should have the same length.")
+
+        # On some tokenizers, like Llama-2 tokenizer, there are occasions where tokens
+        # can be merged together when tokenizing prompt+answer. This could result
+        # on the last token from the prompt being different when tokenized on its own
+        # vs when done as prompt+answer.
+        response_token_ids_start_idx = len(prompt_input_ids)
+
+        # If tokenized prompt is different than both prompt+answer, then it means the
+        # last token has changed due to merging.
+        if prompt_input_ids != full_tokenized["input_ids"][:response_token_ids_start_idx]:
+            response_token_ids_start_idx -= 1
+
+        prompt_input_ids = full_tokenized["input_ids"][:response_token_ids_start_idx]
+        prompt_attention_mask = full_tokenized["attention_mask"][:response_token_ids_start_idx]
+
+        if len(prompt_input_ids) != len(prompt_attention_mask):
+            raise ValueError("Prompt input ids and attention mask should have the same length.")
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /home/agent/.local/bin/python
+✅ Exit code: 0

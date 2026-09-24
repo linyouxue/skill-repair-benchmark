@@ -1,0 +1,70 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+import transitleastsquares as tls
+from astropy.timeseries import BoxLeastSquares
+import astropy.units as u
+path='/root/data/tess_lc.txt'
+t, f, q, fe = np.genfromtxt(path).T
+m=(q==0)
+t,f,fe=t[m],f[m],fe[m]
+idx=np.argsort(t)
+t,f,fe=t[idx],f[idx],fe[idx]
+lc=lk.LightCurve(time=t, flux=f, flux_err=fe)
+lc=lc.remove_outliers(sigma=10)
+wl=1601
+lc_flat=lc.flatten(window_length=wl, polyorder=2, break_tolerance=5)
+lc_flat=lc_flat.remove_outliers(sigma=6)
+time=lc_flat.time.value
+flux=lc_flat.flux.value
+flux_err=lc_flat.flux_err.value
+model=tls.transitleastsquares(time, flux, flux_err)
+out=model.power(period_min=0.5, period_max=15.0, show_progress_bar=False, verbose=False)
+print('broad best period',out.period,'SDE',out.SDE,'snr',out.snr,'dur',out.duration,'T0',out.T0)
+# Show top peaks
+periods=np.array(out.periods)
+power=np.array(out.power)
+ord=np.argsort(power)[::-1]
+print('\nTop 10 peaks:')
+seen=[]
+for i in ord[:50]:
+    p=float(periods[i])
+    # de-duplicate near-equal
+    if any(abs(p-s)<0.01 for s in seen):
+        continue
+    seen.append(p)
+    print(f"  p={p:.6f}  power={power[i]:.6g}")
+    if len(seen)>=10:
+        break
+# Refine around best
+p0=float(out.period)
+ref=model.power(period_min=p0*0.97, period_max=p0*1.03, oversampling_factor=8,
+                show_progress_bar=False, verbose=False)
+print('\nrefined period',ref.period,'±',ref.period_uncertainty,'SDE',ref.SDE,'snr',ref.snr)
+# Also evaluate half/double neighborhoods with a fresh power call
+for label, (pmin,pmax) in [
+    ('half', (p0/2*0.97, p0/2*1.03)),
+    ('double', (p0*2*0.97, p0*2*1.03))
+]:
+    tmp=model.power(period_min=pmin, period_max=pmax, oversampling_factor=8,
+                    show_progress_bar=False, verbose=False)
+    print(f"{label} period best {tmp.period:.6f} SDE {tmp.SDE:.3f} snr {tmp.snr:.3f}")
+# Cross-check with BLS (astropy) on same detrended data
+# BLS prefers relative times; shift for numerical stability
+x=(time - time.min())*u.day
+y=flux
+bls=BoxLeastSquares(x, y, dy=flux_err)
+# Search around refined period using durations near TLS duration
+# duration grid: around tls duration +-50%
+base_d=float(ref.duration)
+durations=np.linspace(base_d*0.5, base_d*1.5, 8)*u.day
+per_grid=np.linspace(float(ref.period)*0.9, float(ref.period)*1.1, 5000)*u.day
+pg=bls.power(per_grid, durations)
+ix=np.argmax(pg.power)
+print('\nBLS best period',pg.period[ix].to_value(u.day),'duration',pg.duration[ix].to_value(u.day),'power',pg.power[ix])
+PY
+
+
+⏳ Process still running (soft timeout)

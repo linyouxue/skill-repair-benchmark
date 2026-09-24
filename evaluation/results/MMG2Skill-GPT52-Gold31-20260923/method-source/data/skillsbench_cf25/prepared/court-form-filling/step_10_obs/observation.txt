@@ -1,0 +1,47 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import NameObject, BooleanObject
+src='/root/sc100-blank.pdf'
+out='/root/_sc100_test.pdf'
+r=PdfReader(src)
+w=PdfWriter()
+for p in r.pages: w.add_page(p)
+w.append_pages_from_reader(r)
+# Actually above duplicates; fix: create fresh writer
+w=PdfWriter()
+for p in r.pages: w.add_page(p)
+# copy form
+w._root_object.update({NameObject('/AcroForm'): r.trailer['/Root']['/AcroForm']})
+# update values on all pages
+vals={'SC-100[0].Page3[0].List5[0].Lia[0].Checkbox5cb[0]': NameObject('/1')}
+for i,page in enumerate(w.pages):
+    w.update_page_form_field_values(page, vals)
+# need appearances
+acro=w._root_object['/AcroForm']
+acro.update({NameObject('/NeedAppearances'): BooleanObject(True)})
+with open(out,'wb') as f: w.write(f)
+r2=PdfReader(out)
+fields=r2.get_fields()
+# print any Checkbox5cb values
+for k in fields:
+    if 'Checkbox5cb' in k:
+        print(k, fields[k].get('/V'))
+PY
+Object 279 0 not defined.
+Traceback (most recent call last):
+  File "<stdin>", line 27, in <module>
+  File "/usr/local/lib/python3.12/dist-packages/pypdf/_doc_common.py", line 576, in get_fields
+    self._build_field(field, retval, fileobj, field_attributes, stack)
+  File "/usr/local/lib/python3.12/dist-packages/pypdf/_doc_common.py", line 604, in _build_field
+    if all(attr not in field for attr in ("/T", "/TM")):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/pypdf/_doc_common.py", line 604, in <genexpr>
+    if all(attr not in field for attr in ("/T", "/TM")):
+           ^^^^^^^^^^^^^^^^^
+TypeError: argument of type 'NoneType' is not iterable
+
+
+📁 Working directory: /root
+❌ Exit code: 1

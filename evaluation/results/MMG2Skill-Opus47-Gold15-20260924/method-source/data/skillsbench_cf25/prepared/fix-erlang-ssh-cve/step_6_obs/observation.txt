@@ -1,0 +1,63 @@
+Tool: terminal
+Result:
+
+handle_event(internal, {version_exchange,Version}, {hello,Role}, D0) ->
+    {NumVsn, StrVsn} = ssh_transport:handle_hello_version(Version),
+    case handle_version(NumVsn, StrVsn, D0#data.ssh_params) of
+	{ok, Ssh1} ->
+	    %% Since the hello part is finished correctly, we set the
+	    %% socket to the packet handling mode (including recbuf size):
+	    inet:setopts(D0#data.socket, [{packet,0},
+					 {mode,binary},
+					 {active, once},
+					 {recbuf, D0#data.inet_initial_recbuf_size}]),
+	    {KeyInitMsg, SshPacket, Ssh} = ssh_transport:key_exchange_init_msg(Ssh1),
+	    s
+[... 7669 characters omitted ...]
+    end;
+
+handle_event({call,From}, get_alg, _, D) ->
+    #ssh{algorithms=Algs} = D#data.ssh_params,
+    {keep_state_and_data, [{reply,From,Algs}]};
+
+handle_event(cast, _, StateName, _) when not ?CONNECTED(StateName) ->
+    {keep_state_and_data, [postpone]};
+
+handle_event(cast, {adjust_window,ChannelId,Bytes}, StateName, D) when ?CONNECTED(StateName) ->
+    case ssh_client_channel:cache_lookup(cache(D), ChannelId) of
+	#channel{recv_window_size = WinSize,
+		 recv_window_pending = Pending,
+		 recv_packet_size = PktSize} = Channel
+	  when (WinSize-Bytes) >= 2*PktSize ->
+	    %% The peer can send at least two more *full* packet, no hurry.
+	    ssh_client_channel:cache_update(cache(D),
+				     Channel#channel{recv_window_pending = Pending + Bytes}),
+	    keep_state_and_data;
+
+	#channel{recv_window_size = WinSize,
+		 recv_window_pending = Pending,
+		 remote_id = Id} = Channel ->
+	    %% Now we have to update the window - we can't receive so many more pkts
+	    ssh_client_channel:cache_update(cache(D),
+				     Channel#channel{recv_window_size =
+							 WinSize + Bytes + Pending,
+						     recv_window_pending = 0}),
+	    Msg = ssh_connection:channel_adjust_window_msg(Id, Bytes + Pending),
+	    {keep_state, send_msg(Msg,D)};
+
+	undefined ->
+	    keep_state_and_data
+    end;
+
+handle_event(cast, {reply_request,Resp,ChannelId}, StateName, D) when ?CONNECTED(StateName) ->
+    case ssh_client_channel:cache_lookup(cache(D), ChannelId) of
+        #channel{remote_id = RemoteId} when Resp== success ; Resp==failure ->
+            Msg =
+                case Resp of
+                    success -> ssh_connection:channel_success_msg(RemoteId);
+                    failure -> ssh_connection:channel_failure_msg(RemoteId)
+                end,
+
+
+📁 Working directory: /app/workspace
+✅ Exit code: 0

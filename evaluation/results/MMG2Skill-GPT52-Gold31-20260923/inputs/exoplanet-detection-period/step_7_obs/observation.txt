@@ -1,0 +1,35 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+import transitleastsquares as tls
+path='/root/data/tess_lc.txt'
+t, f, q, fe = np.genfromtxt(path).T
+m=(q==0)
+t,f,fe=t[m],f[m],fe[m]
+idx=np.argsort(t)
+t,f,fe=t[idx],f[idx],fe[idx]
+lc=lk.LightCurve(time=t, flux=f, flux_err=fe)
+lc=lc.remove_outliers(sigma=10)
+wl=1601
+lc_flat=lc.flatten(window_length=wl, polyorder=2, break_tolerance=5)
+lc_flat=lc_flat.remove_outliers(sigma=6)
+time=lc_flat.time.value
+flux=lc_flat.flux.value
+err=lc_flat.flux_err.value
+def run_range(pmin,pmax,label):
+    m=tls.transitleastsquares(time, flux, err)
+    out=m.power(period_min=pmin, period_max=pmax, oversampling_factor=10, show_progress_bar=False, verbose=False)
+    keys=['period','period_uncertainty','SDE','snr','depth','duration','T0','transit_count','distinct_transit_count','odd_even_mismatch','depth_odd','depth_even']
+    print('\n',label,'range',pmin,pmax)
+    for k in keys:
+        if hasattr(out,k):
+            print(k, getattr(out,k))
+    return out
+out1=run_range(1.2,1.6,'near-1.4d')
+out2=run_range(2.4,3.2,'near-2.8d')
+PY
+
+
+⏳ Process still running (soft timeout)

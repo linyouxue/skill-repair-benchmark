@@ -1,0 +1,36 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import pandas as pd, numpy as np
+from netCDF4 import Dataset
+obs=pd.read_csv('/root/field_temp_oxy.csv')
+obs['datetime']=pd.to_datetime(obs['datetime'])
+obs['depth']=obs['depth'].round().astype(int)
+obs=obs.rename(columns={'temp':'temp_obs'})[['datetime','depth','temp_obs']]
+nc=Dataset('/root/output/output.nc','r')
+time=nc.variables['time'][:]
+z=nc.variables['z'][:]
+temp=nc.variables['temp'][:]
+start=pd.to_datetime(nc.variables['time'].units.split(' since ')[1])
+time_hours=np.array(time,dtype=float)
+recs=[]
+for t_idx,h in enumerate(time_hours):
+    dt=start+pd.Timedelta(hours=float(h))
+    heights=z[t_idx,:,0,0]; temps=temp[t_idx,:,0,0]
+    for hv,tv in zip(heights,temps):
+        if np.ma.is_masked(hv) or np.ma.is_masked(tv):
+            continue
+        d=25.0-float(hv)
+        if 0<=d<=25.0:
+            recs.append({'datetime':dt,'depth':round(d),'temp_sim':float(tv)})
+sim=pd.DataFrame(recs).groupby(['datetime','depth']).agg({'temp_sim':'mean'}).reset_index()
+merged=pd.merge(obs,sim,on=['datetime','depth'],how='inner')
+rmse=np.sqrt(np.mean((merged.temp_sim-merged.temp_obs)**2))
+print('rmse',rmse)
+print('nan count',merged.temp_obs.isna().sum())
+PY
+rmse 2.9468747000494484
+nan count 4
+
+📁 Working directory: /root
+✅ Exit code: 0

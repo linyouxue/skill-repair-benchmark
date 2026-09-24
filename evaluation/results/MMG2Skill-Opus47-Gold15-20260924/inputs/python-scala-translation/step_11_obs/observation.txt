@@ -1,0 +1,74 @@
+Tool: file_editor
+Result:
+[File /root/TokenizerTest.scala edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import java.time.{LocalDate, LocalDateTime}
+ 2|
++3|object TokenizerTest {
++4|  def main(args: Array[String]): Unit = {
++5|    // Token + withMetadata
++6|    val t = Token("hi", TokenType.STRING).withMetadata("k" -> 1, "j" -> "x")
++7|    assert(t.metadata == Map("k" -> 1, "j" -> "x"), s"metadata: ${t.metadata}")
++8|
++9|    // StringTokenizer
++10|    val st = new StringTokenizer(normalizer = _.toUpperCase)
++11|    assert(st.tokenize(StringOrBytes.Str("abc")).value == "ABC")
++12|    assert(st.tokenize(StringOrBytes.Bytes("hey".getBytes("UTF-8"))).value == "HEY")
++13|
++14|    // NumericTokenizer
++15|    val nt = new NumericTokenizer[Double](precision = 3)
++16|    assert(nt.tokenize(1.23456).value == "1.235", nt.tokenize(1.23456).value)
++17|    val nti = new NumericTokenizer[Int]()
++18|    assert(nti.tokenize(42).value == "42")
++19|
++20|    // TemporalTokenizer
++21|    val tt = new TemporalTokenizer()
++22|    assert(tt.tokenize(Temporal.Date(LocalDate.of(2024, 1, 15))).value == "2024-01-15")
++23|    assert(tt.tokenize(Temporal.DateTime(LocalDateTime.of(2024, 1, 15, 10, 30, 0))).value == "2024-01-15T10:30:00")
++24|
++25|    // UniversalTokenizer
++26|    val ut = new UniversalTokenizer()
++27|    assert(ut.tokenize(null).tokenType == TokenType.NULL)
++28|    assert(ut.tokenize("hello").tokenType == TokenType.STRING)
++29|    assert(ut.tokenize(3.14).tokenType == TokenType.NUMERIC)
++30|    assert(ut.tokenize(LocalDate.of(2024, 1, 1)).tokenType == TokenType.TEMPORAL)
++31|
++32|    // Tokenizable type class
++33|    case class Foo(x: Int)
++34|    implicit val fooTok: Tokenizable[Foo] = (v: Foo) => s"foo(${v.x})"
++35|    val fooToken = ***REDACTED***
++36|    assert(fooToken.value == "foo(7)" && fooToken.tokenType == TokenType.STRUCTURED, fooToken.toString)
++37|
++38|    // WhitespaceTokenizer
++39|    val wt = new WhitespaceTokenizer(lowercase = true, minLength = 2, stripPunctuation = true)
++40|    val toks = wt.tokenize("Hello, World! a is Great.")
++41|    val values = toks.map(_.value)
++42|    // "a" is filtered (len < 2), commas/exclamation stripped
++43|    assert(values == List("hello", "world", "is", "great"), values.toString)
++44|    val pos = wt.tokenizeWithPositions("Hi there")
++45|    assert(pos == List(("hi", 0, 2), ("there", 3, 8)), pos.toString)
++46|
++47|    // tokenizeBatch
++48|    val batch = st.tokenizeBatch(List[StringOrBytes](StringOrBytes.Str("a"), StringOrBytes.Str("b"))).toList
++49|    assert(batch.map(_.value) == List("A", "B"))
++50|
++51|    // TokenizerBuilder
++52|    val f = TokenizerBuilder[Int]()
++53|      .withValidator(_ >= 0)
++54|      .withNormalizer(_ + "!")
++55|      .withMetadata("src" -> "test")
++56|      .build
++57|    val bt = f(5)
++58|    assert(bt.value == "5!" && bt.metadata("src") == "test")
++59|    try {
++60|      f(-1); assert(false, "should have thrown")
++61|    } catch { case _: IllegalArgumentException => () }
++62|
++63|    println("All tests passed.")
++64|  }
++65|}
++66|
+[end of edit 1 / 1]

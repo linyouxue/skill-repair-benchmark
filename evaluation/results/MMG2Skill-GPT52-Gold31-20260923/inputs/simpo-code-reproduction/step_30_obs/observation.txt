@@ -1,0 +1,74 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /root/SimPO/scripts/simpo_trainer.py:
+   540	                    pad_value = padding_value
+   541	                elif k.endswith("_attention_mask"):
+   542	                    pad_value = 0
+   543	                concatenated_key = k.replace("rejected", "concatenated")
+   544	                concatenated_batch[concatenated_key] = torch.cat(
+   545	                    (
+   546	                        concatenated_batch[concatenated_key],
+   547	                        pad_to_length(batch[k], max_length, pad_value=pad_value),
+   548	                    ),
+   549	                    dim=0,
+   550	                ).to(device=device)
+   551	
+   552	        if is_encoder_decoder:
+   553	            concatenated_batch["concatenated_input_ids"] = batch["prompt_input_ids"].repeat(2, 1).to(device=device)
+   554	            concatenated_batch["concatenated_attention_mask"] = (
+   555	                batch["prompt_attention_mask"].repeat(2, 1).to(device=device)
+   556	            )
+   557	
+   558	        return concatenated_batch
+   559	
+   560	    def simpo_loss(
+   561	        self,
+   562	        policy_chosen_logps: torch.FloatTensor,
+   563	        policy_rejected_logps: torch.FloatTensor,
+   564	    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+   565	        """Compute the SimPO loss for a batch of policy model log probabilities.
+   566	
+   567	        Args:
+   568	            policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (batch_size,)
+   569	            policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
+   570	
+   571	        Returns:
+   572	            A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
+   573	            The losses tensor contains the SimPO loss for each example in the batch.
+   574	            The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+   575	        """
+   576	
+   577	        return losses, chosen_rewards, rejected_rewards
+   578	
+   579	    def concatenated_forward(
+   580	        self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]
+   581	    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+   582	        """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
+   583	
+   584	        We do this to avoid doing two forward passes, because it's faster for FSDP.
+   585	        """
+   586	        concatenated_batch = self.concatenated_inputs(
+   587	            batch,
+   588	            is_encoder_decoder=self.is_encoder_decoder,
+   589	            label_pad_token_id=self.label_pad_token_id,
+   590	            padding_value=self.padding_value,
+   591	            device=self.accelerator.device,
+   592	        )
+   593	        len_chosen = batch["chosen_labels"].shape[0]
+   594	
+   595	        model_kwargs = (
+   596	            {
+   597	                "labels": concatenated_batch["concatenated_labels"],
+   598	                "decoder_input_ids": concatenated_batch.pop("concatenated_decoder_input_ids", None),
+   599	            }
+   600	            if self.is_encoder_decoder
+   601	            else {}
+   602	        )
+   603	
+   604	        all_logits = model(
+   605	            concatenated_batch["concatenated_input_ids"],
+   606	            attention_mask=concatenated_batch["concatenated_attention_mask"],
+   607	            use_cache=False,
+   608	            **model_kwargs,
+   609	        ).logits
+   610	

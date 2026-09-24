@@ -1,0 +1,156 @@
+Tool: file_editor
+Result:
+[File /app/workspace/extract.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import os
++2|import re
++3|from pathlib import Path
++4|import pytesseract
++5|from PIL import Image
++6|from openpyxl import Workbook
+ 7|
++8|IMG_DIR = Path("/app/workspace/dataset/img")
++9|OUT_FILE = Path("/app/workspace/stat_ocr.xlsx")
++10|
++11|# Exclusion patterns: skip this line entirely.
++12|# These match lines that contain tax/discount/change info rather than the final total.
++13|EXCLUSION_PATTERNS = [
++14|    re.compile(r'\bSUB[\s\-_]*TOTAL\b', re.IGNORECASE),
++15|    re.compile(r'\bDISCOUNT\b', re.IGNORECASE),
++16|    re.compile(r'\bCHANGE\b', re.IGNORECASE),
++17|    re.compile(r'\bCASH\s+TENDERED\b', re.IGNORECASE),
++18|    # tax-total variations: "Total GST", "Total Tax", "GST Total", "Tax Total", "GST Summary"
++19|    re.compile(r'\bTOTAL\s+(GST|TAX|SST)\b', re.IGNORECASE),
++20|    re.compile(r'\b(GST|TAX|SST)\s+(TOTAL|SUMMARY|AMOUNT|AMT|PAYABLE|RATE)\b', re.IGNORECASE),
++21|    # standalone tax lines at start
++22|    re.compile(r'^\s*(GST|TAX|SST)\b', re.IGNORECASE),
++23|]
++24|
++25|# Priority keyword tiers (higher priority first).
++26|PRIORITY_TIERS = [
++27|    [re.compile(r'\bGRAND\s+TOTAL\b', re.IGNORECASE)],
++28|    [re.compile(r'\bTOTAL\s*:?\s*RM\b', re.IGNORECASE)],
++29|    [re.compile(r'\bTOTAL\s+AMOUNT\b', re.IGNORECASE)],
++30|    [
++31|        re.compile(r'\bTOTAL\s+DUE\b', re.IGNORECASE),
++32|        re.compile(r'\bAMOUNT\s+DUE\b', re.IGNORECASE),
++33|        re.compile(r'\bBALANCE\s+DUE\b', re.IGNORECASE),
++34|        re.compile(r'\bNETT?\s+TOTAL\b', re.IGNORECASE),
++35|        re.compile(r'\bTOTAL\b', re.IGNORECASE),
++36|        re.compile(r'\bAMOUNT\b', re.IGNORECASE),
++37|    ],
++38|]
++39|
++40|# Number pattern: 1,234.56 or 1234.56 (must have decimal to be a money amount)
++41|NUM_RE = re.compile(r'(?<![\w.])(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})|\d+\.\d{1,2})(?![\w.])')
++42|
++43|
++44|def is_excluded(line: str) -> bool:
++45|    return any(p.search(line) for p in EXCLUSION_PATTERNS)
++46|
++47|
++48|def extract_last_number(line: str):
++49|    matches = NUM_RE.findall(line)
++50|    if not matches:
++51|        return None
++52|    val = matches[-1].replace(',', '')
++53|    try:
++54|        return float(val)
++55|    except ValueError:
++56|        return None
++57|
++58|
++59|def extract_total(text: str):
++60|    lines = [ln.rstrip() for ln in text.splitlines()]
++61|    # Try each priority tier in order.
++62|    for tier in PRIORITY_TIERS:
++63|        # collect all candidate line indices matching any keyword in this tier
++64|        candidates = []
++65|        for i, line in enumerate(lines):
++66|            if is_excluded(line):
++67|                continue
++68|            if any(kw.search(line) for kw in tier):
++69|                candidates.append(i)
++70|        if not candidates:
++71|            continue
++72|        # Prefer the LAST candidate line (final total usually appears last).
++73|        i = candidates[-1]
++74|        val = extract_last_number(lines[i])
++75|        if val is not None:
++76|            return val
++77|        # Fallback: check next non-empty line for a number.
++78|        for j in range(i + 1, min(i + 3, len(lines))):
++79|            if lines[j].strip() and not is_excluded(lines[j]):
++80|                v = extract_last_number(lines[j])
++81|                if v is not None:
++82|                    return v
++83|                break
++84|    return None
++85|
++86|
++87|# Date extraction: look for common formats.
++88|DATE_PATTERNS = [
++89|    # DD/MM/YYYY or DD-MM-YYYY
++90|    re.compile(r'(?<!\d)(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})(?!\d)'),
++91|    # DD/MM/YY or DD-MM-YY
++92|    re.compile(r'(?<!\d)(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2})(?!\d)'),
++93|    # YYYY/MM/DD or YYYY-MM-DD
++94|    re.compile(r'(?<!\d)(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?!\d)'),
++95|]
++96|
++97|
++98|def extract_date(text: str):
++99|    for line in text.splitlines():
++100|        # 4-digit year first
++101|        for pat_idx, pat in enumerate(DATE_PATTERNS):
++102|            m = pat.search(line)
++103|            if not m:
++104|                continue
++105|            a, b, c = m.groups()
++106|            try:
++107|                if pat_idx == 2:
++108|                    y, mo, d = int(a), int(b), int(c)
++109|                else:
++110|                    d, mo, y = int(a), int(b), int(c)
++111|                    if pat_idx == 1:
++112|                        # 2-digit year → assume 2000s
++113|                        y = 2000 + y
++114|                if 1 <= mo <= 12 and 1 <= d <= 31 and 2000 <= y <= 2099:
++115|                    return f"{y:04d}-{mo:02d}-{d:02d}"
++116|            except ValueError:
++117|                pass
++118|    return None
++119|
++120|
++121|def process_image(path: Path):
++122|    img = Image.open(path)
++123|    text = pytesseract.image_to_string(img)
++124|    date = extract_date(text)
++125|    total = extract_total(text)
++126|    total_str = f"{total:.2f}" if total is not None else None
++127|    return date, total_str
++128|
++129|
++130|def main():
++131|    wb = Workbook()
++132|    ws = wb.active
++133|    ws.title = "results"
++134|    ws.append(["filename", "date", "total_amount"])
++135|
++136|    files = sorted(f for f in os.listdir(IMG_DIR) if f.lower().endswith((".jpg", ".jpeg", ".png")))
++137|    for fn in files:
++138|        date, total = process_image(IMG_DIR / fn)
++139|        ws.append([fn, date, total])
++140|        print(f"{fn}: date={date}, total={total}")
++141|
++142|    wb.save(OUT_FILE)
++143|    print(f"\nSaved {OUT_FILE}")
++144|
++145|
++146|if __name__ == "__main__":
++147|    main()
++148|
+[end of edit 1 / 1]

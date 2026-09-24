@@ -1,0 +1,66 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, re
+from decimal import Decimal, ROUND_HALF_UP
+import pandas as pd
+import pdfplumber
+from difflib import SequenceMatcher
+VENDORS_PATH='/root/vendors.xlsx'
+PO_PATH='/root/purchase_orders.csv'
+INVOICES_PATH='/root/invoices.pdf'
+OUT_PATH='/root/fraud_report.json'
+vendors = pd.read_excel(VENDORS_PATH, dtype={'id': str, 'name': str, 'iban': str}).fillna('')
+po = pd.read_csv(PO_PATH, dtype={'po_number': str, 'vendor_id': str})
+po['amount'] = po['amount'].apply(lambda x: Decimal(str(x)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+po_by_number
+[... 2598 characters omitted ...]
+t = amount if amount is not None else Decimal('0.00')
+        vendor_row, score = best_vendor_match(vendor_name)
+        reason = None
+        # 1) Unknown Vendor
+        if vendor_row is None or score < 0.86:
+            reason = 'Unknown Vendor'
+            vendor_id = None
+            vendor_iban = None
+        else:
+            vendor_id = vendor_row['id']
+            vendor_iban = vendor_row['iban']
+        # 2) IBAN Mismatch
+        if reason is None:
+            if not invoice_iban or not vendor_iban or norm_iban(invoice_iban) != norm_iban(vendor_iban):
+                reason = 'IBAN Mismatch'
+        # 3) Invalid PO
+        po_rec = None
+        if reason is None:
+            if not po_number or po_number not in po_by_number:
+                reason = 'Invalid PO'
+            else:
+                po_rec = po_by_number[po_number]
+        # 4) Amount Mismatch
+        if reason is None:
+            po_amount = po_rec['amount']
+            if (invoice_amount - po_amount).copy_abs() > Decimal('0.01'):
+                reason = 'Amount Mismatch'
+        # 5) Vendor Mismatch
+        if reason is None:
+            if vendor_id != po_rec['vendor_id']:
+                reason = 'Vendor Mismatch'
+        if reason is not None:
+            flagged.append({
+                'invoice_page_number': idx,
+                'vendor_name': vendor_name,
+                'invoice_amount': float(invoice_amount),
+                'iban': invoice_iban,
+                'po_number': po_number if po_number else None,
+                'reason': reason,
+            })
+with open(OUT_PATH, 'w', encoding='utf-8') as f:
+    json.dump(flagged, f, indent=2)
+print(f'flagged {len(flagged)} invoices -> {OUT_PATH}')
+PY
+flagged 50 invoices -> /root/fraud_report.json
+
+
+📁 Working directory: /root
+✅ Exit code: 0

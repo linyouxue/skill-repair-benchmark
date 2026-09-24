@@ -1,0 +1,57 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import openpyxl
+from openpyxl.utils import get_column_letter
+path='gdp.xlsx'
+wb=openpyxl.load_workbook(path)
+ws=wb['Task']
+def set_block(r_start, r_end, c_start=8, c_end=12):
+    # columns H(8) to L(12)
+    for r in range(r_start, r_end+1):
+        for c in range(c_start, c_end+1):
+            col=get_column_letter(c)
+            # year header is row 9 in this template
+            formula=(
+                f"=INDEX(Data!$H$21:$M$40,"
+                f"MATCH($D{r},Data!$B$21:$B$40,0),"
+                f"MATCH({col}$9,Data!$H$4:$M$4,0))"
+            )
+            ws[f"{col}{r}"].value=formula
+# Step 1 blocks
+set_block(12,17)
+set_block(19,24)
+set_block(26,31)
+# Step 2 net exports % GDP (rows 35-40)
+for i, r in enumerate(range(35,41)):
+    export_row=12+i
+    import_row=19+i
+    gdp_row=26+i
+    for c in range(8,13):
+        col=get_column_letter(c)
+        ws[f"{col}{r}"].value=f"=(({col}{export_row}-{col}{import_row})/{col}{gdp_row})*100"
+# Summary stats per year (rows 42-47)
+stat_formulas={
+    42: "=MIN({col}35:{col}40)",
+    43: "=MAX({col}35:{col}40)",
+    44: "=MEDIAN({col}35:{col}40)",
+    45: "=AVERAGE({col}35:{col}40)",
+    46: "=PERCENTILE.INC({col}35:{col}40,0.25)",
+    47: "=PERCENTILE.INC({col}35:{col}40,0.75)",
+}
+for r, tmpl in stat_formulas.items():
+    for c in range(8,13):
+        col=get_column_letter(c)
+        ws[f"{col}{r}"].value=tmpl.format(col=col)
+# Step 3 weighted mean per year (row 50)
+for c in range(8,13):
+    col=get_column_letter(c)
+    ws[f"{col}50"].value=f"=SUMPRODUCT({col}35:{col}40,{col}26:{col}31)/SUM({col}26:{col}31)"
+wb.save(path)
+print('updated', path)
+PY
+updated gdp.xlsx
+
+
+📁 Working directory: /root
+✅ Exit code: 0

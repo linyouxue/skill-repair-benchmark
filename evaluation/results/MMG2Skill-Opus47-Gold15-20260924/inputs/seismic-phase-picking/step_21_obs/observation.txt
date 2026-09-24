@@ -1,0 +1,81 @@
+Tool: file_editor
+Result:
+[File /root/pick.py edited with 4 changes.]
+[begin of edit 1 / 4]
+(content before edit)
+ 66|print(f"Processing {len(files)} files with device={device}")
+ 67|
+-68|MERGE_TOL = 10  # samples (0.1s at 100Hz) — merge picks from ensemble within tolerance
+ 69|
+ 70|for i, path in enumerate(files):
+(content after edit)
+ 66|print(f"Processing {len(files)} files with device={device}")
+ 67|
++68|MERGE_TOL = 10  # samples (0.1s at 100Hz) — cluster picks within tolerance
++69|MIN_VOTES = 2   # require confirmation from at least this many models per cluster
+ 70|
+ 71|for i, path in enumerate(files):
+[end of edit 1 / 4]
+-------------------------
+[begin of edit 2 / 4]
+(content before edit)
+ 72|    stream, t0, dt = load_stream(path)
+ 73|
+-74|    all_picks = {"P": [], "S": []}  # list of (idx, prob)
+ 75|    for name, m in models:
+ 76|        try:
+(content after edit)
+ 73|    stream, t0, dt = load_stream(path)
+ 74|
++75|    all_picks = {"P": [], "S": []}  # each pick: (idx, prob, model_name)
+ 76|    for name, m in models:
+ 77|        try:
+[end of edit 2 / 4]
+-------------------------
+[begin of edit 3 / 4]
+(content before edit)
+ 85|            prob = getattr(p, "peak_value", 1.0) or 1.0
+ 86|            if p.phase in all_picks:
+-87|                all_picks[p.phase].append((idx, float(prob)))
+ 88|
+-89|    # Merge picks within MERGE_TOL, keep highest-probability pick per cluster
+ 90|    for phase, plist in all_picks.items():
+ 91|        if not plist:
+(content after edit)
+ 86|            prob = getattr(p, "peak_value", 1.0) or 1.0
+ 87|            if p.phase in all_picks:
++88|                all_picks[p.phase].append((idx, float(prob), name))
+ 89|
++90|    # Cluster picks by proximity; require agreement from >= MIN_VOTES models.
++91|    # This favors precision (agreement) while retaining ensemble recall.
+ 92|    for phase, plist in all_picks.items():
+ 93|        if not plist:
+[end of edit 3 / 4]
+-------------------------
+[begin of edit 4 / 4]
+(content before edit)
+  93|        plist.sort()
+  94|        clusters = [[plist[0]]]
+- 95|        for idx, prob in plist[1:]:
+- 96|            if idx - clusters[-1][-1][0] <= MERGE_TOL:
+- 97|                clusters[-1].append((idx, prob))
+  98|            else:
+- 99|                clusters.append([(idx, prob)])
+ 100|        for cluster in clusters:
+ 101|            best = max(cluster, key=lambda x: x[1])
+ 102|            rows.append((fname, phase, best[0]))
+(content after edit)
+  95|        plist.sort()
+  96|        clusters = [[plist[0]]]
++ 97|        for item in plist[1:]:
++ 98|            if item[0] - clusters[-1][-1][0] <= MERGE_TOL:
++ 99|                clusters[-1].append(item)
+ 100|            else:
++101|                clusters.append([item])
+ 102|        for cluster in clusters:
++103|            distinct_models = {c[2] for c in cluster}
++104|            if len(distinct_models) < MIN_VOTES:
++105|                continue
+ 106|            best = max(cluster, key=lambda x: x[1])
+ 107|            rows.append((fname, phase, best[0]))
+[end of edit 4 / 4]

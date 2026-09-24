@@ -1,0 +1,200 @@
+Tool: file_editor
+Result:
+[File /app/workspace/src/main/java/clusterdata/query/LongestSessionPerJob.java edited with 2 changes.]
+[begin of edit 1 / 2]
+(content before edit)
+  1|package clusterdata.query;
+  2|
+  3|import clusterdata.utils.AppBase;
+  4|import org.apache.flink.api.java.utils.ParameterTool;
+  5|import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+  6|
+  7|public class LongestSessionPerJob extends AppBase {
+(content after edit)
+  1|package clusterdata.query;
+  2|
++ 3|import clusterdata.datatypes.JobEvent;
++ 4|import clusterdata.datatypes.TaskEvent;
++ 5|import clusterdata.io.GzipCsvSourceFunction;
++ 6|import clusterdata.io.LocalTextFileSink;
+  7|import clusterdata.utils.AppBase;
++ 8|import org.apache.flink.api.common.eventtime.WatermarkStrategy;
++ 9|import org.apache.flink.api.common.state.ValueState;
++10|import org.apache.flink.api.common.state.ValueStateDescriptor;
++11|import org.apache.flink.api.java.tuple.Tuple2;
+ 12|import org.apache.flink.api.java.utils.ParameterTool;
++13|import org.apache.flink.streaming.api.datastream.DataStream;
++14|import org.apache.flink.streaming.api.datastream.KeyedStream;
+ 15|import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
++16|import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
++17|import org.apache.flink.util.Collector;
+ 18|
+ 19|public class LongestSessionPerJob extends AppBase {
+[end of edit 1 / 2]
+-------------------------
+[begin of edit 2 / 2]
+(content before edit)
+  13|        String jobInput = params.get("job_input", null);
+  14|        String outputPath = params.get("output", null);
+- 15|        System.out.println("task_input  "+taskInput);
+- 16|        System.out.println("job_input  "+jobInput);
+  17|        final int sesssize = params.getInt("sesssize", 600);
+  18|
+- 19|        // set up streaming execution environment
+  20|        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+  21|
+  22|
+  23|
+  24|        env.execute("LongestSessionPerJob");
+  25|    }
+  26|
+  27|}
+  28|
+(content after edit)
+  25|        String jobInput = params.get("job_input", null);
+  26|        String outputPath = params.get("output", null);
+  27|        final int sesssize = params.getInt("sesssize", 600);
+  28|
++ 29|        if (taskInput == null || jobInput == null || outputPath == null) {
++ 30|            throw new IllegalArgumentException("Required params: --task_input --job_input --output");
++ 31|        }
++ 32|
++ 33|        long gapMicros = sesssize * 1_000_000L;
++ 34|
+  35|        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+  36|
++ 37|        DataStream<TaskEvent> tasks = env.addSource(
++ 38|                taskSourceOrTest(new GzipCsvSourceFunction<>(taskInput, TaskEvent::fromCsv))
++ 39|        );
+  40|
++ 41|        DataStream<JobEvent> jobs = env.addSource(
++ 42|                jobSourceOrTest(new GzipCsvSourceFunction<>(jobInput, JobEvent::fromCsv))
++ 43|        );
++ 44|
++ 45|        WatermarkStrategy<TaskEvent> taskWm = WatermarkStrategy
++ 46|                .<TaskEvent>forMonotonousTimestamps()
++ 47|                .withTimestampAssigner((e, ts) -> e.timestamp);
++ 48|
++ 49|        WatermarkStrategy<JobEvent> jobWm = WatermarkStrategy
++ 50|                .<JobEvent>forMonotonousTimestamps()
++ 51|                .withTimestampAssigner((e, ts) -> e.timestamp);
++ 52|
++ 53|        KeyedStream<TaskEvent, Long> keyedTaskSubmits = tasks
++ 54|                .filter(t -> t.eventType == TaskEvent.EVENT_SUBMIT)
++ 55|                .assignTimestampsAndWatermarks(taskWm)
++ 56|                .keyBy(TaskEvent::getJobId);
++ 57|
++ 58|        KeyedStream<JobEvent, Long> keyedJobFinishes = jobs
++ 59|                .filter(j -> j.eventType == JobEvent.EVENT_FINISH)
++ 60|                .assignTimestampsAndWatermarks(jobWm)
++ 61|                .keyBy(JobEvent::getJobId);
++ 62|
++ 63|        DataStream<Tuple2<Long, Integer>> longestStagePerFinishedJob = keyedTaskSubmits
++ 64|                .connect(keyedJobFinishes)
++ 65|                .process(new LongestStageOnFinish(gapMicros));
++ 66|
++ 67|        longestStagePerFinishedJob
++ 68|                .map(t -> "(" + t.f0 + "," + t.f1 + ")")
++ 69|                .addSink(sinkOrTest(new LocalTextFileSink(outputPath)))
++ 70|                .name("local-file-sink")
++ 71|                .setParallelism(1);
+  72|
+  73|        env.execute("LongestSessionPerJob");
+  74|    }
+  75|
++ 76|    private static class LongestStageOnFinish
++ 77|            extends KeyedCoProcessFunction<Long, TaskEvent, JobEvent, Tuple2<Long, Integer>> {
++ 78|
++ 79|        private final long gapMicros;
++ 80|
++ 81|        private transient ValueState<Long> lastSubmitTs;
++ 82|        private transient ValueState<Integer> currentStageCount;
++ 83|        private transient ValueState<Integer> maxStageCount;
++ 84|        private transient ValueState<Long> finishTs;
++ 85|        private transient ValueState<Boolean> emitted;
++ 86|
++ 87|        private LongestStageOnFinish(long gapMicros) {
++ 88|            this.gapMicros = gapMicros;
++ 89|        }
++ 90|
++ 91|        @Override
++ 92|        public void open(org.apache.flink.configuration.Configuration parameters) {
++ 93|            lastSubmitTs = getRuntimeContext().getState(new ValueStateDescriptor<>("lastSubmitTs", Long.class));
++ 94|            currentStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("currentStageCount", Integer.class));
++ 95|            maxStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("maxStageCount", Integer.class));
++ 96|            finishTs = getRuntimeContext().getState(new ValueStateDescriptor<>("finishTs", Long.class));
++ 97|            emitted = getRuntimeContext().getState(new ValueStateDescriptor<>("emitted", Boolean.class));
++ 98|        }
++ 99|
++100|        @Override
++101|        public void processElement1(TaskEvent value, Context ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
++102|            Long finish = finishTs.value();
++103|            if (finish != null && value.timestamp > finish) {
++104|                return;
++105|            }
++106|
++107|            Long last = lastSubmitTs.value();
++108|            Integer cur = currentStageCount.value();
++109|            Integer max = maxStageCount.value();
++110|
++111|            if (cur == null) {
++112|                cur = 0;
++113|            }
++114|            if (max == null) {
++115|                max = 0;
++116|            }
++117|
++118|            if (last != null && value.timestamp - last > gapMicros) {
++119|                if (cur > max) {
++120|                    max = cur;
++121|                }
++122|                cur = 0;
++123|            }
++124|
++125|            cur += 1;
++126|
++127|            lastSubmitTs.update(value.timestamp);
++128|            currentStageCount.update(cur);
++129|            maxStageCount.update(max);
++130|        }
++131|
++132|        @Override
++133|        public void processElement2(JobEvent value, Context ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
++134|            Long alreadyEmitted = emitted.value();
++135|            if (alreadyEmitted != null && alreadyEmitted) {
++136|                return;
++137|            }
++138|
++139|            Long existingFinish = finishTs.value();
++140|            if (existingFinish == null || value.timestamp < existingFinish) {
++141|                finishTs.update(value.timestamp);
++142|                ctx.timerService().registerEventTimeTimer(value.timestamp);
++143|            }
++144|        }
++145|
++146|        @Override
++147|        public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
++148|            Boolean alreadyEmitted = emitted.value();
++149|            if (alreadyEmitted != null && alreadyEmitted) {
++150|                return;
++151|            }
++152|
++153|            Integer cur = currentStageCount.value();
++154|            Integer max = maxStageCount.value();
++155|            if (cur == null) {
++156|                cur = 0;
++157|            }
++158|            if (max == null) {
++159|                max = 0;
++160|            }
++161|            if (cur > max) {
++162|                max = cur;
++163|            }
++164|
++165|            out.collect(Tuple2.of(ctx.getCurrentKey(), max));
++166|            emitted.update(true);
++167|        }
++168|    }
+ 169|}
+ 170|
+[end of edit 2 / 2]

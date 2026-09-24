@@ -1,0 +1,64 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /root/Tokenizer.scala:
+   400	      case c => c.toString
+   401	    }
+   402	
+   403	  private def render(value: JsonValue, level: Int): String = {
+   404	    val indent = if (pretty) "  " * level else ""
+   405	    val newline = if (pretty) "\n" else ""
+   406	    val sep = if (pretty) ": " else ":"
+   407	
+   408	    value match {
+   409	      case Null => "null"
+   410	      case Str(s) => s"\"${escape(s)}\""
+   411	      case Num(n) => n.bigDecimal.toPlainString
+   412	      case Bool(b) => if (b) "true" else "false"
+   413
+[... 482 characters omitted ...]
+Vector.sortBy(_._1).map { case (k, v) =>
+   426	            val kvIndent = if (pretty) indent + "  " else ""
+   427	            s"${kvIndent}\"${escape(k)}\"$sep${render(v, level + 1)}"
+   428	          }
+   429	          val joined = inner.mkString("," + newline)
+   430	          s"{${newline}${joined}${newline}${indent}}"
+   431	        }
+   432	    }
+   433	  }
+   434	
+   435	  def tokenize(value: JsonValue): Token =
+   436	    Token(render(value, 0), TokenType.STRUCTURED, metadata = Map("json" -> true))
+   437	
+   438	  def tokenizePath(value: JsonValue, path: String): Option[Token] = {
+   439	    val parts = path.split("\\.").toList.filter(_.nonEmpty)
+   440	
+   441	    @tailrec
+   442	    def loop(current: JsonValue, remaining: List[String]): Option[JsonValue] = remaining match {
+   443	      case Nil => Some(current)
+   444	      case part :: tail =>
+   445	        current match {
+   446	          case Obj(fields) => fields.get(part).flatMap(loop(_, tail))
+   447	          case Arr(items) if part.forall(_.isDigit) =>
+   448	            val idx = part.toInt
+   449	            items.lift(idx).flatMap(loop(_, tail))
+   450	          case _ => None
+   451	        }
+   452	    }
+   453	
+   454	    loop(value, parts).map(tokenize)
+   455	  }
+   456	}
+   457	
+   458	// ============================================================================
+   459	// Whitespace tokenizer
+   460	// ============================================================================
+   461	
+   462	final class WhitespaceTokenizer(
+   463	  lowercase: Boolean = false,
+   464	  minLength: Int = 0,
+   465	  maxLength: Option[Int] = None,
+   466	  stripPunctuation: Boolean = false
+   467	) extends Serializable {
+   468	
+   469	  private val punctuation: Set[Char] = ".,!?;:'\"()[]{}".toSet
+   470	

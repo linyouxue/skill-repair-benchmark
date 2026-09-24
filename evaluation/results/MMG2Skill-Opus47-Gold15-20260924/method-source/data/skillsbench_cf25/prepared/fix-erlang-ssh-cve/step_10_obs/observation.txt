@@ -1,0 +1,48 @@
+Tool: terminal
+Result:
+                                                                 remote_id = RemoteId,
+                                                                 user = Pid,
+                                                                 recv_window_size = WinSz,
+                                                                 recv_packet_size = PktSz,
+                                                                 send_window_size = WindowSize,
+                                                                 send_packet_size = PacketSize,
+                                       
+[... 8337 characters omitted ...]
+_FAILURE, or request-specific
+    %%  continuation messages.  If the request is not recognized or is not
+    %%  supported for the channel, SSH_MSG_CHANNEL_FAILURE is returned."
+    %%
+    case ssh_client_channel:cache_lookup(Cache, ChannelId) of
+        #channel{remote_id = RemoteId} when WantReply==true -> 
+            FailMsg = channel_failure_msg(RemoteId),
+            {[{connection_reply, FailMsg}], Connection};
+        _ -> %% Channel has been closed or no reply is wanted
+            {[], Connection}
+    end;
+
+handle_msg(#ssh_msg_global_request{name = <<"tcpip-forward">>,
+				   want_reply = WantReply,
+				   data = <<?DEC_BIN(ListenAddrStr,_Len),?UINT32(ListenPort)>>},
+           #connection{options = Opts} = Connection, server, _SSH) ->
+    case ?GET_OPT(tcpip_tunnel_out, Opts) of
+        false ->
+            %% This daemon instance has not enabled tcpip_forwarding
+            {[{connection_reply, request_failure_msg()}], Connection};
+
+        true ->
+            ConnectionSup = ?GET_INTERNAL_OPT(connection_sup, Opts),
+            FwdSup = ssh_connection_sup:tcpip_fwd_supervisor(ConnectionSup),
+            ConnPid = self(),
+            case ssh_tcpip_forward_acceptor:supervised_start(FwdSup,
+                                                             {ListenAddrStr, ListenPort},
+                                                             undefined,
+                                                             "forwarded-tcpip", ssh_tcpip_forward_srv,
+                                                             ConnPid) of
+                {ok,ListenPort} when WantReply==true ->
+                    {[{connection_reply, request_success_msg(<<>>)}], Connection};
+
+                {ok,LPort} when WantReply==true ->
+
+
+📁 Working directory: /app/workspace
+✅ Exit code: 0

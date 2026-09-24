@@ -1,0 +1,46 @@
+Repository: AgentOps-AI/agentops
+
+## Failure
+`pytest` collection (and the base `import agentops`) fails with:
+
+    ModuleNotFoundError: No module named 'langchain_core'
+    (and, when langchain_core IS installed but too new:
+     ModuleNotFoundError: No module named 'langchain.callbacks')
+
+Traceback origin:
+    agentops/__init__.py, line 12:
+        from .langchain_callback_handler import LangchainCallbackHandler,
+                                                AsyncLangchainCallbackHandler
+
+## Root cause
+`pyproject.toml` declares `langchain` as an OPTIONAL extra:
+
+    [project.optional-dependencies]
+    langchain = ["langchain>=0.0.354"]
+
+so a plain `pip install .` (no extras) legitimately does not pull in
+langchain / langchain_core. However `agentops/__init__.py` unconditionally
+imports `.langchain_callback_handler`, which itself does
+`from langchain_core.agents import ...` and
+`from langchain.callbacks.base import ...`. That makes the top-level
+`import agentops` — and therefore every test that imports the package —
+fail whenever the optional `langchain` extra is not installed.
+
+This matches exactly the "Optional Extras / Import Errors" build-fix
+pattern from the uv-package-manager skill: the offending import is at the
+package top level, the missing module is declared as an optional extra
+(not required), so the correct fix is to make the top-level import
+conditional — NOT to add langchain as a required dep and NOT to rewrite
+the internal langchain module paths.
+
+## Plan
+Edit `agentops/__init__.py` so that the langchain callback handler names
+are imported inside a `try/except ImportError` block. When the optional
+`langchain` extra is not installed the names simply won't be re-exported;
+when it IS installed they continue to be exported as before, preserving
+existing public API.
+
+No other files need to change. Any downstream import failure inside
+`langchain_callback_handler.py` (e.g. `langchain.callbacks.base` moving
+in newer langchain releases) is out of scope for a build-fix task — those
+symbols are only reachable when the user opts into the `langchain` extra.

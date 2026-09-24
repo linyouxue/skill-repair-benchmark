@@ -1,0 +1,61 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+from astropy.timeseries import BoxLeastSquares
+import astropy.units as u
+path='/root/data/tess_lc.txt'
+t, f, q, fe = np.genfromtxt(path).T
+m=(q==0)
+t,f,fe=t[m],f[m],fe[m]
+idx=np.argsort(t)
+t,f,fe=t[idx],f[idx],fe[idx]
+wl=2001
+lc=lk.LightCurve(time=t, flux=f, flux_err=fe)
+lc=lc.remove_outliers(sigma=10)
+lc_flat=lc.flatten(window_length=wl, polyorder=2, break_tolerance=5).remove_outliers(sigma=6)
+t_rel=(lc_flat.time.value - lc_flat.time.value.min())*u.day
+flux=lc_flat.flux.value
+err=lc_flat.flux_err.value
+bls=BoxL
+[... 279 characters omitted ...]
+T0=float(pg.transit_time[ix].to_value(u.day))
+print('best P',P,'D',D,'T0',T0,'power',pg.power[ix])
+stats=bls.compute_stats(P*u.day, D*u.day, T0*u.day)
+print('\nStats at P:')
+for k in ['depth','depth_err','depth_snr','transit_count','depth_odd','depth_even','depth_half','depth_double','duration','transit_times']:
+    if k in stats:
+        v=stats[k]
+        if hasattr(v,'to_value'):
+            v=v.to_value(u.day) if k=='duration' else v
+        print(k, v if k!='transit_times' else f"{len(v)} times")
+print('odd-even diff', float(stats['depth_odd']-stats['depth_even']))
+# Now test doubled period; find best duration/T0 for 2P by scanning
+Pd=2*P
+per_grid=np.linspace(Pd*0.98, Pd*1.02, 4000)*u.day
+pgd=bls.power(per_grid, durations, objective='snr')
+ixd=int(np.argmax(pgd.power))
+Pd_best=float(pgd.period[ixd].to_value(u.day))
+Dd_best=float(pgd.duration[ixd].to_value(u.day))
+T0d=float(pgd.transit_time[ixd].to_value(u.day))
+print('\nBest near 2P:',Pd_best,'D',Dd_best,'T0',T0d,'power',pgd.power[ixd])
+statsd=bls.compute_stats(Pd_best*u.day, Dd_best*u.day, T0d*u.day)
+print('Stats at ~2P: depth_snr',statsd['depth_snr'],'transit_count',statsd['transit_count'],'odd-even diff', float(statsd['depth_odd']-statsd['depth_even']))
+PY
+best P 1.3982309087784257 D 0.45 T0 1.1300000000000001 power 419.175490277964
+
+Stats at P:
+depth (0.006540139859011362, 1.5602390909531545e-05)
+depth_odd (0.006956249329972519, 2.029639738587801e-05)
+depth_even (0.00612728527650086, 2.0231604863981882e-05)
+depth_half (0.0004245827234704569, 1.5050800421947941e-05)
+transit_times 18 times
+Traceback (most recent call last):
+  File "<stdin>", line 39, in <module>
+TypeError: unsupported operand type(s) for -: 'tuple' and 'tuple'
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+❌ Exit code: 1

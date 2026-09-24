@@ -1,0 +1,193 @@
+Tool: file_editor
+Result:
+[File /app/solution.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import json
++2|import re
++3|from collections import deque
++4|from typing import Dict, List, Tuple
+ 5|
++6|
++7|_SECTION_RE = re.compile(r"^\[(?P<id>[^\]]+)\]\s*$")
++8|
++9|
++10|def _split_transition(line: str) -> Tuple[str, str]:
++11|    if "->" not in line:
++12|        raise ValueError(f"Missing transition arrow '->' in line: {line!r}")
++13|    left, right = line.rsplit("->", 1)
++14|    return left.strip(), right.strip()
++15|
++16|
++17|def parse_script(text: str) -> Dict[str, List[Dict[str, str]]]:
++18|    sections_in_order: List[str] = []
++19|    section_lines: Dict[str, List[str]] = {}
++20|
++21|    current: str | None = None
++22|    for raw in text.splitlines():
++23|        line = raw.strip()
++24|        if not line:
++25|            continue
++26|
++27|        m = _SECTION_RE.match(line)
++28|        if m:
++29|            current = m.group("id").strip()
++30|            if current in section_lines:
++31|                raise ValueError(f"Duplicate section header: [{current}]")
++32|            sections_in_order.append(current)
++33|            section_lines[current] = []
++34|            continue
++35|
++36|        if current is None:
++37|            raise ValueError(f"Content before first section header: {line!r}")
++38|        section_lines[current].append(line)
++39|
++40|    if not sections_in_order:
++41|        return {"nodes": [], "edges": []}
++42|
++43|    nodes: List[Dict[str, str]] = []
++44|    edges: List[Dict[str, str]] = []
++45|
++46|    all_defined = set(sections_in_order)
++47|    referenced_targets: set[str] = set()
++48|
++49|    for sec_id in sections_in_order:
++50|        lines = section_lines.get(sec_id, [])
++51|        nonempty = [l for l in lines if l.strip()]
++52|        if not nonempty:
++53|            nodes.append({"id": sec_id, "text": "", "speaker": "", "type": "line"})
++54|            continue
++55|
++56|        is_choice = bool(re.match(r"^\d+\.", nonempty[0]))
++57|
++58|        if is_choice:
++59|            nodes.append({"id": sec_id, "text": "", "speaker": "", "type": "choice"})
++60|            for choice_line in nonempty:
++61|                left, target = _split_transition(choice_line)
++62|                referenced_targets.add(target)
++63|                edges.append({"from": sec_id, "to": target, "text": left.strip()})
++64|        else:
++65|            if len(nonempty) != 1:
++66|                raise ValueError(
++67|                    f"Section [{sec_id}] mixes multiple non-choice lines; unsupported: {nonempty!r}"
++68|                )
++69|            left, target = _split_transition(nonempty[0])
++70|            referenced_targets.add(target)
++71|
++72|            if ":" not in left:
++73|                raise ValueError(f"Dialogue line missing speaker ':' in section [{sec_id}]: {left!r}")
++74|            speaker, text_part = left.split(":", 1)
++75|            speaker = speaker.strip()
++76|            text_part = text_part.strip()
++77|
++78|            nodes.append({"id": sec_id, "text": text_part, "speaker": speaker, "type": "line"})
++79|            edges.append({"from": sec_id, "to": target, "text": ""})
++80|
++81|    missing_targets = sorted(t for t in referenced_targets if t not in all_defined)
++82|    if missing_targets:
++83|        if missing_targets != ["End"]:
++84|            raise ValueError(
++85|                "Edges point to missing sections (only 'End' may be implicit): "
++86|                + ", ".join(missing_targets)
++87|            )
++88|        nodes.append({"id": "End", "text": "", "speaker": "", "type": "line"})
++89|        all_defined.add("End")
++90|
++91|    graph = {"nodes": nodes, "edges": edges}
++92|    _validate_graph(graph, start_id=sections_in_order[0])
++93|    return graph
++94|
++95|
++96|def _validate_graph(graph: Dict[str, List[Dict[str, str]]], start_id: str) -> None:
++97|    node_ids = [n.get("id") for n in graph.get("nodes", [])]
++98|    if any(not nid for nid in node_ids):
++99|        raise ValueError("All nodes must have a non-empty 'id'")
++100|
++101|    if len(set(node_ids)) != len(node_ids):
++102|        dupes = sorted({x for x in node_ids if node_ids.count(x) > 1})
++103|        raise ValueError(f"Duplicate node ids: {dupes}")
++104|
++105|    node_set = set(node_ids)
++106|
++107|    for e in graph.get("edges", []):
++108|        src = e.get("from")
++109|        dst = e.get("to")
++110|        if src not in node_set:
++111|            raise ValueError(f"Edge 'from' references unknown node: {src!r}")
++112|        if dst not in node_set:
++113|            raise ValueError(f"Edge 'to' references unknown node: {dst!r}")
++114|
++115|    if start_id not in node_set:
++116|        raise ValueError(f"Start node {start_id!r} is missing")
++117|
++118|    adj: Dict[str, List[str]] = {}
++119|    for e in graph.get("edges", []):
++120|        adj.setdefault(e["from"], []).append(e["to"])
++121|
++122|    seen = {start_id}
++123|    q: deque[str] = deque([start_id])
++124|    while q:
++125|        u = q.popleft()
++126|        for v in adj.get(u, []):
++127|            if v not in seen:
++128|                seen.add(v)
++129|                q.append(v)
++130|
++131|    unreachable = sorted(node_set - seen)
++132|    if unreachable:
++133|        raise ValueError(f"Unreachable nodes from start '{start_id}': {unreachable}")
++134|
++135|
++136|def graph_to_dot(graph: Dict[str, List[Dict[str, str]]]) -> str:
++137|    node_by_id = {n["id"]: n for n in graph.get("nodes", [])}
++138|
++139|    def esc(s: str) -> str:
++140|        return s.replace("\\", "\\\\").replace('"', '\\"')
++141|
++142|    out = ["digraph Dialogue {", "  rankdir=LR;"]
++143|
++144|    for node_id, n in node_by_id.items():
++145|        ntype = n.get("type", "line")
++146|        shape = "diamond" if ntype == "choice" else "box"
++147|        if ntype == "line":
++148|            speaker = n.get("speaker", "").strip()
++149|            text = n.get("text", "").strip()
++150|            label = f"{node_id}\\n{speaker}: {text}" if speaker or text else node_id
++151|        else:
++152|            label = node_id
++153|
++154|        out.append(f'  "{esc(node_id)}" [shape={shape}, label="{esc(label)}"];')
++155|
++156|    for e in graph.get("edges", []):
++157|        src = e["from"]
++158|        dst = e["to"]
++159|        label = e.get("text", "")
++160|        if label:
++161|            out.append(f'  "{esc(src)}" -> "{esc(dst)}" [label="{esc(label)}"];')
++162|        else:
++163|            out.append(f'  "{esc(src)}" -> "{esc(dst)}";')
++164|
++165|    out.append("}")
++166|    return "\n".join(out) + "\n"
++167|
++168|
++169|def main() -> None:
++170|    with open("/app/script.txt", "r", encoding="utf-8") as f:
++171|        text = f.read()
++172|
++173|    graph = parse_script(text)
++174|
++175|    with open("/app/dialogue.json", "w", encoding="utf-8") as f:
++176|        json.dump(graph, f, ensure_ascii=False, indent=2)
++177|        f.write("\n")
++178|
++179|    with open("/app/dialogue.dot", "w", encoding="utf-8") as f:
++180|        f.write(graph_to_dot(graph))
++181|
++182|
++183|if __name__ == "__main__":
++184|    main()
++185|
+[end of edit 1 / 1]

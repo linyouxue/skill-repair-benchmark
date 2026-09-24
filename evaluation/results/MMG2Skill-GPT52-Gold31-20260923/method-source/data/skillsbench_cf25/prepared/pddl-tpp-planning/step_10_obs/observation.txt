@@ -1,0 +1,41 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json
+from pathlib import Path
+import unified_planning as up
+from unified_planning.io import PDDLReader
+from unified_planning.shortcuts import OneshotPlanner
+from unified_planning.engines import SequentialPlanValidator
+up.shortcuts.get_environment().credits_stream = None
+with open('problem.json','r') as f:
+    tasks = json.load(f)
+reader = PDDLReader()
+planner_name = 'pyperplan'
+for t in tasks:
+    domain_path = Path(t['domain'])
+    problem_path = Path(t['problem'])
+    out_path = Path(t['plan_output'])
+    problem = reader.parse_problem(str(domain_path), str(problem_path))
+    with OneshotPlanner(name=planner_name) as planner:
+        result = planner.solve(problem)
+        if result.plan is None:
+            raise RuntimeError(f"No plan found for {t['id']}: {result.status}")
+        plan = result.plan
+    validator = SequentialPlanValidator()
+    vres = validator.validate(problem, plan)
+    if vres.status.name != 'VALID':
+        raise RuntimeError(f"Invalid plan for {t['id']}: {vres}")
+    lines = []
+    for a in plan.actions:
+        params = [p.object().name for p in a.actual_parameters]
+        lines.append(f"{a.action.name}({', '.join(params)})")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines) + "\n")
+print('Wrote plans:', ', '.join(t['plan_output'] for t in tasks))
+PY
+Wrote plans: task01.txt, task02.txt
+
+
+📁 Working directory: /app
+✅ Exit code: 0

@@ -1,0 +1,280 @@
+Hit:1 http://mirrors.tuna.tsinghua.edu.cn/ubuntu noble InRelease
+Hit:2 http://mirrors.tuna.tsinghua.edu.cn/ubuntu noble-updates InRelease
+Hit:3 http://mirrors.tuna.tsinghua.edu.cn/ubuntu noble-backports InRelease
+Hit:4 http://mirrors.tuna.tsinghua.edu.cn/ubuntu noble-security InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (8.5.0-2ubuntu10.13).
+0 upgraded, 0 newly installed, 0 to remove and 25 not upgraded.
+downloading uv 0.9.7 x86_64-unknown-linux-gnu
+no checksums to verify
+installing to /root/.local/bin
+  uv
+  uvx
+everything's installed!
+
+To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+    source $HOME/.local/bin/env (sh, bash, zsh)
+    source $HOME/.local/bin/env.fish (fish)
+Downloading pygments (1.2MiB)
+ Downloading pygments
+Installed 6 packages in 10ms
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0
+rootdir: /app/workspace
+configfile: ../../dev/null
+plugins: json-ctrf-0.3.5
+collected 3 items
+
+. .FF                                                                    [100%]
+
+=================================== FAILURES ===================================
+_____________________________ test_flink_job_runs ______________________________
+
+    def test_flink_job_runs():
+        """Test that the Flink job runs without error."""
+        result = subprocess.run(
+            "cd /opt/flink/bin && ./flink run -t local "
+            "-c clusterdata.query.LongestSessionPerJob "
+            "/app/workspace/target/LongestSessionPerJob-jar-with-dependencies.jar "
+            "--task_input /app/workspace/data/task_events/part-00001-of-00500.csv.gz "
+            "--job_input /app/workspace/data/job_events/part-00001-of-00500.csv.gz "
+            "--output /app/workspace/out.txt",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+>       assert result.returncode == 0, f"Flink job failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+E       AssertionError: Flink job failed:
+E         stdout: task_input  /app/workspace/data/task_events/part-00001-of-00500.csv.gz
+E         job_input  /app/workspace/data/job_events/part-00001-of-00500.csv.gz
+E         
+E         stderr: 
+E         ------------------------------------------------------------
+E          The program finished with the following exception:
+E         
+E         The return type of function 'Custom Source' could not be determined automatically, due to type erasure. You can give type information hints by using the returns(...) method on the result of the transformation call, or by letting your function implement the 'ResultTypeQueryable' interface.
+E         	org.apache.flink.api.dag.Transformation.getOutputType(Transformation.java:557)
+E         	org.apache.flink.streaming.api.transformations.TimestampsAndWatermarksTransformation.<init>(TimestampsAndWatermarksTransformation.java:64)
+E         	org.apache.flink.streaming.api.datastream.DataStream.assignTimestampsAndWatermarks(DataStream.java:888)
+E         	clusterdata.query.LongestSessionPerJob.main(LongestSessionPerJob.java:66)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args='cd /opt/flink/bin && ./flink run -t local -c clusterdata.query.LongestSessionPerJob /app/worksp...ampsAndWatermarks(DataStream.java:888)\n\tclusterdata.query.LongestSessionPerJob.main(LongestSessionPerJob.java:66)\n").returncode
+
+/verifier/test_outputs.py:44: AssertionError
+_________________________ test_output_matches_expected _________________________
+
+    def test_output_matches_expected():
+        """Test that the output file matches the expected output. This testcase also check the query semantics."""
+        expected_path = os.path.join(os.path.dirname(__file__), "out_lsj_001a.txt")
+        actual_path = "/app/workspace/out.txt"
+    
+>       assert os.path.isfile(actual_path), f"Output file {actual_path} does not exist"
+E       AssertionError: Output file /app/workspace/out.txt does not exist
+E       assert False
+E        +  where False = <function isfile at 0x77daaf1a0a40>('/app/workspace/out.txt')
+E        +    where <function isfile at 0x77daaf1a0a40> = <module 'posixpath' (frozen)>.isfile
+E        +      where <module 'posixpath' (frozen)> = os.path
+
+/verifier/test_outputs.py:52: AssertionError
+==================================== PASSES ====================================
+_______________________________ test_maven_build _______________________________
+----------------------------- Captured stdout call -----------------------------
+
+=== Content of LongestSessionPerJob.java ===
+package clusterdata.query;
+
+import clusterdata.datatypes.JobEvent;
+import clusterdata.datatypes.TaskEvent;
+import clusterdata.utils.AppBase;
+import clusterdata.utils.io.GzipCsvEventSource;
+import clusterdata.utils.io.LocalTextFileSink;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
+import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
+import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.util.Collector;
+import org.apache.flink.api.common.RuntimeExecutionMode;
+
+import java.time.Duration;
+
+public class LongestSessionPerJob extends AppBase {
+
+    public static void main(String[] args) throws Exception {
+
+        ParameterTool params = ParameterTool.fromArgs(args);
+        String taskInput = params.get("task_input", null);
+        String jobInput = params.get("job_input", null);
+        String outputPath = params.get("output", null);
+        System.out.println("task_input  " + taskInput);
+        System.out.println("job_input  " + jobInput);
+
+        // Session inactivity gap in seconds; default 600 == 10 minutes.
+        final int sesssize = params.getInt("sesssize", 600);
+        final long sessionGapMs = sesssize * 1000L;
+
+        if (outputPath == null) {
+            throw new IllegalArgumentException("Missing required parameter: --output");
+        }
+        if (taskInput == null) {
+            throw new IllegalArgumentException("Missing required parameter: --task_input");
+        }
+        if (jobInput == null) {
+            throw new IllegalArgumentException("Missing required parameter: --job_input");
+        }
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        env.setParallelism(1);
+
+        WatermarkStrategy<TaskEvent> taskWm = WatermarkStrategy
+                .<TaskEvent>forBoundedOutOfOrderness(Duration.ofSeconds(1))
+                .withTimestampAssigner((e, ts) -> e.timestampUs / 1000L);
+
+        WatermarkStrategy<JobEvent> jobWm = WatermarkStrategy
+                .<JobEvent>forBoundedOutOfOrderness(Duration.ofSeconds(1))
+                .withTimestampAssigner((e, ts) -> e.timestampUs / 1000L);
+
+        DataStream<TaskEvent> taskEventsStream = env
+                .addSource(taskSourceOrTest(new GzipCsvEventSource<>(taskInput, TaskEvent::fromCsvLine)))
+                .name("task-events")
+                .assignTimestampsAndWatermarks(taskWm);
+
+        DataStream<JobEvent> jobEventsStream = env
+                .addSource(jobSourceOrTest(new GzipCsvEventSource<>(jobInput, JobEvent::fromCsvLine)))
+                .name("job-events")
+                .assignTimestampsAndWatermarks(jobWm);
+
+        // Stage == event-time session window over SUBMIT events keyed by jobId.
+        SingleOutputStreamOperator<Tuple2<Long, Integer>> stageCounts = taskEventsStream
+                .filter(e -> e.eventType == TaskEvent.EVENT_SUBMIT)
+                .name("filter-submit")
+                .keyBy(TaskEvent::getJobId)
+                .window(EventTimeSessionWindows.withGap(Time.milliseconds(sessionGapMs)))
+                .process(new CountInWindow())
+                .name("stage-counts");
+
+        // Per job, compute maximum stage size.
+        SingleOutputStreamOperator<Tuple2<Long, Integer>> longestStagePerJob = stageCounts
+                .keyBy(t -> t.f0)
+                .reduce((a, b) -> Tuple2.of(a.f0, Math.max(a.f1, b.f1)))
+                .name("max-stage-count");
+
+        // Terminal job event (FINISH or KILL) per job.
+        SingleOutputStreamOperator<Tuple2<Long, Long>> terminalJobSignals = jobEventsStream
+                .filter(e -> e.eventType == JobEvent.EVENT_FINISH || e.eventType == JobEvent.EVENT_KILL)
+                .name("filter-terminal")
+                .map(e -> Tuple2.of(e.jobId, e.timestampUs / 1000L))
+                .name("terminal-signal");
+
+        SingleOutputStreamOperator<String> outputLines = longestStagePerJob
+                .keyBy(t -> t.f0)
+                .connect(terminalJobSignals.keyBy(t -> t.f0))
+                .process(new EmitWhenTerminalSeen(sessionGapMs))
+                .name("emit-after-terminal")
+                .map(t -> String.format("(%d,%d)", t.f0, t.f1))
+                .name("format-output");
+
+        outputLines
+                .addSink((org.apache.flink.streaming.api.functions.sink.SinkFunction<String>) sinkOrTest(new LocalTextFileSink(outputPath)))
+                .name("local-file-sink")
+                .setParallelism(1);
+
+        env.execute("LongestSessionPerJob");
+    }
+
+    private static final class CountInWindow extends ProcessWindowFunction<TaskEvent, Tuple2<Long, Integer>, Long, TimeWindow> {
+        @Override
+        public void process(Long key, Context context, Iterable<TaskEvent> elements, Collector<Tuple2<Long, Integer>> out) {
+            int c = 0;
+            for (TaskEvent ignored : elements) {
+                c++;
+            }
+            out.collect(Tuple2.of(key, c));
+        }
+    }
+
+    private static final class EmitWhenTerminalSeen
+            extends KeyedCoProcessFunction<Long, Tuple2<Long, Integer>, Tuple2<Long, Long>, Tuple2<Long, Integer>> {
+
+        private final long sessionGapMs;
+
+        private transient ValueState<Integer> maxStageCount;
+        private transient ValueState<Long> terminalTsMs;
+        private transient ValueState<Boolean> emitted;
+
+        private EmitWhenTerminalSeen(long sessionGapMs) {
+            this.sessionGapMs = sessionGapMs;
+        }
+
+        @Override
+        public void open(org.apache.flink.configuration.Configuration parameters) {
+            maxStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("maxStageCount", Integer.class));
+            terminalTsMs = getRuntimeContext().getState(new ValueStateDescriptor<>("terminalTsMs", Long.class));
+            emitted = getRuntimeContext().getState(new ValueStateDescriptor<>("emitted", Boolean.class));
+        }
+
+        @Override
+        public void processElement1(Tuple2<Long, Integer> value, Context ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
+            Boolean already = emitted.value();
+            if (already != null && already) {
+                return;
+            }
+
+            Integer current = maxStageCount.value();
+            if (current == null || value.f1 > current) {
+                maxStageCount.update(value.f1);
+            }
+        }
+
+        @Override
+        public void processElement2(Tuple2<Long, Long> terminal, Context ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
+            Boolean already = emitted.value();
+            if (already != null && already) {
+                return;
+            }
+
+            Long existing = terminalTsMs.value();
+            if (existing == null) {
+                terminalTsMs.update(terminal.f1);
+                ctx.timerService().registerEventTimeTimer(terminal.f1 + sessionGapMs);
+            }
+        }
+
+        @Override
+        public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
+            Boolean already = emitted.value();
+            if (already != null && already) {
+                return;
+            }
+
+            Integer max = maxStageCount.value();
+            if (max == null) {
+                max = 0;
+            }
+            out.collect(Tuple2.of(ctx.getCurrentKey(), max));
+            emitted.update(true);
+        }
+    }
+}
+
+=== End of LongestSessionPerJob.java ===
+
+=========================== short test summary info ============================
+PASSED ::test_maven_build
+FAILED ::test_flink_job_runs - AssertionError: Flink job failed:
+FAILED ::test_output_matches_expected - AssertionError: Output file /app/work...
+========================= 2 failed, 1 passed in 19.24s =========================

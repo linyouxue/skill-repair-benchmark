@@ -1,0 +1,44 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import re, os
+import fitz
+META_KEYS = ['title','author','subject','keywords','creator','producer','creatio nDate','modDate','trapped']
+def empty_metadata():
+    return {k:'' for k in META_KEYS}
+def redact_arxiv_everywhere(in_path:str, out_path:str):
+    doc=fitz.open(in_path)
+    doc.set_metadata(empty_metadata())
+    total=0
+    for page in doc:
+        text=page.get_text('text')
+        ids=set(re.findall(r'arXiv:\s*\d{4}\.\d{4,5}(?:v\d+)?', text, flags=re.I ))
+        urls=set(re.findall(r'https?://arxiv\.org/abs/[^\s)\],;]+', text, flags= re.I))
+        for s in sorted(ids | urls, key=len, reverse=True):
+            # normalize whitespace in arXiv ids for search
+            if s.lower().startswith('arxiv:'):
+                s='arXiv:' + s.split(':',1)[1].strip()
+            rects=page.search_for(s)
+            for r in rects:
+                page.add_redact_annot(r, fill=(0,0,0))
+                total += 1
+        if total:
+            page.apply_redactions()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    doc.save(out_path, garbage=4, deflate=True, clean=True)
+    doc.close()
+    return total
+for i in range(1,4):
+    p=f'/root/redacted/paper{i}.pdf'
+    tmp=f'/root/redacted/.tmp_paper{i}.pdf'
+    count=redact_arxiv_everywhere(p,tmp)
+    os.replace(tmp,p)
+    print(p,'arxiv_redactions',count)
+PY
+/root/redacted/paper1.pdf arxiv_redactions 56
+/root/redacted/paper2.pdf arxiv_redactions 3
+/root/redacted/paper3.pdf arxiv_redactions 7
+
+
+📁 Working directory: /root
+✅ Exit code: 0

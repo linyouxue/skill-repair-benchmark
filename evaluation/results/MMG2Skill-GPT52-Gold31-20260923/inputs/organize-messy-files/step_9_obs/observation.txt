@@ -1,0 +1,234 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import os, re, shutil, subprocess, zipfile
+from pathlib import Path
+import xml.etree.ElementTree as ET
+SRC = Path('papers/all')
+BASE = Path('papers')
+CATS = [
+    ('LLM', 'LLM'),
+    ('trapped_ion_and_qc', 'trapped_ion_and_qc'),
+    ('black_hole', 'black_hole'),
+    ('DNA', 'DNA'),
+    ('music_history', 'music_history'),
+]
+patterns = {
+    'LLM': [
+        ('large language model', 10),
+        ('language model', 7),
+        ('transformer', 6),
+        ('self-attention', 5),
+        ('attention mechanism', 4),
+        ('prompt', 4),
+        ('fine-tun', 3),
+        ('pretrain', 3),
+        ('token', 2),
+        ('gpt', 5),
+        ('bert', 5),
+        ('llm', 8),
+        ('text generation', 4),
+        ('instruction', 2),
+        ('rlhf', 6),
+    ],
+    'trapped_ion_and_qc': [
+        ('trapped ion', 12),
+        ('ion trap', 12),
+        ('lamb-dicke', 8),
+        ('jaynes-cummings', 6),
+        ('quantum computing', 10),
+        ('quantum computation', 10),
+        ('quantum computer', 8),
+        ('quantum algorithm', 6),
+        ('quantum gate', 6),
+        ('qubit', 5),
+        ('entanglement', 4),
+        ('decoherence', 3),
+        ('hamiltonian', 2),
+        ('quant-ph', 5),
+    ],
+    'black_hole': [
+        ('black hole', 14),
+        ('event horizon', 10),
+        ('hawking', 8),
+        ('schwarzschild', 6),
+        ('kerr', 6),
+        ('bekenstein', 6),
+        ('gr-qc', 5),
+        ('general relativity', 4),
+        ('singularity', 4),
+        ('accretion', 4),
+        ('spacetime', 2),
+    ],
+    'DNA': [
+        (' dna ', 1),  # handled specially below
+        ('deoxyribonucleic', 10),
+        ('genome', 7),
+        ('genetic', 5),
+        ('nucleotide', 6),
+        ('base pair', 6),
+        ('double helix', 8),
+        ('sequenc', 5),
+        ('chromosome', 5),
+        ('crispr', 8),
+        ('pcr', 6),
+        ('rna', 3),
+        ('q-bio', 5),
+    ],
+    'music_history': [
+        ('music history', 12),
+        ('composer', 7),
+        ('symphony', 7),
+        ('orchestra', 5),
+        ('opera', 5),
+        ('baroque', 8),
+        ('renaissance', 8),
+        ('medieval', 8),
+        ('classical', 6),
+        ('romantic', 6),
+        ('jazz', 6),
+        ('bach', 8),
+        ('mozart', 8),
+        ('beethoven', 8),
+        ('sonata', 5),
+        ('concerto', 5),
+        ('harmonic', 2),
+    ],
+}
+word_boundary_re = re.compile(r"\bDNA\b", re.IGNORECASE)
+def extract_pdf_text(p: Path) -> str:
+    # first 2 pages are usually enough (title/abstract)
+    try:
+        out = subprocess.check_output(
+            ['pdftotext', '-f', '1', '-l', '2', str(p), '-'],
+            stderr=subprocess.DEVNULL,
+            timeout=40,
+        )
+        return out.decode('utf-8', errors='ignore')
+    except Exception:
+        try:
+            out = subprocess.check_output(['pdftotext', str(p), '-'], stderr=subprocess.DEVNULL, timeout=80)
+            return out.decode('utf-8', errors='ignore')
+        except Exception:
+            return ''
+def extract_docx_text(p: Path) -> str:
+    try:
+        with zipfile.ZipFile(p) as z:
+            xml = z.read('word/document.xml')
+        root = ET.fromstring(xml)
+        parts = []
+        for el in root.iter():
+            if el.tag.endswith('}t') and el.text:
+                parts.append(el.text)
+        return '\n'.join(parts)
+    except Exception:
+        return ''
+def extract_pptx_text(p: Path) -> str:
+    try:
+        with zipfile.ZipFile(p) as z:
+            names = [n for n in z.namelist() if n.startswith('ppt/slides/slide') and n.endswith('.xml')]
+            names.sort()
+            parts = []
+            for n in names:
+                try:
+                    root = ET.fromstring(z.read(n))
+                    for el in root.iter():
+                        if el.tag.endswith('}t') and el.text:
+                            parts.append(el.text)
+                except Exception:
+                    continue
+        return '\n'.join(parts)
+    except Exception:
+        return ''
+def normalize(s: str) -> str:
+    s = s.replace('\x00', ' ')
+    s = s.lower()
+    s = re.sub(r"\s+", " ", s)
+    return s
+def score(text_norm: str, cat_key: str) -> int:
+    s = 0
+    for kw, w in patterns[cat_key]:
+        if kw == ' dna ':
+            # special: count word-boundary DNA occurrences
+            s += len(word_boundary_re.findall(text_norm)) * 6
+            continue
+        s += text_norm.count(kw) * w
+    return s
+def classify(text: str) -> tuple[str, dict]:
+    t = normalize(text)
+    scores = {k: score(t, k) for k, _ in CATS}
+    best = max(scores.items(), key=lambda kv: kv[1])[0]
+    if scores[best] == 0:
+        best = 'music_history'
+    return best, scores
+# Create destination folders
+for k, folder in CATS:
+    (BASE / folder).mkdir(parents=True, exist_ok=True)
+files = [p for p in SRC.iterdir() if p.is_file() and not p.name.startswith('.')] ]
+files.sort(key=lambda p: p.name.lower())
+moved = []
+counts = {k: 0 for k, _ in CATS}
+low_conf = []
+errors = []
+for p in files:
+    ext = p.suffix.lower()
+    if ext == '.pdf':
+        text = extract_pdf_text(p)
+    elif ext == '.docx':
+        text = extract_docx_text(p)
+    elif ext == '.pptx':
+        text = extract_pptx_text(p)
+    else:
+        text = p.name
+    cat, scores = classify(text)
+    dst_dir = BASE / dict(CATS)[cat]
+    dst = dst_dir / p.name
+    if dst.exists():
+        errors.append((p.name, f'destination exists: {dst}'))
+        continue
+    try:
+        shutil.move(str(p), str(dst))
+        moved.append((p.name, cat, scores))
+        counts[cat] += 1
+        if max(scores.values()) < 12:
+            low_conf.append((p.name, cat, scores))
+    except Exception as e:
+        errors.append((p.name, f'move failed: {e}'))
+print('--- moved counts ---')
+for k, _ in CATS:
+    print(f'{k:20s} {counts[k]}')
+if errors:
+    print('\n--- errors ---')
+    for name, msg in errors:
+        print(name, '->', msg)
+print('\n--- low confidence (first 25) ---')
+for name, cat, scores in low_conf[:25]:
+    top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    print(f'{name} -> {cat} | top: {top}')
+# Remove empty SRC directory if empty
+try:
+    if SRC.exists() and not any(SRC.iterdir()):
+        SRC.rmdir()
+except Exception:
+    pass
+PY
+--- moved counts ---
+LLM                  22
+trapped_ion_and_qc   22
+black_hole           20
+DNA                  25
+music_history        14
+
+--- low confidence (first 25) ---
+1205.5651v1.pdf -> music_history | top: [('music_history', 10), ('LLM', 0), ('trapped_ion_and_qc', 0)]
+1907.04292v1.pdf -> music_history | top: [('music_history', 9), ('LLM', 6), ('DNA', 6)]
+2206.07754v1.pdf -> music_history | top: [('music_history', 8), ('DNA', 3), ('LLM', 0)]
+2312.14036v1.pdf -> DNA | top: [('DNA', 8), ('music_history', 5), ('LLM', 0)]
+2405.07574v1.pdf -> DNA | top: [('DNA', 5), ('LLM', 0), ('trapped_ion_and_qc', 0)]
+2411.16408v1.pdf -> LLM | top: [('LLM', 6), ('trapped_ion_and_qc', 0), ('black_hole', 0)]
+2505.00035v1.pdf -> DNA | top: [('DNA', 6), ('LLM', 0), ('trapped_ion_and_qc', 0)]
+2506.14877v1.pdf -> DNA | top: [('DNA', 3), ('LLM', 0), ('trapped_ion_and_qc', 0)]
+
+
+📁 Working directory: /root
+✅ Exit code: 0

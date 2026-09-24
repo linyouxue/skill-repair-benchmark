@@ -1,0 +1,56 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /app/workspace/Library/Tactic/Numbers.lean:
+     1	import Library.Theory.ModEq.Defs
+     2	import Mathlib.Tactic.NormNum
+     3	import Mathlib.Tactic.Linarith
+     4	
+     5	open Lean hiding Rat mkRat
+     6	open Lean.Meta Qq Lean.Elab Term
+     7	open Lean.Parser.Tactic Mathlib.Meta.NormNum
+     8	
+     9	namespace Mathlib.Meta.NormNum
+    10	
+    11	theorem isInt_ModEq_true : {a b a' b' n : ℤ} → IsInt a a' → IsInt b b' → decide (a' = b') = true →
+    12	    Int.ModEq n a b
+    13	  | _, _, a', b', n, ⟨rfl⟩, ⟨rfl⟩, hab =>
+    
+[... 3469 characters omitted ...]
+
+    81	elab (name := numbers) "numbers" loc:(location ?) : tactic =>
+    82	  elabNormNum mkNullNode loc (simpOnly := true) (useSimp := false)
+    83	
+    84	theorem Prod.ne_left {a1 a2 : A} {b1 b2 : B} : a1 ≠ a2 → (a1, b1) ≠ (a2, b2) := mt <| by
+    85	  rw [Prod.mk.inj_iff]
+    86	  exact And.left
+    87	
+    88	theorem Prod.ne_right {a1 a2 : A} {b1 b2 : B} : b1 ≠ b2 → (a1, b1) ≠ (a2, b2) := mt <| by
+    89	  rw [Prod.mk.inj_iff]
+    90	  exact And.right
+    91	
+    92	theorem Prod.ne_left_right {a1 a2 : A} {b1 b2 : B} {c1 c2 : C} (h : b1 ≠ b2) :
+    93	    (a1, b1, c1) ≠ (a2, b2, c2) :=
+    94	  Prod.ne_right <| Prod.ne_left h
+    95	
+    96	theorem Prod.ne_right_right {a1 a2 : A} {b1 b2 : B} {c1 c2 : C} (h : c1 ≠ c2) :
+    97	    (a1, b1, c1) ≠ (a2, b2, c2) :=
+    98	  Prod.ne_right <| Prod.ne_right h
+    99	
+   100	macro_rules | `(tactic| numbers) => `(tactic| apply Prod.ext <;> numbers)
+   101	macro_rules | `(tactic| numbers) => `(tactic| apply Prod.ne_left ; numbers)
+   102	macro_rules | `(tactic| numbers) => `(tactic| apply Prod.ne_right ; numbers)
+   103	macro_rules | `(tactic| numbers) => `(tactic| apply Prod.ne_left_right ; numbers)
+   104	macro_rules | `(tactic| numbers) => `(tactic| apply Prod.ne_right_right ; numbers)
+   105	
+   106	macro (name := normNumCmd) "#numbers" ppSpace e:term : command =>
+   107	  `(command| #conv norm_num1 => $e)
+   108	
+   109	open Tactic
+   110	
+   111	@[inherit_doc numbers] syntax (name := numbersConv) "numbers" : conv
+   112	
+   113	/-- Elaborator for `numbers` conv tactic. -/
+   114	@[tactic numbersConv] def elabNormNum1Conv : Tactic := fun _ ↦ withMainContext do
+   115	  let ctx ← getSimpContext mkNullNode true
+   116	  Conv.applySimpResult (← deriveSimp ctx (← instantiateMVars (← Conv.getLhs)) (useSimp := false))
+   117	

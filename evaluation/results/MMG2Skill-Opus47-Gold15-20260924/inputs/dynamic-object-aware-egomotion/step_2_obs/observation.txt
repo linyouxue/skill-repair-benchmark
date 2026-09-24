@@ -1,0 +1,169 @@
+Tool: file_editor
+Result:
+[File /root/solve.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import cv2
++2|import numpy as np
++3|import json
+ 4|
++5|VIDEO_PATH = "/root/input.mp4"
++6|OUT_JSON = "/root/pred_instructions.json"
++7|OUT_NPZ = "/root/pred_dyn_masks.npz"
++8|TARGET_FPS = 5
++9|
++10|cap = cv2.VideoCapture(VIDEO_PATH)
++11|total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
++12|src_fps = cap.get(cv2.CAP_PROP_FPS)
++13|H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
++14|W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
++15|step = max(1, int(round(src_fps / TARGET_FPS)))
++16|sample_ids = list(range(0, total, step))
++17|print(f"total={total}, fps={src_fps}, step={step}, n_samples={len(sample_ids)}, ids={sample_ids}")
++18|
++19|# Read sampled frames
++20|frames_gray = []
++21|frames_color = []
++22|idx_set = set(sample_ids)
++23|i = 0
++24|while True:
++25|    ok, frame = cap.read()
++26|    if not ok:
++27|        break
++28|    if i in idx_set:
++29|        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
++30|        frames_gray.append(gray)
++31|        frames_color.append(frame)
++32|    i += 1
++33|cap.release()
++34|n = len(frames_gray)
++35|print(f"Read {n} sampled frames")
++36|
++37|# ---------- Egomotion ----------
++38|# Thresholds tuned for 720p at target fps=5 (large per-frame motion possible)
++39|TH_TRANS = 8.0       # pixels per sampled-frame
++40|TH_ROT = np.deg2rad(1.0)   # rad
++41|TH_SCALE = 0.01      # relative
++42|
++43|lk_params = dict(winSize=(21, 21), maxLevel=3,
++44|                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
++45|feat_params = dict(maxCorners=1500, qualityLevel=0.01, minDistance=8, blockSize=7)
++46|
++47|per_frame_labels = [["Stay"]]  # label for sample 0 (no prior)
++48|transforms = [np.array([[1, 0, 0], [0, 1, 0]], dtype=np.float32)]  # identity for frame 0
++49|
++50|for k in range(1, n):
++51|    prev = frames_gray[k - 1]
++52|    curr = frames_gray[k]
++53|    p0 = cv2.goodFeaturesToTrack(prev, mask=None, **feat_params)
++54|    M = None
++55|    dx = dy = rot = 0.0
++56|    scale = 1.0
++57|    if p0 is not None and len(p0) >= 10:
++58|        p1, st, err = cv2.calcOpticalFlowPyrLK(prev, curr, p0, None, **lk_params)
++59|        if p1 is not None:
++60|            st = st.reshape(-1)
++61|            good0 = p0[st == 1]
++62|            good1 = p1[st == 1]
++63|            if len(good0) >= 10:
++64|                M_est, inliers = cv2.estimateAffinePartial2D(
++65|                    good0, good1, method=cv2.RANSAC, ransacReprojThreshold=3.0,
++66|                    maxIters=2000, confidence=0.99)
++67|                if M_est is not None:
++68|                    M = M_est.astype(np.float32)
++69|                    a, b = M[0, 0], M[0, 1]
++70|                    dx = float(M[0, 2])
++71|                    dy = float(M[1, 2])
++72|                    scale = float(np.sqrt(a * a + b * b))
++73|                    rot = float(np.arctan2(b, a))
++74|    if M is None:
++75|        M = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.float32)
++76|    transforms.append(M)
++77|
++78|    labels = []
++79|    if abs(scale - 1.0) > TH_SCALE:
++80|        labels.append("Dolly In" if scale > 1.0 else "Dolly Out")
++81|    if abs(rot) > TH_ROT:
++82|        # rotation matrix: point rotates by +rot when world rotates by +rot
++83|        # If image rotates counterclockwise (rot>0), camera rolls clockwise -> Roll Right
++84|        labels.append("Roll Right" if rot > 0 else "Roll Left")
++85|    # Translation: dx>0 => image shifts right => camera pans left
++86|    if abs(dx) > TH_TRANS and abs(dx) >= abs(dy):
++87|        labels.append("Pan Left" if dx > 0 else "Pan Right")
++88|    if abs(dy) > TH_TRANS and abs(dy) > abs(dx):
++89|        # dy>0 => image shifts down => camera tilts up
++90|        labels.append("Tilt Up" if dy > 0 else "Tilt Down")
++91|    if not labels:
++92|        labels.append("Stay")
++93|    per_frame_labels.append(labels)
++94|    print(f"frame {k}: dx={dx:.2f} dy={dy:.2f} rot={np.rad2deg(rot):.2f}deg scale={scale:.4f} -> {labels}")
++95|
++96|# Compress into half-open intervals: "start->end" labels [start, end)
++97|# We'll create one interval per sample index: "i -> i+1"
++98|instructions = {}
++99|# Merge consecutive identical label sets
++100|i0 = 0
++101|while i0 < n:
++102|    j = i0 + 1
++103|    while j < n and per_frame_labels[j] == per_frame_labels[i0]:
++104|        j += 1
++105|    key = f"{i0}->{j}"
++106|    instructions[key] = per_frame_labels[i0]
++107|    i0 = j
++108|
++109|with open(OUT_JSON, "w") as f:
++110|    json.dump(instructions, f, indent=2)
++111|print("Wrote", OUT_JSON)
++112|print(json.dumps(instructions, indent=2))
++113|
++114|# ---------- Dynamic object masks ----------
++115|k3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
++116|k7 = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
++117|MIN_AREA = max(200, int(0.0005 * H * W))  # ~460 px for 720p
++118|
++119|npz_dict = {"shape": np.array([H, W], dtype=np.int32)}
++120|
++121|for k in range(n):
++122|    if k == 0:
++123|        mask = np.zeros((H, W), dtype=bool)
++124|    else:
++125|        prev = frames_gray[k - 1]
++126|        curr = frames_gray[k]
++127|        M = transforms[k]
++128|        warped_prev = cv2.warpAffine(prev, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=0)
++129|        valid = cv2.warpAffine(np.ones((H, W), np.uint8), M, (W, H),
++130|                               flags=cv2.INTER_NEAREST) > 0
++131|        diff = cv2.absdiff(curr, warped_prev)
++132|        vals = diff[valid]
++133|        if vals.size > 0:
++134|            med = float(np.median(vals))
++135|            mad = float(np.median(np.abs(vals - med)))
++136|            thr = max(20.0, med + 3.0 * 1.4826 * mad)
++137|        else:
++138|            thr = 20.0
++139|        raw = (diff > thr) & valid
++140|        m = cv2.morphologyEx(raw.astype(np.uint8) * 255, cv2.MORPH_OPEN, k3)
++141|        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k7)
++142|        ncc, cc, stats, _ = cv2.connectedComponentsWithStats(
++143|            (m > 0).astype(np.uint8), connectivity=8)
++144|        mask = np.zeros((H, W), dtype=bool)
++145|        for cid in range(1, ncc):
++146|            if stats[cid, cv2.CC_STAT_AREA] >= MIN_AREA:
++147|                mask |= (cc == cid)
++148|
++149|    rows, cols = np.nonzero(mask)
++150|    indices = cols.astype(np.int32)
++151|    data = np.ones(indices.size, dtype=np.uint8)
++152|    counts = np.bincount(rows, minlength=H)
++153|    indptr = np.concatenate(([0], np.cumsum(counts))).astype(np.int32)
++154|    npz_dict[f"f_{k}_data"] = data
++155|    npz_dict[f"f_{k}_indices"] = indices
++156|    npz_dict[f"f_{k}_indptr"] = indptr
++157|    print(f"mask frame {k}: nnz={indices.size} ({100.0 * indices.size / (H * W):.3f}%)")
++158|
++159|np.savez_compressed(OUT_NPZ, **npz_dict)
++160|print("Wrote", OUT_NPZ)
++161|
+[end of edit 1 / 1]

@@ -1,0 +1,38 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import re, os
+import fitz
+path='/root/redacted/paper1.pdf'
+tmp='/root/redacted/.tmp_paper1.pdf'
+doc=fitz.open(path)
+count=0
+for page in doc:
+    text=page.get_text('text')
+    # grab tokens containing arxiv.org/abs
+    tokens=set(re.findall(r'\S*arxiv\.org/abs/\S*', text, flags=re.I))
+    # also catch bare prefixes (some lines show URL then newline)
+    if re.search(r'arxiv\.org/abs/', text, re.I):
+        tokens.update(['https://arxiv.org/abs/','//arxiv.org/abs/','arxiv.org/ab s/'])
+    for tok in sorted(tokens, key=len, reverse=True):
+        # try a few variants for punctuation
+        variants=[tok, tok.rstrip(').,;'), tok.rstrip(').,;')+'.']
+        for v in variants:
+            v=v.strip()
+            if len(v) < 5:
+                continue
+            for r in page.search_for(v):
+                page.add_redact_annot(r, fill=(0,0,0))
+                count += 1
+    if count:
+        page.apply_redactions()
+doc.save(tmp, garbage=4, deflate=True, clean=True)
+doc.close()
+os.replace(tmp,path)
+print('redacted_url_rects',count)
+PY
+redacted_url_rects 33
+
+
+📁 Working directory: /root
+✅ Exit code: 0

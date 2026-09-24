@@ -1,0 +1,62 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /app/normalize_reasons.py:
+   240	            align = 1.0
+   241	        elif "CURRENT_HIGH" in sig and entry.kind == "CURRENT_HIGH":
+   242	            align = 1.0
+   243	        elif "HIPOT" in sig and entry.kind == "HIPOT_LEAKAGE":
+   244	            align = 1.0
+   245	        elif "CONTAMINATION" in sig and entry.kind == "CONTAMINATION":
+   246	            align = 1.0
+   247	        elif "CONNECTOR_WEAR" in sig and entry.kind == "CONNECTOR_WEAR":
+   248	            align = 1.0
+   249	        elif "SOLDER" in sig and entry.k
+[... 818 characters omitted ...]
+,
+   274	    test_item: str,
+   275	    fail_code: str,
+   276	    margin: float = 0.015,
+   277	) -> tuple[CodebookEntry, float, list[str]]:
+   278	    candidates.sort(key=lambda x: x[1], reverse=True)
+   279	    best = candidates[0]
+   280	    best_score = best[1]
+   281	
+   282	    near_best = [c for c in candidates if (best_score - c[1]) <= margin]
+   283	    if len(near_best) == 1:
+   284	        return best
+   285	
+   286	    key = f"{record_id}|{seg_index}|{station}|{test_item}|{fail_code}".encode("utf-8")
+   287	    h = int(hashlib.md5(key).hexdigest(), 16)
+   288	    return near_best[h % len(near_best)]
+   289	
+   290	
+   291	def calibrate_confidence(best_score: float, second_score: float | None, is_unknown: bool) -> float:
+   292	    if second_score is None:
+   293	        margin = best_score
+   294	    else:
+   295	        margin = max(0.0, best_score - second_score)
+   296	
+   297	    margin_factor = min(1.0, margin / 0.25)
+   298	
+   299	    if is_unknown:
+   300	        conf = 0.10 + 0.55 * best_score
+   301	        return float(max(0.05, min(0.55, conf)))
+   302	
+   303	    conf = 0.55 + 0.44 * (0.75 * best_score + 0.25 * margin_factor)
+   304	    return float(max(0.55, min(0.99, conf)))
+   305	
+   306	
+   307	def main() -> None:
+   308	    data_dir = Path("/app/data")
+   309	    out_path = Path("/app/output/solution.json")
+   310	
+   311	    codebooks = load_codebooks(data_dir)
+   312	    logs = pd.read_csv(data_dir / "test_center_logs.csv")
+   313	
+   314	    records_out: list[dict] = []
+   315	
+   316	    for _, r in logs.iterrows():
+   317	        record_id = str(r["record_id"]).strip()
+   318	        product_id = str(r["product_id"]).strip()
+   319	        station = str(r["station"]).strip()
+   320	        engineer_id = str(r["engineer_id"]).strip()

@@ -1,0 +1,67 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, numpy as np
+from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+cfg=json.load(open('/root/instance_config.json'))
+n=cfg['nb_trips']; V=cfg['nb_vehicles']; cap=cfg['vehicle_capacity']; TW=cfg['time_window_width']; H=1320
+external_end=2*n+1
+travel=np.loadtxt('/root/t_matrix.csv', delimiter=',', dtype=np.int32)
+requests=json.load(open('/root/requests.json'))
+flat=[]
+trip_to_pass=[]
+passenger_trips=[]
+for pi,p in enumerate(requests):
+    idxs=[]
+    for t in p['trips']:
+        trip_to_pass.append(pi)
+        idxs.append(len(flat))
+[... 1916 characters omitted ...]
+_dim.CumulVar(e).SetRange(0,H)
+    time_dim.SetSpanUpperBoundForVehicle(480,v)
+SKIP=1_000_000
+solver=routing.solver()
+for i,t in enumerate(flat):
+    pu=manager.NodeToIndex(i); do=manager.NodeToIndex(n+i)
+    routing.AddDisjunction([pu], SKIP)
+    routing.AddDisjunction([do], 1)
+    solver.Add(routing.ActiveVar(pu) == routing.ActiveVar(do))
+    routing.AddPickupAndDelivery(pu, do)
+    solver.Add(routing.VehicleVar(pu)==routing.VehicleVar(do))
+    solver.Add(time_dim.CumulVar(pu) <= time_dim.CumulVar(do))
+    expected=int(t['expected_arrival_time'])
+    drop_low, drop_high = expected-TW, expected
+    direct=int(travel[1+i, 1+n+i])
+    pick_low=expected-TW-direct
+    pick_high=expected-direct
+    if drop_low>H:
+        solver.Add(routing.ActiveVar(pu)==0)
+        solver.Add(routing.ActiveVar(do)==0)
+        continue
+    time_dim.CumulVar(pu).SetRange(pick_low,pick_high)
+    time_dim.CumulVar(do).SetRange(drop_low,drop_high)
+params=pywrapcp.DefaultRoutingSearchParameters()
+params.first_solution_strategy=routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC C
+params.local_search_metaheuristic=routing_enums_pb2.LocalSearchMetaheuristic.GENERIC_TABU_SEARCH
+params.time_limit.seconds=10
+sol=routing.SolveWithParameters(params)
+served=[0]*n
+for i in range(n):
+    served[i]=sol.Value(routing.ActiveVar(manager.NodeToIndex(i)))
+served_trips=sum(served)
+complete_pass=0
+complete_trips=0
+for idxs in passenger_trips:
+    if all(served[i]==1 for i in idxs):
+        complete_pass += 1
+        complete_trips += len(idxs)
+print('served trips raw', served_trips)
+print('complete passenger sets', complete_pass, 'complete trips', complete_trips)
+PY
+served trips raw 56
+complete passenger sets 25 complete trips 54
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

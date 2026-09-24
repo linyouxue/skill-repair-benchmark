@@ -1,0 +1,713 @@
+Tool: terminal
+Result:
+❌ [An error occurred during execution.]
+Cannot execute multiple commands at once.
+Please run each command separately OR chain them into a single command via && or ;
+Provided commands:
+(1) cat > /root/params.py <<'PY'
+import yaml
+import numpy as np
+
+
+def load_params(path: str = '/root/system_params.yaml') -> dict:
+    with open(path, 'r') as f:
+        params = yaml.safe_load(f)
+    params = dict(params)
+    params['inertia_matrix'] = np.diag(np.array(params['inertia'], dtype=float))
+    return params
+PY
+(2) cat > /root/flight_plan_parser.py <<'PY'
+import re
+import numpy as np
+
+
+_TAKEOFF_RE = re.compile(r'^\s*Take\s+off\s+to\s+([+-]?[0-9]*\.?[0-9]+)\s*m\s*height\s+in\s+([+-]?[0-9]*\.?[0-9]+)\s*seconds\s*$', re.IGNORECASE)
+_HOVER_RE = re.compile(r'^\s*Hover\s+at\s+([+-]?[0-9]*\.?[0-9]+)\s*m\s*height\s+for\s+([+-]?[0-9]*\.?[0-9]+)\s*seconds\s*$', re.IGNORECASE)
+_LAND_RE = re.compile(r'^\s*Land\s+from\s+([+-]?[0-9]*\.?[0-9]+)\s*m\s*height\s+in\s+([+-]?[0-9]*\.?[0-9]+)\s*seconds\s*$', re.IGNORECASE)
+_FLY_RE = re.compile(
+    r'^\s*Fly\s+from\s*\(\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*\)\s*'
+    r'to\s*\(\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*\)\s*'
+    r'in\s+([+-]?[0-9]*\.?[0-9]+)\s*seconds\s*$',
+    re.IGNORECASE,
+)
+
+
+class FlightPlanParser:
+    def __init__(self):
+        self._waypoints = []  # list of [x,y,z,yaw]
+        self._times = []
+        self._modes = []
+        self._t = 0.0
+
+    def _ensure_start(self, waypoint):
+        if not self._waypoints:
+            self._waypoints.append(list(waypoint))
+            self._times.append(0.0)
+            self._t = 0.0
+
+    def _append_end(self, end_wp, duration, mode):
+        self._t += float(duration)
+        self._waypoints.append(list(end_wp))
+        self._times.append(self._t)
+        self._modes.append(mode)
+
+    def feed_line(self, line: str):
+        line = line.strip()
+        if not line:
+            return
+
+        m = _TAKEOFF_RE.match(line)
+        if m:
+            h = float(m.group(1))
+            dur = float(m.group(2))
+            start = [0.0, 0.0, 0.0, 0.0]
+            self._ensure_start(start)
+            self._append_end([0.0, 0.0, h, 0.0], dur, 'takeoff')
+            return
+
+        m = _HOVER_RE.match(line)
+        if m:
+            h = float(m.group(1))
+            dur = float(m.group(2))
+            start = [0.0, 0.0, h, 0.0]
+            self._ensure_start(start)
+            self._append_end([0.0, 0.0, h, 0.0], dur, 'hover')
+            return
+
+        m = _LAND_RE.match(line)
+        if m:
+            h = float(m.group(1))
+            dur = float(m.group(2))
+            start = [0.0, 0.0, h, 0.0]
+            self._ensure_start(start)
+            self._append_end([0.0, 0.0, 0.0, 0.0], dur, 'land')
+            return
+
+        m = _FLY_RE.match(line)
+        if m:
+            x0, y0, z0, x1, y1, z1, dur = map(float, m.groups())
+            start = [x0, y0, z0, 0.0]
+            self._ensure_start(start)
+            self._append_end([x1, y1, z1, 0.0], dur, 'fly')
+            return
+
+        raise ValueError(f'Unsupported command line: {line!r}')
+
+    def build(self):
+        waypoints = np.array(self._waypoints, dtype=float).T  # (4,n)
+        times = np.array(self._times, dtype=float)
+        return waypoints, times, list(self._modes)
+
+
+def parse_flight_plan(text: str):
+    parser = FlightPlanParser()
+    for line in text.splitlines():
+        parser.feed_line(line)
+    return parser.build()
+PY
+(3) cat > /root/attitude_planner.py <<'PY'
+import numpy as np
+
+
+def attitude_planner(acc_des: np.ndarray, yaw_des: float, yaw_rate_des: float, gravity: float):
+    ax, ay, _az = [float(x) for x in acc_des]
+    psi = float(yaw_des)
+
+    phi_des = (ax * np.sin(psi) - ay * np.cos(psi)) / gravity
+    theta_des = (ax * np.cos(psi) + ay * np.sin(psi)) / gravity
+
+    rot_des = np.array([phi_des, theta_des, psi], dtype=float)
+    omega_des = np.array([0.0, 0.0, float(yaw_rate_des)], dtype=float)
+    return rot_des, omega_des
+PY
+(4) cat > /root/attitude_controller.py <<'PY'
+import numpy as np
+
+
+def make_attitude_integral():
+    return {'e': np.zeros(3, dtype=float)}
+
+
+def attitude_controller(current_rot: np.ndarray, current_omega: np.ndarray,
+                        desired_rot: np.ndarray, desired_omega: np.ndarray,
+                        params: dict, integral: dict):
+    dt = 1.0 / float(params['sample_rate'])
+
+    e = desired_rot - current_rot
+    integral['e'] = integral['e'] + e * dt
+
+    kp = np.array(params['kp_att'], dtype=float)
+    ki = np.array(params['ki_att'], dtype=float)
+    kd = np.array(params['kd_att'], dtype=float)
+
+    I = params['inertia_matrix']
+
+    u = kp * e + ki * integral['e'] + kd * (desired_omega - current_omega)
+    M = I @ u
+    return M
+PY
+(5) cat > /root/position_controller.py <<'PY'
+import numpy as np
+
+
+def make_position_integral():
+    return {'e': np.zeros(3, dtype=float)}
+
+
+def position_controller(current_pos: np.ndarray, current_vel: np.ndarray,
+                        desired_pos: np.ndarray, desired_vel: np.ndarray, desired_acc: np.ndarray,
+                        params: dict, integral: dict):
+    dt = 1.0 / float(params['sample_rate'])
+
+    pos_err = current_pos - desired_pos
+    vel_err = current_vel - desired_vel
+
+    integral['e'] = integral['e'] + pos_err * dt
+
+    kp = np.array(params['kp_pos'], dtype=float)
+    ki = np.array(params['ki_pos'], dtype=float)
+    kd = np.array(params['kd_pos'], dtype=float)
+
+    acc_cmd = desired_acc - kp * pos_err - ki * integral['e'] - kd * vel_err
+    F_cmd = float(params['mass']) * (float(params['gravity']) + float(acc_cmd[2]))
+    return F_cmd, acc_cmd
+PY
+(6) cat > /root/motor_model.py <<'PY'
+import numpy as np
+
+
+def _motor_positions(arm_length: float, motor_spread_angle: float):
+    a = float(motor_spread_angle)
+    l = float(arm_length)
+    # motor positions in body XY plane
+    # 1: (+x,+y), 2: (-x,+y), 3: (-x,-y), 4: (+x,-y)
+    x = l * np.cos(a)
+    y = l * np.sin(a)
+    return np.array([
+        [ x,  y],
+        [-x,  y],
+        [-x, -y],
+        [ x, -y],
+    ], dtype=float)
+
+
+def allocation_matrix(params: dict) -> np.ndarray:
+    cT = float(params['thrust_coefficient'])
+    cQ = float(params['moment_scale'])
+    arm = float(params['arm_length'])
+    ang = float(params['motor_spread_angle'])
+
+    xy = _motor_positions(arm, ang)
+
+    A = np.zeros((4, 4), dtype=float)
+    # Thrust row
+    A[0, :] = cT
+
+    # Roll moment about x: Mx = sum(y_i * T_i)
+    A[1, :] = xy[:, 1] * cT
+
+    # Pitch moment about y: My = sum(-x_i * T_i)
+    A[2, :] = -xy[:, 0] * cT
+
+    # Yaw moment: alternating signs
+    A[3, :] = np.array([-cQ, +cQ, -cQ, +cQ], dtype=float)
+    return A
+
+
+def motor_model(params: dict, F_des: float, M_des: np.ndarray, motor_rpm: np.ndarray):
+    km = float(params['motor_constant'])
+    rpm_min = float(params['rpm_min'])
+    rpm_max = float(params['rpm_max'])
+
+    A = allocation_matrix(params)
+    u = np.array([float(F_des), float(M_des[0]), float(M_des[1]), float(M_des[2])], dtype=float)
+
+    rpm_sq_des = np.linalg.solve(A, u)
+    rpm_sq_des = np.maximum(rpm_sq_des, 0.0)
+    rpm_des = np.sqrt(rpm_sq_des)
+    rpm_des = np.clip(rpm_des, rpm_min, rpm_max)
+
+    rpm_dot = km * (rpm_des - motor_rpm)
+
+    return rpm_des, rpm_dot
+
+
+def thrust_moment_from_rpm(params: dict, motor_rpm: np.ndarray):
+    A = allocation_matrix(params)
+    u = A @ (motor_rpm ** 2)
+    F = float(u[0])
+    M = np.array(u[1:4], dtype=float)
+    return F, M
+PY
+(7) cat > /root/dynamics.py <<'PY'
+import numpy as np
+
+
+def rot_matrix_zyx(phi: float, theta: float, psi: float) -> np.ndarray:
+    cphi, sphi = np.cos(phi), np.sin(phi)
+    cth, sth = np.cos(theta), np.sin(theta)
+    cps, sps = np.cos(psi), np.sin(psi)
+
+    Rz = np.array([[cps, -sps, 0.0], [sps, cps, 0.0], [0.0, 0.0, 1.0]])
+    Ry = np.array([[cth, 0.0, sth], [0.0, 1.0, 0.0], [-sth, 0.0, cth]])
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cphi, -sphi], [0.0, sphi, cphi]])
+    return Rz @ Ry @ Rx
+
+
+def dynamics(params: dict, state: np.ndarray, F: float, M: np.ndarray):
+    m = float(params['mass'])
+    g = float(params['gravity'])
+    I = params['inertia_matrix']
+
+    pos = state[0:3]
+    vel = state[3:6]
+    rot = state[6:9]
+    omega = state[9:12]
+
+    phi, theta, psi = [float(x) for x in rot]
+    R = rot_matrix_zyx(phi, theta, psi)
+    thrust_dir = R @ np.array([0.0, 0.0, 1.0], dtype=float)
+
+    acc = thrust_dir * (float(F) / m) + np.array([0.0, 0.0, -g], dtype=float)
+
+    pos_dot = vel
+    vel_dot = acc
+
+    rot_dot = omega
+    omega_dot = np.linalg.solve(I, M)
+
+    state_dot = np.zeros_like(state)
+    state_dot[0:3] = pos_dot
+    state_dot[3:6] = vel_dot
+    state_dot[6:9] = rot_dot
+    state_dot[9:12] = omega_dot
+    return state_dot
+PY
+(8) cat > /root/trajectory_planner.py <<'PY'
+import numpy as np
+from scipy.interpolate import CubicSpline
+
+from attitude_planner import attitude_planner
+
+
+def _clamped_spline(t0: float, t1: float, p0: float, p1: float):
+    t = np.array([t0, t1], dtype=float)
+    p = np.array([p0, p1], dtype=float)
+    return CubicSpline(t, p, bc_type=((1, 0.0), (1, 0.0)))
+
+
+def trajectory_planner(waypoints: np.ndarray, max_iter: int, waypoint_times: np.ndarray, sample_rate: float, modes):
+    waypoints = np.array(waypoints, dtype=float)
+    waypoint_times = np.array(waypoint_times, dtype=float)
+    dt = 1.0 / float(sample_rate)
+
+    n_wp = waypoints.shape[1]
+    if n_wp < 2:
+        raise ValueError('Need at least 2 waypoints')
+    if len(modes) != n_wp - 1:
+        raise ValueError('modes must have length n_waypoints - 1')
+
+    t_vec = np.arange(max_iter, dtype=float) * dt
+
+    # Precompute per-segment splines
+    segs = []
+    for i in range(n_wp - 1):
+        t0, t1 = float(waypoint_times[i]), float(waypoint_times[i + 1])
+        p0 = waypoints[:, i]
+        p1 = waypoints[:, i + 1]
+        mode = modes[i]
+
+        if mode == 'hover':
+            segs.append({'mode': mode, 't0': t0, 't1': t1, 'p0': p0.copy(), 'p1': p1.copy()})
+            continue
+
+        segs.append({
+            'mode': mode,
+            't0': t0,
+            't1': t1,
+            'sx': _clamped_spline(t0, t1, p0[0], p1[0]),
+            'sy': _clamped_spline(t0, t1, p0[1], p1[1]),
+            'sz': _clamped_spline(t0, t1, p0[2], p1[2]),
+            'syaw': _clamped_spline(t0, t1, p0[3], p1[3]),
+        })
+
+    traj = np.zeros((15, max_iter), dtype=float)
+
+    for k, t in enumerate(t_vec):
+        i = int(np.clip(np.searchsorted(waypoint_times, t, side='right') - 1, 0, n_wp - 2))
+        seg = segs[i]
+        mode = seg['mode']
+
+        if mode == 'hover':
+            pos = seg['p1'][0:3]
+            vel = np.zeros(3)
+            acc = np.zeros(3)
+            yaw = float(seg['p1'][3])
+            yaw_rate = 0.0
+        else:
+            sx, sy, sz, syaw = seg['sx'], seg['sy'], seg['sz'], seg['syaw']
+            pos = np.array([sx(t), sy(t), sz(t)], dtype=float)
+            vel = np.array([sx(t, 1), sy(t, 1), sz(t, 1)], dtype=float)
+            acc = np.array([sx(t, 2), sy(t, 2), sz(t, 2)], dtype=float)
+            yaw = float(syaw(t))
+            yaw_rate = float(syaw(t, 1))
+
+        rot, omega = attitude_planner(acc, yaw, yaw_rate, gravity=9.80665)
+
+        traj[0:3, k] = pos
+        traj[3:6, k] = vel
+        traj[6:9, k] = rot
+        traj[9:12, k] = omega
+        traj[12:15, k] = acc
+
+    return traj
+PY
+(9) cat > /root/stepinfo_3d.py <<'PY'
+import numpy as np
+
+
+def stepinfo_3d(pos_actual: np.ndarray, pos_target: np.ndarray, t: np.ndarray, settling_threshold: float = 0.02):
+    pos_actual = np.array(pos_actual, dtype=float)
+    pos_target = np.array(pos_target, dtype=float).reshape(3)
+    t = np.array(t, dtype=float)
+
+    dist = np.linalg.norm(pos_actual.T - pos_target.reshape(1, 3), axis=1)
+    d0 = float(dist[0])
+    if d0 < 1e-6:
+        return {
+            'RiseTime': 0.0,
+            'SettlingTime': 0.0,
+            'Overshoot_pct': 0.0,
+            'SteadyStateError': float(dist[-1]),
+        }
+
+    rise_time = 0.0
+    rise_thresh = 0.1 * d0
+    for k in range(len(dist)):
+        if dist[k] <= rise_thresh:
+            rise_time = float(t[k])
+            break
+
+    band = settling_threshold * d0
+    settling_time = 0.0
+    for k in range(len(dist) - 1, -1, -1):
+        if dist[k] > band:
+            settling_time = float(t[k])
+            break
+
+    entered = np.where(dist <= band)[0]
+    overshoot = 0.0
+    if len(entered) > 0:
+        first = int(entered[0])
+        max_post = float(np.max(dist[first:]))
+        overshoot = (max_post / d0) * 100.0
+
+    return {
+        'RiseTime': float(rise_time),
+        'SettlingTime': float(settling_time),
+        'Overshoot_pct': float(overshoot),
+        'SteadyStateError': float(dist[-1]),
+    }
+PY
+(10) cat > /root/plot_quadrotor.py <<'PY'
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def plot_quadrotor(state: np.ndarray, state_des: np.ndarray, time_vec: np.ndarray, save_dir: str):
+    os.makedirs(save_dir, exist_ok=True)
+
+    state = np.array(state, dtype=float)
+    state_des = np.array(state_des, dtype=float)
+    t = np.array(time_vec, dtype=float)
+
+    groups = [
+        ('pos', ['x', 'y', 'z'], slice(0, 3)),
+        ('vel', ['vx', 'vy', 'vz'], slice(3, 6)),
+        ('rot', [r'$\phi$', r'$\theta$', r'$\psi$'], slice(6, 9)),
+        ('omega', ['p', 'q', 'r'], slice(9, 12)),
+        ('acc', ['ax', 'ay', 'az'], slice(12, 15)),
+    ]
+
+    def _grid_fig(title):
+        fig, axes = plt.subplots(5, 3, figsize=(16, 20), sharex=True)
+        fig.suptitle(title)
+        return fig, axes
+
+    # Figure 1: desired vs actual
+    fig1, axes1 = _grid_fig('Desired vs Actual')
+    for i, (_name, labels, sl) in enumerate(groups):
+        for j in range(3):
+            ax = axes1[i, j]
+            ax.plot(t, state_des[sl, :][j, :], 'b', linewidth=1)
+            ax.plot(t, state[sl, :][j, :], 'r', linewidth=1)
+            ax.set_ylabel(labels[j])
+            if i == 4:
+                ax.set_xlabel('t [s]')
+    fig1.tight_layout(rect=[0, 0, 1, 0.97])
+    fig1.savefig(os.path.join(save_dir, 'desired_vs_actual.png'))
+    plt.close(fig1)
+
+    # Figure 2: errors
+    fig2, axes2 = _grid_fig('Errors (actual - desired)')
+    err = state - state_des
+    for i, (_name, labels, sl) in enumerate(groups):
+        for j in range(3):
+            ax = axes2[i, j]
+            ax.plot(t, err[sl, :][j, :], 'k', linewidth=1)
+            ax.set_ylabel(labels[j])
+            if i == 4:
+                ax.set_xlabel('t [s]')
+    fig2.tight_layout(rect=[0, 0, 1, 0.97])
+    fig2.savefig(os.path.join(save_dir, 'errors.png'))
+    plt.close(fig2)
+
+    # Figure 3: cumulative absolute errors
+    fig3, axes3 = _grid_fig('Cumulative absolute errors')
+    dt = float(t[1] - t[0]) if len(t) > 1 else 0.0
+    cum = dt * np.cumsum(np.abs(err), axis=1)
+    for i, (_name, labels, sl) in enumerate(groups):
+        for j in range(3):
+            ax = axes3[i, j]
+            ax.plot(t, cum[sl, :][j, :], 'g', linewidth=1)
+            ax.set_ylabel(labels[j])
+            if i == 4:
+                ax.set_xlabel('t [s]')
+    fig3.tight_layout(rect=[0, 0, 1, 0.97])
+    fig3.savefig(os.path.join(save_dir, 'cumulative_errors.png'))
+    plt.close(fig3)
+PY
+(11) cat > /root/simulate.py <<'PY'
+import numpy as np
+
+from position_controller import position_controller, make_position_integral
+from attitude_planner import attitude_planner
+from attitude_controller import attitude_controller, make_attitude_integral
+from motor_model import motor_model, thrust_moment_from_rpm
+from dynamics import dynamics
+
+
+def _hover_rpm(params: dict) -> float:
+    m = float(params['mass'])
+    g = float(params['gravity'])
+    cT = float(params['thrust_coefficient'])
+    F = m * g
+    return float(np.sqrt((F / 4.0) / cT))
+
+
+def simulate_trajectory(params: dict, planned: np.ndarray):
+    planned = np.array(planned, dtype=float)
+    max_iter = planned.shape[1]
+    dt = 1.0 / float(params['sample_rate'])
+
+    # State vector: pos(3), vel(3), rot(3), omega(3), motor_rpm(4)
+    state = np.zeros(16, dtype=float)
+    state[0:3] = planned[0:3, 0]
+    state[3:6] = planned[3:6, 0]
+    state[6:9] = planned[6:9, 0]
+    state[9:12] = planned[9:12, 0]
+
+    rpm0 = _hover_rpm(params)
+    state[12:16] = rpm0
+
+    actual = np.zeros((15, max_iter), dtype=float)
+
+    pos_int = make_position_integral()
+    att_int = make_attitude_integral()
+
+    for k in range(max_iter):
+        # record
+        actual[0:3, k] = state[0:3]
+        actual[3:6, k] = state[3:6]
+        actual[6:9, k] = state[6:9]
+        actual[9:12, k] = state[9:12]
+
+        # approximate acceleration from last applied thrust
+        if k == 0:
+            actual[12:15, k] = planned[12:15, 0]
+        else:
+            # recompute from current state and current thrust
+            F_now, _M_now = thrust_moment_from_rpm(params, state[12:16])
+            # compute acceleration (same as in dynamics)
+            sdot = dynamics(params, state, F_now, np.zeros(3))
+            actual[12:15, k] = sdot[3:6]
+
+        if k == max_iter - 1:
+            break
+
+        des_pos = planned[0:3, k]
+        des_vel = planned[3:6, k]
+        des_acc = planned[12:15, k]
+        yaw_des = float(planned[8, k])
+        yaw_rate_des = float(planned[11, k])
+
+        F_cmd, acc_cmd = position_controller(
+            current_pos=state[0:3],
+            current_vel=state[3:6],
+            desired_pos=des_pos,
+            desired_vel=des_vel,
+            desired_acc=des_acc,
+            params=params,
+            integral=pos_int,
+        )
+
+        rot_des, omega_des = attitude_planner(acc_cmd, yaw_des, yaw_rate_des, gravity=float(params['gravity']))
+
+        M_cmd = attitude_controller(
+            current_rot=state[6:9],
+            current_omega=state[9:12],
+            desired_rot=rot_des,
+            desired_omega=omega_des,
+            params=params,
+            integral=att_int,
+        )
+
+        rpm_des, rpm_dot = motor_model(params, F_cmd, M_cmd, state[12:16])
+        state[12:16] = np.clip(state[12:16] + rpm_dot * dt, float(params['rpm_min']), float(params['rpm_max']))
+
+        F_act, M_act = thrust_moment_from_rpm(params, state[12:16])
+
+        sdot = dynamics(params, state, F_act, M_act)
+        state[0:12] = state[0:12] + sdot[0:12] * dt
+
+    return actual
+PY
+(12) cat > /root/generate_results.py <<'PY'
+import json
+import os
+from glob import glob
+
+import numpy as np
+
+from params import load_params
+from flight_plan_parser import parse_flight_plan
+from trajectory_planner import trajectory_planner
+from simulate import simulate_trajectory
+from stepinfo_3d import stepinfo_3d
+from plot_quadrotor import plot_quadrotor
+
+
+def _accel_limits_ok(params: dict, planned: np.ndarray) -> bool:
+    acc = planned[12:15, :]
+    ax, ay, az = acc[0, :], acc[1, :], acc[2, :]
+    horiz = np.sqrt(ax ** 2 + ay ** 2)
+
+    if np.any(az > float(params['accel_limit_up']) + 1e-9):
+        return False
+    if np.any(az < -float(params['accel_limit_down']) - 1e-9):
+        return False
+    if np.any(horiz > float(params['accel_limit_horiz']) + 1e-9):
+        return False
+    return True
+
+
+def _score_run(planned: np.ndarray, actual: np.ndarray, metrics: dict) -> float:
+    pos_err = np.linalg.norm((actual[0:3, :] - planned[0:3, :]).T, axis=1)
+    max_err = float(np.max(pos_err))
+    score = max_err
+    # Soft penalties
+    score += 0.2 * float(metrics['SteadyStateError'])
+    score += 0.01 * float(metrics['Overshoot_pct'])
+    score += 0.001 * float(metrics['SettlingTime'])
+
+    # Hard penalties
+    if max_err > 0.05:
+        score += 1000.0 * (max_err - 0.05)
+    if metrics['SteadyStateError'] >= 0.05:
+        score += 1000.0 * (metrics['SteadyStateError'] - 0.05)
+    if metrics['Overshoot_pct'] >= 5.0:
+        score += 1000.0 * (metrics['Overshoot_pct'] - 5.0)
+    return score
+
+
+def tune_and_run_for_command(params_base: dict, command_text: str):
+    waypoints, waypoint_times, modes = parse_flight_plan(command_text)
+    time_final = float(waypoint_times[-1])
+    sr = float(params_base['sample_rate'])
+    max_iter = int(np.ceil(time_final * sr)) + 1
+
+    planned = trajectory_planner(waypoints, max_iter, waypoint_times, sr, modes)
+    if not _accel_limits_ok(params_base, planned):
+        raise RuntimeError('Planned trajectory violates acceleration limits')
+
+    # A small, fast gain sweep around a stable baseline.
+    candidates = []
+
+    kp_pos_base = np.array([4.0, 4.0, 8.0])
+    kd_pos_base = np.array([3.0, 3.0, 5.0])
+    ki_pos_base = np.array([0.0, 0.0, 0.5])
+
+    kp_att_base = np.array([220.0, 220.0, 120.0])
+    kd_att_base = np.array([35.0, 35.0, 20.0])
+    ki_att_base = np.array([0.0, 0.0, 0.0])
+
+    for s_pos in [0.7, 1.0, 1.3]:
+        for s_att in [0.7, 1.0, 1.3]:
+            cand = {
+                'kp_pos': (kp_pos_base * s_pos).tolist(),
+                'ki_pos': (ki_pos_base * s_pos).tolist(),
+                'kd_pos': (kd_pos_base * s_pos).tolist(),
+                'kp_att': (kp_att_base * s_att).tolist(),
+                'ki_att': (ki_att_base * s_att).tolist(),
+                'kd_att': (kd_att_base * s_att).tolist(),
+            }
+            candidates.append(cand)
+
+    best = None
+    best_score = float('inf')
+    best_actual = None
+    best_metrics = None
+
+    t = np.arange(max_iter, dtype=float) / sr
+    pos_target = waypoints[0:3, -1]
+
+    for cand in candidates:
+        params = dict(params_base)
+        params.update(cand)
+        actual = simulate_trajectory(params, planned)
+        metrics = stepinfo_3d(actual[0:3, :], pos_target, t, settling_threshold=0.02)
+        metrics = {'mode': modes[0], **metrics}
+        score = _score_run(planned, actual, metrics)
+        if score < best_score:
+            best_score = score
+            best = cand
+            best_actual = actual
+            best_metrics = metrics
+
+    return planned, best_actual, best_metrics, best
+
+
+def main():
+    params = load_params('/root/system_params.yaml')
+
+    cmd_files = sorted(glob('/root/commands/*.txt'))
+    os.makedirs('/root/results', exist_ok=True)
+
+    for path in cmd_files:
+        label = os.path.splitext(os.path.basename(path))[0]
+        out_dir = f'/root/results/{label}'
+        os.makedirs(out_dir, exist_ok=True)
+
+        with open(path, 'r') as f:
+            cmd_text = f.read()
+
+        planned, actual, metrics, tuning = tune_and_run_for_command(params, cmd_text)
+
+        np.save(os.path.join(out_dir, 'planned_trajectory.npy'), planned)
+        np.save(os.path.join(out_dir, 'actual_trajectory.npy'), actual)
+
+        with open(os.path.join(out_dir, 'metrics_3d.json'), 'w') as f:
+            json.dump(metrics, f, indent=2)
+
+        with open(os.path.join(out_dir, 'tuning_results.json'), 'w') as f:
+            json.dump(tuning, f, indent=2)
+
+        plot_quadrotor(actual, planned, np.arange(planned.shape[1]) / float(params['sample_rate']), save_dir=os.path.join(out_dir, 'plots'))
+
+
+if __name__ == '__main__':
+    main()
+PY
+
+⏳ Process still running (soft timeout)

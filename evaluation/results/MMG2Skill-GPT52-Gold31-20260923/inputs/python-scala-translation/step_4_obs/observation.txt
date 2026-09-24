@@ -1,0 +1,599 @@
+Tool: file_editor
+Result:
+[File /root/Tokenizer.scala edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|import java.nio.charset.{Charset, StandardCharsets}
++2|import java.time.format.DateTimeFormatter
++3|import java.time.{Instant, LocalDate, LocalDateTime, ZoneOffset, ZonedDateTime}
++4|import java.util.Locale
++5|
++6|import scala.annotation.tailrec
++7|import scala.collection.mutable
++8|import scala.math.BigDecimal.RoundingMode
++9|
++10|// ============================================================================
++11|// Enums and Core Data Model
++12|// ============================================================================
++13|
++14|sealed trait TokenType extends Product with Serializable { def value: String }
++15|
++16|object TokenType {
++17|  case object STRING extends TokenType { override val value: String = "string" }
++18|  case object NUMERIC extends TokenType { override val value: String = "numeric" }
++19|  case object TEMPORAL extends TokenType { override val value: String = "temporal" }
++20|  case object STRUCTURED extends TokenType { override val value: String = "structured" }
++21|  case object BINARY extends TokenType { override val value: String = "binary" }
++22|  case object NULL extends TokenType { override val value: String = "null" }
++23|
++24|  val values: List[TokenType] = List(STRING, NUMERIC, TEMPORAL, STRUCTURED, BINARY, NULL)
++25|
++26|  def fromString(s: String): Option[TokenType] = values.find(_.value == s)
++27|}
++28|
++29|final case class Token(
++30|  value: String,
++31|  tokenType: TokenType,
++32|  metadata: Map[String, Any] = Map.empty
++33|) extends Serializable {
++34|
++35|  def withMetadata(kvs: (String, Any)*): Token =
++36|    if (kvs.isEmpty) this else copy(metadata = metadata ++ kvs.toMap)
++37|
++38|  def withMetadata(more: Map[String, Any]): Token =
++39|    if (more.isEmpty) this else copy(metadata = metadata ++ more)
++40|}
++41|
++42|// ============================================================================
++43|// Protocol-like Traits
++44|// ============================================================================
++45|
++46|trait Tokenizable extends Serializable {
++47|  def toToken: ***REDACTED***
++48|}
++49|
++50|trait HasLength extends Serializable {
++51|  def length: Int
++52|}
++53|
++54|trait TokenProcessor[-T] extends Serializable {
++55|  def process(item: T): Unit
++56|}
++57|
++58|// ============================================================================
++59|// Generic Containers (variance mirrors the Python example)
++60|// ============================================================================
++61|
++62|final class TokenContainer[+T](items: Seq[T]) extends Serializable {
++63|  private val all: Vector[T] = items.toVector
++64|
++65|  def getAll: Vector[T] = all
++66|
++67|  def mapTokens(f: T => String): Vector[String] = all.map(f)
++68|}
++69|
++70|final class TokenSink[-T] extends Serializable {
++71|  private val received: mutable.ListBuffer[Any] = mutable.ListBuffer.empty
++72|
++73|  def receive(item: T): Unit = received += item
++74|
++75|  def drain(): List[Any] = {
++76|    val out = received.toList
++77|    received.clear()
++78|    out
++79|  }
++80|}
++81|
++82|final class BivariantHandler[T](default: T) extends Serializable {
++83|  private var value: T = default
++84|
++85|  def get: T = value
++86|
++87|  def set(newValue: T): Unit = value = newValue
++88|
++89|  def transform(f: T => T): T = {
++90|    value = f(value)
++91|    value
++92|  }
++93|}
++94|
++95|// ============================================================================
++96|// Tokenizers
++97|// ============================================================================
++98|
++99|trait BaseTokenizer[-T] extends Serializable {
++100|  def tokenize(value: T): Token
++101|
++102|  def tokenizeBatch(values: IterableOnce[T]): Iterator[Token] =
++103|    values.iterator.map(tokenize)
++104|}
++105|
++106|final class StringTokenizer(
++107|  encoding: Charset = StandardCharsets.UTF_8,
++108|  normalizer: String => String = identity
++109|) extends BaseTokenizer[Any] {
++110|
++111|  def this(encoding: String, normalizer: String => String) =
++112|    this(Charset.forName(encoding), normalizer)
++113|
++114|  def this(encoding: String) =
++115|    this(Charset.forName(encoding), identity)
++116|
++117|  def tokenize(value: String): Token =
++118|    Token(normalizer(value), TokenType.STRING)
++119|
++120|  def tokenize(value: Array[Byte]): Token =
++121|    Token(normalizer(new String(value, encoding)), TokenType.STRING)
++122|
++123|  override def tokenize(value: Any): Token = ***REDACTED*** match {
++124|    case s: String => tokenize(s)
++125|    case b: Array[Byte] => tokenize(b)
++126|    case other =>
++127|      throw new IllegalArgumentException(s"StringTokenizer expected String or Array[Byte], got: ${other.getClass}")
++128|  }
++129|}
++130|
++131|final class NumericTokenizer(
++132|  precision: Int = 6,
++133|  formatOptions: Map[String, Any] = Map.empty
++134|) extends BaseTokenizer[Any] {
++135|
++136|  private def formatFloating(d: Double): String = {
++137|    val fmt = s"%.${precision}f"
++138|    String.format(Locale.ROOT, fmt, java.lang.Double.valueOf(d))
++139|  }
++140|
++141|  private def formatDecimal(d: BigDecimal): String =
++142|    d.setScale(precision, RoundingMode.HALF_UP).bigDecimal.toPlainString
++143|
++144|  override def tokenize(value: Any): Token = ***REDACTED***
++145|    val (strValue, originalType) = value match {
++146|      case bd: BigDecimal => (formatDecimal(bd), "Decimal")
++147|      case bd: java.math.BigDecimal => (formatDecimal(BigDecimal(bd)), "Decimal")
++148|      case d: Double => (formatFloating(d), "float")
++149|      case f: Float => (formatFloating(f.toDouble), "float")
++150|      case i: Int => (i.toString, "int")
++151|      case l: Long => (l.toString, "int")
++152|      case s: Short => (s.toString, "int")
++153|      case b: Byte => (b.toString, "int")
++154|      case bi: BigInt => (bi.toString, "int")
++155|      case other =>
++156|        throw new IllegalArgumentException(s"NumericTokenizer expected numeric type, got: ${other.getClass}")
++157|    }
++158|
++159|    Token(
++160|      value = strValue,
++161|      tokenType = TokenType.NUMERIC,
++162|      metadata = Map("original_type" -> originalType) ++ formatOptions
++163|    )
++164|  }
++165|}
++166|
++167|object TemporalTokenizer {
++168|  // Keep the Python strftime patterns to preserve intent.
++169|  val ISO_FORMAT: String = "%Y-%m-%dT%H:%M:%S"
++170|  val DATE_FORMAT: String = "%Y-%m-%d"
++171|
++172|  private val pythonToJava: Map[String, String] = Map(
++173|    "%Y" -> "yyyy",
++174|    "%m" -> "MM",
++175|    "%d" -> "dd",
++176|    "%H" -> "HH",
++177|    "%M" -> "mm",
++178|    "%S" -> "ss"
++179|  )
++180|
++181|  def pythonStrftimeToJava(pattern: String): String = {
++182|    // Minimal converter for the directives used in this module.
++183|    // If you need more directives, extend pythonToJava.
++184|    val out = new StringBuilder
++185|    var i = 0
++186|    while (i < pattern.length) {
++187|      if (pattern.charAt(i) == '%' && i + 1 < pattern.length) {
++188|        val directive = pattern.substring(i, i + 2)
++189|        pythonToJava.get(directive) match {
++190|          case Some(java) => out.append(java); i += 2
++191|          case None => throw new IllegalArgumentException(s"Unsupported strftime directive: $directive")
++192|        }
++193|      } else {
++194|        out.append(pattern.charAt(i))
++195|        i += 1
++196|      }
++197|    }
++198|    out.toString
++199|  }
++200|}
++201|
++202|final class TemporalTokenizer(formatStr: Option[String] = None) extends BaseTokenizer[Any] {
++203|  import TemporalTokenizer._
++204|
++205|  def this(formatStr: String) = this(Option(formatStr))
++206|
++207|  private def formatterFor(value: Any): DateTimeFormatter = {
++208|    val pythonPattern = formatStr.getOrElse {
++209|      value match {
++210|        case _: LocalDateTime | _: ZonedDateTime | _: Instant => ISO_FORMAT
++211|        case _: LocalDate => DATE_FORMAT
++212|        case _ => DATE_FORMAT
++213|      }
++214|    }
++215|
++216|    DateTimeFormatter.ofPattern(pythonStrftimeToJava(pythonPattern))
++217|  }
++218|
++219|  override def tokenize(value: Any): Token = ***REDACTED***
++220|    val fmt = formatterFor(value)
++221|
++222|    val rendered = value match {
++223|      case dt: LocalDateTime => dt.format(fmt)
++224|      case d: LocalDate => d.format(fmt)
++225|      case zdt: ZonedDateTime => zdt.toLocalDateTime.format(fmt)
++226|      case i: Instant => LocalDateTime.ofInstant(i, ZoneOffset.UTC).format(fmt)
++227|      case other =>
++228|        throw new IllegalArgumentException(s"TemporalTokenizer expected LocalDate/LocalDateTime/ZonedDateTime/Instant, got: ${other.getClass}")
++229|    }
++230|
++231|    Token(rendered, TokenType.TEMPORAL)
++232|  }
++233|}
++234|
++235|final class UniversalTokenizer(
++236|  private val stringTokenizer: StringTokenizer = new StringTokenizer(),
++237|  private val numericTokenizer: NumericTokenizer = new NumericTokenizer(),
++238|  private val temporalTokenizer: TemporalTokenizer = new TemporalTokenizer()
++239|) extends Serializable {
++240|
++241|  def tokenize(value: Any): Token = ***REDACTED*** match {
++242|    case null => Token("NULL", TokenType.NULL)
++243|    case None => Token("NULL", TokenType.NULL)
++244|    case Some(v) => tokenize(v)
++245|
++246|    case t: Tokenizable => Token(t.toToken, TokenType.STRUCTURED)
++247|
++248|    case s: String => stringTokenizer.tokenize(s)
++249|    case b: Array[Byte] => stringTokenizer.tokenize(b)
++250|
++251|    case _: Int | _: Long | _: Short | _: Byte | _: BigInt | _: Float | _: Double | _: BigDecimal | _: java.math.BigDecimal =>
++252|      numericTokenizer.tokenize(value)
++253|
++254|    case _: LocalDate | _: LocalDateTime | _: ZonedDateTime | _: Instant =>
++255|      temporalTokenizer.tokenize(value)
++256|
++257|    case other =>
++258|      Token(other.toString, TokenType.STRING, metadata = Map("fallback" -> true))
++259|  }
++260|}
++261|
++262|// ============================================================================
++263|// Mutable Batch (kept to mirror the Python contrast example)
++264|// ============================================================================
++265|
++266|final class MutableTokenBatch extends Serializable {
++267|  private val tokensBuffer: mutable.ListBuffer[Token] = mutable.ListBuffer.empty
++268|  private var processed: Boolean = false
++269|
++270|  def tokens: List[Token] = tokensBuffer.toList
++271|
++272|  def add(token: ***REDACTED*** Unit = {
++273|    if (processed) throw new IllegalStateException("Batch already processed")
++274|    tokensBuffer += token
++275|  }
++276|
++277|  def markProcessed(): Unit = processed = true
++278|}
++279|
++280|// ============================================================================
++281|// Token registry (nested generics + handlers)
++282|// ============================================================================
++283|
++284|final class TokenRegistry[T] extends Serializable {
++285|  private val registry: mutable.Map[String, TokenContainer[T]] = mutable.Map.empty
++286|  private val handlers: mutable.ListBuffer[T => Option[Token]] = mutable.ListBuffer.empty
++287|
++288|  def register(key: String, container: TokenContainer[T]): Unit =
++289|    registry.update(key, container)
++290|
++291|  def addHandler(handler: T => Option[Token]): Unit =
++292|    handlers += handler
++293|
++294|  def process(key: String): List[Option[Token]] =
++295|    registry.get(key) match {
++296|      case None => Nil
++297|      case Some(container) =>
++298|        container.getAll.toList.map { item =>
++299|          handlers.iterator
++300|            .map(_(item))
++301|            .collectFirst { case Some(t) => t }
++302|        }
++303|    }
++304|}
++305|
++306|// ============================================================================
++307|// Functor/Monad simulation (the Python code uses None/null-like absence)
++308|// ============================================================================
++309|
++310|final case class TokenFunctor[+A](value: Option[A]) extends Serializable {
++311|  def map[B](f: A => B): TokenFunctor[B] = TokenFunctor(value.map(f))
++312|
++313|  def flatMap[B](f: A => TokenFunctor[B]): TokenFunctor[B] =
++314|    TokenFunctor(value.flatMap(a => f(a).value))
++315|
++316|  def getOrElse[B >: A](default: => B): B = value.getOrElse(default)
++317|}
++318|
++319|object TokenFunctor {
++320|  def apply[A](value: A): TokenFunctor[A] = TokenFunctor(Option(value))
++321|}
++322|
++323|final case class TokenMonad[+A](override val value: Option[A]) extends Serializable {
++324|  def map[B](f: A => B): TokenMonad[B] = TokenMonad(value.map(f))
++325|
++326|  def flatMap[B](f: A => TokenMonad[B]): TokenMonad[B] =
++327|    TokenMonad(value.flatMap(a => f(a).value))
++328|
++329|  def getOrElse[B >: A](default: => B): B = value.getOrElse(default)
++330|
++331|  def ap[B](fWrapped: TokenMonad[A => B]): TokenMonad[B] =
++332|    TokenMonad(for {
++333|      a <- value
++334|      f <- fWrapped.value
++335|    } yield f(a))
++336|}
++337|
++338|object TokenMonad {
++339|  def pure[A](value: A): TokenMonad[A] = TokenMonad(Option(value))
++340|
++341|  def apply[A](value: A): TokenMonad[A] = TokenMonad(Option(value))
++342|}
++343|
++344|// ============================================================================
++345|// JSON structure tokenization (a small, dependency-free ADT)
++346|// ============================================================================
++347|
++348|sealed trait JsonValue extends Product with Serializable
++349|
++350|object JsonValue {
++351|  case object Null extends JsonValue
++352|  final case class Str(value: String) extends JsonValue
++353|  final case class Num(value: BigDecimal) extends JsonValue
++354|  final case class Bool(value: Boolean) extends JsonValue
++355|  final case class Arr(value: Vector[JsonValue]) extends JsonValue
++356|  final case class Obj(value: Map[String, JsonValue]) extends JsonValue
++357|
++358|  def fromAny(value: Any): Option[JsonValue] = value match {
++359|    case null => Some(Null)
++360|    case None => Some(Null)
++361|    case Some(v) => fromAny(v)
++362|
++363|    case s: String => Some(Str(s))
++364|    case b: Boolean => Some(Bool(b))
++365|    case i: Int => Some(Num(BigDecimal(i)))
++366|    case l: Long => Some(Num(BigDecimal(l)))
++367|    case d: Double => Some(Num(BigDecimal(d)))
++368|    case f: Float => Some(Num(BigDecimal(f.toDouble)))
++369|    case bd: BigDecimal => Some(Num(bd))
++370|    case bd: java.math.BigDecimal => Some(Num(BigDecimal(bd)))
++371|
++372|    case xs: Seq[_] =>
++373|      val converted = xs.iterator.map(fromAny).toVector
++374|      if (converted.forall(_.isDefined)) Some(Arr(converted.flatten)) else None
++375|
++376|    case m: Map[_, _] =>
++377|      val kvs = m.iterator.collect { case (k: String, v) => k -> fromAny(v) }.toVector
++378|      if (kvs.forall(_._2.isDefined)) Some(Obj(kvs.map { case (k, ov) => k -> ov.get }.toMap))
++379|      else None
++380|
++381|    case _ => None
++382|  }
++383|}
++384|
++385|final class JsonTokenizer(pretty: Boolean = false) extends Serializable {
++386|  import JsonValue._
++387|
++388|  private def escape(s: String): String =
++389|    s.flatMap {
++390|      case '"' => "\\\""
++391|      case '\\' => "\\\\"
++392|      case '\b' => "\\b"
++393|      case '\f' => "\\f"
++394|      case '\n' => "\\n"
++395|      case '\r' => "\\r"
++396|      case '\t' => "\\t"
++397|      case c if c.isControl => f"\\u${c.toInt}%04x"
++398|      case c => c.toString
++399|    }
++400|
++401|  private def render(value: JsonValue, level: Int): String = {
++402|    val indent = if (pretty) "  " * level else ""
++403|    val newline = if (pretty) "\n" else ""
++404|    val sep = if (pretty) ": " else ":"
++405|
++406|    value match {
++407|      case Null => "null"
++408|      case Str(s) => s"\"${escape(s)}\""
++409|      case Num(n) => n.bigDecimal.toPlainString
++410|      case Bool(b) => if (b) "true" else "false"
++411|
++412|      case Arr(items) =>
++413|        if (items.isEmpty) "[]"
++414|        else {
++415|          val inner = items.map(v => s"${if (pretty) indent + "  " else ""}${render(v, level + 1)}")
++416|          val joined = inner.mkString("," + newline)
++417|          s"[${newline}${joined}${newline}${indent}]"
++418|        }
++419|
++420|      case Obj(fields) =>
++421|        if (fields.isEmpty) "{}"
++422|        else {
++423|          val inner = fields.toVector.sortBy(_._1).map { case (k, v) =>
++424|            val kvIndent = if (pretty) indent + "  " else ""
++425|            s"${kvIndent}\"${escape(k)}\"$sep${render(v, level + 1)}"
++426|          }
++427|          val joined = inner.mkString("," + newline)
++428|          s"{${newline}${joined}${newline}${indent}}"
++429|        }
++430|    }
++431|  }
++432|
++433|  def tokenize(value: JsonValue): Token =
++434|    Token(render(value, 0), TokenType.STRUCTURED, metadata = Map("json" -> true))
++435|
++436|  def tokenizePath(value: JsonValue, path: String): Option[Token] = {
++437|    val parts = path.split("\\.").toList.filter(_.nonEmpty)
++438|
++439|    @tailrec
++440|    def loop(current: JsonValue, remaining: List[String]): Option[JsonValue] = remaining match {
++441|      case Nil => Some(current)
++442|      case part :: tail =>
++443|        current match {
++444|          case Obj(fields) => fields.get(part).flatMap(loop(_, tail))
++445|          case Arr(items) if part.forall(_.isDigit) =>
++446|            val idx = part.toInt
++447|            items.lift(idx).flatMap(loop(_, tail))
++448|          case _ => None
++449|        }
++450|    }
++451|
++452|    loop(value, parts).map(tokenize)
++453|  }
++454|}
++455|
++456|// ============================================================================
++457|// Whitespace tokenizer
++458|// ============================================================================
++459|
++460|final class WhitespaceTokenizer(
++461|  lowercase: Boolean = false,
++462|  minLength: Int = 0,
++463|  maxLength: Option[Int] = None,
++464|  stripPunctuation: Boolean = false
++465|) extends Serializable {
++466|
++467|  private val punctuation: Set[Char] = ".,!?;:'\"()[]{}".toSet
++468|
++469|  private def stripEdgePunctuation(word: String): String = {
++470|    def dropLeading(s: String): String = s.dropWhile(punctuation.contains)
++471|    def dropTrailing(s: String): String = s.reverse.dropWhile(punctuation.contains).reverse
++472|    dropTrailing(dropLeading(word))
++473|  }
++474|
++475|  private def processToken(word0: String): Option[String] = {
++476|    val word1 = if (stripPunctuation) stripEdgePunctuation(word0) else word0
++477|    val word2 = if (lowercase) word1.toLowerCase(Locale.ROOT) else word1
++478|
++479|    if (word2.length < minLength) None
++480|    else {
++481|      val trimmed = maxLength match {
++482|        case Some(m) if word2.length > m => word2.take(m)
++483|        case _ => word2
++484|      }
++485|      Option(trimmed).filter(_.nonEmpty)
++486|    }
++487|  }
++488|
++489|  def tokenize(text: String): List[Token] = {
++490|    val words = text.split("\\s+").toList.filter(_.nonEmpty)
++491|
++492|    words.zipWithIndex.flatMap { case (word, i) =>
++493|      processToken(word).map { processed =>
++494|        Token(
++495|          value = processed,
++496|          tokenType = TokenType.STRING,
++497|          metadata = Map("position" -> i, "original" -> word)
++498|        )
++499|      }
++500|    }
++501|  }
++502|
++503|  def tokenizeToStrings(text: String): List[String] = tokenize(text).map(_.value)
++504|
++505|  def tokenizeWithPositions(text: String): List[(String, Int, Int)] = {
++506|    val words = text.split("\\s+").toList.filter(_.nonEmpty)
++507|
++508|    @tailrec
++509|    def loop(remaining: List[String], currentPos: Int, acc: List[(String, Int, Int)]): List[(String, Int, Int)] =
++510|      remaining match {
++511|        case Nil => acc.reverse
++512|        case word :: tail =>
++513|          val start = text.indexOf(word, currentPos)
++514|          val end = if (start >= 0) start + word.length else currentPos
++515|
++516|          val nextAcc = processToken(word) match {
++517|            case Some(processed) if start >= 0 => (processed, start, end) :: acc
++518|            case _ => acc
++519|          }
++520|
++521|          loop(tail, end, nextAcc)
++522|      }
++523|
++524|    loop(words, 0, Nil)
++525|  }
++526|
++527|  def countTokens(text: String): Int = tokenize(text).length
++528|}
++529|
++530|// ============================================================================
++531|// Builder Pattern with Fluent Interface
++532|// ============================================================================
++533|
++534|final case class TokenizerValidationError(message: String) extends RuntimeException(message)
++535|
++536|final class TokenizerBuilder[T] extends Serializable {
++537|  private var normalizers: Vector[String => String] = Vector.empty
++538|  private var validators: Vector[T => Boolean] = Vector.empty
++539|  private var metadata: Map[String, Any] = Map.empty
++540|
++541|  def withNormalizer(normalizer: String => String): TokenizerBuilder[T] = {
++542|    normalizers = normalizers :+ normalizer
++543|    this
++544|  }
++545|
++546|  def withValidator(validator: T => Boolean): TokenizerBuilder[T] = {
++547|    validators = validators :+ validator
++548|    this
++549|  }
++550|
++551|  def withMetadata(kvs: (String, Any)*): TokenizerBuilder[T] = {
++552|    metadata = metadata ++ kvs.toMap
++553|    this
++554|  }
++555|
++556|  def build(): T => Token = ***REDACTED***
++557|    val ns = normalizers
++558|    val vs = validators
++559|    val md = metadata
++560|
++561|    (value: T) => {
++562|      vs.foreach { v =>
++563|        if (!v(value)) throw TokenizerValidationError(s"Validation failed for $value")
++564|      }
++565|
++566|      val normalized = ns.foldLeft(value.toString) { case (acc, n) => n(acc) }
++567|      Token(normalized, TokenType.STRING, md)
++568|    }
++569|  }
++570|}
++571|
++572|// ============================================================================
++573|// Module-level convenience functions (Scala 2.13: placed in an object)
++574|// ============================================================================
++575|
++576|object Tokenizer {
++577|  private val universal: UniversalTokenizer = new UniversalTokenizer()
++578|
++579|  def tokenize(value: Any): Token = ***REDACTED***
++580|
++581|  def tokenizeBatch(values: IterableOnce[Any]): Iterator[Token] =
++582|    values.iterator.map(tokenize)
++583|
++584|  /** Convenience: return only the token string value. */
++585|  def toToken(value: Any): String = tokenize(value).value
++586|
++587|  /** Convenience: enrich a token with more metadata. */
++588|  def withMetadata(token: ***REDACTED***, kvs: (String, Any)*): Token =
++589|    token.withMetadata(kvs: _*)
++590|}
++591|
+[end of edit 1 / 1]

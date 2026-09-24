@@ -1,0 +1,186 @@
+Tool: file_editor
+Result:
+[File /root/redact.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|"""Redact identifying info from academic papers for blind review."""
++2|import fitz
++3|import os
++4|import re
+ 5|
++6|
++7|def find_references_page(doc):
++8|    """Locate the References section start (title line), not passing mentions."""
++9|    for i, page in enumerate(doc):
++10|        text = page.get_text()
++11|        for line in text.split("\n"):
++12|            s = line.strip().lower()
++13|            # Common section headings for references
++14|            if s in ("references", "6. references", "5. references",
++15|                    "4. references", "7. references"):
++16|                return i
++17|    # Fallback: first page containing the word 'references' as its own token
++18|    for i, page in enumerate(doc):
++19|        if re.search(r"^\s*(\d+\.\s*)?references\s*$",
++20|                     page.get_text(), re.IGNORECASE | re.MULTILINE):
++21|            return i
++22|    return None
++23|
++24|
++25|def redact_pdf(input_path, output_path, patterns, regex_patterns=None):
++26|    doc = fitz.open(input_path)
++27|    ref_page = find_references_page(doc)
++28|    print(f"[{os.path.basename(input_path)}] References start page: {ref_page}")
++29|
++30|    for page_num, page in enumerate(doc):
++31|        if ref_page is not None and page_num >= ref_page:
++32|            continue
++33|
++34|        for pattern in patterns:
++35|            for rect in page.search_for(pattern):
++36|                page.add_redact_annot(rect, fill=(0, 0, 0))
++37|
++38|        # Regex patterns: search full text and locate rects for each match
++39|        if regex_patterns:
++40|            text = page.get_text()
++41|            for rx in regex_patterns:
++42|                for m in re.finditer(rx, text):
++43|                    match_str = m.group(0)
++44|                    for rect in page.search_for(match_str):
++45|                        page.add_redact_annot(rect, fill=(0, 0, 0))
++46|
++47|        page.apply_redactions()
++48|
++49|    os.makedirs(os.path.dirname(output_path), exist_ok=True)
++50|    doc.save(output_path)
++51|    doc.close()
++52|    verify(input_path, output_path)
++53|
++54|
++55|def verify(original_path, output_path):
++56|    orig = fitz.open(original_path)
++57|    redc = fitz.open(output_path)
++58|    orig_len = sum(len(p.get_text()) for p in orig)
++59|    redc_len = sum(len(p.get_text()) for p in redc)
++60|    print(f"  Original: {len(orig)} pages, {orig_len} chars")
++61|    print(f"  Redacted: {len(redc)} pages, {redc_len} chars")
++62|    print(f"  Retained: {redc_len/orig_len:.1%}")
++63|    if len(redc) != len(orig):
++64|        raise ValueError(f"Page count changed: {len(orig)} -> {len(redc)}")
++65|    if redc_len < 1000:
++66|        raise ValueError(f"PDF corrupted: only {redc_len} chars remain!")
++67|    if redc_len < orig_len * 0.7:
++68|        raise ValueError(f"Too much removed: kept only {redc_len/orig_len:.0%}")
++69|    orig.close()
++70|    redc.close()
++71|    print("  ✓ Verification passed")
++72|
++73|
++74|# ================= Paper 1 =================
++75|paper1_patterns = [
++76|    # Authors (full names)
++77|    "Yueqian Lin",
++78|    "Zhengmian Hu",
++79|    "Qinsi Wang",
++80|    "Yudong Liu",
++81|    "Hengfan Zhang",
++82|    "Jayakumar Subramanian",
++83|    "Nikos Vlassis",
++84|    'Hai "Helen" Li',
++85|    "Hai “Helen” Li",
++86|    "Yiran Chen",
++87|    # Affiliations
++88|    "Duke University, Durham, NC, USA",
++89|    "Duke University",
++90|    "Adobe, San Jose, CA, USA",
++91|    "Adobe",
++92|    # Emails
++93|    "yueqian.lin@duke.edu",
++94|    "zhengmianh@adobe.com",
++95|    # arXiv identifier
++96|    "arXiv:2509.26542v1",
++97|    "arXiv:2509.26542",
++98|    "2509.26542",
++99|]
++100|
++101|# ================= Paper 2 =================
++102|paper2_patterns = [
++103|    # Authors
++104|    "Jiatong Shi",
++105|    "Yueqian Lin",
++106|    "Xinyi Bai",
++107|    "Keyi Zhang",
++108|    "Yuning Wu",
++109|    "Yuxun Tang",
++110|    "Yifeng Yu",
++111|    "Qin",  # careful — see below; using regex instead
++112|    "Shinji Watanabe",
++113|    # Affiliations
++114|    "Carnegie Mellon University",
++115|    "Duke Kunshan University",
++116|    "Cornell University",
++117|    "Multimodal Art",
++118|    "Projection Community",
++119|    "Renmin University of China",
++120|    "Georgia Institute of Technology",
++121|    # Email
++122|    "jiatongs@cs.cmu.edu",
++123|    # Venue & DOI
++124|    "Interspeech 2024",
++125|    "1-5 September 2024, Kos, Greece",
++126|    "10.21437/Interspeech.2024-33",
++127|    # Acknowledgement names
++128|    "Shengyuan Xu",
++129|    "Pengcheng Zhu",
++130|    # Specific funding identifiers
++131|    "CIS210014",
++132|    "IRI120008P",
++133|    "#2138259",
++134|    "#2138286",
++135|    "#2138307",
++136|    "#2137603",
++137|    "#2138296",
++138|    "62072462",
++139|]
++140|# Remove overly-generic "Qin" — replace with full name "Qin\nJin" and "Qin Jin"
++141|paper2_patterns = [p for p in paper2_patterns if p != "Qin"]
++142|paper2_patterns.extend(["Qin Jin", "Qin\nJin"])
++143|
++144|# ================= Paper 3 =================
++145|paper3_patterns = [
++146|    # Authors
++147|    "Yueqian Lin",
++148|    "Yuzhe Fu",
++149|    "Jingyang Zhang",
++150|    "Yudong Liu",
++151|    "Jianyi Zhang",
++152|    "Jingwei Sun",
++153|    "Hai Li",
++154|    "Yiran Chen",
++155|    # Affiliation
++156|    "Duke University, Durham, USA",
++157|    "Duke University",
++158|    # Email
++159|    "yl768@duke.edu",
++160|    # Venue
++161|    "ICML Workshop on Machine Learning for Audio, Vancouver,",
++162|    "ICML Workshop on Machine Learning for Audio",
++163|    "Vancouver, Canada",
++164|    "Copyright 2025 by the author(s)",
++165|    # Funding info that identifies affiliation/grants
++166|    "NSF 2112562",
++167|    "ARO W911NF-23-2-0224",
++168|]
++169|
++170|# arXiv IDs regex — redact ALL arXiv IDs on pre-reference pages? No — arXiv IDs in
++171|# references are self-citation-adjacent and are OK. Only the paper's own arXiv ID
++172|# matters (front-page vertical banner). Handled via literal string.
++173|
++174|if __name__ == "__main__":
++175|    redact_pdf("/root/paper1.pdf", "/root/redacted/paper1.pdf", paper1_patterns)
++176|    redact_pdf("/root/paper2.pdf", "/root/redacted/paper2.pdf", paper2_patterns)
++177|    redact_pdf("/root/paper3.pdf", "/root/redacted/paper3.pdf", paper3_patterns)
++178|
+[end of edit 1 / 1]

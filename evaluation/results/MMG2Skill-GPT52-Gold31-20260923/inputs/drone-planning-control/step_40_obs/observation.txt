@@ -1,0 +1,49 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, yaml
+from flight_plan_parser import parse_flight_plan
+from trajectory_planner import trajectory_planner
+from params import load_params
+from position_controller import position_controller, make_position_integral
+from attitude_planner import attitude_planner
+from dynamics import dynamics
+params=load_params('/root/system_params.yaml')
+# fixed gains from tuning for 018 currently
+import json
+with open('/root/results/018/tuning_results.json') as f:
+    gains=json.load(f)
+params.update(gains)
+cmd=open('/root/commands/018.txt').read()
+waypoints, waypoint_times, modes=parse_flight_plan(cmd)
+T=float(waypoint_times[-1]); sr=params['sample_rate']; max_iter=int(np.ceil(T*sr))+1
+planned=trajectory_planner(waypoints,max_iter,waypoint_times,sr,modes)
+# ideal attitude: directly set state angles to desired each step, thrust exactly.
+state=np.zeros(16)
+state[0:3]=planned[0:3,0]; state[3:6]=planned[3:6,0]; state[6:9]=planned[6:9,0]
+pos_int=make_position_integral()
+m=float(params['mass']); g=float(params['gravity']); dt=1/sr
+actual=np.zeros((15,max_iter))
+for k in range(max_iter):
+    actual[0:3,k]=state[0:3]; actual[3:6,k]=state[3:6]; actual[6:9,k]=state[6:9] ]
+    if k==max_iter-1: break
+    des_pos=planned[0:3,k]; des_vel=planned[3:6,k]; des_acc=planned[12:15,k]
+    _F, acc_cmd=position_controller(state[0:3],state[3:6],des_pos,des_vel,des_acc,params,pos_int)
+    yaw_des=float(planned[8,k]); yaw_rate_des=float(planned[11,k])
+    rot_des,_=attitude_planner(acc_cmd,yaw_des,yaw_rate_des,gravity=g)
+    # set attitude instantly
+    state[6:9]=rot_des
+    # thrust magnitude ideal
+    F_cmd=m*np.linalg.norm(acc_cmd+np.array([0,0,g]))
+    sdot=dynamics(params,state,F_cmd,np.zeros(3))
+    state[0:6]+=sdot[0:6]*dt
+pos_err=np.linalg.norm((actual[0:3]-planned[0:3]).T,axis=1)
+print('ideal attitude max err',pos_err.max(),'final',pos_err[-1])
+print('ideal final pos',actual[0:3,-1],'planned',planned[0:3,-1])
+PY
+ideal attitude max err 0.004084462025687463 final 0.0034022865491070142
+ideal final pos [0.         2.00340229 1.        ] planned [0. 2. 1.]
+
+
+📁 Working directory: /root
+✅ Exit code: 0

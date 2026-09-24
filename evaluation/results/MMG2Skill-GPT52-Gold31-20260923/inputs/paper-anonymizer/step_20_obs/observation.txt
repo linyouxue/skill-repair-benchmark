@@ -1,0 +1,54 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import re, fitz, os
+paths=[f'/root/redacted/paper{i}.pdf' for i in range(1,4)]
+needles=[
+    r'@',
+    r'arxiv\s*:\s*\d{4}\.\d{4,5}',
+    r'Duke University', r'Adobe', r'Carnegie Mellon', r'Cornell University', r'R enmin University', r'Georgia Institute',
+    r'Interspeech\s*2024', r'Kos, Greece', r'ICML', r'Vancouver',
+]
+for path in paths:
+    if not os.path.exists(path):
+        raise SystemExit(f'missing {path}')
+for path in paths:
+    doc=fitz.open(path)
+    meta=doc.metadata
+    # basic sanity
+    pages=len(doc)
+    text='\n'.join(p.get_text('text') for p in doc)
+    print('\n===',path,'===')
+    print('pages',pages)
+    print('metadata_nonempty', {k:v for k,v in meta.items() if v})
+    # scan
+    findings=[]
+    for n in needles:
+        if re.search(n, text, re.I):
+            findings.append(n)
+    print('scan_hits', findings)
+    # show any email-like tokens if present
+    emails=set(re.findall(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', tex t))
+    if emails:
+        print('emails_found', sorted(emails)[:10])
+    doc.close()
+PY
+
+=== /root/redacted/paper1.pdf ===
+pages 23
+metadata_nonempty {'format': 'PDF 1.7'}
+scan_hits ['arxiv\\s*:\\s*\\d{4}\\.\\d{4,5}']
+
+=== /root/redacted/paper2.pdf ===
+pages 5
+metadata_nonempty {'format': 'PDF 1.5'}
+scan_hits ['arxiv\\s*:\\s*\\d{4}\\.\\d{4,5}', 'ICML']
+
+=== /root/redacted/paper3.pdf ===
+pages 12
+metadata_nonempty {'format': 'PDF 1.5'}
+scan_hits ['arxiv\\s*:\\s*\\d{4}\\.\\d{4,5}', 'ICML']
+
+
+📁 Working directory: /root
+✅ Exit code: 0
