@@ -1,10 +1,5 @@
 **请每个方法单独建立一个目录**
 
-MMG2Skill 已有结果（2026-09-24）：
-
-- [GPT-5.2 Gold31 当前快照](MMG2Skill-GPT52-Gold31-20260923/README.md)：30题有效执行，Druid地区访问阻塞，语义Gold尚未结算。
-- [Claude Opus4.7 Gold15 完整评测](MMG2Skill-Opus47-Gold15-20260924/README.md)：15题/32缺陷，原语义与F→P替代指标分别保存。
-
 大致最后结构如下：
 ```text
 results/
