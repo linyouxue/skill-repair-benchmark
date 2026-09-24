@@ -1,0 +1,23 @@
+# Batch Diagnoses
+
+## Task flink-query (reward: 0.0)
+
+<label>Missing evidence due to sandbox</label>
+
+(1) First observable failure:
+The first failure is that no verifier logs/artifacts (e.g., stdout/stderr/output/result files) and no workspace source files can be accessed from the provided paths; all attempted reads return “file not found” or “escapes allowed project root”. This prevents observing the program’s actual incorrect output or runtime/test failure.
+
+(2) Trajectory step that produced it:
+At the very first diagnostic data-collection step (the initial `read_file` calls), the tool attempts to read absolute paths outside the allowed project root (e.g., `/app/workspace/...` and verifier artifact paths), triggering path sandbox violations and missing-file errors.
+
+(3) Relevant skill rule or missing rule:
+Missing/violated rule: “When diagnosing, only read files within the allowed project root; prefer relative paths under the run’s exported workspace/output directory. If a path is rejected, locate the corresponding file inside the permitted root rather than retrying absolute locations.”
+This is a skill-controllable error in evidence gathering (not an API/grader error).
+
+(4) General corrective behavior:
+Always enumerate or derive the correct in-root locations for: (a) the produced workspace code, (b) verifier artifacts, and (c) execution trace, then read those. Use only project-root-relative paths; if the task references `/app/workspace/...`, map it to the copied workspace directory inside the rollout output root before reading. Only after obtaining the actual Java implementation and verifier output should we identify the true first functional bug in the Flink job.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/iter_6/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/iter_6/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/workspace

@@ -1,0 +1,8 @@
+### verify-in-root-evidence-paths | workflow | map referenced absolute paths to sandbox-allowed project-root locations before reading
+- anchor: verify-evidence-is-accessible-before-diagnosing-or-proposing-changes
+- appeared_in: iter_6
+- description: Diagnoses can fail early when the executor tries to read verifier artifacts or workspace files via absolute paths (e.g., `/app/workspace/...`) that are outside the sandbox-allowed project root. The tool then returns “file not found” or “escapes allowed project root,” leaving the diagnoser with no observable stdout/stderr/results. This is skill-controllable: the executor must translate/locate the corresponding files inside the exported run directory (e.g., `.../batch/<task>/workspace` and `.../iter_N/trace.jsonl`) rather than repeatedly probing disallowed paths.
+- latest_executor_action: Before any debugging/diagnosis step, confirm evidence files are accessible *within the allowed project root*. If the prompt/trace references absolute paths, map them to the run’s in-root export locations (typically under the batch `workspace/` directory and the current `iter_N/` directory). If a read fails due to sandbox or missing file, stop retrying the same path; instead, locate the file by searching/indexing within the permitted root and only proceed once stdout/stderr/output/result artifacts are readable.
+- remedy_log:
+  - iter_6 | diagnosis: first diagnostic `read_file` calls attempted absolute/out-of-root verifier/workspace paths, triggering sandbox violations and preventing any functional localization
+            | patch: record a new workflow pattern to force in-root path mapping before evidence collection

@@ -1,0 +1,18 @@
+# Batch Diagnoses
+
+## Task flink-query (reward: 0.0)
+
+<label>Incorrect event-time stage logic</label>
+
+(1) **First observable failure**: The job produces wrong per-job “longest stage” task counts (tests fail by output mismatch, not by compile/runtime errors). This indicates the implemented session/stage detection did not match the spec (10-minute inactivity gap on **SUBMIT** events per job, in **event time** microseconds).
+
+(2) **Trajectory step that produced it**: The first failure is introduced when implementing the stage aggregation in `LongestSessionPerJob`—specifically, the step that chooses how to segment stages (session windows / timers) and what to count (SUBMIT-only task events), and then emits the “longest stage” count per job at job completion. That implementation step is where an incorrect windowing/timer/keying decision would deterministically yield wrong counts.
+
+(3) **Relevant skill rule or missing rule**: Missing/violated rule: *“When asked for inactivity-based stage/session detection, use event-time semantics with correct timestamp units and filter to the specified event type before sessionization; ensure per-key session gaps are applied on the keyed stream.”* Common violations include: using processing time, using milliseconds instead of microseconds (10 minutes becomes mis-scaled), not filtering to SUBMIT, sessionizing on taskId instead of jobId, or emitting partial maxima without waiting for job-finish boundary.
+
+(4) **General corrective behavior**: Ensure the stage logic is: **key by jobId → filter task events to SUBMIT → assign event-time timestamps/watermarks in microseconds → apply a 10-minute event-time inactivity gap per job to form stages → count tasks per stage → take max per job after all relevant events (or after explicit job-finish signal) before emitting**. Also verify unit conversions (10 minutes = 600 seconds = 600,000,000 microseconds) and that resubmissions are counted as separate SUBMIT events.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/iter_4/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/iter_4/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/workspace

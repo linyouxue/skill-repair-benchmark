@@ -1,0 +1,26 @@
+# Batch Diagnoses
+
+## Task pddl-airport-planning (reward: 0.0)
+
+<label>Missing planning-and-write workflow</label>
+
+(1) First observable failure:
+No plan files were produced at all (no `plan_output` targets written), so the verifier had nothing to execute; reward stayed 0 despite “execution_ok=true”.
+
+(2) Trajectory step that produced it:
+The agent run ended (“end_turn”) after tool activity without ever performing the required loop: read `problem.json` → load each domain/problem PDDL → generate a plan → write it to each specified `plan_output`. This is evidenced by `n_skill_invocations: 0` and absence of any generated plan artifacts in the output inventory.
+
+(3) Relevant skill rule or missing rule:
+Missing (or not triggered) rule in the PDDL skill bundle: a compulsory “for each entry in problem.json, write a plan file to plan_output” procedure, including an explicit finalization step that creates the output files. Also missing a guardrail rule: “do not terminate until all plan_output files exist and are non-empty”.
+
+(4) General corrective behavior:
+Always enforce an output-completion checklist before ending:
+- Parse `problem.json` and iterate all tasks.
+- For each task: read domain + problem, derive/compute a valid action sequence, then write exactly that sequence (one grounded action per line) to `plan_output`.
+- Verify locally that every `plan_output` path exists, is non-empty, and actions match the domain vocabulary; only then terminate.
+This is skill-controllable (agent failed to execute the required procedure), not an API/permission/grader issue.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/pddl-airport-planning/iter_1/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/pddl-airport-planning/iter_1/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/pddl-airport-planning/workspace

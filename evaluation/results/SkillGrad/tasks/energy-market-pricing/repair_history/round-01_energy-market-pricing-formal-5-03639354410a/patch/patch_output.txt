@@ -1,0 +1,40 @@
+Implemented the missing **deliverable-commit-phase** workflow pattern across the energy-market-pricing skill suite so runs don’t terminate without producing the required artifact (e.g., `report.json`).
+
+## What changed (pattern: `deliverable-commit-phase`)
+### Added to each SKILL.md (L2)
+Inserted a new workflow section near the top:
+
+- **“Workflow: Commit Deliverables Before Exit”**
+  - Identify required artifact names/schema from the task statement.
+  - Treat compute as incomplete until the final artifact is written.
+  - If upstream compute fails, still write a structured output with an `error` payload.
+  - Re-open/parse the written file to verify validity before exiting.
+
+Also added an L2 pointer:
+
+- `Read references/deliverables.md when the grader expects a specific file (e.g., report.json) or when upstream compute might fail. Skip when the environment auto-persists outputs and the task has no required artifact.`
+
+And updated **Common Pitfalls** in each skill to include the “exit without writing deliverable” failure mode.
+
+Files updated:
+- `evolved_skills/dc-power-flow/SKILL.md`
+- `evolved_skills/economic-dispatch/SKILL.md`
+- `evolved_skills/locational-marginal-prices/SKILL.md`
+- `evolved_skills/power-flow-data/SKILL.md`
+
+### Added new L3 chapter in each skill’s references/
+Created `references/deliverables.md` (one per skill directory) containing a reusable, runnable Python template that:
+
+- Branches on success vs exception (writes normal payload vs `error` payload)
+- Writes **atomically** (tmp + rename)
+- Verifies by reopening and `json.load`
+- If verification fails, rewrites a minimal error payload and re-verifies (includes a corrective next action, not just detection)
+
+Files created:
+- `evolved_skills/dc-power-flow/references/deliverables.md`
+- `evolved_skills/economic-dispatch/references/deliverables.md`
+- `evolved_skills/locational-marginal-prices/references/deliverables.md`
+- `evolved_skills/power-flow-data/references/deliverables.md`
+
+## Why this addresses the observed failure
+The diagnosis showed the run produced **no output artifact** (`report.json` missing), which is an immediate harness failure regardless of computational correctness. The new workflow + L3 procedure enforce a mandatory “write + verify deliverable” phase and provide a fallback behavior that still emits a structured `report.json` even when upstream computation crashes.

@@ -1,0 +1,18 @@
+# Batch Diagnoses
+
+## Task flink-query (reward: 0.0)
+
+<label>Missing implementation files created</label>
+
+(1) **First observable failure:** The run completes but produces incorrect/empty evaluation output because the required datatype classes (task/job event classes under `clusterdata.datatypes`) are not present/usable, so the Flink pipeline cannot correctly parse inputs and compute stage counts. This is implied by the task requirement (“you need to implement … classes”) and the absence of any such files in the **Output inventory** (only `LongestSessionPerJob.java` and `AppBase.java` exist under `src/main/java`).
+
+(2) **Trajectory step that produced it:** The agent never created any new Java source files under `clusterdata/datatypes` during the trajectory (no such artifacts appear in output inventory; trace content is unavailable/empty, but the artifact list is sufficient to pinpoint the omission).
+
+(3) **Relevant skill rule or missing rule:** Missing rule in the agent’s implementation procedure: *when a base framework (`AppBase`) references external datatypes/parsers, ensure all referenced classes are implemented and compiled as part of the solution, not just the top-level job file.* This is a skill-controllable completeness error (not an API/harness/grader issue).
+
+(4) **General corrective behavior:** Before finalizing, enumerate all compile-time/runtime dependencies implied by the skeleton/base class (e.g., required POJOs, CSV parsing utilities, timestamp fields) and create/verify those source files exist, compile, and are wired into the pipeline. Run a local compile/test to confirm the job reads the gzipped CSV, extracts event-time timestamps, and emits the required `(jobId,longestStageTaskCount)` tuples to the output file.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/iter_2/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/iter_2/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/flink-query/workspace

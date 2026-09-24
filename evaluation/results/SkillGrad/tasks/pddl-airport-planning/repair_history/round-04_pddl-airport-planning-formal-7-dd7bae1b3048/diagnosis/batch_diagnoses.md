@@ -1,0 +1,25 @@
+# Batch Diagnoses
+
+## Task pddl-airport-planning (reward: 0.0)
+
+<label>Missing required output artifacts</label>
+
+(1) First observable failure:
+No plan files were written to the required `plan_output` paths from `problem.json` (i.e., the run ended without persisting the mandated plan artifacts). This is observable from the overall failure with otherwise “execution_ok: true” and from the agent not producing any filesystem outputs listed as plan files.
+
+(2) Trajectory step that produced it:
+The final agent termination (`end_turn`) occurred without a preceding “persist all required outputs” gate. In the trajectory summary this corresponds to the last agent message step (after 30 tool calls) where the agent stopped, but never performed the required enumeration of `problem.json` → write plan files → read-back existence check.
+
+(3) Relevant skill rule or missing rule:
+Direct violation of the preloaded skill `pddl-skills/SKILL.md` section “Finalize: persist required plan artifacts”, especially:
+- “Immediately before finishing, run an explicit ‘persist all required outputs’ step … treat it as a non-skippable completion gate.”
+- “Never call `end_turn` until a filesystem existence check over all required `plan_output` paths passes.”
+Also suggests a missing/ignored rule in the agent behavior: enforce output persistence even when planning fails (write an explicit artifact per harness convention).
+
+(4) General corrective behavior:
+Adopt a hard completion gate: re-open `problem.json`, enumerate every `(domain, problem, plan_output)`, solve + validate, then write exactly one plan file per `plan_output` (or an explicit “no-plan” marker per benchmark convention) and verify by reading back and checking existence for all outputs before ending the turn. This is fully skill-controllable (not an API/permission/grader issue).
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/pddl-airport-planning/iter_3/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/pddl-airport-planning/iter_3/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/pddl-airport-planning/workspace

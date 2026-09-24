@@ -1,0 +1,8 @@
+### deliverables-presence-check | workflow | ensure required output artifacts are created at exact paths and verified before finalizing
+- anchor: (none yet)
+- appeared_in: iter_2
+- description: The executor can complete “domain work” (e.g., reasoning about syzlang/ioctl direction, running build checks) yet still fail the task because it does not actually create/write the required deliverable files at the exact requested paths, or it creates them transiently and they are missing at grading time. This manifests as an empty output inventory (“no output artifacts at all”). The failure mode is upstream of syzlang correctness: even correct content is ungradeable if not persisted to the mandated locations.
+- latest_executor_action: At the start, enumerate all explicitly requested deliverables (file paths + required names). Before final response, enforce a hard gate: (1) write each file to the exact absolute path; (2) verify existence and non-emptiness via `ls -l <path>` and `sed -n '1,40p' <path>` (or equivalent); (3) if the build system must see them, verify they are under the expected repo location and referenced (then run `make descriptions`); (4) re-check that the files still exist after any build/cleanup step. Do not finalize until the inventory matches.
+- remedy_log:
+  - iter_2 | diagnosis: run ended with empty output inventory; no step wrote the required syzlang description files to specified paths; existing skills focus on `make descriptions` but not deliverable creation/verification
+            | patch: (pending) add an L2 workflow section "Deliverables gate: write + verify required files exist" to one of the always-loaded skills, or add a small shared L3 checklist referenced by all skills
