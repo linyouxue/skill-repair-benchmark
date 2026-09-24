@@ -1,0 +1,30 @@
+{
+  "task_id": "xlsx-recover-data",
+  "initial_run_id": "xlsx-recover-data-original-skill-r002",
+  "selected_run_id": "xlsx-recover-data-bundle-1-published-original-revi-866cb9624df6",
+  "selected_reward": 0.0,
+  "selected_success": false,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-gpt52-fail39-published-trace-r4/xlsx-recover-data/bundle-1-published-original-revised-6208db3e97753ae7/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-gpt52-fail39-published-trace-r4/skillrevise-bundle-gpt52-fail39-published-trace-top3-r4/xlsx-recover-data-bundle-1-published-original-revi-866cb9624df6",
+  "selected_overrides": {
+    "xlsx/SKILL.md": "# Spreadsheet Edit and Verification (XLSX)\n\n## Purpose\nSafely create, edit, or repair Excel workbooks while preserving formulas and ensuring computed results are correct by using environment discovery, post-save recalculation, and verifier-aligned error checks.\n\n## When to Use\nUse when the task involves .xlsx/.xlsm workbooks where formulas, derived sheets, or template integrity matter (including \"fill blanks\", \"recover a sheet\", \"update inputs\", or \"repair errors\"). Do not use for simple CSV-only transformations, or when the user explicitly requires replacing formulas with fixed numbers.\n\n## Procedure\n- Step 1: Discover requirements and the workbook state (no edits yet).\n- Identify the exact input workbook path(s) provided by the task and confirm they are readable.\n- Open once with formulas visible (e.g., openpyxl with data_only=False) and determine:\n- Whether target cells currently contain formulas, constants, or blanks.\n- Whether edits will affect formula-dependent outputs (directly or indirectly).\n- If requirements are ambiguous (e.g., whether to keep formulas vs fill static values), stop and resolve before writing.\n- Step 2: Choose an edit strategy (decision point).\n- If a value can be expressed as an Excel formula and the sheet is meant to stay dynamic, write a formula, not a Python-computed constant.\n- Only write Python-computed constants when at least one is true:\n- The task explicitly demands fixed numbers, or\n- The workbook section is clearly a static data table (no downstream formulas), or\n- The environment cannot recalculate and the task accepts static results (must be stated/confirmed).\n- Step 3: Apply edits conservatively and preserve structure.\n- Avoid operations that may destroy formulas/styles (e.g., do not load with data_only=True for any edit-save path).\n- Make targeted cell edits; avoid broad reformatting unless the task requests it.\n- Save to the required output path (or, if none is specified, save alongside the input with a clear derived name).\n- Step 4: Recalculate and gate on formula errors (mandatory when formulas exist or are affected).\n- Environment discovery:\n- Check whether recalc tooling exists (e.g., recalc.py) and is runnable in the current environment.\n- If formulas exist anywhere in the workbook OR your edits could affect derived cells:\n- Run: python recalc.py <workbook_path> [timeout]\n- Parse/inspect the JSON result and require an explicit no-error signal (e.g., status indicates success and total_errors equals 0).\n- If errors are found: fix the referenced cells, save, and rerun recalc until clean (or stop and report an unresolvable environment/tooling issue).\n- Step 5: Verify outputs using fresh values (post-recalc).\n- Reload with data_only=False and confirm formulas are still present where they should be (no accidental formula-to-value loss).\n- Reload with data_only=True after a successful recalc and run spot-checks that match the task contract (e.g., totals equal sum of components, percentages match numerators/denominators within stated rounding).\n- Finalize only if: (a) recalc gate passed (when applicable), and (b) spot-checks pass or discrepancies are explained and corrected.\n\n## Constraints / Pitfalls\n- Never claim correctness based on openpyxl data_only=True unless you have just recalculated the same saved file; cached values can be stale and produce false confidence.\n- Do not assume LibreOffice/recalc.py is available; discover tooling first. If recalculation is required by the task but the tool is missing or fails, stop and escalate with a concrete description of what was found (missing script, permission issue, headless office failure) instead of silently switching to a non-recalc workflow."
+  },
+  "selection": {
+    "targets": [
+      "xlsx/SKILL.md"
+    ],
+    "rationale": "The trace shows the agent computed missing values in Python and hardcoded numeric results into cells (e.g., setting bud['K5'].value = 19285, etc.) rather than using Excel formulas and then recalculating/validating formulas. The xlsx skill explicitly requires using formulas (not hardcoded Python-calculated values) and mandates LibreOffice recalc.py for formula recalculation/verification; the run also indicates recalc.py was missing/unused. This mismatch is the most likely cause of the failed execution.",
+    "raw_response": "{\"targets\":[\"xlsx/SKILL.md\"],\"rationale\":\"The trace shows the agent computed missing values in Python and hardcoded numeric results into cells (e.g., setting bud['K5'].value = 19285, etc.) rather than using Excel formulas and then recalculating/validating formulas. The xlsx skill explicitly requires using formulas (not hardcoded Python-calculated values) and mandates LibreOffice recalc.py for formula recalculation/verification; the run also indicates recalc.py was missing/unused. This mismatch is the most likely cause of the failed execution.\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "xlsx/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.0,
+      "score_after": 0.0
+    }
+  ]
+}
