@@ -10,6 +10,11 @@ def score(tp,fp,fn):
     return dict(tp=tp,fp=fp,fn=fn,precision=tp/(tp+fp) if tp+fp else None,recall=tp/(tp+fn) if tp+fn else None,f1=2*tp/(2*tp+fp+fn) if 2*tp+fp+fn else None)
 
 if __name__ == '__main__':
+    # The frozen scorer intentionally refuses to overwrite existing evidence.
+    suffix=1
+    while OUT.exists() and any(OUT.iterdir()):
+        suffix+=1
+        OUT=ROOT/f'recomputed-gold-v1.4-{suffix:03d}'
     subprocess.run([sys.executable, str(ROOT/'evaluate_skill_diagnosis_repair.py'), '--gold',str(ROOT/'gold.json'),'--submission',str(ROOT/'submission.json'),'--judge-responses',str(ROOT/'gold-evaluation/judge_responses.json'),'--executor-results',str(ROOT/'executor-results.json'),'--output',str(OUT),'--max-input-chars','2000000'],check=True,cwd=ROOT)
     summary=read(OUT/'summary.json'); details=read(OUT/'details.json')
     index={t['task_id']:t for t in read(ROOT/'task-index.json')['tasks']}

@@ -5,11 +5,13 @@
 本次仅整理并发布已有结果，模型/裁判新增调用均为0。MMG原Analyzer分块15、一次Refiner、include_tutorial_in_refine=false，32768限制；复用历史original-skill轨迹，不重跑基线。固定本地OpenHands，fresh60步/JPG65步。两个模型的响应和评分独立保存。
 
 - [任务、基线、bundle、有效run索引](task-index.json)
-- [完整方法提交](submission.json)：31/15题完整Skill bundle，包含所有支持文件。
+- [完整方法提交](submission.json)：指向 `tasks/<task_id>/repaired_skill/`，完整保留所有支持文件。
 - [真实执行结果注册表](executor-results.json)，原始和历史失败run均保留，选择有效结果以索引为准。
 - [完整最终报告](final-review/REPORT.md)，[原语义评分](final-review/original-semantic-summary.json)，[F→P全缺陷TP版本](final-review/outcome-adjusted-summary.json)。
 - `trajectory_timelines/` 是仓库export_trajectory.py生成的完整before/after可读轨迹；原始轨迹保留。
-- `generation/` 保存真实方法请求/响应与adapter；`runs/` 保存fresh结果/验收；`tasks/*/original_run/` 为复用的原始运行。
+- `tasks/<task_id>/` 按仓库README包含 `repaired_skill/`、`original_run/`、`repaired_run/`；后两者均含executor_request/result/benchmark_result及原始trajectory。GPT Druid保留失败证据，明确不算有效完成。
+- `generation/` 保存方法请求/响应与adapter；`runs/`、`submission/` 额外保留原批次路径，便于核对历史引用。
+- GPT AgentOps的 `repaired_run/RESULT_PROVENANCE.json` 明确区分原fresh和verifier-only恢复：顶部结果采用已审核派生验收，原超时及恢复verifier均保留。
 - [大文件下载和校验清单](large-files.json)：工作区快照不裁剪、不从轨迹重建，大文件保存在同仓库GitHub附件中。
 
 ## 恢复与离线复算
@@ -28,3 +30,5 @@
 - n_skill_invocations与正文预加载证据分别保留在真实result和审计中。fresh通过不等于语义Gold内容修复成功。
 
 `history/`为原本地配置/脚本快照，保留历史绝对路径；直接复算请用本目录便携入口，不执行旧launch脚本。
+
+大附件的 `also_restore_to` 给出标准 `tasks/*/repaired_run` 路径；恢复脚本会同时恢复原历史路径与这些标准路径。可读轨迹索引由原始唯一rollout导出，未手工修改；标准目录是相同证据的字节一致副本。

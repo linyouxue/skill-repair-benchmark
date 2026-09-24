@@ -44,5 +44,15 @@ if __name__ == '__main__':
     manifest = json.loads((ROOT/'large-files.json').read_text(encoding='utf-8'))
     for row in manifest['compressed_text']: restore(row)
     if args.download_assets:
-        for row in manifest['assets']: restore(row, True)
+        for row in manifest['assets']:
+            restore(row, True)
+            for alias in row.get('also_restore_to', []):
+                dest=target(alias)
+                if dest.exists():
+                    if dest.stat().st_size != row['bytes'] or sha(dest) != row['sha256']:
+                        raise RuntimeError('Existing alias differs: '+alias)
+                    continue
+                dest.parent.mkdir(parents=True,exist_ok=True)
+                try: os.link(target(row['path']),dest)
+                except OSError: shutil.copyfile(target(row['path']),dest)
     print('Verified and restored requested files.')
