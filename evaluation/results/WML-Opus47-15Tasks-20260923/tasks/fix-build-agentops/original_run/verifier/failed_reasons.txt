@@ -1,0 +1,47 @@
+Repository: /home/github/build/failed/AgentOps-AI/agentops
+
+=== Failure summary ===
+Running `pytest` (per tox.ini command `coverage run --source agentops -m pytest`)
+fails during test collection with:
+
+    ModuleNotFoundError: No module named 'langchain_core'
+
+Trace:
+    tests/test_*.py -> `import agentops`
+    agentops/__init__.py:12 -> `from .langchain_callback_handler import ...`
+    agentops/langchain_callback_handler.py:5 -> `from langchain_core.agents import ...`
+
+=== Root cause ===
+`agentops/langchain_callback_handler.py` unconditionally imports third-party
+packages (`langchain_core`, `langchain`, `tenacity`) that are declared as
+OPTIONAL dependencies in `pyproject.toml`:
+
+    [project.optional-dependencies]
+    langchain = ["langchain>=0.0.354"]
+
+`agentops/__init__.py` unconditionally imports the callback handler module,
+so simply installing the base package (or the [dev] extra used for testing)
+raises ImportError as soon as `agentops` is imported. That is why every
+test module fails to be collected.
+
+The build/test workflow uses `pip install .[dev]` (or the equivalent) which
+does NOT pull the langchain extra, so the tests must not require langchain
+just to import `agentops`.
+
+=== Plan / fix ===
+Make the langchain callback handler import in `agentops/__init__.py`
+optional: wrap the `from .langchain_callback_handler import ...` in a
+try/except ImportError, so `agentops` can still be imported when the
+langchain (or tenacity) packages are not installed.
+
+Users that install the `langchain` extra continue to get
+`LangchainCallbackHandler` and `AsyncLangchainCallbackHandler` at the
+`agentops` namespace, matching current behavior when the extra is present.
+
+Files to change:
+- agentops/__init__.py
+
+=== Verification ===
+After the fix, `python -m pytest` should collect and run all tests without
+the ImportError. (Other test failures unrelated to the missing optional
+dependency are out of scope for this build-fix task.)

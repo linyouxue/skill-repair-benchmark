@@ -1,0 +1,112 @@
+Analysis of failing builds under /home/github/build/failed
+==========================================================
+
+There are two entries under `/home/github/build/failed/`:
+
+1. `AgentOps-AI/agentops`  - a real Python project (has pyproject.toml + tox.ini + tests).
+2. `cacher/env`            - only a bare Python 3.10 virtual environment directory
+                             (`pyvenv.cfg`, `bin/`, `lib/site-packages/`).  There is
+                             no source tree, no build system, no tests, and nothing
+                             to fix.  Skipped.
+
+--------------------------------------------------------------
+Repo: AgentOps-AI/agentops
+--------------------------------------------------------------
+
+Build command (from tox.ini):
+
+    coverage run --source agentops -m pytest
+    coverage report -m
+
+Interpreter available in this environment: Python 3.10 only, so tests are run
+via `tox -e py310`.
+
+Failure 1 (collection-time ImportError, blocks the whole test run)
+------------------------------------------------------------------
+
+    tests/test_canary.py         <- import agentops
+    tests/test_events.py         <- import agentops
+    tests/test_record_function.py
+    tests/test_session.py
+    tests/test_teardown.py
+
+All fail to collect with:
+
+    agentops/__init__.py:12: in <module>
+        from .langchain_callback_handler import LangchainCallbackHandler,
+                                                AsyncLangchainCallbackHandler
+    agentops/langchain_callback_handler.py:8: in <module>
+        from langchain.callbacks.base import BaseCallbackHandler,
+                                             AsyncCallbackHandler
+    ModuleNotFoundError: No module named 'langchain.callbacks'
+
+Root cause: the tox deps pull in the current `langchain` / `langchain-core`
+release (langchain 1.4.2, langchain-core 1.6.4 at time of run).  In this
+release the `langchain.callbacks.*` submodule has been removed.  The
+`BaseCallbackHandler` and `AsyncCallbackHandler` classes now live in
+`langchain_core.callbacks.base` (this was already the canonical location; the
+old `langchain.callbacks.base` was just a re-export that has now been
+dropped).  All other langchain imports in the file are already from
+`langchain_core.*`, so the fix is to change this one import line to use
+`langchain_core.callbacks.base`.
+
+Verified locally: after patching the import, module `agentops` imports
+cleanly and pytest collects all test files.
+
+Fix (patch_1.diff):
+    agentops/langchain_callback_handler.py
+        - from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+        + from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+Failure 2 (test_events.py::TestEvents::test_record_timestamp)
+-------------------------------------------------------------
+
+After Failure 1 is fixed, collection works and 9/10 tests pass, but
+`test_record_timestamp` still fails with:
+
+    AssertionError: assert '...T...Z' != '...T...Z'
+    (event.init_timestamp == event.end_timestamp)
+
+The captured log reveals what really goes wrong when the client is created:
+
+    WARNING agentops:meta_client.py:48 🖇 AgentOps: Error:
+        'Client' object has no attribute '_tags_for_future_session'
+
+The subsequent `NoMockAddress: POST /developer_errors` is just a downstream
+consequence — the metaclass exception handler tries to send the developer
+error to the (mocked) server, which mocks only `/sessions` and `/events`.
+
+Root cause is in `agentops/client.py::Client.__init__`.  The attribute
+`self._tags_for_future_session` is assigned *only* in the
+`auto_start_session=False` branch:
+
+    if auto_start_session:
+        self.start_session(tags, self.config, inherited_session_id)
+    else:
+        self._tags_for_future_session = tags
+
+But `start_session` (the same file, further down) does:
+
+    self._session = Session(inherited_session_id or uuid4(),
+                            tags or self._tags_for_future_session, ...)
+
+so it reads `self._tags_for_future_session` even in the auto-start branch.
+When the caller does not pass tags (like this test does), the `tags or ...`
+short-circuits into `self._tags_for_future_session`, which was never set,
+raising `AttributeError`.  The metaclass wrapper swallows that error, so
+`self._session` stays None, `record()` early-returns without ever updating
+`end_timestamp`, and the equality assertion fails.
+
+Fix (patch_2.diff):
+    agentops/client.py
+        Initialise `self._tags_for_future_session` unconditionally at the top
+        of `__init__` (right next to the other bookkeeping attributes), so it
+        exists on every code path before `start_session` reads it.  Remove the
+        now-redundant assignment in the `else` branch.
+
+Verification plan
+-----------------
+Run `tox -e py310` after applying patch_1.diff and patch_2.diff.  Expected
+result: `10 passed`, and tox exits 0 for env py310 (the only Python
+interpreter available in this sandbox; py37/38/39/311/312 remain listed in
+envlist but are naturally skipped when the interpreter is not present).
