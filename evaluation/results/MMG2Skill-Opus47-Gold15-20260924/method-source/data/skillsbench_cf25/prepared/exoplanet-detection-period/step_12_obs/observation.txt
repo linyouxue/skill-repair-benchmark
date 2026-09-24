@@ -1,0 +1,67 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+from astropy.timeseries import BoxLeastSquares
+import astropy.units as u
+path='/root/data/tess_lc.txt'
+t, f, q, fe = np.genfromtxt(path).T
+m=(q==0)
+t,f,fe=t[m],f[m],fe[m]
+idx=np.argsort(t)
+t,f,fe=t[idx],f[idx],fe[idx]
+wl=2001
+lc=lk.LightCurve(time=t, flux=f, flux_err=fe).remove_outliers(sigma=10)
+lc_flat=lc.flatten(window_length=wl, polyorder=2, break_tolerance=5).remove_outliers(sigma=6)
+t_rel=(lc_flat.time.value - lc_flat.time.value.min())*u.day
+flux=lc_flat.flux.value
+err=lc_flat.flux_err.value
+bls=BoxLeastSq
+[... 202 characters omitted ...]
+g.period[ix].to_value(u.day))
+D=float(pg.duration[ix].to_value(u.day))
+T0=float(pg.transit_time[ix].to_value(u.day))
+print('best P',P,'D',D,'T0',T0,'power',float(pg.power[ix]))
+stats=bls.compute_stats(P*u.day, D*u.day, T0*u.day)
+def val(x):
+    # stats entries are often (value, err)
+    if isinstance(x, tuple):
+        return float(x[0]), float(x[1])
+    return float(x), None
+dep, dep_err = val(stats['depth'])
+odd, odd_err = val(stats['depth_odd'])
+even, even_err = val(stats['depth_even'])
+print('depth',dep,'±',dep_err)
+print('depth_odd',odd,'±',odd_err)
+print('depth_even',even,'±',even_err)
+print('odd-even diff',odd-even,'(~', (odd-even)/dep,'of depth)')
+print('transit_count',stats['transit_count'])
+# Scan near 2P
+Pd=2*P
+per_grid=np.linspace(Pd*0.98, Pd*1.02, 6000)*u.day
+pgd=bls.power(per_grid, durations, objective='snr')
+ixd=int(np.argmax(pgd.power))
+P2=float(pgd.period[ixd].to_value(u.day))
+D2=float(pgd.duration[ixd].to_value(u.day))
+T02=float(pgd.transit_time[ixd].to_value(u.day))
+stats2=bls.compute_stats(P2*u.day, D2*u.day, T02*u.day)
+dep2,_=val(stats2['depth'])
+odd2,_=val(stats2['depth_odd'])
+even2,_=val(stats2['depth_even'])
+print('\nBest near 2P',P2,'D',D2,'power',float(pgd.power[ixd]))
+print('depth',dep2,'odd-even diff',odd2-even2,'transit_count',stats2['transit_count'])
+PY
+best P 1.3982309087784257 D 0.45 T0 1.1300000000000001 power 419.175490277964
+depth 0.006540139859011362 ± 1.5602390909531545e-05
+depth_odd 0.006956249329972519 ± 2.029639738587801e-05
+depth_even 0.00612728527650086 ± 2.0231604863981882e-05
+odd-even diff 0.0008289640534716591 (~ 0.1267502028002455 of depth)
+Traceback (most recent call last):
+  File "<stdin>", line 45, in <module>
+KeyError: 'transit_count'
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+❌ Exit code: 1

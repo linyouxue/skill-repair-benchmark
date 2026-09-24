@@ -1,0 +1,59 @@
+Tool: file_editor
+Result:
+[File /tmp/check.js edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|const { JSDOM, ResourceLoader } = require('jsdom');
+ 2|
++3|(async () => {
++4|    const errors = [];
++5|    const logs = [];
++6|    const dom = await JSDOM.fromURL('http://localhost:8765/index.html', {
++7|        runScripts: 'dangerously',
++8|        resources: 'usable',
++9|        pretendToBeVisual: true,
++10|    });
++11|    dom.window.addEventListener('error', e => errors.push('ERROR: ' + e.message));
++12|    dom.window.console.error = (...a) => errors.push('console.error: ' + a.join(' '));
++13|    dom.window.console.warn  = (...a) => logs.push('WARN: ' + a.join(' '));
++14|    dom.window.console.log   = (...a) => logs.push('LOG: ' + a.join(' '));
++15|
++16|    // Wait for async d3.csv + simulation setup.
++17|    await new Promise(r => setTimeout(r, 2500));
++18|
++19|    const doc = dom.window.document;
++20|    const circles = doc.querySelectorAll('#bubble-chart circle.bubble');
++21|    const labels  = doc.querySelectorAll('#bubble-chart text.bubble-label');
++22|    const rows    = doc.querySelectorAll('#stock-table tbody tr');
++23|    const legend  = doc.querySelectorAll('#legend .legend-item');
++24|
++25|    console.log('bubbles:', circles.length);
++26|    console.log('labels:', labels.length);
++27|    console.log('table rows:', rows.length);
++28|    console.log('legend items:', legend.length);
++29|    if (rows.length) {
++30|        console.log('sample row:', rows[0].textContent.trim().replace(/\s+/g, ' '));
++31|        console.log('last  row:', rows[rows.length-1].textContent.trim().replace(/\s+/g, ' '));
++32|    }
++33|    // Spot-check that a bubble has been positioned (transform set).
++34|    if (circles.length) {
++35|        const g = circles[0].parentNode;
++36|        console.log('first bubble transform:', g.getAttribute('transform'));
++37|        console.log('first bubble r:', circles[0].getAttribute('r'));
++38|        console.log('first bubble fill:', circles[0].getAttribute('fill'));
++39|    }
++40|    // Count unique sector colors used.
++41|    const colorSet = new Set();
++42|    circles.forEach(c => colorSet.add(c.getAttribute('fill')));
++43|    console.log('unique bubble colors:', colorSet.size);
++44|
++45|    if (errors.length) {
++46|        console.log('\n---ERRORS---');
++47|        errors.forEach(e => console.log(e));
++48|    }
++49|    dom.window.close();
++50|})().catch(e => { console.error('FATAL', e); process.exit(1); });
++51|
+[end of edit 1 / 1]

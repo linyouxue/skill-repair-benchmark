@@ -1,0 +1,353 @@
+Tool: file_editor
+Result:
+[File /root/Tokenizer.scala edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|/*
++2| * Tokenizer module for converting various input types to standardized string
++3| * tokens. Idiomatic Scala 2.13 translation of the original Python module.
++4| *
++5| * Design notes
++6| *  - Immutability is the default. `Token`, `TokenType`, etc. are all
++7| *    immutable case classes / case objects.
++8| *  - Absence is modelled with `Option`, errors with `Either` / `Try`.
++9| *  - Runtime dispatch (Python's duck typing) becomes pattern matching and
++10| *    type classes (`Numeric`, `Tokenizable`).
++11| *  - Where Python relied on ad-hoc union types (`str | bytes`,
++12| *    `datetime | date`, ...) we use small sealed ADTs.
++13| */
++14|
++15|import java.time.format.DateTimeFormatter
++16|import java.time.{LocalDate, LocalDateTime}
++17|import java.nio.charset.{Charset, StandardCharsets}
++18|
++19|import scala.collection.mutable
++20|import scala.util.Try
++21|
++22|// ============================================================================
++23|// Enums
++24|// ============================================================================
++25|
++26|sealed abstract class TokenType(val value: String)
++27|
++28|object TokenType {
++29|  case object STRING     extends TokenType("string")
++30|  case object NUMERIC    extends TokenType("numeric")
++31|  case object TEMPORAL   extends TokenType("temporal")
++32|  case object STRUCTURED extends TokenType("structured")
++33|  case object BINARY     extends TokenType("binary")
++34|  case object NULL       extends TokenType("null")
++35|
++36|  val values: Seq[TokenType] =
++37|    Seq(STRING, NUMERIC, TEMPORAL, STRUCTURED, BINARY, NULL)
++38|}
++39|
++40|// ============================================================================
++41|// Structural typing → type class
++42|// ============================================================================
++43|
++44|/** Any type that knows how to render itself as a token string. */
++45|trait Tokenizable[-A] {
++46|  def toToken(value: A): String
++47|}
++48|
++49|// ============================================================================
++50|// Core Token model
++51|// ============================================================================
++52|
++53|final case class Token(
++54|    value: String,
++55|    tokenType: TokenType,
++56|    metadata: Map[String, Any] = Map.empty
++57|) {
++58|
++59|  /** Return a new token whose metadata is augmented with `entries`. */
++60|  def withMetadata(entries: (String, Any)*): Token =
++61|    copy(metadata = metadata ++ entries)
++62|}
++63|
++64|/**
++65| * Mutable batch of tokens - retained to mirror the Python API. Prefer working
++66| * with plain `Seq[Token]` in new code.
++67| */
++68|final class MutableTokenBatch {
++69|  private val buffer   = mutable.ArrayBuffer.empty[Token]
++70|  private var _closed  = false
++71|
++72|  def tokens: Seq[Token] = buffer.toSeq
++73|  def isProcessed: Boolean = _closed
++74|
++75|  def add(token: ***REDACTED*** Unit = {
++76|    if (_closed) throw new IllegalStateException("Batch already processed")
++77|    buffer += token
++78|  }
++79|
++80|  def markProcessed(): Unit = _closed = true
++81|}
++82|
++83|// ============================================================================
++84|// Generic containers (variance)
++85|// ============================================================================
++86|
++87|/** Covariant container - can produce values of subtypes of `A`. */
++88|final class TokenContainer[+A](items: Seq[A]) {
++89|  private val underlying: Vector[A] = items.toVector
++90|
++91|  def getAll: Vector[A]                     = underlying
++92|  def mapTokens(f: A => String): List[String] = underlying.iterator.map(f).toList
++93|}
++94|
++95|/** Contravariant sink - can consume values of supertypes of `A`. */
++96|final class TokenSink[-A] {
++97|  private val received = mutable.ArrayBuffer.empty[Any]
++98|
++99|  def receive(item: A): Unit = received += item
++100|
++101|  def drain(): List[Any] = {
++102|    val snapshot = received.toList
++103|    received.clear()
++104|    snapshot
++105|  }
++106|}
++107|
++108|/** Invariant handler - exact type required. */
++109|final class BivariantHandler[A](default: A) {
++110|  private var current: A = default
++111|
++112|  def get: A             = current
++113|  def set(value: A): Unit = current = value
++114|
++115|  def transform(f: A => A): A = {
++116|    current = f(current)
++117|    current
++118|  }
++119|}
++120|
++121|// ============================================================================
++122|// Tokenizer hierarchy
++123|// ============================================================================
++124|
++125|/** Abstract tokenizer with a generic input type. */
++126|abstract class BaseTokenizer[A] {
++127|
++128|  /** Convert a single value to a `Token`. */
++129|  def tokenize(value: A): Token
++130|
++131|  /** Lazily tokenize a batch of values. */
++132|  def tokenizeBatch(values: IterableOnce[A]): Iterator[Token] =
++133|    values.iterator.map(tokenize)
++134|}
++135|
++136|// ----------------------------------------------------------------------------
++137|// StringTokenizer: `str | bytes` becomes a small sealed ADT.
++138|// ----------------------------------------------------------------------------
++139|
++140|sealed trait StringOrBytes
++141|object StringOrBytes {
++142|  final case class Str(value: String)          extends StringOrBytes
++143|  final case class Bytes(value: Array[Byte])   extends StringOrBytes
++144|
++145|  implicit def fromString(s: String): StringOrBytes         = Str(s)
++146|  implicit def fromBytes(bs: Array[Byte]): StringOrBytes    = Bytes(bs)
++147|}
++148|
++149|final class StringTokenizer(
++150|    val encoding: Charset            = StandardCharsets.UTF_8,
++151|    val normalizer: String => String = identity
++152|) extends BaseTokenizer[StringOrBytes] {
++153|
++154|  def tokenize(value: StringOrBytes): Token = ***REDACTED***
++155|    val raw = value match {
++156|      case StringOrBytes.Str(s)    => s
++157|      case StringOrBytes.Bytes(bs) => new String(bs, encoding)
++158|    }
++159|    Token(normalizer(raw), TokenType.STRING)
++160|  }
++161|}
++162|
++163|// ----------------------------------------------------------------------------
++164|// NumericTokenizer: use the stdlib `Numeric` type class instead of a fixed
++165|// TypeVar union.  Immutable default metadata (Python's mutable default is a
++166|// bug that doesn't have to survive translation).
++167|// ----------------------------------------------------------------------------
++168|
++169|final class NumericTokenizer[A](
++170|    val precision: Int                = 6,
++171|    val formatOptions: Map[String, Any] = Map.empty
++172|)(implicit num: Numeric[A]) extends BaseTokenizer[A] {
++173|
++174|  def tokenize(value: A): Token = ***REDACTED***
++175|    val text = value match {
++176|      case bd: BigDecimal => bd.setScale(precision, BigDecimal.RoundingMode.HALF_UP).toString
++177|      case d: Double      => f"$d%.${precision}f"
++178|      case f: Float       => f"$f%.${precision}f"
++179|      case other          => num.toDouble(other) match {
++180|        case whole if whole.isValidInt && other.isInstanceOf[Int] => other.toString
++181|        case _                                                    => other.toString
++182|      }
++183|    }
++184|    Token(text, TokenType.NUMERIC, Map("original_type" -> value.getClass.getSimpleName))
++185|  }
++186|}
++187|
++188|// ----------------------------------------------------------------------------
++189|// TemporalTokenizer: `datetime | date` becomes a sealed ADT.
++190|// ----------------------------------------------------------------------------
++191|
++192|sealed trait Temporal
++193|object Temporal {
++194|  final case class Date(value: LocalDate)         extends Temporal
++195|  final case class DateTime(value: LocalDateTime) extends Temporal
++196|
++197|  implicit def fromDate(d: LocalDate): Temporal         = Date(d)
++198|  implicit def fromDateTime(dt: LocalDateTime): Temporal = DateTime(dt)
++199|}
++200|
++201|object TemporalTokenizer {
++202|  val IsoFormat: DateTimeFormatter  = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
++203|  val DateFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
++204|}
++205|
++206|final class TemporalTokenizer(val format: Option[DateTimeFormatter] = None)
++207|    extends BaseTokenizer[Temporal] {
++208|
++209|  def tokenize(value: Temporal): Token = ***REDACTED***
++210|    val text = value match {
++211|      case Temporal.DateTime(dt) =>
++212|        format.getOrElse(TemporalTokenizer.IsoFormat).format(dt)
++213|      case Temporal.Date(d) =>
++214|        format.getOrElse(TemporalTokenizer.DateFormat).format(d)
++215|    }
++216|    Token(text, TokenType.TEMPORAL)
++217|  }
++218|}
++219|
++220|// ----------------------------------------------------------------------------
++221|// UniversalTokenizer: Python's `isinstance` chain becomes pattern matching.
++222|// ----------------------------------------------------------------------------
++223|
++224|final class UniversalTokenizer {
++225|  private val stringTokenizer   = new StringTokenizer()
++226|  private val intTokenizer      = new NumericTokenizer[Long]()
++227|  private val doubleTokenizer   = new NumericTokenizer[Double]()
++228|  private val bigDecTokenizer   = new NumericTokenizer[BigDecimal]()
++229|  private val temporalTokenizer = new TemporalTokenizer()
++230|
++231|  /** Dispatch to the right tokenizer based on the runtime type of `value`. */
++232|  def tokenize(value: Any): Token = ***REDACTED*** match {
++233|    case null                       => Token("NULL", TokenType.NULL)
++234|    case None                       => Token("NULL", TokenType.NULL)
++235|    case s: String                  => stringTokenizer.tokenize(StringOrBytes.Str(s))
++236|    case bs: Array[Byte]            => stringTokenizer.tokenize(StringOrBytes.Bytes(bs))
++237|    case i: Int                     => intTokenizer.tokenize(i.toLong)
++238|    case l: Long                    => intTokenizer.tokenize(l)
++239|    case d: Double                  => doubleTokenizer.tokenize(d)
++240|    case f: Float                   => doubleTokenizer.tokenize(f.toDouble)
++241|    case bd: BigDecimal             => bigDecTokenizer.tokenize(bd)
++242|    case bd: java.math.BigDecimal   => bigDecTokenizer.tokenize(BigDecimal(bd))
++243|    case dt: LocalDateTime          => temporalTokenizer.tokenize(Temporal.DateTime(dt))
++244|    case d: LocalDate               => temporalTokenizer.tokenize(Temporal.Date(d))
++245|    case other                      => Token(other.toString, TokenType.STRING, Map("fallback" -> true))
++246|  }
++247|
++248|  /**
++249|   * Overload for values whose type provides a `Tokenizable` instance - the
++250|   * type-class equivalent of Python's `Tokenizable` Protocol.
++251|   */
++252|  def tokenize[A](value: A)(implicit ev: Tokenizable[A]): Token =
++253|    Token(ev.toToken(value), TokenType.STRUCTURED)
++254|}
++255|
++256|// ============================================================================
++257|// Whitespace Tokenizer
++258|// ============================================================================
++259|
++260|final class WhitespaceTokenizer(
++261|    val lowercase: Boolean        = false,
++262|    val minLength: Int            = 0,
++263|    val maxLength: Option[Int]    = None,
++264|    val stripPunctuation: Boolean = false
++265|) {
++266|  private val punctuation: Set[Char] = ".,!?;:'\"()[]{}".toSet
++267|
++268|  private def processToken(raw: String): Option[String] = {
++269|    val stripped   = if (stripPunctuation) raw.dropWhile(punctuation).reverse.dropWhile(punctuation).reverse else raw
++270|    val cased      = if (lowercase) stripped.toLowerCase else stripped
++271|    val truncated  = maxLength.fold(cased)(m => if (cased.length > m) cased.substring(0, m) else cased)
++272|    if (truncated.length < minLength || truncated.isEmpty) None else Some(truncated)
++273|  }
++274|
++275|  def tokenize(text: String): List[Token] =
++276|    text.split("\\s+").iterator
++277|      .filter(_.nonEmpty)
++278|      .zipWithIndex
++279|      .flatMap { case (word, i) =>
++280|        processToken(word).map { processed =>
++281|          Token(processed, TokenType.STRING, Map("position" -> i, "original" -> word))
++282|        }
++283|      }
++284|      .toList
++285|
++286|  def tokenizeToStrings(text: String): List[String] =
++287|    tokenize(text).map(_.value)
++288|
++289|  /** Returns tokens paired with their `(start, end)` positions in `text`. */
++290|  def tokenizeWithPositions(text: String): List[(String, Int, Int)] = {
++291|    val words = text.split("\\s+").filter(_.nonEmpty)
++292|
++293|    words
++294|      .foldLeft((List.empty[(String, Int, Int)], 0)) { case ((acc, cursor), word) =>
++295|        val start = text.indexOf(word, cursor)
++296|        val end   = start + word.length
++297|        val next  = processToken(word).fold(acc)(p => (p, start, end) :: acc)
++298|        (next, end)
++299|      }
++300|      ._1
++301|      .reverse
++302|  }
++303|
++304|  def countTokens(text: String): Int = tokenize(text).size
++305|}
++306|
++307|// ============================================================================
++308|// Fluent builder
++309|// ============================================================================
++310|
++311|final class TokenizerBuilder[A] private (
++312|    private val normalizers: Vector[String => String],
++313|    private val validators:  Vector[A => Boolean],
++314|    private val metadata:    Map[String, Any]
++315|) {
++316|
++317|  def withNormalizer(f: String => String): TokenizerBuilder[A] =
++318|    new TokenizerBuilder[A](normalizers :+ f, validators, metadata)
++319|
++320|  def withValidator(f: A => Boolean): TokenizerBuilder[A] =
++321|    new TokenizerBuilder[A](normalizers, validators :+ f, metadata)
++322|
++323|  def withMetadata(entries: (String, Any)*): TokenizerBuilder[A] =
++324|    new TokenizerBuilder[A](normalizers, validators, metadata ++ entries)
++325|
++326|  /** Build a plain function `A => Token`. Snapshots the current state. */
++327|  def build: A => Token = ***REDACTED***
++328|    val ns = normalizers
++329|    val vs = validators
++330|    val md = metadata
++331|
++332|    value => {
++333|      vs.find(v => !v(value))
++334|        .foreach(_ => throw new IllegalArgumentException(s"Validation failed for $value"))
++335|      val text = ns.foldLeft(value.toString)((s, n) => n(s))
++336|      Token(text, TokenType.STRING, md)
++337|    }
++338|  }
++339|}
++340|
++341|object TokenizerBuilder {
++342|  def apply[A](): TokenizerBuilder[A] =
++343|    new TokenizerBuilder[A](Vector.empty, Vector.empty, Map.empty)
++344|}
++345|
+[end of edit 1 / 1]

@@ -1,0 +1,36 @@
+Repository: /home/travis/build/failed/google/auto
+
+Step 1 — Failure reproduction
+- The default root build (mvn test using pom.xml) succeeds.
+- The CI-like build uses build-pom.xml (per .travis.yml):
+    mvn -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+- On this environment (Maven 3.6.3, Java 11.0.27), that build fails during dependency resolution.
+
+Observed error (key part)
+- Dependency resolution fails for module: com.google.auto.service:auto-service
+- Root cause reported by Maven:
+    Could not resolve dependencies ... Could not find artifact com.sun:tools:jar:11.0.27
+    at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+- tools.jar does not exist on Java 9+ (it was removed when the JDK was modularized).
+
+Where it comes from
+- auto-service (and other modules) depend on com.google.testing.compile:compile-testing (test scope).
+- Older compile-testing versions (0.6/0.7/0.8) declare a system-scoped dependency on com.sun:tools
+  and assume tools.jar exists at ${java.home}/../lib/tools.jar.
+- On Java 11, that systemPath points to a non-existent file, so Maven fails before compiling.
+
+Classification
+- This is a build/dependency-configuration issue (not a Java source code bug).
+
+Plan
+1) Update com.google.testing.compile:compile-testing to a version that does NOT unconditionally
+   depend on tools.jar. compile-testing 0.21.0 moves com.sun:tools into an inactive-by-default
+   profile (tools-jar/classes-jar) so it won’t be activated on Java 11.
+2) Align Guava versions with the chosen compile-testing version.
+   - compile-testing 0.21.0 depends on guava 31.1-jre.
+   - Our modules currently pin guava 18.0 directly, which would override compile-testing’s
+     transitive guava and likely break compile-testing at runtime.
+   - Update module Guava (and guava-testlib) to 31.1-jre.
+3) Re-run:
+   - mvn -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+   and iterate on any follow-on compilation/test failures.

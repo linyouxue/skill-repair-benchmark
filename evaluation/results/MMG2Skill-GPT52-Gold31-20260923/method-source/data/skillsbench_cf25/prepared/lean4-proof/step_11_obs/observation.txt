@@ -1,0 +1,54 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /app/workspace/Library/Tactic/Addarith.lean:
+     1	/-
+     2	Copyright (c) 2023 Heather Macbeth. All rights reserved.
+     3	Released under Apache 2.0 license as described in the file LICENSE.
+     4	Authors: Heather Macbeth
+     5	-/
+     6	import Mathlib.Tactic.Abel
+     7	import Mathlib.Tactic.Linarith
+     8	import Mathlib.Tactic.NormNum
+     9	
+    10	/-! # Addarith tactic
+    11	
+    12	The tactic `addarith` proves certain linear (in)equality goals over a commutative linear ordered
+    13	ring, by combining a specified set of linear (in)equality hypotheses.
+    14	
+    15	This tactic is a deliberately weakened version of the Mathlib tactic `linarith`.
+    16	-/
+    17	
+    18	open Lean Elab Tactic
+    19	open Parser Tactic Syntax
+    20	
+    21	syntax (name := addarith) "addarith" (" [" term,* "]")? : tactic
+    22	
+    23	open Elab.Tactic Parser.Tactic
+    24	open Mathlib Tactic Abel
+    25	
+    26	def addarithDischarger : TacticM Unit := do
+    27	  try evalTactic (← `(tactic| simp (config := { decide := false }) only [one_mul, neg_mul])) catch _ => pure ()
+    28	  abelNFTarget {}
+    29	  try evalTactic (← `(tactic| push_cast (config := { decide := false }) [zsmul_eq_mul])) catch _ => pure ()
+    30	  try evalTactic (← `(tactic| norm_num1)) catch _ => pure ()
+    31	
+    32	/--
+    33	`addarith` attempts to use specified linear (in)equality hypotheses to prove a linear (in)equality
+    34	goal.  It can add and subtract terms from both sides of hypotheses, add them together or subtract
+    35	them, and compare numerals.  It cannot rescale hypotheses (i.e., multiply through by a factor).
+    36	
+    37	An example:
+    38	```lean
+    39	example {a b : ℤ} (h : a = 10 - b) : a + b ≤ 12 := by addarith [h]
+    40	```
+    41	-/
+    42	elab_rules : tactic | `(tactic| addarith $[[$args,*]]?) => withMainContext do
+    43	  (liftMetaFinishingTactic <|
+    44	    Linarith.linarith true
+    45	      (← ((args.map (TSepArray.getElems)).getD {}).mapM (elabTerm ·.raw none)).toList
+    46	      { discharger := addarithDischarger })
+    47	  <|> throwError "addarith failed to prove this"
+    48	
+    49	-- while we're at it, this turns off the succeed-with-noise behaviour of `ring_nf` with `ring`
+    50	macro_rules | `(tactic| ring) => `(tactic| ring_nf)
+    51	

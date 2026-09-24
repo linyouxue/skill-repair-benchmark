@@ -1,0 +1,74 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import os,re
+import fitz
+META_KEYS = ['title','author','subject','keywords','creator','producer','creationDate','modDate','trapped']
+def empty_metadata():
+    return {k:'' for k in META_KEYS}
+def find_references_page(doc: fitz.Document):
+    for pno, page in enumerate(doc):
+        lines = [ln.strip().lower() for ln in page.get_text('text').splitlines()[:250] if ln.strip()]
+        for ln in lines:
+            if ln == 'references':
+                return pno
+            if re.match(r'^\d+\.?\s*references$', ln):
+                return pno
+            if re.match(r'^references\b', ln):
+                return pno
+    return None
+def redact_pdf(input_path: str, output_path: str, patterns: list[str], footer_patterns: list[str]):
+    doc = fitz.open(input_path)
+    doc.set_metadata(empty_metadata())
+    ref_page = find_references_page(doc)
+    def apply_patterns(page: fitz.Page, pats: list[str]):
+        for pat in pats:
+            pat=(pat or '').strip()
+            if len(pat) < 3:
+                continue
+            for rect in page.search_for(pat):
+                page.add_redact_annot(rect, fill=(0,0,0))
+    for pno,page in enumerate(doc):
+        apply_patterns(page, footer_patterns)
+        if ref_page is None or pno < ref_page:
+            apply_patterns(page, patterns)
+        page.apply_redactions()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    doc.save(output_path, garbage=4, deflate=True, clean=True)
+    doc.close()
+# Updated patterns
+paper1_patterns = [
+    'Yueqian Lin', 'Zhengmian Hu', 'Qinsi Wang', 'Yudong Liu', 'Hengfan Zhang',
+    'Jayakumar Subramanian', 'Nikos Vlassis', 'Hai cHelend Li', 'Hai Helen Li',  'Yiran Chen',
+    'Duke University', 'Adobe', 'Durham, NC, USA', 'San Jose, CA, USA',
+    'Correspondence:', 'yueqian.lin@duke.edu', 'zhengmianh@adobe.com',
+    'arXiv:2509.26542v1',
+    'https://github.com/linyueqian/VERA',
+    'github.com/linyueqian/VERA',
+]
+paper3_patterns = [
+    'Yueqian Lin', 'Yuzhe Fu', 'Jingyang Zhang', 'Yudong Liu', 'Jianyi Zhang', ' Jingwei Sun',
+    'Hai Li', 'Yiran Chen',
+    '*Equal contribution',
+    'Duke University, Durham, USA.',
+    'Correspondence to:', 'yl768@duke.edu',
+    'NSF 2112562',
+    'ARO W911NF-23-2-0224',
+    'W911NF-23-2-',
+    'W911NF',
+]
+paper3_footer = [
+    'ICML Workshop on Machine Learning for Audio',
+    'Vancouver,',
+    'Canada.',
+    'Copyright 2025 by the author(s).',
+]
+redact_pdf('/root/paper1.pdf','/root/redacted/paper1.pdf',paper1_patterns,footer _patterns=[])
+redact_pdf('/root/paper3.pdf','/root/redacted/paper3.pdf',paper3_patterns,footer _patterns=paper3_footer)
+print('Updated paper1 and paper3 redactions.')
+PY
+Updated paper1 and paper3 redactions.
+
+
+📁 Working directory: /root
+✅ Exit code: 0

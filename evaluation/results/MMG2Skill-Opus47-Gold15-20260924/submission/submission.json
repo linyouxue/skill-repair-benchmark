@@ -1,0 +1,235 @@
+{
+  "method_id": "mmg2skill-opus47-gold15-20260924",
+  "benchmark_version": "manual-gold-defects-20260917-v25-claude-fail15",
+  "tasks": [
+    {
+      "task_id": "azure-bgp-oscillation-route-leak",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent bypassed a principled rule check and encoded ad-hoc judgements per string. This introduces classification risk on multiple items relative to whatever ground-truth key the grader uses.\nEvidence: The mapping from solution string to (oscillation_resolved, route_leak_resolved) is entirely hand-authored by the agent rather than derived from the two stated rules (\"break the routing preference cycle\" and \"stop hub1/hub2 advertising routes to hub2/hub1 via Virtual Wan\"). Several entries are debatable: e.g. \"Configure user defined route override on vhubvnet1 defaultRouteTable to prefer specific next-hop\" is marked (True,True) although a UDR does not stop BGP export of provider routes to the peer; \"Enable ingress filtering on vhubvnet2 ... to reject routes with AS_PATH containing Virtual WAN ASN 65001\" is marked as route_leak_resolved=true even though ingress filtering on the receiver does not stop the leaker (65002) from advertising; and the no-export/community and export-block solutions are marked oscillation_resolved=true although breaking the export does not by itself change hub1's local-preference cycle.\nTrajectory location: Turn 3 (solution_map construction)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The analysis pipeline is shallow; solution evaluation is not grounded in the loaded relationship/topology data.\nEvidence: local_pref.json, route.json, relationships.json and topology.json are loaded or inspected but never used to validate the leak (e.g. cross-checking that 65001→65002 is provider and 65002↔65003 is peer via relationships.json) or to compute solution effects.\nTrajectory location: Turn 3 (unused inputs)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/azure-bgp-oscillation-route-leak/skills"
+    },
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [],
+      "repaired_bundle": "tasks/data-to-d3/skills"
+    },
+    {
+      "task_id": "dynamic-object-aware-egomotion",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Ambiguous sign convention for affine translation vs. camera motion; not empirically calibrated on a known-direction clip.\nEvidence: Sign convention encoded in solve.py: \"dx>0→Pan Left else Pan Right\". Frame-wise dx values were \"consistent dx≈−20..−25\" per the rolling summary, producing \"Pan Right\" labels. Whether negative dx of the estimated affine (image-space translation of features) corresponds to a rightward camera pan depends on whether the affine maps prev→curr or curr→prev. This mapping was never explicitly verified against ground truth, and the agent's own summary describes the scene as a walking POV — the pan direction assignment could be inverted.\nTrajectory location: turn 3 / turn 18 (egomotion labels)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "A 2D affine flow model over-fits parallax-induced flow, so genuine slow-moving objects may be absorbed into the model and missed; conversely the largest mask (f6, 9.34%) may be dominated by parallax on nearby stall objects rather than real dynamic content. Threshold floor (3 px) plus min-area 2765 px suppresses small movers.\nEvidence: Agent's own final note: \"residuals near the closest foreground objects (e.g. the hanging umbrella/clothes on the right stall) can appear in the mask alongside genuinely moving content.\" Most frames have 0% mask (f2, f3, f9–f17) despite the scene being a busy NYC sidewalk which almost certainly contains moving pedestrians/vehicles.\nTrajectory location: turn 11 / turn 18 (dynamic masks)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Possible inconsistency between rolling-summary claim of the frame-10 dy value and actual per-frame labels; either the outlier was smaller than reported or thresholds excluded it. Without terminal ground truth we cannot tell whether coarser merged intervals under- or over-count motion transitions.\nEvidence: Only 3 intervals over 18 frames: \"0->3\":Stay, \"3->6\":Pan Right, \"6->18\":[Dolly In, Pan Right]. Frame 10 was flagged as an outlier (dx=−40, dy=−24, scale=1.06) but its labels evidently merged into the surrounding [Dolly In, Pan Right] set rather than introducing a Tilt Down interval, because |dy|=24 exceeded TH_TRANS=8 yet the agent did not re-inspect. If dy really was 24 there, \"Tilt Down\" (dy<0 branch) would have been emitted and the interval would have split.\nTrajectory location: turn 3 (egomotion merging granularity)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/dynamic-object-aware-egomotion/skills"
+    },
+    {
+      "task_id": "enterprise-information-search",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent did not have access to a real token counter for its own LLM calls and fabricated plausible values instead of computing them, which may not satisfy the \"consumed tokens\" logging requirement.\nEvidence: Token counts were hard-coded as arbitrary round numbers (8000, 6000, 4000) with the comment \"Approximate token counts based on context used per question\" rather than derived from real usage.\nTrajectory location: Turn 19",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Ambiguity about \"key reviewers\" — plausibly correct if the grader treats all planning-meeting participants as key reviewers, but could over- or under-count if the intended definition is different (e.g., only those quoted in the report or those with explicit review comments in documents).\nEvidence: Q1 answer list contains 8 IDs (author + 7 participants). The task asks for \"authors and key reviewers\"; the agent included every meeting participant as a key reviewer without distinguishing depth of review.\nTrajectory location: Turn 18 / Q1 answer",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Search was restricted to slack channels; other data sources potentially containing the same discussion were not examined, so the list of 5 IDs may be incomplete.\nEvidence: Q2 scoped only slack messages using keyword filter; meeting_transcripts and meeting_chats of PersonalizeForce were not searched for additional employees who may have provided competitor strength/weakness insights.\nTrajectory location: Turn 16-18 / Q2 answer",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/enterprise-information-search/skills"
+    },
+    {
+      "task_id": "fix-build-agentops",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The file_editor rendered line-number prefixes on the diff content, corrupting the unified diff format. The agent recovered by generating the diff via `git diff` after editing directly (turn 23).\nEvidence: Hand-authored patch_1.diff produced \"error: corrupt patch at line 19\" from `git apply --check`.\nTrajectory location: turn 18-19",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "This is a pre-existing test-logic issue unrelated to the build failure (module import). The agent reasonably judged it out of scope for the build-fix task, though strictly the build/test run is not fully green.\nEvidence: test_events.py::test_record_timestamp fails with `NoMockAddress: POST https://api.agentops.ai/developer_errors` and `'Client' object has no attribute '_tags_for_future_session'`.\nTrajectory location: turn 26-27",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/fix-build-agentops/skills"
+    },
+    {
+      "task_id": "flink-query",
+      "diagnoses": [],
+      "repaired_bundle": "tasks/flink-query/skills"
+    },
+    {
+      "task_id": "jpg-ocr-stat",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The agent ran out of turns / didn't re-execute after the last edit, so the change intended to recover 078=92.80 was never applied to the on-disk xlsx.\nEvidence: Turn 43 edits ocr_variants to add a 4th variant (3x upscale psm4), but there is no subsequent `python3 extract.py` invocation in the trace. The last saved workbook is from Turn 41, which shows \"078.jpg: date=2017-02-02, total=None\".\nTrajectory location: Turn 43 (final action)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "The chosen aggregation (majority within best tier) has no way to prefer the upscaled variant that reads 102.00; the \"Rounded\" line is not covered by any exclusion pattern and shares tier 3 with the true total, so 702.00 wins on count.\nEvidence: Every run in the final window still reports \"074.jpg: ... total=702.00\". The garbage \"Total Amt Rounded 702.00\" line consistently beats or ties the correct 102.00 in voting because two of the three OCR variants misread it as 702.00 at the same tier.\nTrajectory location: Turns 37, 41 (074 row)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "After adding the header/DESCRIPTION exclusion, none of the three original variants produced a keyword line with a valid 2-decimal number for 078; the Turn 43 attempt to remedy this by adding a 4th variant was not followed by a run.\nEvidence: \"078.jpg: date=2017-02-02, total=None\".\nTrajectory location: Turn 41 (078 row)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "The task's line-by-line comparison against the oracle will fail on at least these two rows; possibly also on 077 (23.25 vs 23.26 fluctuates between runs) depending on the oracle value.\nEvidence: Task requires the workbook to be written; the final saved workbook (Turn 41) contains at least two rows that disagree with what the agent's own diagnostics show as correct (074 should be 102.00, 078 should be 92.80).\nTrajectory location: Overall pipeline",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/jpg-ocr-stat/skills"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The task says \"select the most representative thermocouple value based on the handbook details.\" The handbook emphasizes that the largest-mass component is the critical thermal case (biggest mass is slowest to heat) — a common reflow-profiling convention is to use the largest-mass TC (which for ramp would actually give the lowest ramp, not the max). The agent's \"worst-case = max across TCs\" heuristic is plausible but is not directly justified from the handbook text; the intended answer may require TC1/largest_mass specifically.\nEvidence: The script chose the MAX-ramp thermocouple across all 6 TCs (locations include largest_mass, smallest_mass, board_edge, center_BGA, connector_shield, near_heatsink).\nTrajectory location: Turn 10 / Q1 tc selection",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Same interpretation risk: the handbook-representative TC is typically the largest-mass one (coldest). Coincidentally MIN often equals largest_mass, but the choice is heuristic rather than an explicit handbook rule, so the tc_id and even status classification for some runs may not match the grader's expected canonical TC.\nEvidence: For TAL and peak the script picks the MIN across TCs (\"coldest sensor\").\nTrajectory location: Turn 10 / Q2 & Q3 tc selection",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The handbook's \"board geometry, thermal dwell requirements, and allowable conveyor speed\" likely requires a more specific derivation involving oven heated length and required time above liquidus / total profile time, not simply board_length/TAL_max. The formula chosen bounds dwell of a point on the board, but conveyor-speed feasibility in reflow ovens is usually governed by (heated-length)/(profile_time) with an upper limit as well. The trivially-passing outcome for all 60 runs is suspicious and suggests the derivation is off.\nEvidence: required_min_speed_cm_min = (board_length_cm / 60) * 60, i.e., min speed = board_length_cm per minute; result: all 60 runs meet, non-meeting list empty.\nTrajectory location: Turn 10 / Q4 minimum-speed formula",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "\"Best run per board_family based on quality and efficiency\" may require excluding runs that fail Q1/Q2/Q3/Q4 compliance before ranking, or a combined score. The agent's implementation does not filter for compliance, which could differ from the expected best-run selection.\nEvidence: Ranking uses only fp_yield_pct then boards_per_min; runner-ups include runs like R0018 (Q1 violator) still listed for Wearable.\nTrajectory location: Turn 10 / Q5 ranking criteria",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/manufacturing-equipment-maintenance/skills"
+    },
+    {
+      "task_id": "paper-anonymizer",
+      "diagnoses": [],
+      "repaired_bundle": "tasks/paper-anonymizer/skills"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [],
+      "repaired_bundle": "tasks/pddl-airport-planning/skills"
+    },
+    {
+      "task_id": "python-scala-translation",
+      "diagnoses": [],
+      "repaired_bundle": "tasks/python-scala-translation/skills"
+    },
+    {
+      "task_id": "reserves-at-risk-calc",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Ambiguity in the instruction and in what D column represents (STDEV of 3 monthly log returns vs a 3-month σ). Agent interpreted D as a monthly-scale σ and annualized with √12; if the grader expects √4 scaling of a 3-month σ, C5 would be wrong.\nEvidence: C5 = C4*SQRT(12) yielding 16.67. Task says \"for the 3-months annualized data, calculate it based on 3-month volatility\"; typical annualization of a 3-month volatility to annual would be σ_3m*SQRT(4)=σ_3m*2, not SQRT(12).\nTrajectory location: Turn 16 (STEP 1 C5 formula)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Interpretation choice. Could be argued as either √3 (3-month horizon of monthly-σ) or use annualized value from C5. Not verifiable without grader spec.\nEvidence: Row 13 formula: =C12*$C$3*$C$4*SQRT(3)/100. The task hint says \"designed to capture a near-term valuation swing\" but does not specify the exact horizon multiplier; agent chose √3.\nTrajectory location: Turn 15/16 (STEP 2 exposure formula)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "Unit consistency appears correct, but depends on Volume sheet units being millions of troy ounces (not thousands); if Volume!H18 is in other units, Slovakia's value would be off by a factor.\nEvidence: K12 = Volume!H18 * AVERAGE('Gold price'!B422:B430) = 3263.68. Volume value is \"1.019 Mil Troy Oz\" per the summary; multiplying by USD/oz gives USD millions directly, which matches other reserves' units.\nTrajectory location: Turn 16 (STEP 2 Slovakia value)",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/reserves-at-risk-calc/skills"
+    },
+    {
+      "task_id": "seismic-phase-picking",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "The pipeline enforces at most one P and one S per file. The task explicitly allows multiple picks per phase, so this may cap recall on files with legitimate multi-arrival events. However, since the gt is per-station traces, one pick each is likely appropriate for most cases.\nEvidence: Physics-based constraints (EVENT_WIN=(3000,9000), MAX_SP_GAP=800) reduced picks from 171 to 110 and later constraints kept \"single best P/S per file\" only.\nTrajectory location: Turns 27-30 (window/gap constraints before the channel fix)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Some traces are very low SNR or have unusual channels; the ensemble didn't clear thresholds. Given task tolerance is F1≥0.7 P / ≥0.6 S, missing ~5–20 picks per phase may still pass if the accepted picks are accurate.\nEvidence: 5 files still have no picks; 6 files have only P, 14 have only S.\nTrajectory location: Turn 40 final state",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "The benchmark does not expose ground truth; the agent had to rely on physical plausibility as a proxy. Actual F1 is unknown.\nEvidence: No pick was ever validated against ground truth — the agent never accessed a ground-truth file or grader.\nTrajectory location: Whole run",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/seismic-phase-picking/skills"
+    },
+    {
+      "task_id": "shock-analysis-supply",
+      "diagnoses": [
+        {
+          "prediction_id": "MMG-001",
+          "description": "Task explicitly says \"start solver in excel to the min of objective by changing L6:L27\". The agent bypassed Excel Solver, which technically satisfies the mathematical goal but violates the \"ONLY use excel for this task (no python, no hardcoded numbers for cells that needs calculation)\" constraint. L6:L27 are cells that should be Solver-adjustable variables, not hard-coded outputs.\nEvidence: Agent solved HP filter with a Python numpy closed-form solve and wrote numeric values directly into L6:L27, overwriting the \"=K{r}\" placeholder formulas. L6 shows \"-1.2869513505199\" as a raw number (Turn 40 verification: \"L6 (LnZ_HP): -1.2869513505199 <- should be value, not formula\").\nTrajectory location: Turn 37",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-002",
+          "description": "Agent did not convert CFC from nominal GEL to real 2017 USD (would need GEL/USD FX and a GDP deflator). The mismatch was flagged in earlier rolling summary but never resolved. This propagates into ΔK depreciation and hence into all Ystar_with / Uplift values.\nEvidence: Column C values are ECB CFC in millions of GEL (nominal domestic currency) while Column D links to PWT rnna in millions of 2017 US$. E = C/D produces a dimensionally meaningless ratio; the \"depreciation rate\" B3 ≈ 0.0226 is a coincidental scale artifact, not a true depreciation rate (a real depreciation rate for Georgia should be ~4% as seen in the PWT delta column).\nTrajectory location: Turn 32 / CFC data sheet",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-003",
+          "description": "PWT 10.01 genuinely lacks 2020+ data; the agent invented a CAGR extrapolation. Reasonable stopgap but not an actual data collection. Task grader may expect a specific source or blank cells.\nEvidence: rnna for 2020-2023 is extrapolated with =B{prev}*($B$31/$B$26)^(1/5) rather than sourced. Task says \"the latest K is 2023\"; PWT 10.01 only publishes through 2019.\nTrajectory location: Turn 32 / PWT rows 32-35 (2020-2023)",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-004",
+          "description": "Task says \"fill the relevant data in column B and C in sheet PWT\" — but doesn't specify what column C should be. Agent chose PWT's delta series. This may or may not match the grader's expectation (e.g., some models use labsh or emp in column C).\nEvidence: Agent added a \"delta\" column (PWT average depreciation rate) with header \"C1\"=delta and 30 hard-coded values.\nTrajectory location: Turn 32 / PWT column C",
+          "locations": []
+        },
+        {
+          "prediction_id": "MMG-005",
+          "description": "Rolling summary indicates no Playwright/MCP tooling available in the environment. Values were transcribed from earlier-observed workbook content. Not a computational error but a process deviation from instruction.\nEvidence: Task says \"Use Playwright MCP\" for IMF WEO. Agent used hard-coded WEO values written in the Python script (weo_gdp = {2000: 16.963, ...}) rather than live Playwright browsing.\nTrajectory location: Turn 32 / Data collection methodology",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/shock-analysis-supply/skills"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnoses": [],
+      "repaired_bundle": "tasks/video-silence-remover/skills"
+    }
+  ]
+}

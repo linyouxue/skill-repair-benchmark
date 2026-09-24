@@ -1,0 +1,25 @@
+Repository: /home/travis/build/failed/google/auto
+
+Build command used by CI (.travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure on this environment (Java 11.0.27, Maven 3.6.3):
+  mvn ... verify fails during dependency resolution for multiple modules (auto-common, auto-factory, auto-service).
+  Error:
+    Could not resolve dependencies ...
+    Could not find artifact com.sun:tools:jar:11.0.27 at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause:
+  The test dependency com.google.testing.compile:compile-testing (versions 0.6/0.7/0.8 used across modules)
+  declares a transitive system-scoped dependency on com.sun:tools with systemPath=${toolsjar}.
+  In JDK 9+ there is no tools.jar, so Maven cannot resolve com.sun:tools and the reactor build fails.
+
+Likely follow-on issue after fixing tools.jar:
+  The parent POM (com.google.auto:auto-parent:3) configures maven-compiler-plugin with <source>${java.version}</source>
+  where java.version defaults to 1.6; Java 11 no longer supports -source 1.6.
+
+Plan:
+  1) In each module that depends on compile-testing (common, factory, service, value), add an exclusion to the
+     compile-testing dependency to exclude com.sun:tools. This prevents Maven from trying to resolve tools.jar.
+  2) Override the java.version property in those modules to 1.7 so compilation works on Java 11.
+  3) Re-run the CI build command to confirm the reactor verifies successfully.

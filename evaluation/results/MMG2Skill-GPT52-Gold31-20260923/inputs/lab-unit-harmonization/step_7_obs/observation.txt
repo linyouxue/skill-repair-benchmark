@@ -1,0 +1,137 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import pandas as pd, numpy as np, re
+in_path='/root/environment/data/ckd_lab_data.csv'
+df=pd.read_csv(in_path, dtype=str)
+MISSING={'', 'nan','NaN','None','NULL','null','NA','N/A'}
+_num_re=re.compile(r'[^0-9eE+\-\.,]')
+def parse(val):
+    if val is None or (isinstance(val,float) and np.isnan(val)):
+        return np.nan
+    s=str(val).strip()
+    if s in MISSING or s.lower()=='nan':
+        return np.nan
+    s=_num_re.sub('',s)
+    if ',' in s and '.' in s:
+        s=s.replace(',','')
+    elif ',' in s:
+        s=s.replace(',','.')
+    try:
+        return float(s)
+    except:
+        return np.nan
+num_cols=[c for c in df.columns if c!='patient_id']
+parsed=df.copy()
+for c in num_cols:
+    parsed[c]=parsed[c].map(parse)
+parsed=parsed.dropna(axis=0, how='any', subset=num_cols).reset_index(drop=True)
+# Load same ranges/conversions from previous run quickly
+RANGES={
+    'Serum_Creatinine': (0.2, 20.0),'BUN': (1.0, 200.0),'eGFR': (0.0, 150.0),'Cystatin_C': (0.3, 10.0),'BUN_Creatinine_Ratio': (1.0, 80.0),
+    'Sodium': (110.0, 170.0),'Potassium': (2.0, 8.5),'Chloride': (70.0, 140.0),'Bicarbonate': (5.0, 40.0),'Anion_Gap': (0.0, 40.0),
+    'Magnesium': (1.0, 4.0),'Serum_Calcium': (4.0, 15.0),'Ionized_Calcium': (3.0, 7.0),'Phosphorus': (1.0, 15.0),'Intact_PTH': (0.0, 2000.0),
+    'Vitamin_D_25OH': (0.0, 150.0),'Vitamin_D_1_25OH': (0.0, 200.0),'Alkaline_Phosphatase': (10.0, 2000.0),
+    'Hemoglobin': (2.0, 20.0),'Hematocrit': (10.0, 70.0),'RBC_Count': (1.0, 8.0),'WBC_Count': (0.5, 50.0),'Platelet_Count': (10.0, 1500.0),
+    'Serum_Iron': (10.0, 300.0),'TIBC': (50.0, 600.0),'Transferrin_Saturation': (0.0, 100.0),'Ferritin': (1.0, 20000.0),'Reticulocyte_Count': (0.0, 20.0),
+    'Total_Bilirubin': (0.0, 10.0),'Direct_Bilirubin': (0.0, 5.0),'Albumin_Serum': (0.5, 6.5),'Total_Protein': (2.0, 12.0),
+    'Prealbumin': (0.0, 60.0),'CRP': (0.0, 300.0),'Total_Cholesterol': (50.0, 500.0),'LDL_Cholesterol': (10.0, 300.0),
+    'HDL_Cholesterol': (10.0, 150.0),'Triglycerides': (20.0, 2000.0),'Non_HDL_Cholesterol': (20.0, 400.0),'Glucose': (20.0, 600.0),
+    'HbA1c': (3.0, 20.0),'Fructosamine': (100.0, 800.0),'Uric_Acid': (1.0, 20.0),'Urine_Albumin': (0.0, 10000.0),'Urine_Creatinine': (1.0, 1000.0),
+    'Albumin_to_Creatinine_Ratio_Urine': (0.0, 5000.0),'Protein_to_Creatinine_Ratio_Urine': (0.0, 20000.0),'Urine_Protein': (0.0, 30000.0),
+    'Urine_pH': (4.0, 9.0),'Urine_Specific_Gravity': (1.0, 1.05),'BNP': (0.0, 5000.0),'NT_proBNP': (0.0, 40000.0),
+    'Troponin_I': (0.0, 50000.0),'Troponin_T': (0.0, 10000.0),'Free_T4': (0.2, 6.0),'Free_T3': (0.5, 10.0),
+    'pH_Arterial': (6.8, 7.8),'pCO2_Arterial': (2.0, 100.0),'pO2_Arterial': (4.0, 500.0),'Lactate': (4.0, 200.0),
+    'Beta2_Microglobulin': (0.0, 50.0),'Aluminum': (0.0, 300.0),
+}
+CONV={
+    'Serum_Creatinine':[0.0113],'Urine_Creatinine':[0.0113],'Uric_Acid':[0.01681],
+    'Serum_Calcium':[4.0],'Ionized_Calcium':[4.0],'Phosphorus':[3.1],'Magnesium':[2.43,1.215,0.1],
+    'Hemoglobin':[0.1,1.611],'Albumin_Serum':[0.1],'Total_Protein':[0.1],'Prealbumin':[0.1,100.0],
+    'Vitamin_D_25OH':[0.4],'Vitamin_D_1_25OH':[0.3846],
+    'Serum_Iron':[5.585],'TIBC':[5.585],
+    'Total_Bilirubin':[0.0585],'Direct_Bilirubin':[0.0585],
+    'Total_Cholesterol':[38.67],'LDL_Cholesterol':[38.67],'HDL_Cholesterol':[38.67],'Non_HDL_Cholesterol':[38.67],'Triglycerides':[88.57],
+    'Glucose':[18.0182,0.1],'Free_T4':[0.0777],'Free_T3':[0.651],'Lactate':[9.0] ]
+}
+TOL=0.05
+def in_rng(v,lo,hi):
+    return (lo*(1-TOL))<=v<=(hi*(1+TOL))
+def harmonize_col(series, col):
+    lo,hi=RANGES[col]
+    factors=CONV.get(col,[])
+    out=[]
+    for v in series:
+        if np.isnan(v):
+            out.append(np.nan); continue
+        if in_rng(v,lo,hi):
+            out.append(v); continue
+        fixed=None
+        for f in factors:
+            cand=v*f
+            if in_rng(cand,lo,hi):
+                fixed=cand; break
+        if fixed is None:
+            for f in [0.1,0.01,0.001,10,100,1000]:
+                cand=v*f
+                if in_rng(cand,lo,hi):
+                    fixed=cand; break
+        out.append(fixed if fixed is not None else np.nan)
+    return pd.Series(out)
+harm=parsed.copy()
+for c in num_cols:
+    harm[c]=harmonize_col(harm[c].astype(float), c)
+na_counts=harm[num_cols].isna().sum().sort_values(ascending=False)
+print('Rows after missing drop:', len(parsed))
+print('\nTop columns causing NaNs after harmonization:')
+print(na_counts.head(15).to_string())
+# show how many rows would remain if we only required range for each column individually
+print('\nRows that become invalid (any NaN) after harmonization:', harm[num_cols].isna().any(axis=1).sum())
+# identify columns with strict ranges maybe
+bad_rows=harm[num_cols].isna().any(axis=1)
+cols_bad=(harm.loc[bad_rows,num_cols].isna().sum().sort_values(ascending=False)) )
+print('\nBad rows NaN counts per column (subset of bad rows):')
+print(cols_bad.head(15).to_string())
+PY
+Rows after missing drop: 2548
+
+Top columns causing NaNs after harmonization:
+Magnesium                            1391
+Ionized_Calcium                       352
+Serum_Creatinine                        0
+Fructosamine                            0
+Albumin_to_Creatinine_Ratio_Urine       0
+Urine_Creatinine                        0
+Urine_Albumin                           0
+Uric_Acid                               0
+HbA1c                                   0
+Urine_Protein                           0
+Glucose                                 0
+Non_HDL_Cholesterol                     0
+Triglycerides                           0
+HDL_Cholesterol                         0
+LDL_Cholesterol                         0
+
+Rows that become invalid (any NaN) after harmonization: 1539
+
+Bad rows NaN counts per column (subset of bad rows):
+Magnesium                            1391
+Ionized_Calcium                       352
+Serum_Creatinine                        0
+Fructosamine                            0
+Albumin_to_Creatinine_Ratio_Urine       0
+Urine_Creatinine                        0
+Urine_Albumin                           0
+Uric_Acid                               0
+HbA1c                                   0
+Urine_Protein                           0
+Glucose                                 0
+Non_HDL_Cholesterol                     0
+Triglycerides                           0
+HDL_Cholesterol                         0
+LDL_Cholesterol                         0
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

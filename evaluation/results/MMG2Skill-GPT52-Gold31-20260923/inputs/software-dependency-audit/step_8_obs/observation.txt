@@ -1,0 +1,89 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import csv, json
+from pathlib import Path
+IN_JSON = Path('/root/trivy_report.json')
+OUT_CSV = Path('/root/security_audit.csv')
+SEVERITIES = {'HIGH', 'CRITICAL'}
+SOURCE_PRIORITY = ['nvd', 'ghsa', 'redhat']
+def get_cvss_score(vuln: dict):
+    cvss = vuln.get('CVSS') or {}
+    if not isinstance(cvss, dict):
+        return 'N/A'
+    # Prefer V3Score from preferred sources, then fall back to V2Score.
+    for src in SOURCE_PRIORITY:
+        entry = cvss.get(src)
+        if isinstance(entry, dict):
+            s = entry.get('V3Score')
+            if isinstance(s, (int, float)):
+                return s
+    for src in SOURCE_PRIORITY:
+        entry = cvss.get(src)
+        if isinstance(entry, dict):
+            s = entry.get('V2Score')
+            if isinstance(s, (int, float)):
+                return s
+    return 'N/A'
+def get_url(vuln: dict):
+    url = vuln.get('PrimaryURL')
+    if isinstance(url, str) and url.strip():
+        return url.strip()
+    refs = vuln.get('References')
+    if isinstance(refs, list) and refs:
+        for r in refs:
+            if isinstance(r, str) and r.strip():
+                return r.strip()
+    return ''
+def get_title(vuln: dict):
+    t = vuln.get('Title')
+    if isinstance(t, str) and t.strip():
+        return t.strip()
+    d = vuln.get('Description')
+    if isinstance(d, str) and d.strip():
+        return d.strip()
+    return 'N/A'
+with IN_JSON.open('r', encoding='utf-8') as f:
+    data = json.load(f)
+rows = []
+seen = set()
+for result in data.get('Results', []) or []:
+    for vuln in result.get('Vulnerabilities', []) or []:
+        severity = vuln.get('Severity') or 'UNKNOWN'
+        if severity not in SEVERITIES:
+            continue
+        pkg = vuln.get('PkgName') or 'Unknown'
+        ver = vuln.get('InstalledVersion') or 'N/A'
+        cve = vuln.get('VulnerabilityID') or 'N/A'
+        key = (pkg, ver, cve)
+        if key in seen:
+            continue
+        seen.add(key)
+        fixed = vuln.get('FixedVersion')
+        if not (isinstance(fixed, str) and fixed.strip()):
+            fixed = 'N/A'
+        rows.append({
+            'Package': pkg,
+            'Version': ver,
+            'CVE_ID': cve,
+            'Severity': severity,
+            'CVSS_Score': get_cvss_score(vuln),
+            'Fixed_Version': fixed,
+            'Title': get_title(vuln),
+            'Url': get_url(vuln),
+        })
+# Stable ordering for easier review
+rows.sort(key=lambda r: (r['Severity'] != 'CRITICAL', r['Package'], r['Version'], r['CVE_ID']))
+headers = ['Package', 'Version', 'CVE_ID', 'Severity', 'CVSS_Score', 'Fixed_Version', 'Title', 'Url']
+with OUT_CSV.open('w', newline='', encoding='utf-8') as f:
+    w = csv.DictWriter(f, fieldnames=headers)
+    w.writeheader()
+    w.writerows(rows)
+print(f'Wrote {len(rows)} HIGH/CRITICAL vulnerabilities to {OUT_CSV}')
+PY
+Wrote 24 HIGH/CRITICAL vulnerabilities to /root/security_audit.csv
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

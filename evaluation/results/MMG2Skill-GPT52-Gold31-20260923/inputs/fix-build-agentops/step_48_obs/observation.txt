@@ -1,0 +1,60 @@
+Tool: terminal
+Result:
+            sys.exit(0)
+
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            """
+                Handle uncaught exceptions before they result in program termination.
+
+                Args:
+                    exc_type (Type[BaseException]): The type of the exception.
+                    exc_value (BaseException): The exception instance.
+                    exc_traceback (TracebackType): A traceback object encapsulating the call stack at the
+                                                point where the exception originally occurred.
+            """
+            formatted_traceback = ''.join(traceback.format_exception(exc_type, exc_value,
+                                                                     exc_traceback))
+
+            self.end_session(end_state='Fail',
+                             end_state_reason=f"{str(exc_value)}: {formatted_traceback}")
+
+            # Then call the default excepthook to exit the program
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+        # if main thread
+        if isinstance(threading.current_thread(), threading._MainThread):
+            atexit.register(lambda: cleanup(end_state="Indeterminate",
+                            end_state_reason="Process exited without calling end_session()"))
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            sys.excepthook = handle_exception
+
+    @property
+    def current_session_id(self):
+        return self._session.session_id if self._session else None
+
+    @property
+    def api_key(self):
+        return self.config.api_key
+
+    def set_parent_key(self, parent_key: str):
+        """
+            Set the parent API key which has visibility to projects it is parent to.
+
+            Args:
+                parent_key (str): The API key of the parent organization to set.
+        """
+        if self._worker:
+            self._worker.config.parent_key = parent_key
+
+    @property
+    def parent_key(self):
+        return self.config.parent_key
+
+    def stop_instrumenting(self):
+        self.llm_tracker.stop_instrumenting()
+
+
+📁 Working directory: /home/github/build/failed/AgentOps-AI/agentops
+🐍 Python interpreter: /home/github/build/failed/AgentOps-AI/agentops/.venv_old/bin/python
+✅ Exit code: 0

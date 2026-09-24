@@ -1,0 +1,85 @@
+Tool: file_editor
+Result:
+[File /app/workspace/extract.py edited with 2 changes.]
+[begin of edit 1 / 2]
+(content before edit)
+ 74|
+ 75|
+-76|def extract_total_with_tier(text: str):
+-77|    """Return (tier_index, value) for the best total match, or (None, None)."""
+ 78|    lines = [ln.rstrip() for ln in text.splitlines()]
+ 79|    summary_start = find_summary_start(lines)
+ 80|
+ 81|    for tier_idx, tier in enumerate(PRIORITY_TIERS):
+-82|        candidates = []
+ 83|        for i, line in enumerate(lines[:summary_start]):
+ 84|            if is_excluded(line):
+ 85|                continue
+ 86|            if any(kw.search(line) for kw in tier):
+-87|                candidates.append(i)
+-88|        if not candidates:
+-89|            continue
+-90|        # Prefer last candidate (final total appears at the bottom); fall back through earlier ones.
+-91|        for i in reversed(candidates):
+ 92|            val = extract_last_number(lines[i])
+ 93|            if val is not None:
+-94|                return tier_idx, val
+-95|            # Split-across-two-lines fallback only when the keyword line has no digits.
+ 96|            if any(c.isdigit() for c in lines[i]):
+ 97|                continue
+(content after edit)
+ 74|
+ 75|
++76|def extract_total_candidates(text: str):
++77|    """Return a list of (tier_index, value) tuples for all keyword-matched candidates.
++78|
++79|    Candidates from lower tier_index (higher priority) come first. Within a tier they
++80|    are ordered from LAST match to FIRST match (final total tends to appear last).
++81|    """
+ 82|    lines = [ln.rstrip() for ln in text.splitlines()]
+ 83|    summary_start = find_summary_start(lines)
++84|    out = []
+ 85|
+ 86|    for tier_idx, tier in enumerate(PRIORITY_TIERS):
++87|        matches = []
+ 88|        for i, line in enumerate(lines[:summary_start]):
+ 89|            if is_excluded(line):
+ 90|                continue
+ 91|            if any(kw.search(line) for kw in tier):
++92|                matches.append(i)
++93|        for i in reversed(matches):
+ 94|            val = extract_last_number(lines[i])
+ 95|            if val is not None:
++96|                out.append((tier_idx, val))
++97|                continue
++98|            # Split-line fallback for pure-keyword lines only.
+ 99|            if any(c.isdigit() for c in lines[i]):
+100|                continue
+[end of edit 1 / 2]
+-------------------------
+[begin of edit 2 / 2]
+(content before edit)
+ 103|                v = extract_last_number(lines[j])
+ 104|                if v is not None:
+-105|                    return tier_idx, v
+ 106|                break
+-107|    return None, None
+ 108|
+ 109|
+(content after edit)
+ 106|                v = extract_last_number(lines[j])
+ 107|                if v is not None:
++108|                    out.append((tier_idx, v))
+ 109|                break
++110|    return out
++111|
++112|
++113|def extract_total_with_tier(text: str):
++114|    """Return the top (tier_index, value) for a single text, or (None, None)."""
++115|    cands = extract_total_candidates(text)
++116|    if not cands:
++117|        return None, None
++118|    return cands[0]
+ 119|
+ 120|
+[end of edit 2 / 2]

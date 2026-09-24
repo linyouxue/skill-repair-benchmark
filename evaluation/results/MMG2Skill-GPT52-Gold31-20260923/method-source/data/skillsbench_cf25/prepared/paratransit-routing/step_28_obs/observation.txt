@@ -1,0 +1,68 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, numpy as np
+from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+cfg=json.load(open('/root/instance_config.json'))
+n=cfg['nb_trips']; V=cfg['nb_vehicles']; cap=cfg['vehicle_capacity']; TW=cfg['time_window_width']; H=1320
+external_end=2*n+1
+travel=np.loadtxt('/root/t_matrix.csv', delimiter=',', dtype=np.int32)
+requests=json.load(open('/root/requests.json'))
+flat=[]
+passenger_trips=[]
+for p in requests:
+    idxs=[]
+    for t in p['trips']:
+        idxs.append(len(flat))
+        flat.append(t)
+    passenger_trips.append(idxs)
+job_c
+[... 1761 characters omitted ...]
+    time_dim.CumulVar(s).SetRange(300,840)
+    time_dim.CumulVar(s).SetValues(shift)
+    time_dim.CumulVar(e).SetRange(0,H)
+    time_dim.SetSpanUpperBoundForVehicle(480,v)
+SKIP=1_000_000
+solver=routing.solver()
+forced=0
+for i,t in enumerate(flat):
+    pu=manager.NodeToIndex(i); do=manager.NodeToIndex(n+i)
+    routing.AddDisjunction([pu], SKIP)
+    routing.AddDisjunction([do], 1)
+    solver.Add(routing.ActiveVar(pu) == routing.ActiveVar(do))
+    routing.AddPickupAndDelivery(pu, do)
+    solver.Add(routing.VehicleVar(pu)==routing.VehicleVar(do))
+    solver.Add(time_dim.CumulVar(pu) <= time_dim.CumulVar(do))
+    expected=int(t['expected_arrival_time'])
+    drop_low, drop_high = expected-TW, expected
+    direct=int(travel[1+i, 1+n+i])
+    pick_low=expected-TW-direct
+    pick_high=expected-direct
+    if drop_low>H:
+        solver.Add(routing.ActiveVar(pu)==0); solver.Add(routing.ActiveVar(do)==0); forced += 1
+        continue
+    time_dim.CumulVar(pu).SetRange(pick_low,pick_high)
+    time_dim.CumulVar(do).SetRange(drop_low,drop_high)
+params=pywrapcp.DefaultRoutingSearchParameters()
+params.first_solution_strategy=routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC C
+params.local_search_metaheuristic=routing_enums_pb2.LocalSearchMetaheuristic.GENERIC_TABU_SEARCH
+params.time_limit.seconds=60
+sol=routing.SolveWithParameters(params)
+served=[sol.Value(routing.ActiveVar(manager.NodeToIndex(i))) for i in range(n)]
+raw=sum(served)
+complete_trips=0
+for idxs in passenger_trips:
+    if all(served[i]==1 for i in idxs):
+        complete_trips += len(idxs)
+print('forced inactive', forced)
+print('raw served', raw)
+print('complete trips', complete_trips)
+PY
+forced inactive 2
+raw served 479
+complete trips 453
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

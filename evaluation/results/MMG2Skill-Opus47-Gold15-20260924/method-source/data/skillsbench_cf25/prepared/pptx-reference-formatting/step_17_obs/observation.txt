@@ -1,0 +1,75 @@
+Tool: terminal
+Result:
+/root/.venv_pptx/bin/python - <<'PY'
+from __future__ import annotations
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
+from pptx.oxml.xmlchemy import OxmlElement
+from pptx.oxml.ns import qn
+from pptx.util import Inches, Pt
+SRC = '/root/Awesome-Agent-Papers.pptx'
+DST = '/root/Awesome-Agent-Papers_processed.pptx'
+FONT_NAME = 'Arial'
+FONT_SIZE = Pt(16)
+FONT_COLOR = RGBColor(0x98, 0x95, 0x96)
+prs = Presentation(SRC)
+slide_w = prs.slide_width
+slide_h = prs.slide_height
+TITLE_BOX_W = slide_w - In
+[... 2331 characters omitted ...]
+title.has_text_frame:
+    ref_slide.shapes.title.text_frame.text = 'Reference'
+# Body placeholder
+body = None
+for sh in ref_slide.shapes:
+    if not getattr(sh, 'is_placeholder', False):
+        continue
+    if sh.placeholder_format.type == 2:  # BODY
+        body = sh
+        break
+if body is None:
+    # fallback: first non-title text placeholder
+    for sh in ref_slide.shapes:
+        if getattr(sh, 'has_text_frame', False) and sh is not ref_slide.shapes.title:
+            body = sh
+            break
+if body is not None and body.has_text_frame:
+    tf = body.text_frame
+    tf.clear()
+    tf.word_wrap = True
+    def apply_autonum(paragraph, *, start_at: int | None):
+        pPr = paragraph._p.get_or_add_pPr()
+        # remove any existing bullet settings
+        for tag in (
+            'a:buNone','a:buAutoNum','a:buChar','a:buBlip','a:buClr','a:buFont','a:buSzPct','a:buSzPts'
+        ):
+            el = pPr.find(qn(tag))
+            if el is not None:
+                pPr.remove(el)
+        bu = OxmlElement('a:buAutoNum')
+        bu.set('type', 'arabicPeriod')
+        if start_at is not None:
+            bu.set('startAt', str(start_at))
+        pPr.insert(0, bu)
+    for idx, t in enumerate(uniq_titles):
+        p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+        p.text = t
+        # style
+        p.font.name = FONT_NAME
+        p.font.size = FONT_SIZE
+        p.font.bold = False
+        p.font.color.rgb = FONT_COLOR
+        for r in p.runs:
+            set_run_style(r)
+        apply_autonum(p, start_at=1 if idx == 0 else None)
+prs.save(DST)
+print('saved', DST)
+print('paper_titles_found', len(paper_titles), 'unique', len(uniq_titles))
+PY
+saved /root/Awesome-Agent-Papers_processed.pptx
+paper_titles_found 5 unique 4
+
+
+📁 Working directory: /root
+✅ Exit code: 0

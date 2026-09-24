@@ -1,0 +1,73 @@
+Tool: file_editor
+Result:
+[File /root/run_mpc_controller.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|#!/usr/bin/env python3
++2|"""Run an MPC-style controller on the provided R2R simulator.
++3|
++4|Outputs (in current directory):
++5|- controller_params.json
++6|- control_log.json
++7|- metrics.json
++8|
++9|The controller is a receding-horizon, unconstrained finite-horizon LQR tracker:
++10|    u_k = u_ref(k) - K (x_k - x_ref(k))
++11|
++12|The plant is linearized once at the initial operating point and discretized
++13|with the same forward-Euler s
+[... 6136 characters omitted ...]
+        "control_inputs": [float(v) for v in u],
++207|                "references": [float(v) for v in x_ref],
++208|            }
++209|        )
++210|
++211|        x = x_next
++212|
++213|    # Save controller parameters
++214|    controller_params = {
++215|        "horizon_N": int(horizon_N),
++216|        "Q_diag": [float(v) for v in Q_diag],
++217|        "R_diag": [float(v) for v in R_diag],
++218|        "K_lqr": K_lqr.tolist(),
++219|        "A_matrix": A_d.tolist(),
++220|        "B_matrix": B_d.tolist(),
++221|    }
++222|
++223|    Path("controller_params.json").write_text(json.dumps(controller_params, indent=2))
++224|    Path("control_log.json").write_text(json.dumps(control_log, indent=2))
++225|
++226|    # Compute metrics
++227|    with open("/root/system_config.json", "r") as f:
++228|        cfg = json.load(f)
++229|
++230|    times = np.array([row["time"] for row in control_log["data"]], dtype=float)
++231|    tensions = np.array([row["tensions"] for row in control_log["data"]], dtype=float)
++232|
++233|    metrics = compute_metrics(
++234|        times=times,
++235|        tensions=tensions,
++236|        step_time=float(cfg["step_time"]),
++237|        T_ref_initial=np.array(cfg["T_ref_initial"], dtype=float),
++238|        T_ref_final=np.array(cfg["T_ref_final"], dtype=float),
++239|    )
++240|
++241|    Path("metrics.json").write_text(
++242|        json.dumps(
++243|            {
++244|                "steady_state_error": metrics.steady_state_error,
++245|                "settling_time": metrics.settling_time,
++246|                "max_tension": metrics.max_tension,
++247|                "min_tension": metrics.min_tension,
++248|            },
++249|            indent=2,
++250|        )
++251|    )
++252|
++253|
++254|if __name__ == "__main__":
++255|    main()
++256|
+[end of edit 1 / 1]

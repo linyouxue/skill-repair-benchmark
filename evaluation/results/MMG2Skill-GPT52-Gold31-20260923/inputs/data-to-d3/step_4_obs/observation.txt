@@ -1,0 +1,935 @@
+Tool: terminal
+Result:
+bash -lc 'mkdir -p /root/output/js /root/output/css /root/output/data && rm -rf /root/output/data/* && cp -a /root/data/stock-descriptions.csv /root/output/data/ && cp -a /root/data/indiv-stock /root/output/data/ && curl -L --fail https://d3js.org/d3.v6.min.js -o /root/output/js/d3.v6.min.js && cat > /root/output/index.html <<"HTML"
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stocks overview: sector clusters + details table</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__title">Stocks overview</div>
+    <div class="topbar__subtitle">Bubble clusters by sector (size by market cap) + linked table</div>
+  </header>
+  <main id="app" class="app">
+    <section class="panel panel--bubble" aria-label="Bubble chart panel">
+      <div class="panel__header">
+        <div class="panel__title">Sector clusters</div>
+        <div class="panel__hint">Click a bubble or a table row to link selections.</div>
+      </div>
+      <div id="bubbleWrap" class="bubbleWrap">
+        <svg id="bubbleSvg" class="bubbleSvg" role="img" aria-label="Bubble chart"></svg>
+        <div id="legend" class="legend" aria-label="Sector legend"></div>
+        <div id="tooltip" class="tooltip" aria-hidden="true"></div>
+      </div>
+    </section>
+    <section class="panel panel--table" aria-label="Table panel">
+      <div class="panel__header">
+        <div class="panel__title">All stocks (50)</div>
+        <div class="panel__hint">Sorted by ticker symbol.</div>
+      </div>
+      <div id="tableWrap" class="tableWrap">
+        <table class="dataTable" aria-label="Stock table">
+          <thead>
+            <tr>
+              <th>Ticker symbol</th>
+              <th>Full company name</th>
+              <th>Sector</th>
+              <th class="num">Market cap</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="js/d3.v6.min.js"></script>
+  <script src="js/visualization.js"></script>
+</body>
+</html>
+HTML
+cat > /root/output/css/style.css <<"CSS"
+:root {
+  --bg: #0b1020;
+  --panel: #111a33;
+  --panel2: #0f1730;
+  --text: #e7eefc;
+  --muted: rgba(231, 238, 252, 0.72);
+  --grid: rgba(231, 238, 252, 0.10);
+  --stroke: rgba(231, 238, 252, 0.22);
+  --accent: #9cd2ff;
+  --selected: #ffd76a;
+}
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  margin: 0;
+  background: radial-gradient(1200px 800px at 20% 0%, #152252 0%, var(--bg) 55%);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+a { color: var(--accent); }
+.topbar {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--grid);
+  background: rgba(3, 6, 15, 0.55);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.topbar__title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+.topbar__subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.app {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+}
+.panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  border: 1px solid var(--grid);
+  border-radius: 14px;
+  overflow: hidden;
+  min-height: 680px;
+}
+.panel__header {
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--grid);
+  background: rgba(0,0,0,0.12);
+}
+.panel__title {
+  font-size: 13px;
+  font-weight: 650;
+}
+.panel__hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.panel--bubble {
+  flex: 1.1;
+}
+.panel--table {
+  flex: 0.9;
+}
+.bubbleWrap {
+  position: relative;
+  height: 640px;
+}
+.bubbleSvg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.legend {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  background: rgba(0,0,0,0.28);
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  padding: 10px 10px 8px;
+  max-width: 240px;
+}
+.legend__title {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.legend__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.legend__swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.25);
+}
+.legend__label {
+  font-size: 12px;
+  color: rgba(231, 238, 252, 0.92);
+}
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  padding: 10px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--grid);
+  background: rgba(0,0,0,0.82);
+  box-shadow: 0 12px 34px rgba(0,0,0,0.35);
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 130ms ease, transform 130ms ease;
+  max-width: 320px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.tooltip__ticker {
+  font-weight: 750;
+  letter-spacing: 0.4px;
+}
+.tooltip__name {
+  color: rgba(231, 238, 252, 0.92);
+  margin-top: 3px;
+}
+.tooltip__meta {
+  color: var(--muted);
+  margin-top: 6px;
+}
+.tableWrap {
+  height: 640px;
+  overflow: auto;
+}
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+.dataTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(3, 6, 15, 0.72);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--grid);
+  font-size: 12px;
+  text-align: left;
+  padding: 10px 10px;
+  color: rgba(231, 238, 252, 0.92);
+}
+.dataTable td {
+  border-bottom: 1px solid rgba(231, 238, 252, 0.08);
+  padding: 9px 10px;
+  font-size: 12px;
+  color: rgba(231, 238, 252, 0.9);
+  vertical-align: top;
+}
+.dataTable td.num,
+.dataTable th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dataTable tbody tr {
+  cursor: pointer;
+}
+.dataTable tbody tr:hover {
+  background: rgba(156, 210, 255, 0.08);
+}
+.dataTable tbody tr.selected {
+  background: rgba(255, 215, 106, 0.14);
+  outline: 1px solid rgba(255, 215, 106, 0.35);
+}
+@media (max-width: 1050px) {
+  .app {
+    flex-direction: column;
+  }
+  .panel {
+    min-height: auto;
+  }
+}
+CSS
+python3 - <<"PY"
+import json
+from pathlib import Path
+csv_text = Path("/root/data/stock-descriptions.csv").read_text(encoding="utf-8") )
+js = f"""/* global d3 */
+// If you open index.html directly via file://, browsers often block fetch().
+// We embed stock-descriptions.csv for a reliable fallback.
+const EMBEDDED_STOCK_CSV = {json.dumps(csv_text)};
+const STATE = {{
+  selectedTicker: null,
+}};
+function formatMarketCap(n) {{
+  if (!Number.isFinite(n) || n <= 0) return '\u2014';
+  const abs = Math.abs(n);
+  const units = [
+    ['T', 1e12],
+    ['B', 1e9],
+    ['M', 1e6],
+    ['K', 1e3],
+  ];
+  for (const [suffix, v] of units) {{
+    if (abs >= v) return `${{d3.format('.2f')(n / v)}}${{suffix}}`;
+  }}
+  return d3.format(',')(Math.round(n));
+}}
+async function loadStockDescriptions() {{
+  try {{
+    const res = await fetch('data/stock-descriptions.csv', {{ cache: 'no-store' }});
+    const text = await res.text();
+    return d3.csvParse(text, d3.autoType);
+  }} catch (err) {{
+    console.warn('Falling back to embedded stock-descriptions.csv (fetch failed).', err);
+bash: syntax error near unexpected token `('
+    return d3.csvParse(EMBEDDED_STOCK_CSV, d3.autoType);
+
+
+    return d3.csvParse(EMBEDDED_STOCK_CSV, d3.autoType);
+bash: syntax error near unexpected token `('
+  }}
+
+
+  }}
+}}
+
+function normalizeStocks(rows) {{
+  return rows.map(r => {{
+    const ticker = (r.ticker ?? '').trim();
+    const sector = (r.sector ?? '').trim() || 'Unknown';
+    const fullName = (r['full name'] ?? '').trim();
+    const marketCap = Number.isFinite(r.marketCap) ? +r.marketCap : NaN;
+    const isETF = sector === 'ETF' || !Number.isFinite(marketCap);
+
+    return {{
+      ticker,
+bash: }}: command not found
+      sector,
+
+
+}}
+bash: }}: command not found
+      fullName,
+
+
+      marketCap: Number.isFinite(marketCap) ? marketCap : null,
+
+
+function normalizeStocks(rows) {{
+bash: syntax error near unexpected token `{{'
+      isETF,
+
+
+  return rows.map(r => {{
+bash: syntax error near unexpected token `('
+    }};
+
+
+    const ticker = (r.ticker ?? '').trim();
+bash: syntax error near unexpected token `('
+  }}).filter(d => d.ticker);
+}}
+
+
+    const sector = (r.sector ?? '').trim() || 'Unknown';
+bash: syntax error near unexpected token `('
+
+
+
+    const fullName = (r['full name'] ?? '').trim();
+bash: syntax error near unexpected token `('
+function buildLegend(sectors, color) {{
+
+
+    const marketCap = Number.isFinite(r.marketCap) ? +r.marketCap : NaN;
+bash: syntax error near unexpected token `('
+
+
+    const isETF = sector === 'ETF' || !Number.isFinite(marketCap);
+bash: syntax error near unexpected token `marketCap'
+  const legend = d3.select('#legend');
+
+
+  legend.selectAll('*').remove();
+
+
+    return {{
+bash: return: {{: numeric argument required
+bash: return: can only `return' from a function or sourced script
+
+
+
+      ticker,
+bash: ticker,: command not found
+  legend.append('div')
+
+
+      sector,
+bash: sector,: command not found
+    .attr('class', 'legend__title')
+
+
+      fullName,
+    .text('Sector');
+bash: fullName,: command not found
+
+
+
+      marketCap: Number.isFinite(marketCap) ? marketCap : null,
+bash: syntax error near unexpected token `('
+  const items = legend.selectAll('.legend__item')
+
+
+      isETF,
+[?20<response clipped><NOTE>Due to the max output limit, only part of the full response has been shown to you.</NOTE>row.scrollIntoView({{ block: 'nearest' }});
+bash: syntax error near unexpected token `row.scrollIntoView'
+  rows.exit().remove();
+
+
+}}
+bash: }}: command not found
+
+
+
+  const rowsEnter = rows.enter()
+
+
+function renderTable(stocks) {{
+bash: syntax error near unexpected token `{{'
+    .append('tr')
+
+
+  const tbody = d3.select('#tableBody');
+bash: syntax error near unexpected token `('
+    .attr('class', 'stockRow')
+
+
+    .attr('data-ticker', d => d.ticker)
+
+
+  const rows = tbody.selectAll('tr.stockRow')
+bash: syntax error near unexpected token `('
+
+
+    .data(stocks, d => d.ticker);
+bash: syntax error near unexpected token `stocks,'
+
+
+
+
+
+  rows.exit().remove();
+bash: syntax error near unexpected token `.remove'
+  rowsEnter.append('td').attr('class', 'ticker');
+
+
+  rowsEnter.append('td').attr('class', 'name');
+
+
+  const rowsEnter = rows.enter()
+bash: syntax error near unexpected token `('
+  rowsEnter.append('td').attr('class', 'sector');
+
+
+    .append('tr')
+bash: syntax error near unexpected token `'tr''
+  rowsEnter.append('td').attr('class', 'num marketCap');
+
+
+    .attr('class', 'stockRow')
+bash: syntax error near unexpected token `'class','
+
+
+
+    .attr('data-ticker', d => d.ticker)
+bash: syntax error near unexpected token `'data-ticker','
+
+
+    .on('click', (event, d) => setSelection(d.ticker));
+bash: syntax error near unexpected token `'click','
+  const merged = rowsEnter.merge(rows);
+
+
+  merged.select('td.ticker').text(d => d.ticker);
+
+
+  rowsEnter.append('td').attr('class', 'ticker');
+bash: syntax error near unexpected token `'td''
+  merged.select('td.name').text(d => d.fullName || '\u2014');
+
+
+  rowsEnter.append('td').attr('class', 'name');
+bash: syntax error near unexpected token `'td''
+  merged.select('td.sector').text(d => d.sector || '\u2014');
+
+
+  rowsEnter.append('td').attr('class', 'sector');
+bash: syntax error near unexpected token `'td''
+  merged.select('td.marketCap').text(d => formatMarketCap(d.marketCap));
+
+
+  rowsEnter.append('td').attr('class', 'num marketCap');
+bash: syntax error near unexpected token `'td''
+}}
+
+
+
+
+  const merged = rowsEnter.merge(rows);
+bash: syntax error near unexpected token `('
+
+
+
+  merged.select('td.ticker').text(d => d.ticker);
+bash: syntax error near unexpected token `'td.ticker''
+function renderBubbles(stocks) {{
+
+
+  merged.select('td.name').text(d => d.fullName || '\u2014');
+bash: syntax error near unexpected token `'td.name''
+  const wrap = document.getElementById('bubbleWrap');
+
+
+  merged.select('td.sector').text(d => d.sector || '\u2014');
+bash: syntax error near unexpected token `'td.sector''
+  const rect = wrap.getBoundingClientRect();
+
+
+  merged.select('td.marketCap').text(d => formatMarketCap(d.marketCap));
+bash: syntax error near unexpected token `'td.marketCap''
+  const width = Math.max(520, Math.floor(rect.width));
+
+
+}}
+bash: }}: command not found
+  const height = Math.max(520, Math.floor(rect.height));
+
+
+
+
+
+function renderBubbles(stocks) {{
+bash: syntax error near unexpected token `{{'
+  const svg = d3.select('#bubbleSvg');
+
+
+  const wrap = document.getElementById('bubbleWrap');
+bash: syntax error near unexpected token `('
+  svg.selectAll('*').remove();
+
+
+  const rect = wrap.getBoundingClientRect();
+bash: syntax error near unexpected token `('
+  svg.attr('viewBox', `0 0 ${{width}} ${{height}}`);
+
+
+  const width = Math.max(520, Math.floor(rect.width));
+bash: syntax error near unexpected token `('
+
+
+
+  const height = Math.max(520, Math.floor(rect.height));
+bash: syntax error near unexpected token `('
+  const tooltip = d3.select('#tooltip');
+
+
+
+
+
+  const svg = d3.select('#bubbleSvg');
+bash: syntax error near unexpected token `('
+
+
+  svg.selectAll('*').remove();
+bash: syntax error near unexpected token `'*''
+  const sectors = Array.from(new Set(stocks.map(d => d.sector))).sort(d3.ascending);
+
+
+  svg.attr('viewBox', `0 0 ${{width}} ${{height}}`);
+bash: syntax error near unexpected token `'viewBox','
+  const color = d3.scaleOrdinal()
+
+
+    .domain(sectors)
+
+
+  const tooltip = d3.select('#tooltip');
+bash: syntax error near unexpected token `('
+    .range(sectors.map((s, i) => d3.interpolateRainbow((i + 0.15) / (sectors.length + 0.3))));
+
+
+
+
+
+  const sectors = Array.from(new Set(stocks.map(d => d.sector))).sort(d3.ascending);
+bash: syntax error near unexpected token `('
+
+
+  const color = d3.scaleOrdinal()
+bash: syntax error near unexpected token `('
+  buildLegend(sectors, color);
+
+
+    .domain(sectors)
+bash: syntax error near unexpected token `sectors'
+
+
+
+    .range(sectors.map((s, i) => d3.interpolateRainbow((i + 0.15) / (sectors.length + 0.3))));
+bash: syntax error near unexpected token `sectors.map'
+  const nonEtfCaps = stocks.filter(d => !d.isETF && Number.isFinite(d.marketCap)).map(d => d.marketCap);
+
+
+  const capExtent = d3.extent(nonEtfCaps);
+
+
+  buildLegend(sectors, color);
+bash: syntax error near unexpected token `sectors,'
+  const rScale = d3.scaleSqrt()
+
+
+    .domain([Math.max(1, capExtent[0] ?? 1), capExtent[1] ?? 1])
+
+
+  const nonEtfCaps = stocks.filter(d => !d.isETF && Number.isFinite(d.marketCap)).map(d => d.marketCap);
+bash: syntax error near unexpected token `('
+    .range([14, 48])
+
+
+  const capExtent = d3.extent(nonEtfCaps);
+bash: syntax error near unexpected token `('
+
+
+  const rScale = d3.scaleSqrt()
+bash: syntax error near unexpected token `('
+    .clamp(true);
+
+
+    .domain([Math.max(1, capExtent[0] ?? 1), capExtent[1] ?? 1])
+bash: syntax error near unexpected token `[Math.max'
+
+
+
+    .range([14, 48])
+bash: syntax error near unexpected token `[14,'
+  const ETF_R = 16;
+
+
+    .clamp(true);
+bash: syntax error near unexpected token `true'
+
+
+
+  // Compute fixed cluster centers in a small ring around the canvas center.
+
+
+  const ETF_R = 16;
+bash: const: command not found
+  const cx = width / 2;
+
+
+  const cy = height / 2;
+
+
+  // Compute fixed cluster centers in a small ring around the canvas center.
+bash: //: Is a directory
+  const ringR = Math.min(width, height) * 0.22;
+
+
+  const cx = width / 2;
+bash: const: command not found
+  const centers = new Map();
+
+
+  const cy = height / 2;
+bash: const: command not found
+  sectors.forEach((s, i) => {{
+
+
+  const ringR = Math.min(width, height) * 0.22;
+bash: syntax error near unexpected token `('
+    const a = (i / sectors.length) * 2 * Math.PI - Math.PI / 2;
+
+
+  const centers = new Map();
+bash: syntax error near unexpected token `('
+    centers.set(s, {{
+
+
+  sectors.forEach((s, i) => {{
+bash: syntax error near unexpected token `('
+      x: cx + ringR * Math.cos(a),
+
+
+    const a = (i / sectors.length) * 2 * Math.PI - Math.PI / 2;
+bash: syntax error near unexpected token `('
+      y: cy + ringR * Math.sin(a),
+
+
+    centers.set(s, {{
+bash: syntax error near unexpected token `s,'
+    }});
+
+
+      x: cx + ringR * Math.cos(a),
+bash: syntax error near unexpected token `('
+  }});
+
+
+      y: cy + ringR * Math.sin(a),
+bash: syntax error near unexpected token `('
+
+
+    }});
+bash: syntax error near unexpected token `)'
+
+
+
+  }});
+bash: syntax error near unexpected token `)'
+  // Stable initial positions: based on sorted tickers.
+
+
+  const nodes = stocks
+
+
+  // Stable initial positions: based on sorted tickers.
+bash: //: Is a directory
+    .slice()
+
+
+  const nodes = stocks
+bash: const: command not found
+    .sort((a, b) => d3.ascending(a.ticker, b.ticker))
+
+
+    .slice()
+    .sort((a, b) => d3.ascending(a.ticker, b.ticker))
+bash: syntax error near unexpected token `.sort'
+    .map((d, i) => {{
+
+
+    .map((d, i) => {{
+bash: syntax error near unexpected token `('
+      const c = centers.get(d.sector) ?? {{ x: cx, y: cy }};
+
+
+      const c = centers.get(d.sector) ?? {{ x: cx, y: cy }};
+bash: syntax error near unexpected token `('
+      const r = d.isETF ? ETF_R : rScale(d.marketCap);
+
+
+      const r = d.isETF ? ETF_R : rScale(d.marketCap);
+bash: syntax error near unexpected token `('
+      const phi = i * 0.61;
+
+
+      const phi = i * 0.61;
+bash: const: command not found
+      const rad = 8 + (i % 12) * 1.7;
+
+
+      const rad = 8 + (i % 12) * 1.7;
+bash: syntax error near unexpected token `('
+      return Object.assign({{}}, d, {{
+
+
+      return Object.assign({{}}, d, {{
+bash: syntax error near unexpected token `('
+        r,
+
+
+        r,
+bash: r,: command not found
+        x: c.x + Math.cos(phi) * rad,
+
+
+        x: c.x + Math.cos(phi) * rad,
+bash: syntax error near unexpected token `('
+        y: c.y + Math.sin(phi) * rad,
+
+
+        y: c.y + Math.sin(phi) * rad,
+bash: syntax error near unexpected token `('
+      }});
+
+
+      }});
+bash: syntax error near unexpected token `)'
+
+
+    }});
+bash: syntax error near unexpected token `)'
+
+
+
+
+  const g = svg.append('g');
+bash: syntax error near unexpected token `('
+
+
+
+
+  const node = g.selectAll('g.bubbleNode')
+bash: syntax error near unexpected token `('
+
+
+    .data(nodes, d => d.ticker)
+bash: syntax error near unexpected token `nodes,'
+
+
+    .enter()
+    .append('g')
+bash: syntax error near unexpected token `.append'
+
+
+    .attr('class', 'bubbleNode')
+bash: syntax error near unexpected token `'class','
+
+
+    .style('cursor', 'pointer')
+bash: syntax error near unexpected token `'cursor','
+    .on('click', (event, d) => setSelection(d.ticker));
+
+
+    .on('click', (event, d) => setSelection(d.ticker));
+bash: syntax error near unexpected token `'click','
+
+
+  node.append('circle')
+
+
+  node.append('circle')
+bash: syntax error near unexpected token `'circle''
+
+
+    .attr('r', d => d.r)
+bash: syntax error near unexpected token `'r','
+    .attr('fill', d => color(d.sector))
+
+
+    .attr('fill', d => color(d.sector))
+bash: syntax error near unexpected token `'fill','
+    .attr('fill-opacity', d => d.isETF ? 0.55 : 0.78)
+
+
+    .attr('fill-opacity', d => d.isETF ? 0.55 : 0.78)
+bash: syntax error near unexpected token `'fill-opacity','
+
+
+    .attr('stroke', 'rgba(255,255,255,0.30)')
+bash: syntax error near unexpected token `'stroke','
+
+
+    .attr('stroke-width', 1);
+bash: syntax error near unexpected token `'stroke-width','
+
+
+
+
+  node.append('text')
+bash: syntax error near unexpected token `'text''
+
+
+    .text(d => d.ticker)
+bash: syntax error near unexpected token `d'
+
+
+    .attr('text-anchor', 'middle')
+bash: syntax error near unexpected token `'text-anchor','
+
+
+    .attr('dy', '0.35em')
+bash: syntax error near unexpected token `'dy','
+
+
+    .attr('fill', 'rgba(255,255,255,0.94)')
+bash: syntax error near unexpected token `'fill','
+    .attr('font-weight', 720)
+
+
+    .attr('font-weight', 720)
+bash: syntax error near unexpected token `'font-weight','
+    .attr('font-size', d => Math.max(9, Math.min(14, d.r * 0.55)));
+
+
+    .attr('font-size', d => Math.max(9, Math.min(14, d.r * 0.55)));
+bash: syntax error near unexpected token `'font-size','
+
+
+
+
+  // Tooltip only for non-ETFs (per requirement).
+bash: syntax error near unexpected token `('
+
+
+  node
+    .filter(d => !d.isETF)
+    .on('mousemove', (event, d) => {{
+      tooltip
+        .classed('visible', true)
+        .attr('aria-hidden', 'false')
+        .html(
+          `<div class="tooltip__ticker">${{d.ticker}}</div>` +
+          `<div class="tooltip__name">${{d.fullName}}</div>` +
+          `<div class="tooltip__meta">Sector: ${{d.sector}}<br/>Market cap: ${{formatMarketCap(d.marketCap)}}</div>`
+        )
+        .style('left', `${{event.pageX + 12}}px`)
+        .style('top', `${{event.pageY - 12}}px`);
+    }})
+    .on('mouseleave', () => {{
+      tooltip.classed('visible', false).attr('aria-hidden', 'true');
+    }});
+
+  // Force simulation with sector clustering.
+  const sim = d3.forceSimulation(nodes)
+    .force('x', d3.forceX(d => (centers.get(d.sector) ?? {{ x: cx }}).x).strength(0.18))
+    .force('y', d3.forceY(d => (centers.get(d.sector) ?? {{ y: cy }}).y).strength(0.18))
+    .force('collide', d3.forceCollide(d => d.r + 2).iterations(2))
+    .force('charge', d3.forceManyBody().strength(-10))
+    .force('center', d3.forceCenter(cx, cy));
+
+  // Run a fixed number of ticks for a stable settled layout.
+  for (let i = 0; i < 260; i += 1) sim.tick();
+  sim.stop();
+
+  node.attr('transform', d => `translate(${{d.x}},${{d.y}})`);
+
+  // Selection styling
+  svg.append('style').text(`
+    .bubbleNode.selected circle {{
+      stroke: rgba(255, 215, 106, 0.95);
+      stroke-width: 3px;
+      filter: drop-shadow(0 10px 20px rgba(0,0,0,0.4));
+    }}
+  `);
+
+  // Hide tooltip if click selection happens.
+  svg.on('click', () => tooltip.classed('visible', false));
+}}
+
+async function main() {{
+  const rows = await loadStockDescriptions();
+  const stocks = normalizeStocks(rows);
+
+  const tableStocks = stocks.slice().sort((a, b) => d3.ascending(a.ticker, b.ticker));
+  renderTable(tableStocks);
+  renderBubbles(stocks);
+
+  const ro = new ResizeObserver(() => renderBubbles(stocks));
+  ro.observe(document.getElementById('bubbleWrap'));
+}}
+
+main().catch(err => {{
+  console.error(err);
+  const legend = document.getElementById('legend');
+  if (legend) legend.textContent = 'Failed to load or render data.';
+}});
+"""
+
+Path("/root/output/js/visualization.js").write_text(js, encoding="utf-8")
+print("Wrote /root/output/js/visualization.js")
+PY
+
+Welcome to Node.js v18.19.1.
+Type ".help" for more information.
+find /root/output -maxdepth 3 -type f | sort'
+
+📁 Working directory: /root
+❌ Exit code: 2

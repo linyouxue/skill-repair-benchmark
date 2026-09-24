@@ -1,0 +1,53 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+model=sbm.PhaseNet.from_pretrained('original')
+TARGET_STD=1e-6
+def mkst(fn):
+    z=np.load(fn, allow_pickle=True)
+    x=z['data'].astype('float32')
+    std=float(x.std())
+    if std>0 and std<TARGET_STD:
+        x=x*(TARGET_STD/std)
+    dt=float(z['dt']); sr=1/dt
+    chs=str(z['channels']).split(',')
+    stime=UTCDateTime(str(z.get('start_time','1970-01-01T00:00:00Z')))
+    st=Stream()
+    for i,ch in enumerate(chs):
+        tr=Trace(data=x[:,i].astype('float32'))
+        tr.stats.network=str(z.get('network','XX'))
+        tr.stats.station=str(z.get('station','STA'))
+        tr.stats.location=str(z.get('location_code',''))
+        tr.stats.channel=ch
+        tr.stats.starttime=stime
+        tr.stats.sampling_rate=sr
+        st+=tr
+    return st
+pmax=[]; smax=[]; picked=0
+files=sorted(glob.glob('/root/data/*.npz'))
+for fn in files:
+    st=mkst(fn)
+    ann=model.annotate(st)
+    P=ann.select(channel='*PhaseNet_P')[0].data.max()
+    S=ann.select(channel='*PhaseNet_S')[0].data.max()
+    pmax.append(float(P)); smax.append(float(S))
+arrP=np.array(pmax); arrS=np.array(smax)
+for name,arr in [('P',arrP),('S',arrS)]:
+    qs=np.quantile(arr,[0,0.1,0.25,0.5,0.75,0.9,1])
+    print(name,'quantiles', {q:float(v) for q,v in zip([0,0.1,0.25,0.5,0.75,0.9,1],qs)})
+    print(name,'count>0.3', int((arr>0.3).sum()))
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+P quantiles {0: 8.798981980362441e-06, 0.1: 8.798981980362441e-06, 0.25: 8.798981980362441e-06, 0.5: 0.9226024150848389, 0.75: 0.9732854664325714, 0.9: 0.9830339550971985, 1: 0.9875108003616333}
+P count>0.3 64
+S quantiles {0: 7.709785450060735e-07, 0.1: 7.709785450060735e-07, 0.25: 7.709785450060735e-07, 0.5: 0.7693558931350708, 0.75: 0.9103487581014633, 0.9: 0.9555618643760682, 1: 0.964766800403595}
+S count>0.3 65
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

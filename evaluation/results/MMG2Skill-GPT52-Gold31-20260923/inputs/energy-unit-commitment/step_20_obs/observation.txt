@@ -1,0 +1,104 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /root/solve_uc.py:
+   160	    for rr, ren in enumerate(renewables):
+   161	        lb[pr[rr, :]] = ren.pmin
+   162	        ub[pr[rr, :]] = ren.pmax
+   163	
+   164	    # Thermal bounds from data via constraints (not as bounds)
+   165	
+   166	    rows: List[int] = []
+   167	    cols: List[int] = []
+   168	    vals: List[float] = []
+   169	    row_lb: List[float] = []
+   170	    row_ub: List[float] = []
+   171	    row = 0
+   172	
+   173	    def add_row(terms: List[Tuple[int, float]], lo: float, hi: float):
+   174	        nonlocal row
+   175	        for j, a in terms:
+   176	            if a != 0.0:
+   177	                rows.append(row)
+   178	                cols.append(int(j))
+   179	                vals.append(float(a))
+   180	        row_lb.append(float(lo))
+   181	        row_ub.append(float(hi))
+   182	        row += 1
+   183	
+   184	    # Constraints per thermal unit
+   185	    for g, gen in enumerate(thermals):
+   186	        pmin, pmax = gen.pmin, gen.pmax
+   187	
+   188	        # Must-run
+   189	        if gen.must_run == 1:
+   190	            for t in range(T):
+   191	                add_row([(u[g, t], 1.0)], lo=1.0, hi=1.0)
+   192	
+   193	        # Initial min up/down obligations
+   194	        if gen.u0 == 1 and gen.time_up0 < gen.min_up:
+   195	            must_on = gen.min_up - gen.time_up0
+   196	            for t in range(min(T, must_on)):
+   197	                add_row([(u[g, t], 1.0)], lo=1.0, hi=1.0)
+   198	        if gen.u0 == 0 and gen.time_down0 < gen.min_down:
+   199	            must_off = gen.min_down - gen.time_down0
+   200	            for t in range(min(T, must_off)):
+   201	                add_row([(u[g, t], 1.0)], lo=0.0, hi=0.0)
+   202	
+   203	        # Transition logic and start+stop<=1
+   204	        for t in range(T):
+   205	            prev_u = gen.u0 if t == 0 else u[g, t - 1]
+   206	            add_row(
+   207	                [(u[g, t], 1.0), (start[g, t], -1.0), (stop[g, t], 1.0), (prev_u, -1.0)],
+   208	                lo=0.0,
+   209	                hi=0.0,
+   210	            )
+   211	            add_row([(start[g, t], 1.0), (stop[g, t], 1.0)], lo=-INF, hi=1.0)
+   212	
+   213	        # Capacity, reserve headroom, and pmin linkage
+   214	        for t in range(T):
+   215	            # p >= pmin * u  -> p - pmin*u >= 0
+   216	            add_row([(p[g, t], 1.0), (u[g, t], -pmin)], lo=0.0, hi=INF)
+   217	            # p <= pmax * u  -> p - pmax*u <= 0
+   218	            add_row([(p[g, t], 1.0), (u[g, t], -pmax)], lo=-INF, hi=0.0)
+   219	            # p + r <= pmax * u -> p + r - pmax*u <= 0
+   220	            add_row([(p[g, t], 1.0), (r[g, t], 1.0), (u[g, t], -pmax)], lo=-INF, hi=0.0)
+   221	            # startup period capability
+   222	            red = max(pmax - gen.startup_limit, 0.0)
+   223	            add_row(
+   224	                [(p[g, t], 1.0), (r[g, t], 1.0), (u[g, t], -pmax), (start[g, t], red)],
+   225	                lo=-INF,
+   226	                hi=0.0,
+   227	            )
+   228	
+   229	        # shutdown capability applies to prior period
+   230	        for t in range(T - 1):
+   231	            red = max(thermals[g].pmax - thermals[g].shutdown_limit, 0.0)
+   232	            add_row(
+   233	                [(p[g, t], 1.0), (r[g, t], 1.0), (u[g, t], -pmax), (stop[g, t + 1], red)],
+   234	                lo=-INF,
+   235	                hi=0.0,
+   236	            )
+   237	
+   238	        # Ramping (reserve deliverability for ramp-up)
+   239	        for t in range(T):
+   240	            prev_p = gen.p0 if t == 0 else p[g, t - 1]
+   241	            # (p+r) - prev_p <= ramp_up
+   242	            add_row(
+   243	                [(p[g, t], 1.0), (r[g, t], 1.0), (prev_p, -1.0)],
+   244	                lo=-INF,
+   245	                hi=gen.ramp_up,
+   246	            )
+   247	            # prev_p - p <= ramp_down
+   248	            add_row([(prev_p, 1.0), (p[g, t], -1.0)], lo=-INF, hi=gen.ramp_down)
+   249	
+   250	        # Minimum up/down time window constraints
+   251	        for t in range(T):
+   252	            a = max(0, t - gen.min_up + 1)
+   253	            terms = [(start[g, k], 1.0) for k in range(a, t + 1)]
+   254	            terms.append((u[g, t], -1.0))
+   255	            add_row(terms, lo=-INF, hi=0.0)
+   256	
+   257	            a = max(0, t - gen.min_down + 1)
+   258	            terms = [(stop[g, k], 1.0) for k in range(a, t + 1)]
+   259	            terms.append((u[g, t], 1.0))  # sum stop + u <= 1
+   260	            add_row(terms, lo=-INF, hi=1.0)

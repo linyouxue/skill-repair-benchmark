@@ -1,0 +1,53 @@
+Tool: terminal
+Result:
+cd /root && python3 <<'EOF'
+from openpyxl import load_workbook
+wb_src = load_workbook('/tmp/imf_commodity.xlsx', data_only=True)
+ws_src = wb_src['External']
+# Build dict of period -> gold price
+gold = {}
+for r in range(5, ws_src.max_row+1):
+    period = ws_src.cell(r, 1).value
+    val = ws_src.cell(r, 77).value
+    if period and val is not None:
+        gold[period] = val
+wb = load_workbook('/root/output/rar_result.xlsx')
+ws = wb['Gold price']
+print("Template last row with A value:")
+for r in range(ws.max_row-3, ws.max_row+1):
+    print(r, ws.cell(r, 1).value)
+# check first
+print("First row 2:", ws.cell(2, 1).value)
+# Populate column B with gold prices; also add C formula (log return*100), D formula (3-mon STDEV of C), E formula (12-mon STDEV of C)
+from openpyxl.utils import get_column_letter
+for r in range(2, ws.max_row+1):
+    period = ws.cell(r, 1).value
+    if period in gold:
+        ws.cell(r, 2, gold[period])
+    # C: monthly log return, starting from row 3 (needs prior)
+    if r >= 3:
+        ws.cell(r, 3, f"=LN(B{r}/B{r-1})*100")
+    # D: 3-month vol = STDEV of last 3 log returns; needs C from r-2 to r (only valid if r>=5 so C3..C5 available)
+    if r >= 5:
+        ws.cell(r, 4, f"=STDEV(C{r-2}:C{r})")
+    # E: 12-month vol = STDEV of last 12 log returns; needs C from r-11 to r
+    if r >= 14:
+        ws.cell(r, 5, f"=STDEV(C{r-11}:C{r})")
+# Check what last row's period is
+last_period = ws.cell(ws.max_row, 1).value
+print("Last period in template:", last_period, "-> val:", gold.get(last_period)) )
+wb.save('/root/output/rar_result.xlsx')
+print("Saved.")
+EOF
+Template last row with A value:
+427 2025M6
+428 2025M7
+429 2025M8
+430 2025M9
+First row 2: 1990M1
+Last period in template: 2025M9 -> val: 3666.52363636363
+Saved.
+
+
+📁 Working directory: /root
+✅ Exit code: 0

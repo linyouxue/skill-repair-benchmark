@@ -1,0 +1,56 @@
+Tool: terminal
+Result:
+cd /root && python3 -c "
+import json, numpy as np, cv2
+cap = cv2.VideoCapture('/root/input.mp4')
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)); W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+cap.release()
+ALLOWED = {'Stay','Dolly In','Dolly Out','Pan Left','Pan Right','Tilt Up','Tilt Down','Roll Left','Roll Right'}
+j = json.load(open('/root/pred_instructions.json'))
+print('Instructions:', j)
+step = 12
+sample_ids = list(range(0, total_frames, step))
+n_samples = len(sample_ids)
+print(f'n_samples={n_samples}')
+# Coverage check: keys 'start->end' should form a partition of [0, n_samples)
+keys = sorted(j.keys(), key=lambda k: int(k.split('->')[0]))
+expected = 0
+for k in keys:
+    s, e = k.split('->')
+    assert s.isdigit() and e.isdigit()
+    s, e = int(s), int(e)
+    assert s == expected, f'gap at {k}'
+    assert s < e <= n_samples
+    labels = j[k]
+    assert isinstance(labels, list) and all(isinstance(l, str) and l in ALLOWED for l in labels), labels
+    expected = e
+assert expected == n_samples, f'final {expected} != {n_samples}'
+print('Instructions VALID (partition of half-open [0, n_samples))')
+# NPZ checks
+npz = np.load('/root/pred_dyn_masks.npz')
+assert 'shape' in npz.files
+sh = npz['shape']
+assert sh[0] == H and sh[1] == W, sh
+frames = 0
+while f'f_{frames}_data' in npz.files: frames += 1
+print(f'NPZ frames={frames} (expected {n_samples})')
+assert frames == n_samples
+for k in range(frames):
+    d = npz[f'f_{k}_data']; idx = npz[f'f_{k}_indices']; ip = npz[f'f_{k}_indptr']
+    assert ip.shape[0] == H+1
+    assert int(ip[-1]) == idx.size
+    assert d.size == idx.size
+    if idx.size > 0:
+        assert 0 <= idx.min() and idx.max() < W
+print('NPZ VALID')
+"
+Instructions: {'0->3': ['Stay'], '3->6': ['Pan Right'], '6->18': ['Dolly In', 'Pan Right']}
+n_samples=18
+Instructions VALID (partition of half-open [0, n_samples))
+NPZ frames=18 (expected 18)
+NPZ VALID
+
+
+📁 Working directory: /root
+✅ Exit code: 0

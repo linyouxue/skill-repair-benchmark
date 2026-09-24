@@ -1,0 +1,67 @@
+Tool: terminal
+Result:
+        #ssh{role = Role} when Role==server ;
+                               Role==client ->
+            {PeerRole,PeerVersion} =
+                case Role of
+                    server -> {"Peer client", S#ssh.c_version};
+                    client -> {"Peer server", S#ssh.s_version}
+                end,
+            error_logger:F("Erlang SSH ~p version: ~s ~s.~n"
+                           "Address: ~s~n"
+                           "~s version: ~p~n"
+                           "Peer address: ~s~n"
+                           "~s~n",
+                           [Role, ssh
+[... 2230 characters omitted ...]
+d,
+    {CallRepls, send_msg(Msg,S)};
+get_repl({channel_data,undefined,_Data}, Acc) ->
+    Acc;
+get_repl({channel_data,Pid,Data}, Acc) ->
+    Pid ! {ssh_cm, self(), Data},
+    Acc;
+get_repl({channel_request_reply,From,Data}, {CallRepls,S}) ->
+    {[{reply,From,Data}|CallRepls], S};
+get_repl({flow_control,Cache,Channel,From,Msg}, {CallRepls,S}) ->
+    ssh_client_channel:cache_update(Cache, Channel#channel{flow_control = undefined}),
+    {[{reply,From,Msg}|CallRepls], S};
+get_repl({flow_control,From,Msg}, {CallRepls,S}) ->
+    {[{reply,From,Msg}|CallRepls], S};
+%% get_repl(noreply, Acc) ->
+%%     Acc;
+%% get_repl([], Acc) ->
+%%     Acc;
+get_repl(X, Acc) ->
+    exit({get_repl,X,Acc}).
+
+%%%----------------------------------------------------------------
+%%disconnect_fun({disconnect,Msg}, D) -> ?CALL_FUN(disconnectfun,D)(Msg);
+disconnect_fun(Reason, D)           -> ?CALL_FUN(disconnectfun,D)(Reason).
+
+unexpected_fun(UnexpectedMessage, #data{ssh_params = #ssh{peer = {_,Peer} }} = D) ->
+    ?CALL_FUN(unexpectedfun,D)(UnexpectedMessage, Peer).
+
+debug_fun(#ssh_msg_debug{always_display = Display,
+			 message = DbgMsg,
+			 language = Lang},
+	  D) ->
+    ?CALL_FUN(ssh_msg_debug_fun,D)(self(), Display, DbgMsg, Lang).
+
+
+%%%----------------------------------------------------------------
+%%% Cache idle timer that closes the connection if there are no
+%%% channels open for a while.
+
+cond_set_idle_timer(D) ->
+    case ssh_client_channel:cache_info(num_entries, cache(D)) of
+        0 -> {{timeout,idle_time}, ?GET_OPT(idle_time, (D#data.ssh_params)#ssh.opts), none};
+        _ -> {{timeout,idle_time}, infinity, none}
+    end.
+
+%%%----------------------------------------------------------------
+start_channel_request_timer(_,_, infinity) ->
+
+
+📁 Working directory: /app/workspace
+✅ Exit code: 0

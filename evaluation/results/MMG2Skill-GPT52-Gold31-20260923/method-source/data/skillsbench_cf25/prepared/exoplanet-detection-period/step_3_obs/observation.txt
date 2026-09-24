@@ -1,0 +1,38 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+import transitleastsquares as tls
+path='/root/data/tess_lc.txt'
+t, f, q, fe = np.genfromtxt(path).T
+# 1) filter quality
+m = (q==0) & np.isfinite(t) & np.isfinite(f) & np.isfinite(fe)
+t, f, fe = t[m], f[m], fe[m]
+# sort just in case
+idx = np.argsort(t)
+t, f, fe = t[idx], f[idx], fe[idx]
+lc = lk.LightCurve(time=t, flux=f, flux_err=fe)
+# Conservative outlier removal (avoid clipping real transits)
+lc1 = lc.remove_outliers(sigma=10)
+# Try a few flatten window lengths; pick by TLS SDE
+# window_length is in cadences; cadence ~ 2 minutes => 1 day ~ 720 cadences
+candidates = [801, 1201, 1601, 2001, 3001]
+results = []
+for wl in candidates:
+    try:
+        lc_flat = lc1.flatten(window_length=wl, polyorder=2, break_tolerance=5)
+        # second-pass mild outlier removal after detrending
+        lc_flat = lc_flat.remove_outliers(sigma=6)
+        model = tls.transitleastsquares(lc_flat.time.value, lc_flat.flux.value, lc_flat.flux_err.value)
+        out = model.power(period_min=0.5, period_max=15.0, show_progress_bar=False, verbose=False)
+        results.append((wl, float(out.SDE), float(out.snr), float(out.period)))
+        print('wl',wl,'SDE',out.SDE,'snr',out.snr,'period',out.period)
+    except Exception as e:
+        print('wl',wl,'FAILED',e)
+best = max(results, key=lambda x: x[1])
+print('\nBEST',best)
+PY
+
+
+⏳ Process still running (soft timeout)

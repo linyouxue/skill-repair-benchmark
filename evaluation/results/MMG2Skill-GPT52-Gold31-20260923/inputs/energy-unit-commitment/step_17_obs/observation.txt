@@ -1,0 +1,194 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /root/solve_uc.py:
+   240	            prev_p = gen.p0 if t == 0 else p[g, t - 1]
+   241	            # (p+r) - prev_p <= ramp_up
+   242	            add_row(
+   243	                [(p[g, t], 1.0), (r[g, t], 1.0), (prev_p, -1.0)],
+   244	                lo=-INF,
+   245	                hi=gen.ramp_up,
+   246	            )
+   247	            # prev_p - p <= ramp_down
+   248	            add_row([(prev_p, 1.0), (p[g, t], -1.0)], lo=-INF, hi=gen.ramp_down)
+   249	
+   250	        # Minimum up/down time window constraints
+   251	        for t in range(T):
+   252	            a = max(0, t - gen.min_up + 1)
+   253	            terms = [(start[g, k], 1.0) for k in range(a, t + 1)]
+   254	            terms.append((u[g, t], -1.0))
+   255	            add_row(terms, lo=-INF, hi=0.0)
+   256	
+   257	            a = max(0, t - gen.min_down + 1)
+   258	            terms = [(stop[g, k], 1.0) for k in range(a, t + 1)]
+   259	            terms.append((u[g, t], 1.0))  # sum stop + u <= 1
+   260	            add_row(terms, lo=-INF, hi=1.0)
+   261	
+   262	        # Piecewise segment linkage: p - pmin*u - sum seg = 0 and seg bounds
+   263	        base_cost, widths, slopes = piecewise_segments(gen.pw_points)
+   264	        for t in range(T):
+   265	            seg = seg_index[g][t, :]
+   266	            terms = [(p[g, t], 1.0), (u[g, t], -pmin)] + [(int(seg[s]), -1.0) for s in range(len(widths))]
+   267	            add_row(terms, lo=0.0, hi=0.0)
+   268	            for s, w in enumerate(widths):
+   269	                # seg_s <= w * u  -> seg_s - w*u <= 0
+   270	                add_row([(int(seg[s]), 1.0), (u[g, t], -float(w))], lo=-INF, hi=0.0)
+   271	
+   272	        # Startup tier selection and feasibility windows
+   273	        tiers = gen.startup_tiers
+   274	        lags = [lag for lag, _ in tiers]
+   275	        costs = [cost for _, cost in tiers]
+   276	
+   277	        for t in range(T):
+   278	            tier_vars = [int(tier_index[g][t, k]) for k in range(len(tiers))]
+   279	            add_row([(start[g, t], -1.0)] + [(tv, 1.0) for tv in tier_vars], lo=0.0, hi=0.0)
+   280	
+   281	            for k, Lk in enumerate(lags):
+   282	                if k < len(lags) - 1:
+   283	                    Lnext = lags[k + 1]
+   284	                    a = t - Lnext + 1
+   285	                    b = t - Lk
+   286	                    rhs_const = 0.0
+   287	                    if gen.u0 == 0:
+   288	                        off = gen.time_down0 + t
+   289	                        if Lk <= off < Lnext:
+   290	                            rhs_const = 1.0
+   291	                    terms = [(tier_index[g][t, k], 1.0)]
+   292	                    for s in range(max(0, a), min(T - 1, b) + 1):
+   293	                        terms.append((stop[g, s], -1.0))
+   294	                    add_row(terms, lo=-INF, hi=rhs_const)
+   295	                else:
+   296	                    b = t - Lk
+   297	                    rhs_const = 0.0
+   298	                    if gen.u0 == 0:
+   299	                        off = gen.time_down0 + t
+   300	                        if off >= Lk:
+   301	                            rhs_const = 1.0
+   302	                    terms = [(tier_index[g][t, k], 1.0)]
+   303	                    for s in range(0, min(T - 1, b) + 1):
+   304	                        terms.append((stop[g, s], -1.0))
+   305	                    add_row(terms, lo=-INF, hi=rhs_const)
+   306	
+   307	        # Objective coefficients: production and startup costs
+   308	        base_cost, widths, slopes = piecewise_segments(gen.pw_points)
+   309	        c[u[g, :]] += base_cost
+   310	        for t in range(T):
+   311	            for s, slope in enumerate(slopes):
+   312	                c[int(seg_index[g][t, s])] = float(slope)
+   313	            for k, scost in enumerate(costs):
+   314	                c[int(tier_index[g][t, k])] = float(scost)
+   315	
+   316	    # System demand balance
+   317	    for t in range(T):
+   318	        terms = [(p[g, t], 1.0) for g in range(G)] + [(pr[rn, t], 1.0) for rn in range(R)]
+   319	        add_row(terms, lo=demand[t], hi=demand[t])
+   320	
+   321	    # Spinning reserve requirement
+   322	    for t in range(T):
+   323	        terms = [(r[g, t], 1.0) for g in range(G)]
+   324	        add_row(terms, lo=reserve_req[t], hi=INF)
+   325	
+   326	    A = coo_matrix((vals, (rows, cols)), shape=(row, n))
+   327	    constraints = [LinearConstraint(A, np.array(row_lb), np.array(row_ub))]
+   328	
+   329	    res = milp(
+   330	        c=c,
+   331	        integrality=integrality,
+   332	        bounds=Bounds(lb, ub),
+   333	        constraints=constraints,
+   334	        options={"time_limit": 300.0, "mip_rel_gap": 1e-6, "disp": False},
+   335	    )
+   336	
+   337	    if res.x is None:
+   338	        raise RuntimeError(f"No incumbent solution: status={res.status}, message={res.message}")
+   339	
+   340	    x = res.x
+   341	
+   342	    # Extract and round binaries
+   343	    def as_bin(arr):
+   344	        return (x[arr].reshape(arr.shape) >= 0.5).astype(int)
+   345	
+   346	    u_sol = as_bin(u)
+   347	    start_sol = as_bin(start)
+   348	    stop_sol = as_bin(stop)
+   349	
+   350	    p_sol = x[p].reshape((G, T)).astype(float)
+   351	    r_sol = x[r].reshape((G, T)).astype(float)
+   352	    pr_sol = x[pr].reshape((R, T)).astype(float)
+   353	
+   354	    # Clean small numerical noise on off units
+   355	    for g, gen in enumerate(thermals):
+   356	        off = u_sol[g, :] == 0
+   357	        p_sol[g, off] = 0.0
+   358	        r_sol[g, off] = 0.0
+   359	
+   360	    # Recompute start/stop from commitment to avoid numerical inconsistencies
+   361	    for g, gen in enumerate(thermals):
+   362	        prev = gen.u0
+   363	        for t in range(T):
+   364	            start_sol[g, t] = 1 if (u_sol[g, t] == 1 and prev == 0) else 0
+   365	            stop_sol[g, t] = 1 if (u_sol[g, t] == 0 and prev == 1) else 0
+   366	            prev = u_sol[g, t]
+   367	
+   368	    # Independent validation and cost recomputation
+   369	    tol = 1e-4
+   370	
+   371	    demand_violation = 0.0
+   372	    reserve_shortfall = 0.0
+   373	
+   374	    thermal_gen = np.sum(p_sol, axis=0)
+   375	    renewable_gen = np.sum(pr_sol, axis=0)
+   376	
+   377	    demand_violation = float(np.max(np.abs(thermal_gen + renewable_gen - demand)))
+   378	    reserve_shortfall = float(np.max(np.maximum(0.0, reserve_req - np.sum(r_sol, axis=0))))
+   379	
+   380	    # Constraint family checks
+   381	    def check_all():
+   382	        # generator limits, must-run
+   383	        for g, gen in enumerate(thermals):
+   384	            for t in range(T):
+   385	                uu = u_sol[g, t]
+   386	                pp = p_sol[g, t]
+   387	                rr = r_sol[g, t]
+   388	                if uu == 0 and (abs(pp) > 1e-6 or abs(rr) > 1e-6):
+   389	                    return False
+   390	                if pp < gen.pmin * uu - 1e-3 or pp > gen.pmax * uu + 1e-3:
+   391	                    return False
+   392	                if rr < -1e-6:
+   393	                    return False
+   394	                if pp + rr > gen.pmax * uu + 1e-3:
+   395	                    return False
+   396	                if gen.must_run == 1 and uu != 1:
+   397	                    return False
+   398	
+   399	                if start_sol[g, t] == 1:
+   400	                    if pp + rr > gen.startup_limit + 1e-3:
+   401	                        return False
+   402	                if t < T - 1 and stop_sol[g, t + 1] == 1:
+   403	                    if pp + rr > gen.shutdown_limit + 1e-3:
+   404	                        return False
+   405	
+   406	                prev_p = gen.p0 if t == 0 else p_sol[g, t - 1]
+   407	                if (pp + rr) - prev_p > gen.ramp_up + 1e-3:
+   408	                    return False
+   409	                if prev_p - pp > gen.ramp_down + 1e-3:
+   410	                    return False
+   411	
+   412	            # startup/shutdown logic
+   413	            prev = gen.u0
+   414	            for t in range(T):
+   415	                if u_sol[g, t] - prev != start_sol[g, t] - stop_sol[g, t]:
+   416	                    return False
+   417	                if start_sol[g, t] + stop_sol[g, t] > 1:
+   418	                    return False
+   419	                prev = u_sol[g, t]
+   420	
+   421	            # min up/down
+   422	            for t in range(T):
+   423	                if start_sol[g, t] == 1:
+   424	                    for tau in range(t, min(T, t + gen.min_up)):
+   425	                        if u_sol[g, tau] != 1:
+   426	                            return False
+   427	                if stop_sol[g, t] == 1:
+   428	                    for tau in range(t, min(T, t + gen.min_down)):
+   429	                        if u_sol[g, tau] != 0:
+   430	                            return False

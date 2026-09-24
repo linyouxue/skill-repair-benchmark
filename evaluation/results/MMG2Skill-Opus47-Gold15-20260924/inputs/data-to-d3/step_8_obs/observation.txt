@@ -1,0 +1,232 @@
+Tool: file_editor
+Result:
+[File /root/output/js/visualization.js edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|// Stock sector bubble chart + linked table.
++2|// Bubbles are sized by market cap (uniform for ETFs), colored by sector,
++3|// clustered by sector using forceX/forceY, and kept apart with forceCollide.
++4|
++5|const WIDTH = 740;
++6|const HEIGHT = 640;
++7|
++8|const SECTORS = ["Information Technology", "Financial", "Industry", "Energy", "ETF"];
++9|
++10|// Distinct, colorblind-friendlyish palette; stable per sector.
++11|const SECTOR_COLORS = {
++12|    "Information Technology": "#2563eb",
++13|    "Financial":              "#059669",
++14|    "Industry":               "#d97706",
++15|    "Energy":                 "#dc2626",
++16|    "ETF":                    "#7c3aed"
++17|};
++18|
++19|const color = sector => SECTOR_COLORS[sector] || "#6b7280";
++20|
++21|// Deterministic cluster centers arranged around the chart's center so
++22|// clusters stay close together rather than pinned to the corners.
++23|function clusterCenters(width, height) {
++24|    const cx = width / 2;
++25|    const cy = height / 2;
++26|    const r = Math.min(width, height) * 0.24;
++27|    const centers = {};
++28|    SECTORS.forEach((s, i) => {
++29|        const angle = (i / SECTORS.length) * 2 * Math.PI - Math.PI / 2;
++30|        centers[s] = { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
++31|    });
++32|    return centers;
++33|}
++34|
++35|function formatMarketCap(v) {
++36|    if (v == null || isNaN(v) || v === 0) return "—";
++37|    const abs = Math.abs(v);
++38|    if (abs >= 1e12) return (v / 1e12).toFixed(2) + "T";
++39|    if (abs >= 1e9)  return (v / 1e9).toFixed(2)  + "B";
++40|    if (abs >= 1e6)  return (v / 1e6).toFixed(2)  + "M";
++41|    return d3.format(",")(v);
++42|}
++43|
++44|d3.csv("data/stock-descriptions.csv", d => ({
++45|    ticker:    d.ticker,
++46|    sector:    d.sector,
++47|    name:      d["full name"],
++48|    marketCap: d.marketCap ? +d.marketCap : null,
++49|    country:   d.country || "",
++50|    website:   d.website || ""
++51|})).then(stocks => {
++52|    render(stocks);
++53|});
++54|
++55|function render(stocks) {
++56|    // Radius scale: sqrt so bubble AREA is proportional to market cap.
++57|    const marketCapValues = stocks.filter(s => s.marketCap).map(s => s.marketCap);
++58|    const radius = d3.scaleSqrt()
++59|        .domain([d3.min(marketCapValues), d3.max(marketCapValues)])
++60|        .range([14, 52]);
++61|
++62|    const ETF_RADIUS = 20;
++63|    stocks.forEach(s => {
++64|        s.r = s.sector === "ETF" ? ETF_RADIUS : radius(s.marketCap);
++65|    });
++66|
++67|    const centers = clusterCenters(WIDTH, HEIGHT);
++68|
++69|    buildLegend();
++70|    const bubbleApi = buildBubbleChart(stocks, centers);
++71|    const tableApi  = buildTable(stocks);
++72|
++73|    // Two-way selection between bubbles and table rows.
++74|    function select(ticker) {
++75|        bubbleApi.highlight(ticker);
++76|        tableApi.highlight(ticker);
++77|    }
++78|    bubbleApi.onSelect(select);
++79|    tableApi.onSelect(select);
++80|}
++81|
++82|function buildLegend() {
++83|    const legend = d3.select("#legend");
++84|    legend.selectAll(".legend-item")
++85|        .data(SECTORS)
++86|        .join("div")
++87|        .attr("class", "legend-item")
++88|        .html(s => `<span class="legend-swatch" style="background:${color(s)}"></span>${s}`);
++89|}
++90|
++91|function buildBubbleChart(stocks, centers) {
++92|    const svg = d3.select("#bubble-chart")
++93|        .append("svg")
++94|        .attr("viewBox", `0 0 ${WIDTH} ${HEIGHT}`)
++95|        .attr("preserveAspectRatio", "xMidYMid meet");
++96|
++97|    // Seed positions near each stock's cluster center so the simulation
++98|    // settles quickly and deterministically.
++99|    stocks.forEach((s, i) => {
++100|        const c = centers[s.sector];
++101|        s.x = c.x + (i % 5 - 2) * 4;
++102|        s.y = c.y + (Math.floor(i / 5) % 5 - 2) * 4;
++103|    });
++104|
++105|    const tooltip = d3.select("#tooltip");
++106|    let selectedTicker = null;
++107|    let selectCallback = () => {};
++108|
++109|    const nodes = svg.selectAll("g.node")
++110|        .data(stocks, d => d.ticker)
++111|        .join("g")
++112|        .attr("class", "node");
++113|
++114|    const circles = nodes.append("circle")
++115|        .attr("class", "bubble")
++116|        .attr("r", d => d.r)
++117|        .attr("fill", d => color(d.sector))
++118|        .on("mouseover", function (event, d) {
++119|            if (d.sector === "ETF") return; // No tooltip for ETFs.
++120|            tooltip.classed("visible", true).html(`
++121|                <div class="tt-ticker">${d.ticker}</div>
++122|                <div><span class="tt-label">Name:</span>${d.name}</div>
++123|                <div><span class="tt-label">Sector:</span>${d.sector}</div>
++124|            `);
++125|        })
++126|        .on("mousemove", function (event, d) {
++127|            if (d.sector === "ETF") return;
++128|            tooltip
++129|                .style("left", (event.pageX + 12) + "px")
++130|                .style("top",  (event.pageY + 12) + "px");
++131|        })
++132|        .on("mouseout", function () {
++133|            tooltip.classed("visible", false);
++134|        })
++135|        .on("click", function (event, d) {
++136|            selectedTicker = selectedTicker === d.ticker ? null : d.ticker;
++137|            selectCallback(selectedTicker);
++138|        });
++139|
++140|    nodes.append("text")
++141|        .attr("class", "bubble-label")
++142|        .text(d => d.ticker)
++143|        .style("font-size", d => Math.max(9, Math.min(14, d.r / 2.2)) + "px");
++144|
++145|    // Force simulation: cluster by sector + prevent overlap.
++146|    const simulation = d3.forceSimulation(stocks)
++147|        .force("x", d3.forceX(d => centers[d.sector].x).strength(0.18))
++148|        .force("y", d3.forceY(d => centers[d.sector].y).strength(0.18))
++149|        .force("charge", d3.forceManyBody().strength(3))
++150|        .force("collide", d3.forceCollide(d => d.r + 2).iterations(3))
++151|        .alpha(1)
++152|        .alphaDecay(0.03);
++153|
++154|    simulation.on("tick", () => {
++155|        // Keep nodes inside the SVG viewport.
++156|        stocks.forEach(d => {
++157|            d.x = Math.max(d.r + 2, Math.min(WIDTH  - d.r - 2, d.x));
++158|            d.y = Math.max(d.r + 2, Math.min(HEIGHT - d.r - 2, d.y));
++159|        });
++160|        nodes.attr("transform", d => `translate(${d.x},${d.y})`);
++161|    });
++162|
++163|    // Run enough ticks up front for stable initial layout.
++164|    for (let i = 0; i < 300; i++) simulation.tick();
++165|    simulation.alpha(0.3).restart();
++166|
++167|    function highlight(ticker) {
++168|        selectedTicker = ticker;
++169|        circles.classed("selected", d => d.ticker === ticker);
++170|    }
++171|
++172|    return {
++173|        highlight,
++174|        onSelect(cb) { selectCallback = cb; }
++175|    };
++176|}
++177|
++178|function buildTable(stocks) {
++179|    // Sort: named sectors alphabetically, ETFs last; within a sector, by market cap desc.
++180|    const sorted = stocks.slice().sort((a, b) => {
++181|        const aEtf = a.sector === "ETF" ? 1 : 0;
++182|        const bEtf = b.sector === "ETF" ? 1 : 0;
++183|        if (aEtf !== bEtf) return aEtf - bEtf;
++184|        if (a.sector !== b.sector) return d3.ascending(a.sector, b.sector);
++185|        return d3.descending(a.marketCap || 0, b.marketCap || 0);
++186|    });
++187|
++188|    let selectedTicker = null;
++189|    let selectCallback = () => {};
++190|
++191|    const rows = d3.select("#stock-table tbody")
++192|        .selectAll("tr")
++193|        .data(sorted, d => d.ticker)
++194|        .join("tr")
++195|        .attr("data-ticker", d => d.ticker)
++196|        .on("click", function (event, d) {
++197|            selectedTicker = selectedTicker === d.ticker ? null : d.ticker;
++198|            selectCallback(selectedTicker);
++199|        });
++200|
++201|    rows.append("td").attr("class", "ticker-cell").text(d => d.ticker);
++202|    rows.append("td").text(d => d.name);
++203|    rows.append("td").append("span")
++204|        .attr("class", "sector-tag")
++205|        .style("background", d => color(d.sector))
++206|        .text(d => d.sector);
++207|    rows.append("td").attr("class", "num").text(d => formatMarketCap(d.marketCap));
++208|
++209|    function highlight(ticker) {
++210|        selectedTicker = ticker;
++211|        rows.classed("selected", d => d.ticker === ticker);
++212|        // Scroll the selected row into view within the scrollable panel.
++213|        if (ticker) {
++214|            const node = document.querySelector(`#stock-table tr[data-ticker="${ticker}"]`);
++215|            if (node) node.scrollIntoView({ block: "nearest", behavior: "smooth" });
++216|        }
++217|    }
++218|
++219|    return {
++220|        highlight,
++221|        onSelect(cb) { selectCallback = cb; }
++222|    };
++223|}
++224|
+[end of edit 1 / 1]

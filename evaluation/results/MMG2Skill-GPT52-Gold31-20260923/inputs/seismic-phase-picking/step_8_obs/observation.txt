@@ -1,0 +1,44 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob, random
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+model=sbm.PhaseNet.from_pretrained('original')
+files=sorted(glob.glob('/root/data/*.npz'))
+random.seed(0)
+for fn in random.sample(files, 10):
+    z=np.load(fn, allow_pickle=True)
+    data=z['data']; dt=float(z['dt']); sr=1/dt
+    chs=str(z['channels']).split(',')
+    stime=UTCDateTime(str(z.get('start_time','1970-01-01T00:00:00Z')))
+    st=Stream()
+    for i,ch in enumerate(chs):
+        tr=Trace(data=data[:,i].astype('float32'))
+        tr.stats.network=str(z.get('network','XX'))
+        tr.stats.station=str(z.get('station','STA'))
+        tr.stats.location=str(z.get('location_code',''))
+        tr.stats.channel=ch
+        tr.stats.starttime=stime
+        tr.stats.sampling_rate=sr
+        st+=tr
+    out=model.classify(st, P_threshold=0.05, S_threshold=0.05)
+    print(fn.split('/')[-1], 'picks', len(out.picks))
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+NC.HQR..EH.0047674.npz picks 0
+PG.PB..EH.0163793.npz picks 0
+NC.KMP..EL.0121778.npz picks 0
+BG.EPR..DP.0252305.npz picks 0
+NC.C029.01.HN.0335084.npz picks 6
+NC.MDH1..DP.0412729.npz picks 0
+NC.MDH..HN.0358192.npz picks 3
+NC.JSB..HN.0405110.npz picks 2
+NC.CLCB..EH.0336071.npz picks 0
+NC.MCV..EH.0361339.npz picks 0
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

@@ -1,0 +1,245 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import re
+from pathlib import Path
+from datetime import date
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import pytesseract
+from pytesseract import Output
+from PIL import Image, ImageOps, ImageFilter
+IMG_DIR = Path('/app/workspace/dataset/img')
+MONTHS = {
+    'JAN':1,'JANUARY':1,
+    'FEB':2,'FEBRUARY':2,
+    'MAR':3,'MARCH':3,
+    'APR':4,'APRIL':4,
+    'MAY':5,
+    'JUN':6,'JUNE':6,
+    'JUL':7,'JULY':7,
+    'AUG':8,'AUGUST':8,
+    'SEP':9,'SEPT':9,'SEPTEMBER':9,
+    'OCT':10,'OCTOBER':10,
+    'NOV':11,'NOVEMBER':11,
+    'DEC':12,'DECEMBER':12,
+}
+invoice_ymd_re = re.compile(r"\b(19\d{2}|20\d{2})(\d{2})(\d{2})\d{6,}\b")
+ymd_re = re.compile(r"\b(19\d{2}|20\d{2})[\./-](\d{1,2})[\./-](\d{1,2})\b")
+dmy_re = re.compile(r"\b(\d{1,2})[\./-](\d{1,2})[\./-](\d{2,4})\b")
+d_mon_y_re = re.compile(r"\b(\d{1,2})\s*[-\./]?\s*([A-Za-z]{3,9})\s*[-\./]?\s*(\d{2,4})\b")
+mon_d_y_re = re.compile(r"\b([A-Za-z]{3,9})\s*(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{2,4})\b")
+def extract_date(text: str):
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    def parse_numeric(d1, d2, y):
+        y = int(y)
+        if y < 100:
+            y = 2000 + y if y < 70 else 1900 + y
+        d1, d2 = int(d1), int(d2)
+        if d1 > 12 and d2 <= 12:
+            day, mo = d1, d2
+        elif d2 > 12 and d1 <= 12:
+            mo, day = d1, d2
+        else:
+            day, mo = d1, d2
+        return y, mo, day
+    def try_parse_from(s: str):
+        m = invoice_ymd_re.search(s)
+        if m:
+            try:
+                return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except ValueError:
+                pass
+        for r in (d_mon_y_re, mon_d_y_re):
+            m = r.search(s)
+            if not m:
+                continue
+            if r is d_mon_y_re:
+                d = int(m.group(1)); mon = m.group(2).upper(); y = int(m.group(3))
+            else:
+                mon = m.group(1).upper(); d = int(m.group(2)); y = int(m.group(3))
+            if y < 100:
+                y = 2000 + y if y < 70 else 1900 + y
+            mon_num = MONTHS.get(mon)
+            if mon_num:
+                try:
+                    return date(y, mon_num, d)
+                except ValueError:
+                    pass
+        m = ymd_re.search(s)
+        if m:
+            try:
+                return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except ValueError:
+                pass
+        m = dmy_re.search(s)
+        if m:
+            y, mo, d = parse_numeric(m.group(1), m.group(2), m.group(3))
+            try:
+                return date(y, mo, d)
+            except ValueError:
+                pass
+        return None
+    for ln in lines:
+        if 'DATE' in ln.upper():
+            dt = try_parse_from(ln)
+            if dt:
+                return dt.isoformat()
+    joined = '\n'.join(lines)
+    candidates = []
+    def add(dt, idx, bonus):
+        if 1990 <= dt.year <= 2099:
+            candidates.append((bonus, idx, dt))
+    for m in invoice_ymd_re.finditer(joined):
+        dt = try_parse_from(m.group(0))
+        if dt:
+            add(dt, m.start(), 3)
+    for r, bonus in ((d_mon_y_re, 2), (mon_d_y_re, 2), (ymd_re, 1), (dmy_re, 0)):
+        for m in r.finditer(joined):
+            dt = try_parse_from(m.group(0))
+            if dt:
+                add(dt, m.start(), bonus)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (-x[0], x[1]))
+    return candidates[0][2].isoformat()
+amount_re = re.compile(r"(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}")
+int_re = re.compile(r"\b\d+\b")
+def normalize_for_amount(s: str):
+    s2 = s.upper()
+    # fix O->0 only within numeric contexts
+    s2 = re.sub(r'(?<=\d)[Oo](?=\d)', '0', s2)
+    s2 = re.sub(r'(?<=\d)[Oo](?=\s*\d)', '0', s2)
+    # join separated decimals: 86. 00 or 21,30
+    s2 = re.sub(r'(\d+)\s*[\.,]\s*(\d{2})', r'\1.\2', s2)
+    # join space-separated cents: 92 80
+    s2 = re.sub(r'(\d{1,6})\s+(\d{2})(?!\d)', r'\1.\2', s2)
+    return s2
+def clean_amount(s: str):
+    s = s.replace(',', '')
+    try:
+        d = Decimal(s)
+    except InvalidOperation:
+        return None
+    d = d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return f"{d:.2f}"
+def is_summary_header(uline: str):
+    uline = uline.upper()
+    return ('GST' in uline or 'TAX' in uline) and ('SUM' in uline)
+def total_priority(uline: str):
+    u = uline.upper()
+    if any(k in u for k in ('SUBTOTAL', 'SUB TOTAL', 'SUB-TOTAL', 'DISCOUNT', 'CASH TENDERED')):
+        return None
+    if is_summary_header(u):
+        return None
+    # avoid pure payment lines
+    if 'CHANGE' in u and 'TOTAL' not in u:
+        return None
+    # Exclude tax lines unless they describe a total including tax
+    if ('GST' in u or 'SST' in u or 'TAX' in u) and not any(k in u for k in (
+        'INCL', 'INCLUSIVE', 'INCLUDING', 'GRAND TOTAL', 'TOTAL AFTER', 'TOTAL SALES', 'TOTAL RM', 'TOTAL: RM', 'TOTAL (RM)', 'TOTAL:'
+    )):
+        return None
+    if 'GRAND TOTAL' in u:
+        return 1
+    if 'TOTAL: RM' in u or 'TOTAL RM' in u or 'TOTAL (RM)' in u:
+        return 2
+    if 'TOTAL:' in u and 'EXCL' not in u and 'EXCLUDING' not in u:
+        return 3
+    if 'TOTAL AFTER' in u:
+        return 4
+    if 'TOTAL AMOUNT' in u:
+        return 5
+    if any(k in u for k in ('TOTAL INCL', 'INCLUSIVE', 'INCLUDING', 'TOTAL SALES', 'TOTAL GROSS')):
+        return 6
+    if any(k in u for k in ('TOTAL DUE', 'AMOUNT DUE', 'BALANCE DUE', 'NETT TOTAL', 'NET TOTAL')):
+        return 7
+    if 'TOTAL' in u:
+        return 8
+    if 'AMOUNT' in u:
+        return 9
+    return None
+def extract_total(text: str):
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    u = [ln.upper() for ln in lines]
+    skip = set()
+    for i, uline in enumerate(u):
+        if is_summary_header(uline):
+            for j in range(i, min(i+8, len(u))):
+                skip.add(j)
+    candidates = []
+    for i, uline in enumerate(u):
+        if i in skip:
+            continue
+        pr = total_priority(uline)
+        if pr is None:
+            continue
+        # de-prioritize excluding totals
+        if 'EXCL' in uline or 'EXCLUDING' in uline:
+            pr += 4
+        # de-prioritize "TOTAL RM" lines that explicitly say including/incl
+        if pr == 2 and any(k in uline for k in ('INCL', 'INCLUSIVE', 'INCLUDING')):
+            pr += 1
+        candidates.append((pr, i))
+    if not candidates:
+        return None
+    min_pr = min(pr for pr, _ in candidates)
+    best_idxs = [i for pr, i in candidates if pr == min_pr]
+    idx = max(best_idxs)  # last occurrence
+    def amount_from_line(i):
+        s = normalize_for_amount(lines[i])
+        ms = amount_re.findall(s)
+        if ms:
+            return clean_amount(ms[-1])
+        if 'RM' in s or '$' in s:
+            ints = int_re.findall(s)
+            if ints:
+                return clean_amount(ints[-1] + '.00')
+        return None
+    amt = amount_from_line(idx)
+    if amt is not None:
+        return amt
+    for j in range(idx+1, min(idx+4, len(lines))):
+        if j in skip:
+            continue
+        amt = amount_from_line(j)
+        if amt is not None:
+            return amt
+    # fallback: scan other candidates by priority, taking last within each
+    for pr in sorted({pr for pr,_ in candidates}):
+        idxs = [i for p,i in candidates if p==pr]
+        for i in sorted(idxs, reverse=True):
+            amt = amount_from_line(i)
+            if amt is not None:
+                return amt
+    return None
+def ocr_best(img_path: Path):
+    img0 = Image.open(img_path)
+    img0 = ImageOps.exif_transpose(img0)
+    gray = ImageOps.autocontrast(ImageOps.grayscale(img0))
+    variants = [
+        gray,
+        gray.resize((gray.width*2, gray.height*2)),
+        ImageOps.invert(gray),
+        gray.filter(ImageFilter.SHARPEN),
+    ]
+    configs = ['--oem 3 --psm 6', '--oem 3 --psm 4', '--oem 3 --psm 11']
+    best = (-1.0, '')
+    for v in variants:
+        for cfg in configs:
+            data = pytesseract.image_to_data(v, lang='eng', config=cfg, output_type=Output.DICT)
+            confs = [float(c) for c in data['conf'] if c != '-1']
+            avg = sum(confs)/len(confs) if confs else 0.0
+            txt = pytesseract.image_to_string(v, lang='eng', config=cfg)
+            if avg > best[0] and txt.strip():
+                best = (avg, txt)
+    return best[1]
+files = sorted([p for p in IMG_DIR.iterdir() if p.suffix.lower() in ('.jpg','.jpeg','.png','.webp')])
+for p in files:
+    txt = ocr_best(p)
+    print(p.name, extract_date(txt), extract_total(txt))
+PY
+007.jpg 2019-01-23 20.00
+009.jpg 2018-01-18 26.60
+010.jpg 2017-12-29 14.10
+
+⏳ Process still running (soft timeout)

@@ -1,0 +1,290 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import pandas as pd, numpy as np, re
+lab_path='/root/environment/data/ckd_lab_data.csv'
+df=pd.read_csv(lab_path, dtype=str)
+missing_tokens={'', 'nan','NaN','None','NULL','null','NA','N/A'}
+def parse_value(x):
+    if x is None or (isinstance(x,float) and np.isnan(x)):
+        return np.nan
+    s=str(x).strip()
+    if s in missing_tokens or s.lower()=='nan':
+        return np.nan
+    s=s.replace(' ', '')
+    # handle thousands vs decimal comma
+    if ',' in s and '.' in s:
+        # assume comma thousands sep
+        s=s.replace(',', '')
+    elif ',' in s:
+        s=s.replace(',', '.')
+    try:
+        return float(s)
+    except Exception:
+        # last try: remove non-numeric except e/E,+,-,.
+        s2=re.sub(r'[^0-9eE+\-\.]','',s)
+        try:
+            return float(s2)
+        except Exception:
+            return np.nan
+num_cols=[c for c in df.columns if c!='patient_id']
+df_num=df.copy()
+for c in num_cols:
+    df_num[c]=df_num[c].map(parse_value)
+# show some columns extremes
+cols_to_check=['Serum_Creatinine','BUN','eGFR','Cystatin_C','Sodium','Potassium','Chloride','Bicarbonate','Magnesium','Serum_Calcium','Phosphorus','Hemoglobin','Hematocrit','WBC_Count','Platelet_Count','Ferritin','Albumin_Serum','Glucose','HbA1c','Uric_Acid','Urine_Creatinine','Troponin_I','Free_T4','pCO2_Arterial','pO2_Arterial','Lactate']
+def summary(col):
+    s=df_num[col].dropna().astype(float)
+    if len(s)==0:
+        return None
+    q=s.quantile([0,0.01,0.05,0.5,0.95,0.99,1]).to_dict()
+    return {k:float(v) for k,v in q.items()}, int(s.isna().sum())
+for c in cols_to_check:
+    s=df_num[c]
+    s=s.astype(float)
+    non=s.dropna()
+    if non.empty:
+        continue
+    qs=non.quantile([0,0.01,0.05,0.5,0.95,0.99,1])
+    print(f"\n{c}: count={len(non)}")
+    print(qs.to_string())
+PY
+
+Serum_Creatinine: count=2550
+0.00       0.20000
+0.01       0.53980
+0.05       1.50000
+0.50      13.71175
+0.95    1428.22500
+0.99    1714.49732
+1.00    1764.50000
+
+BUN: count=2551
+0.00      1.8000
+0.01      2.5150
+0.05     15.6615
+0.50    100.1900
+0.95    190.6160
+0.99    197.7600
+1.00    199.8948
+
+eGFR: count=2553
+0.00      0.00000
+0.01      1.40000
+0.05      7.39820
+0.50     74.70000
+0.95    141.35000
+0.99    147.84752
+1.00    149.95000
+
+Cystatin_C: count=2550
+0.00     0.40000
+0.01     0.50000
+0.05     0.84450
+0.50     5.10000
+0.95     9.56475
+0.99     9.90000
+1.00    10.00000
+
+Sodium: count=2550
+0.00    110.070000
+0.01    110.700000
+0.05    113.600000
+0.50    140.040000
+0.95    167.105500
+0.99    169.549514
+1.00    170.000000
+
+Potassium: count=2553
+0.00    2.0000
+0.01    2.0832
+0.05    2.3248
+0.50    5.3567
+0.95    8.1900
+0.99    8.4200
+1.00    8.5000
+
+Chloride: count=2550
+0.00     70.0000
+0.01     70.7098
+0.05     73.6425
+0.50    104.5250
+0.95    136.7000
+0.99    139.2951
+1.00    140.0000
+
+Bicarbonate: count=2549
+0.00     5.0000
+0.01     5.2600
+0.05     6.8120
+0.50    22.2000
+0.95    38.2452
+0.99    39.7904
+1.00    40.0000
+
+Magnesium: count=2549
+0.00     0.200000
+0.01     0.269688
+0.05     1.014200
+0.50     5.110000
+0.95     9.540000
+0.99     9.910000
+1.00    10.000000
+
+Serum_Calcium: count=2548
+0.00     1.20000
+0.01     1.30000
+0.05     1.57805
+0.50     7.34550
+0.95    14.47650
+0.99    14.90000
+1.00    15.00000
+
+Phosphorus: count=2553
+0.00     0.30000
+0.01     0.37000
+0.05     0.53576
+0.50     8.10000
+0.95    14.33440
+0.99    14.82100
+1.00    15.00000
+
+Hemoglobin: count=2552
+0.00      1.86430
+0.01      2.00000
+0.05      2.56866
+0.50     13.41060
+0.95    152.05050
+0.99    191.30000
+1.00    200.00000
+
+Hematocrit: count=2551
+0.00    10.020
+0.01    10.710
+0.05    12.795
+0.50    37.558
+0.95    62.400
+0.99    64.606
+1.00    65.000
+
+WBC_Count: count=2557
+0.00     0.50000
+0.01     0.93008
+0.05     2.60000
+0.50    25.29000
+0.95    47.80120
+0.99    49.47000
+1.00    50.00000
+
+Platelet_Count: count=2550
+0.00      10.210000
+0.01      23.712865
+0.05      81.117500
+0.50     721.390500
+0.95    1423.394000
+0.99    1482.655400
+1.00    1499.400000
+
+Ferritin: count=2550
+0.00        8.65000
+0.01       46.35735
+0.05      242.07450
+0.50     2742.94500
+0.95    10049.83195
+0.99    10995.94700
+1.00    11226.62000
+
+Albumin_Serum: count=2548
+0.00     1.0000
+0.01     1.1000
+0.05     1.4007
+0.50     4.7600
+0.95    55.2650
+0.99    62.9506
+1.00    64.9500
+
+Glucose: count=2549
+0.00      1.11000
+0.01      1.80000
+0.05      4.50280
+0.50    431.94700
+0.95    760.91400
+0.99    791.44928
+1.00    799.94400
+
+HbA1c: count=2549
+0.00     3.00000
+0.01     3.19324
+0.05     3.86940
+0.50    11.40000
+0.95    19.10600
+0.99    19.80000
+1.00    20.00000
+
+Uric_Acid: count=2552
+0.00       1.03170
+0.01       1.35207
+0.05       2.39640
+0.50      13.79000
+0.95     997.06000
+0.99    1145.68000
+1.00    1189.00520
+
+Urine_Creatinine: count=2550
+0.00        9.10000
+0.01       15.39139
+0.05       42.94500
+0.50      317.11500
+0.95    32889.32608
+0.99    41554.60348
+1.00    44170.22000
+
+Troponin_I: count=2551
+0.00        0.000
+0.01        0.640
+0.05        3.650
+0.50       34.503
+0.95    39819.150
+0.99    48437.400
+1.00    49906.000
+
+Free_T4: count=2548
+0.00     0.200000
+0.01     0.260000
+0.05     0.493500
+0.50     4.120500
+0.95    65.276650
+0.99    74.547064
+1.00    77.182700
+
+pCO2_Arterial: count=2551
+0.00     2.04400
+0.01     2.47745
+0.05     4.19500
+0.50    41.57000
+0.95    93.71450
+0.99    98.58750
+1.00    99.98600
+
+pO2_Arterial: count=2551
+0.00      4.00000
+0.01      5.00700
+0.05      9.05405
+0.50    263.51200
+0.95    475.88800
+0.99    496.00325
+1.00    499.66560
+
+Lactate: count=2553
+0.00      0.30000
+0.01      0.50000
+0.05      1.27560
+0.50     13.09000
+0.95    147.35200
+0.99    174.37156
+1.00    179.96660
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

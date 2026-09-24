@@ -1,0 +1,81 @@
+Tool: terminal
+Result:
+PYTHONPATH=/tmp/pyenv python3 <<'PY'
+import gzip, csv, collections
+FINISH_EVENTS = {3,4,5,6}
+GAP_MICROS = 600 * 1_000_000  # 10 minutes in micros
+# Load finished job ids
+finished = set()
+with gzip.open('/app/workspace/data/job_events/part-00001-of-00500.csv.gz', 'rt') as f:
+    for row in csv.reader(f):
+        try:
+            jid = int(row[2]); et = int(row[3])
+        except (ValueError, IndexError):
+            continue
+        if et in FINISH_EVENTS:
+            finished.add(jid)
+# Collect SUBMIT timestamps per job
+submits = collections.defaultdict(list)
+with gzip.open('/app/workspace/data/task_events/part-00001-of-00500.csv.gz', 'rt') as f:
+    for row in csv.reader(f):
+        try:
+            ts = int(row[0]) if row[0] else 0
+            jid = int(row[2])
+            et = int(row[5])
+        except (ValueError, IndexError):
+            continue
+        if et == 0:  # SUBMIT
+            submits[jid].append(ts)
+results = {}
+for jid, ts_list in submits.items():
+    ts_list.sort()
+    max_count = 1
+    cur = 1
+    last = ts_list[0]
+    for t in ts_list[1:]:
+        if t - last <= GAP_MICROS:
+            cur += 1
+        else:
+            if cur > max_count: max_count = cur
+            cur = 1
+        last = t
+    if cur > max_count: max_count = cur
+    results[jid] = max_count
+# Filter to only finished jobs
+final = {j: c for j, c in results.items() if j in finished}
+print("total submits jobs:", len(results))
+print("finished jobs:", len(finished))
+print("in output:", len(final))
+# Compare with Flink output
+flink = {}
+with open('/tmp/out.txt') as f:
+    for line in f:
+        line = line.strip().strip('()')
+        if not line: continue
+        j, c = line.split(',')
+        flink[int(j)] = int(c)
+print("flink lines:", len(flink))
+missing = set(final) - set(flink)
+extra = set(flink) - set(final)
+print("missing from flink:", len(missing))
+print("extra in flink:", len(extra))
+diffs = [(j, final[j], flink[j]) for j in final if j in flink and final[j] != flink[j]]
+print("count mismatches:", len(diffs))
+for d in diffs[:10]:
+    print(" mismatch:", d)
+for e in list(extra)[:5]:
+    print(" extra:", e, flink[e])
+for m in list(missing)[:5]:
+    print(" missing:", m, final[m])
+PY
+total submits jobs: 1234
+finished jobs: 987
+in output: 902
+flink lines: 902
+missing from flink: 0
+extra in flink: 0
+count mismatches: 0
+
+
+📁 Working directory: /app/workspace
+✅ Exit code: 0

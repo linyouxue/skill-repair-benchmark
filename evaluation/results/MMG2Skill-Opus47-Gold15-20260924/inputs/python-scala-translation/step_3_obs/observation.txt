@@ -1,0 +1,69 @@
+Tool: terminal
+Result:
+
+    This pattern is particularly challenging to translate to Scala
+    due to the mixing of mutable and immutable collections with generics.
+    """
+
+    def __init__(self) -> None:
+        # Nested generics with mixed mutability
+        self._registry: dict[str, TokenContainer[T]] = {}
+        self._handlers: list[Callable[[T], Token | None]] = []
+
+    def register(self, key: str, container: TokenContainer[T]) -> None:
+        self._registry[key] = container
+
+    def add_handler(self, handler: Callable[[T], Token | None]) -> None:
+        self._handlers.append(handler)
+
+    def process(self, key: str) -> list[Token | None]:
+        """Process all items in a container through all handlers."""
+        container = self._registry.get(key)
+        if container is None:
+            return []
+
+        results: list[Token | None] = []
+        for item in container.get_all():
+            for handler in self._handlers:
+                result = handler(item)
+                if result is not None:
+                    results.append(result)
+                    break
+            else:
+                results.append(None)
+
+        return results
+
+
+# ============================================================================
+# Higher-Kinded Type Simulation
+# ============================================================================
+
+F = TypeVar("F")  # Type constructor placeholder
+
+
+class TokenFunctor(Generic[T]):
+    """
+    Simulated functor for tokens.
+
+    Python can't express true higher-kinded types (HKT), but Scala can.
+    This simulation needs to become a proper type class in Scala.
+    """
+
+    def __init__(self, value: T) -> None:
+        self._value = value
+
+    def map(self, func: Callable[[T], Any]) -> "TokenFunctor[Any]":
+        return TokenFunctor(func(self._value))
+
+    def flat_map(self, func: Callable[[T], "TokenFunctor[Any]"]) -> "TokenFunctor[Any]":
+        return func(self._value)
+
+    def get_or_else(self, default: T) -> T:
+        return self._value if self._value is not None else default
+
+
+
+
+📁 Working directory: /root
+✅ Exit code: 0

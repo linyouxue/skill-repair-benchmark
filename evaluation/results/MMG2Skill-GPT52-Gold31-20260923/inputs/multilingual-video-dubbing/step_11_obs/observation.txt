@@ -1,0 +1,104 @@
+Tool: file_editor
+Result:
+Here's the result of running `cat -n` on /root/dub_multilingual.py:
+   180	        [
+   181	            "ffmpeg",
+   182	            "-hide_banner",
+   183	            "-y",
+   184	            "-i",
+   185	            in_wav,
+   186	            "-af",
+   187	            af,
+   188	            "-ar",
+   189	            "48000",
+   190	            "-ac",
+   191	            "1",
+   192	            "-c:a",
+   193	            "pcm_s16le",
+   194	            out_wav,
+   195	        ]
+   196	    )
+   197	
+   198	    # Return measured integrated loudness after normalization (should be ~ -23).
+   199	    meas2 = loudnorm_measure_json(out_wav)
+   200	    return float(meas2["input_i"])
+   201	
+   202	
+   203	def make_segment_wav(
+   204	    target_text: str,
+   205	    voice: str,
+   206	    target_duration_sec: float,
+   207	    out_wav: str,
+   208	) -> Tuple[float, str]:
+   209	    tmp_dir = Path("/tmp/openhands_dub")
+   210	    tmp_dir.mkdir(parents=True, exist_ok=True)
+   211	
+   212	    raw_mp3 = str(tmp_dir / "seg_raw.mp3")
+   213	    raw_wav = str(tmp_dir / "seg_raw.wav")
+   214	    pre_norm_wav = str(tmp_dir / "seg_pre_norm.wav")
+   215	
+   216	    asyncio.run(edge_tts_to_mp3(target_text, voice, raw_mp3))
+   217	
+   218	    run(
+   219	        [
+   220	            "ffmpeg",
+   221	            "-hide_banner",
+   222	            "-y",
+   223	            "-i",
+   224	            raw_mp3,
+   225	            "-ar",
+   226	            "48000",
+   227	            "-ac",
+   228	            "1",
+   229	            "-c:a",
+   230	            "pcm_s16le",
+   231	            raw_wav,
+   232	        ]
+   233	    )
+   234	
+   235	    raw_dur = ffprobe_duration(raw_wav)
+   236	
+   237	    # Decide duration control
+   238	    duration_control: str
+   239	    use_atempo = False
+   240	
+   241	    if raw_dur <= 0.0:
+   242	        raise RuntimeError("Generated empty TTS audio")
+   243	
+   244	    ratio = raw_dur / target_duration_sec
+   245	
+   246	    if abs(raw_dur - target_duration_sec) <= 0.05:
+   247	        duration_control = "pad_silence" if raw_dur < target_duration_sec else "trim"
+   248	        atempo_chain = None
+   249	    elif raw_dur > target_duration_sec:
+   250	        if ratio <= 1.25:
+   251	            duration_control = "rate_adjust"
+   252	            use_atempo = True
+   253	            atempo_chain = build_atempo_chain(ratio)
+   254	        else:
+   255	            duration_control = "trim"
+   256	            atempo_chain = None
+   257	    else:
+   258	        # raw shorter than target
+   259	        if ratio >= 0.8:
+   260	            duration_control = "rate_adjust"
+   261	            use_atempo = True
+   262	            atempo_chain = build_atempo_chain(ratio)
+   263	        else:
+   264	            duration_control = "pad_silence"
+   265	            atempo_chain = None
+   266	
+   267	    fade_d = 0.05
+   268	    fade_out_start = max(0.0, target_duration_sec - fade_d)
+   269	
+   270	    filters: List[str] = [
+   271	        "highpass=f=20",
+   272	        "lowpass=f=16000",
+   273	    ]
+   274	    if use_atempo and atempo_chain:
+   275	        filters.append(atempo_chain)
+   276	
+   277	    filters.extend(
+   278	        [
+   279	            "apad",
+   280	            f"atrim=0:{target_duration_sec:.6f}",

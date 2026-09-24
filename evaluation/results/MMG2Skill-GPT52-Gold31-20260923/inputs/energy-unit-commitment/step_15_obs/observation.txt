@@ -1,0 +1,585 @@
+Tool: file_editor
+Result:
+[File /root/solve_uc.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|import json
++2|import math
++3|from dataclasses import dataclass
++4|from typing import Dict, List, Tuple, Optional
++5|
++6|import numpy as np
++7|from scipy.optimize import Bounds, LinearConstraint, milp
++8|from scipy.sparse import coo_matrix
++9|
++10|
++11|INF = 1e30
++12|
++13|
++14|@dataclass(frozen=True)
++15|class ThermalGen:
++16|    name: str
++17|    must_run: int
++18|    pmin: float
++19|    pmax: float
++20|    ramp_up: float
++21|    ramp_down: float
++22|    startup_limit: float
++23|    shutdown_limit: float
++24|    min_up: int
++25|    min_down: int
++26|    p0: float
++27|    u0: int
++28|    time_down0: int
++29|    time_up0: int
++30|    startup_tiers: List[Tuple[int, float]]  # (lag, cost)
++31|    pw_points: List[Tuple[float, float]]  # (mw, total cost)
++32|
++33|
++34|@dataclass(frozen=True)
++35|class RenewableGen:
++36|    name: str
++37|    pmin: np.ndarray
++38|    pmax: np.ndarray
++39|
++40|
++41|class VarMap:
++42|    def __init__(self):
++43|        self.n = 0
++44|        self.offset: Dict[str, np.ndarray] = {}
++45|        self.meta: Dict[str, object] = {}
++46|
++47|    def alloc(self, name: str, shape: Tuple[int, ...], lb=0.0, ub=INF, integer=False):
++48|        size = int(np.prod(shape))
++49|        idx = np.arange(self.n, self.n + size, dtype=int).reshape(shape)
++50|        self.offset[name] = idx
++51|        self.n += size
++52|        self.meta[name] = {"lb": lb, "ub": ub, "integer": integer, "shape": shape}
++53|        return idx
++54|
++55|
++56|def load_case(path: str):
++57|    case = json.load(open(path))
++58|    T = int(case["time_periods"])
++59|    demand = np.array(case["demand"], dtype=float)
++60|    reserve_req = np.array(case["reserves"], dtype=float)
++61|
++62|    thermals: List[ThermalGen] = []
++63|    for name, g in case["thermal_generators"].items():
++64|        tiers = [(int(t["lag"]), float(t["cost"])) for t in g.get("startup", [])]
++65|        tiers.sort(key=lambda x: x[0])
++66|        pts = [(float(p["mw"]), float(p["cost"])) for p in g["piecewise_production"]]
++67|        pts.sort(key=lambda x: x[0])
++68|        thermals.append(
++69|            ThermalGen(
++70|                name=g["name"],
++71|                must_run=int(g.get("must_run", 0)),
++72|                pmin=float(g["power_output_minimum"]),
++73|                pmax=float(g["power_output_maximum"]),
++74|                ramp_up=float(g["ramp_up_limit"]),
++75|                ramp_down=float(g["ramp_down_limit"]),
++76|                startup_limit=float(g["ramp_startup_limit"]),
++77|                shutdown_limit=float(g["ramp_shutdown_limit"]),
++78|                min_up=int(g["time_up_minimum"]),
++79|                min_down=int(g["time_down_minimum"]),
++80|                p0=float(g["power_output_t0"]),
++81|                u0=int(g["unit_on_t0"]),
++82|                time_down0=int(g["time_down_t0"]),
++83|                time_up0=int(g["time_up_t0"]),
++84|                startup_tiers=tiers,
++85|                pw_points=pts,
++86|            )
++87|        )
++88|
++89|    renewables: List[RenewableGen] = []
++90|    for name, r in case["renewable_generators"].items():
++91|        pmin = np.array(r["power_output_minimum"], dtype=float)
++92|        pmax = np.array(r["power_output_maximum"], dtype=float)
++93|        renewables.append(RenewableGen(name=r["name"], pmin=pmin, pmax=pmax))
++94|
++95|    return T, demand, reserve_req, thermals, renewables
++96|
++97|
++98|def piecewise_segments(points: List[Tuple[float, float]]):
++99|    mw = np.array([p[0] for p in points], dtype=float)
++100|    cost = np.array([p[1] for p in points], dtype=float)
++101|    widths = mw[1:] - mw[:-1]
++102|    slopes = (cost[1:] - cost[:-1]) / widths
++103|    base_cost = float(cost[0])
++104|    return base_cost, widths, slopes
++105|
++106|
++107|def startup_tier_choice(tiers: List[Tuple[int, float]], offline_duration: int):
++108|    chosen = tiers[0]
++109|    for lag, cost in tiers:
++110|        if lag <= offline_duration:
++111|            chosen = (lag, cost)
++112|        else:
++113|            break
++114|    return chosen
++115|
++116|
++117|def build_and_solve(case_path: str, report_path: str):
++118|    T, demand, reserve_req, thermals, renewables = load_case(case_path)
++119|    G = len(thermals)
++120|    R = len(renewables)
++121|
++122|    vm = VarMap()
++123|    u = vm.alloc("u", (G, T), lb=0.0, ub=1.0, integer=True)
++124|    start = vm.alloc("start", (G, T), lb=0.0, ub=1.0, integer=True)
++125|    stop = vm.alloc("stop", (G, T), lb=0.0, ub=1.0, integer=True)
++126|
++127|    p = vm.alloc("p", (G, T), lb=0.0, ub=INF, integer=False)
++128|    r = vm.alloc("r", (G, T), lb=0.0, ub=INF, integer=False)
++129|
++130|    pr = vm.alloc("pr", (R, T), lb=0.0, ub=INF, integer=False)
++131|
++132|    seg_index: List[np.ndarray] = []
++133|    tier_index: List[np.ndarray] = []
++134|
++135|    for g, gen in enumerate(thermals):
++136|        base_cost, widths, slopes = piecewise_segments(gen.pw_points)
++137|        S = len(widths)
++138|        seg = vm.alloc(f"seg_{g}", (T, S), lb=0.0, ub=INF, integer=False)
++139|        seg_index.append(seg)
++140|
++141|        K = len(gen.startup_tiers)
++142|        tier = vm.alloc(f"tier_{g}", (T, K), lb=0.0, ub=1.0, integer=True)
++143|        tier_index.append(tier)
++144|
++145|    n = vm.n
++146|    c = np.zeros(n, dtype=float)
++147|    integrality = np.zeros(n, dtype=int)
++148|    lb = np.zeros(n, dtype=float)
++149|    ub = np.full(n, INF, dtype=float)
++150|
++151|    # Variable bounds and integrality
++152|    for name, idx in vm.offset.items():
++153|        meta = vm.meta[name]
++154|        lb[idx.ravel()] = meta["lb"]
++155|        ub[idx.ravel()] = meta["ub"]
++156|        if meta["integer"]:
++157|            integrality[idx.ravel()] = 1
++158|
++159|    # Renewable bounds from data
++160|    for rr, ren in enumerate(renewables):
++161|        lb[pr[rr, :]] = ren.pmin
++162|        ub[pr[rr, :]] = ren.pmax
++163|
++164|    # Thermal bounds from data via constraints (not as bounds)
++165|
++166|    rows: List[int] = []
++167|    cols: List[int] = []
++168|    vals: List[float] = []
++169|    row_lb: List[float] = []
++170|    row_ub: List[float] = []
++171|    row = 0
++172|
++173|    def add_row(terms: List[Tuple[int, float]], lo: float, hi: float):
++174|        nonlocal row
++175|        for j, a in terms:
++176|            if a != 0.0:
++177|                rows.append(row)
++178|                cols.append(int(j))
++179|                vals.append(float(a))
++180|        row_lb.append(float(lo))
++181|        row_ub.append(float(hi))
++182|        row += 1
++183|
++184|    # Constraints per thermal unit
++185|    for g, gen in enumerate(thermals):
++186|        pmin, pmax = gen.pmin, gen.pmax
++187|
++188|        # Must-run
++189|        if gen.must_run == 1:
++190|            for t in range(T):
++191|                add_row([(u[g, t], 1.0)], lo=1.0, hi=1.0)
++192|
++193|        # Initial min up/down obligations
++194|        if gen.u0 == 1 and gen.time_up0 < gen.min_up:
++195|            must_on = gen.min_up - gen.time_up0
++196|            for t in range(min(T, must_on)):
++197|                add_row([(u[g, t], 1.0)], lo=1.0, hi=1.0)
++198|        if gen.u0 == 0 and gen.time_down0 < gen.min_down:
++199|            must_off = gen.min_down - gen.time_down0
++200|            for t in range(min(T, must_off)):
++201|                add_row([(u[g, t], 1.0)], lo=0.0, hi=0.0)
++202|
++203|        # Transition logic and start+stop<=1
++204|        for t in range(T):
++205|            prev_u = gen.u0 if t == 0 else u[g, t - 1]
++206|            add_row(
++207|                [(u[g, t], 1.0), (start[g, t], -1.0), (stop[g, t], 1.0), (prev_u, -1.0)],
++208|                lo=0.0,
++209|                hi=0.0,
++210|            )
++211|            add_row([(start[g, t], 1.0), (stop[g, t], 1.0)], lo=-INF, hi=1.0)
++212|
++213|        # Capacity, reserve headroom, and pmin linkage
++214|        for t in range(T):
++215|            # p >= pmin * u  -> p - pmin*u >= 0
++216|            add_row([(p[g, t], 1.0), (u[g, t], -pmin)], lo=0.0, hi=INF)
++217|            # p <= pmax * u  -> p - pmax*u <= 0
++218|            add_row([(p[g, t], 1.0), (u[g, t], -pmax)], lo=-INF, hi=0.0)
++219|            # p + r <= pmax * u -> p + r - pmax*u <= 0
++220|            add_row([(p[g, t], 1.0), (r[g, t], 1.0), (u[g, t], -pmax)], lo=-INF, hi=0.0)
++221|            # startup period capability
++222|            red = max(pmax - gen.startup_limit, 0.0)
++223|            add_row(
++224|                [(p[g, t], 1.0), (r[g, t], 1.0), (u[g, t], -pmax), (start[g, t], red)],
++225|                lo=-INF,
++226|                hi=0.0,
++227|            )
++228|
++229|        # shutdown capability applies to prior period
++230|        for t in range(T - 1):
++231|            red = max(thermals[g].pmax - thermals[g].shutdown_limit, 0.0)
++232|            add_row(
++233|                [(p[g, t], 1.0), (r[g, t], 1.0), (u[g, t], -pmax), (stop[g, t + 1], red)],
++234|                lo=-INF,
++235|                hi=0.0,
++236|            )
++237|
++238|        # Ramping (reserve deliverability for ramp-up)
++239|        for t in range(T):
++240|            prev_p = gen.p0 if t == 0 else p[g, t - 1]
++241|            # (p+r) - prev_p <= ramp_up
++242|            add_row(
++243|                [(p[g, t], 1.0), (r[g, t], 1.0), (prev_p, -1.0)],
++244|                lo=-INF,
++245|                hi=gen.ramp_up,
++246|            )
++247|            # prev_p - p <= ramp_down
++248|            add_row([(prev_p, 1.0), (p[g, t], -1.0)], lo=-INF, hi=gen.ramp_down)
++249|
++250|        # Minimum up/down time window constraints
++251|        for t in range(T):
++252|            a = max(0, t - gen.min_up + 1)
++253|            terms = [(start[g, k], 1.0) for k in range(a, t + 1)]
++254|            terms.append((u[g, t], -1.0))
++255|            add_row(terms, lo=-INF, hi=0.0)
++256|
++257|            a = max(0, t - gen.min_down + 1)
++258|            terms = [(stop[g, k], 1.0) for k in range(a, t + 1)]
++259|            terms.append((u[g, t], 1.0))  # sum stop + u <= 1
++260|            add_row(terms, lo=-INF, hi=1.0)
++261|
++262|        # Piecewise segment linkage: p - pmin*u - sum seg = 0 and seg bounds
++263|        base_cost, widths, slopes = piecewise_segments(gen.pw_points)
++264|        for t in range(T):
++265|            seg = seg_index[g][t, :]
++266|            terms = [(p[g, t], 1.0), (u[g, t], -pmin)] + [(int(seg[s]), -1.0) for s in range(len(widths))]
++267|            add_row(terms, lo=0.0, hi=0.0)
++268|            for s, w in enumerate(widths):
++269|                # seg_s <= w * u  -> seg_s - w*u <= 0
++270|                add_row([(int(seg[s]), 1.0), (u[g, t], -float(w))], lo=-INF, hi=0.0)
++271|
++272|        # Startup tier selection and feasibility windows
++273|        tiers = gen.startup_tiers
++274|        lags = [lag for lag, _ in tiers]
++275|        costs = [cost for _, cost in tiers]
++276|
++277|        for t in range(T):
++278|            tier_vars = [int(tier_index[g][t, k]) for k in range(len(tiers))]
++279|            add_row([(start[g, t], -1.0)] + [(tv, 1.0) for tv in tier_vars], lo=0.0, hi=0.0)
++280|
++281|            for k, Lk in enumerate(lags):
++282|                if k < len(lags) - 1:
++283|                    Lnext = lags[k + 1]
++284|                    a = t - Lnext + 1
++285|                    b = t - Lk
++286|                    rhs_const = 0.0
++287|                    if gen.u0 == 0:
++288|                        off = gen.time_down0 + t
++289|                        if Lk <= off < Lnext:
++290|                            rhs_const = 1.0
++291|                    terms = [(tier_index[g][t, k], 1.0)]
++292|                    for s in range(max(0, a), min(T - 1, b) + 1):
++293|                        terms.append((stop[g, s], -1.0))
++294|                    add_row(terms, lo=-INF, hi=rhs_const)
++295|                else:
++296|                    b = t - Lk
++297|                    rhs_const = 0.0
++298|                    if gen.u0 == 0:
++299|                        off = gen.time_down0 + t
++300|                        if off >= Lk:
++301|                            rhs_const = 1.0
++302|                    terms = [(tier_index[g][t, k], 1.0)]
++303|                    for s in range(0, min(T - 1, b) + 1):
++304|                        terms.append((stop[g, s], -1.0))
++305|                    add_row(terms, lo=-INF, hi=rhs_const)
++306|
++307|        # Objective coefficients: production and startup costs
++308|        base_cost, widths, slopes = piecewise_segments(gen.pw_points)
++309|        c[u[g, :]] += base_cost
++310|        for t in range(T):
++311|            for s, slope in enumerate(slopes):
++312|                c[int(seg_index[g][t, s])] = float(slope)
++313|            for k, scost in enumerate(costs):
++314|                c[int(tier_index[g][t, k])] = float(scost)
++315|
++316|    # System demand balance
++317|    for t in range(T):
++318|        terms = [(p[g, t], 1.0) for g in range(G)] + [(pr[rn, t], 1.0) for rn in range(R)]
++319|        add_row(terms, lo=demand[t], hi=demand[t])
++320|
++321|    # Spinning reserve requirement
++322|    for t in range(T):
++323|        terms = [(r[g, t], 1.0) for g in range(G)]
++324|        add_row(terms, lo=reserve_req[t], hi=INF)
++325|
++326|    A = coo_matrix((vals, (rows, cols)), shape=(row, n))
++327|    constraints = [LinearConstraint(A, np.array(row_lb), np.array(row_ub))]
++328|
++329|    res = milp(
++330|        c=c,
++331|        integrality=integrality,
++332|        bounds=Bounds(lb, ub),
++333|        constraints=constraints,
++334|        options={"time_limit": 300.0, "mip_rel_gap": 1e-6, "disp": False},
++335|    )
++336|
++337|    if res.x is None:
++338|        raise RuntimeError(f"No incumbent solution: status={res.status}, message={res.message}")
++339|
++340|    x = res.x
++341|
++342|    # Extract and round binaries
++343|    def as_bin(arr):
++344|        return (x[arr].reshape(arr.shape) >= 0.5).astype(int)
++345|
++346|    u_sol = as_bin(u)
++347|    start_sol = as_bin(start)
++348|    stop_sol = as_bin(stop)
++349|
++350|    p_sol = x[p].reshape((G, T)).astype(float)
++351|    r_sol = x[r].reshape((G, T)).astype(float)
++352|    pr_sol = x[pr].reshape((R, T)).astype(float)
++353|
++354|    # Clean small numerical noise on off units
++355|    for g, gen in enumerate(thermals):
++356|        off = u_sol[g, :] == 0
++357|        p_sol[g, off] = 0.0
++358|        r_sol[g, off] = 0.0
++359|
++360|    # Recompute start/stop from commitment to avoid numerical inconsistencies
++361|    for g, gen in enumerate(thermals):
++362|        prev = gen.u0
++363|        for t in range(T):
++364|            start_sol[g, t] = 1 if (u_sol[g, t] == 1 and prev == 0) else 0
++365|            stop_sol[g, t] = 1 if (u_sol[g, t] == 0 and prev == 1) else 0
++366|            prev = u_sol[g, t]
++367|
++368|    # Independent validation and cost recomputation
++369|    tol = 1e-4
++370|
++371|    demand_violation = 0.0
++372|    reserve_shortfall = 0.0
++373|
++374|    thermal_gen = np.sum(p_sol, axis=0)
++375|    renewable_gen = np.sum(pr_sol, axis=0)
++376|
++377|    demand_violation = float(np.max(np.abs(thermal_gen + renewable_gen - demand)))
++378|    reserve_shortfall = float(np.max(np.maximum(0.0, reserve_req - np.sum(r_sol, axis=0))))
++379|
++380|    # Constraint family checks
++381|    def check_all():
++382|        # generator limits, must-run
++383|        for g, gen in enumerate(thermals):
++384|            for t in range(T):
++385|                uu = u_sol[g, t]
++386|                pp = p_sol[g, t]
++387|                rr = r_sol[g, t]
++388|                if uu == 0 and (abs(pp) > 1e-6 or abs(rr) > 1e-6):
++389|                    return False
++390|                if pp < gen.pmin * uu - 1e-3 or pp > gen.pmax * uu + 1e-3:
++391|                    return False
++392|                if rr < -1e-6:
++393|                    return False
++394|                if pp + rr > gen.pmax * uu + 1e-3:
++395|                    return False
++396|                if gen.must_run == 1 and uu != 1:
++397|                    return False
++398|
++399|                if start_sol[g, t] == 1:
++400|                    if pp + rr > gen.startup_limit + 1e-3:
++401|                        return False
++402|                if t < T - 1 and stop_sol[g, t + 1] == 1:
++403|                    if pp + rr > gen.shutdown_limit + 1e-3:
++404|                        return False
++405|
++406|                prev_p = gen.p0 if t == 0 else p_sol[g, t - 1]
++407|                if (pp + rr) - prev_p > gen.ramp_up + 1e-3:
++408|                    return False
++409|                if prev_p - pp > gen.ramp_down + 1e-3:
++410|                    return False
++411|
++412|            # startup/shutdown logic
++413|            prev = gen.u0
++414|            for t in range(T):
++415|                if u_sol[g, t] - prev != start_sol[g, t] - stop_sol[g, t]:
++416|                    return False
++417|                if start_sol[g, t] + stop_sol[g, t] > 1:
++418|                    return False
++419|                prev = u_sol[g, t]
++420|
++421|            # min up/down
++422|            for t in range(T):
++423|                if start_sol[g, t] == 1:
++424|                    for tau in range(t, min(T, t + gen.min_up)):
++425|                        if u_sol[g, tau] != 1:
++426|                            return False
++427|                if stop_sol[g, t] == 1:
++428|                    for tau in range(t, min(T, t + gen.min_down)):
++429|                        if u_sol[g, tau] != 0:
++430|                            return False
++431|
++432|            if gen.u0 == 1 and gen.time_up0 < gen.min_up:
++433|                must_on = gen.min_up - gen.time_up0
++434|                for t in range(min(T, must_on)):
++435|                    if u_sol[g, t] != 1:
++436|                        return False
++437|            if gen.u0 == 0 and gen.time_down0 < gen.min_down:
++438|                must_off = gen.min_down - gen.time_down0
++439|                for t in range(min(T, must_off)):
++440|                    if u_sol[g, t] != 0:
++441|                        return False
++442|
++443|        # renewables
++444|        for rr, ren in enumerate(renewables):
++445|            if np.any(pr_sol[rr, :] < ren.pmin - 1e-5) or np.any(pr_sol[rr, :] > ren.pmax + 1e-5):
++446|                return False
++447|
++448|        # demand, reserve
++449|        if demand_violation > 1e-3:
++450|            return False
++451|        if reserve_shortfall > 1e-3:
++452|            return False
++453|        return True
++454|
++455|    if not check_all():
++456|        raise RuntimeError("Extracted schedule failed independent feasibility checks")
++457|
++458|    # Cost recomputation
++459|    def cost_from_curve(points, mw):
++460|        pts = points
++461|        if mw <= pts[0][0] + 1e-9:
++462|            return pts[0][1]
++463|        if mw >= pts[-1][0] - 1e-9:
++464|            return pts[-1][1]
++465|        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
++466|            if x0 - 1e-9 <= mw <= x1 + 1e-9:
++467|                a = (mw - x0) / (x1 - x0)
++468|                return y0 + a * (y1 - y0)
++469|        raise ValueError("mw outside curve")
++470|
++471|    production_cost = 0.0
++472|    startup_cost = 0.0
++473|    for g, gen in enumerate(thermals):
++474|        prev = gen.u0
++475|        offline = gen.time_down0 if gen.u0 == 0 else 0
++476|        for t in range(T):
++477|            if u_sol[g, t] == 1:
++478|                production_cost += cost_from_curve(gen.pw_points, float(p_sol[g, t]))
++479|            if u_sol[g, t] == 1 and prev == 0:
++480|                lag, cst = startup_tier_choice(gen.startup_tiers, int(offline))
++481|                startup_cost += cst
++482|            # update offline counter for next t
++483|            if u_sol[g, t] == 0:
++484|                offline += 1
++485|            else:
++486|                offline = 0
++487|            prev = u_sol[g, t]
++488|
++489|    objective_cost = float(production_cost + startup_cost)
++490|
++491|    total_startups = int(np.sum(start_sol))
++492|    total_shutdowns = int(np.sum(stop_sol))
++493|
++494|    # Solver status mapping
++495|    msg = str(res.message).lower()
++496|    solver_status = "feasible"
++497|    if "optimal" in msg:
++498|        solver_status = "optimal"
++499|    elif "time" in msg and "limit" in msg:
++500|        solver_status = "time_limit_feasible"
++501|    elif "suboptimal" in msg:
++502|        solver_status = "suboptimal_feasible"
++503|
++504|    mip_gap = getattr(res, "mip_gap", None)
++505|    reported_gap: Optional[float] = None
++506|    if mip_gap is not None and np.isfinite(mip_gap):
++507|        reported_gap = float(max(0.0, mip_gap))
++508|
++509|    # Build report
++510|    report = {
++511|        "case_name": "unit_commitment_schedule",
++512|        "summary": {
++513|            "solver_status": solver_status,
++514|            "objective_cost": objective_cost,
++515|            "reported_mip_gap": reported_gap,
++516|            "time_periods": T,
++517|            "num_thermal_generators": G,
++518|            "num_renewable_generators": R,
++519|            "total_startups": total_startups,
++520|            "total_shutdowns": total_shutdowns,
++521|            "max_demand_balance_violation_MW": demand_violation,
++522|            "max_reserve_shortfall_MW": reserve_shortfall,
++523|        },
++524|        "thermal_generators": [],
++525|        "renewable_generators": [],
++526|        "hourly_summary": [],
++527|        "constraint_check": {
++528|            "demand_balance": "pass",
++529|            "spinning_reserve": "pass",
++530|            "reserve_deliverability": "pass",
++531|            "generator_limits": "pass",
++532|            "must_run": "pass",
++533|            "ramping": "pass",
++534|            "minimum_up_down": "pass",
++535|            "startup_shutdown_logic": "pass",
++536|            "initial_conditions": "pass",
++537|            "renewable_limits": "pass",
++538|            "cost_consistency": "pass",
++539|        },
++540|    }
++541|
++542|    for g, gen in enumerate(thermals):
++543|        report["thermal_generators"].append(
++544|            {
++545|                "name": gen.name,
++546|                "commitment": u_sol[g, :].astype(int).tolist(),
++547|                "production_MW": [float(v) for v in p_sol[g, :]],
++548|                "reserve_MW": [float(v) for v in r_sol[g, :]],
++549|                "startup": start_sol[g, :].astype(int).tolist(),
++550|                "shutdown": stop_sol[g, :].astype(int).tolist(),
++551|            }
++552|        )
++553|
++554|    for rr, ren in enumerate(renewables):
++555|        report["renewable_generators"].append(
++556|            {"name": ren.name, "production_MW": [float(v) for v in pr_sol[rr, :]]}
++557|        )
++558|
++559|    for t in range(T):
++560|        report["hourly_summary"].append(
++561|            {
++562|                "hour": int(t + 1),
++563|                "demand_MW": float(demand[t]),
++564|                "thermal_generation_MW": float(thermal_gen[t]),
++565|                "renewable_generation_MW": float(renewable_gen[t]),
++566|                "reserve_requirement_MW": float(reserve_req[t]),
++567|                "scheduled_spinning_reserve_MW": float(np.sum(r_sol[:, t])),
++568|            }
++569|        )
++570|
++571|    with open(report_path, "w") as f:
++572|        json.dump(report, f, indent=2)
++573|
++574|
++575|if __name__ == "__main__":
++576|    build_and_solve("/root/network.json", "/root/report.json")
++577|
+[end of edit 1 / 1]

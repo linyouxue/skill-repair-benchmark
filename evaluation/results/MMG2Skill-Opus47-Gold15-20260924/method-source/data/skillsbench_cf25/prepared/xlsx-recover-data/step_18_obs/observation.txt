@@ -1,0 +1,76 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import openpyxl
+wb=openpyxl.load_workbook('nasa_budget_recovered.xlsx', data_only=True)
+# Budget row sum checks for years 2015-2024
+bud=wb['Budget by Directorate']
+# columns B-J are directorates, K total
+errors=[]
+for r in range(4,14):
+    year=bud[f'A{r}'].value
+    parts=[bud.cell(r,c).value for c in range(2,11)]
+    total=bud[f'K{r}'].value
+    if None in parts or total is None:
+        continue
+    s=sum(parts)
+    if s!=total:
+        errors.append((year,s,total))
+print('row_sum_mismatches',errors)
+# YoY checks for rows with computed: compare formul
+[... 106 characters omitted ...]
+col_map={'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'H':8,'I':9,'J':10,'K':11}
+# check all yoy rows 2016-2024
+mism=[]
+for r in range(4,13):
+    year=yoy[f'A{r}'].value
+    prev_year=year-1
+    # find budget rows
+    # year rows in budget start at 4 with 2015
+    bud_row=4+(year-2015)
+    prev_row=bud_row-1
+    for ltr,idx in col_map.items():
+        pct=yoy[f'{ltr}{r}'].value
+        if pct is None:
+            continue
+        cur=bud.cell(bud_row,idx).value
+        prev=bud.cell(prev_row,idx).value
+        if prev==0:
+            continue
+        calc=(cur-prev)/prev*100
+        # allow rounding to 2 decimals
+        if round(calc,2)!=round(pct,2):
+            mism.append((year,ltr,round(calc,2),round(pct,2)))
+print('yoy_mismatches_sample',mism[:10], 'count',len(mism))
+# Shares checks: compare to budget row values / total *100 (2 decimals)
+shares=wb['Directorate Shares (%)']
+share_mism=[]
+for r in range(4,14):
+    year=shares[f'A{r}'].value
+    bud_row=4+(year-2015)
+    total=bud[f'K{bud_row}'].value
+    for c in range(2,11):
+        pct=shares.cell(r,c).value
+        if pct is None:
+            continue
+        val=bud.cell(bud_row,c).value
+        calc=val/total*100
+        if round(calc,2)!=round(pct,2):
+            share_mism.append((year,c,round(calc,2),round(pct,2)))
+print('share_mismatches_sample',share_mism[:10],'count',len(share_mism))
+# Growth analysis checks: FY2019 and FY2024 budgets match, changes match
+growth=wb['Growth Analysis']
+# verify exploration FY2019
+assert growth['E5'].value==bud['E8'].value
+# verify science change
+assert growth['B7'].value==bud['B13'].value-bud['B8'].value
+print('growth_checks: ok')
+PY
+row_sum_mismatches []
+yoy_mismatches_sample [] count 0
+share_mismatches_sample [] count 0
+growth_checks: ok
+
+
+📁 Working directory: /root
+✅ Exit code: 0

@@ -1,0 +1,36 @@
+Tool: terminal
+Result:
+python -c "
+import numpy as np
+import obspy
+from obspy import UTCDateTime, Stream, Trace
+import seisbench.models as sbm
+fn = '/root/data/BG.ACR..DP.0215954.npz'
+d = np.load(fn, allow_pickle=True)
+data = d['data'].astype(np.float64) * 1e10
+print('scaled range:', data.min(), data.max(), 'std per ch:', data.std(axis=0))
+channels = str(d['channels']).split(',')
+dt = float(d['dt'])
+traces = []
+for i, ch in enumerate(channels):
+    tr = Trace(data=np.ascontiguousarray(data[:,i]))
+    tr.stats.network='BG'; tr.stats.station='ACR'; tr.stats.channel=ch; tr.stats.delta=dt
+    tr.stats.starttime = UTCDateTime(str(d['start_time']))
+    traces.append(tr)
+st = Stream(traces)
+m = sbm.PhaseNet.from_pretrained('scedc')
+ann = m.annotate(st)
+for tr in ann:
+    print(tr.stats.channel, 'max:', float(tr.data.max()), 'argmax:', int(tr.data.argmax()))
+"
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+scaled range: -0.0003168172240395131 0.0004768278802943886 std per ch: [1.29593584e-05 1.03280158e-05 9.04330545e-06]
+PhaseNet_P max: 0.10043960809707642 argmax: 3723
+PhaseNet_S max: 0.03222866356372833 argmax: 4380
+PhaseNet_N max: 1.0 argmax: 2824
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

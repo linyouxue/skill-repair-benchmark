@@ -1,0 +1,98 @@
+diff --git a/agentops/__init__.py b/agentops/__init__.py
+index 1c2d4df..878b377 100755
+--- a/agentops/__init__.py
++++ b/agentops/__init__.py
+@@ -9,7 +9,27 @@ from .enums import Models
+ from .decorators import record_function
+ from .agent import track_agent
+ from .log_config import set_logging_level_info, set_logging_level_critial
+-from .langchain_callback_handler import LangchainCallbackHandler, AsyncLangchainCallbackHandler
++
++try:
++    from .langchain_callback_handler import (
++        LangchainCallbackHandler,
++        AsyncLangchainCallbackHandler,
++    )
++except ImportError as _exc:
++
++    class LangchainCallbackHandler:  # type: ignore
++        def __init__(self, *args, **kwargs):
++            raise ModuleNotFoundError(
++                "LangChain integration requires optional dependencies. "
++                "Install with: pip install 'agentops[langchain]'"
++            ) from _exc
++
++    class AsyncLangchainCallbackHandler:  # type: ignore
++        def __init__(self, *args, **kwargs):
++            raise ModuleNotFoundError(
++                "LangChain integration requires optional dependencies. "
++                "Install with: pip install 'agentops[langchain]'"
++            ) from _exc
+ 
+ 
+ def init(api_key: Optional[str] = None,
+@@ -45,6 +65,9 @@ def init(api_key: Optional[str] = None,
+             inherited_session_id (optional, str): Init Agentops with an existing Session
+         Attributes:
+     """
++    if hasattr(Client, 'reset_instance'):
++        Client.reset_instance()
++
+     set_logging_level_info()
+     c = Client(api_key=api_key,
+                parent_key=parent_key,
+diff --git a/agentops/client.py b/agentops/client.py
+index 4cd881a..e840131 100644
+--- a/agentops/client.py
++++ b/agentops/client.py
+@@ -76,6 +76,7 @@ class Client(metaclass=MetaClient):
+         self._session: Optional[Session] = None
+         self._worker: Optional[Worker] = None
+         self._tags: Optional[List[str]] = tags
++        self._tags_for_future_session: Optional[List[str]] = tags
+ 
+         self._env_data_opt_out = os.getenv('AGENTOPS_ENV_DATA_OPT_OUT') and os.getenv(
+             'AGENTOPS_ENV_DATA_OPT_OUT').lower() == 'true'
+@@ -93,8 +94,6 @@ class Client(metaclass=MetaClient):
+ 
+         if auto_start_session:
+             self.start_session(tags, self.config, inherited_session_id)
+-        else:
+-            self._tags_for_future_session = tags
+ 
+         if instrument_llm_calls:
+             self.llm_tracker = LlmTracker(self)
+diff --git a/agentops/helpers.py b/agentops/helpers.py
+index 1a8cfca..c10dd5a 100644
+--- a/agentops/helpers.py
++++ b/agentops/helpers.py
+@@ -20,6 +20,10 @@ def singleton(class_):
+             instances[class_] = class_(*args, **kwargs)
+         return instances[class_]
+ 
++    def reset_instance():
++        instances.pop(class_, None)
++
++    getinstance.reset_instance = reset_instance  # type: ignore[attr-defined]
+     return getinstance
+ 
+ 
+diff --git a/agentops/langchain_callback_handler.py b/agentops/langchain_callback_handler.py
+index 65ee9e1..4ac6bd2 100644
+--- a/agentops/langchain_callback_handler.py
++++ b/agentops/langchain_callback_handler.py
+@@ -10,11 +10,9 @@ from langchain_core.messages import BaseMessage
+ 
+ from tenacity import RetryCallState
+ 
+-from agentops import Client as AOClient
+-from agentops import ActionEvent, LLMEvent, ToolEvent, ErrorEvent
+-from agentops.helpers import get_ISO_time
+-
+-from .helpers import debug_print_function_params
++from .client import Client as AOClient
++from .event import ActionEvent, LLMEvent, ToolEvent, ErrorEvent
++from .helpers import get_ISO_time, debug_print_function_params
+ 
+ 
+ class Events:

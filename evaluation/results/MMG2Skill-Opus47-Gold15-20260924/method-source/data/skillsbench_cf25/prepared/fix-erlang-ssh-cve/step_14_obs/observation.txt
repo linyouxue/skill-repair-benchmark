@@ -1,0 +1,67 @@
+Tool: terminal
+Result:
+	    erlang:demonitor(Ref, [flush]),
+	    {error, Reason};
+	{'DOWN', Ref, process, ConnPid, {shutdown, Reason}} ->
+	    {error, Reason};
+	{'DOWN', Ref, process, ConnPid, Reason} ->
+	    {error, Reason}
+    after Timeout ->
+	    erlang:demonitor(Ref, [flush]),
+	    ssh_connection_handler:stop(ConnPid),
+	    {error, timeout}
+    end.
+
+handshake(Msg, #data{starter = User}) ->
+    User ! {self(), Msg}.
+
+%%====================================================================
+%% gen_statem callbacks
+%%====================================================================
+%%------
+[... 2568 characters omitted ...]
+Socket, PeerAddr, Opts),
+                          connection_state = init_connection_record(Role, Socket, Opts)
+                         },
+                NextEvent = {next_event, internal, socket_ready},
+                {next_state, {hello,Role}, D, NextEvent}
+            catch
+                _:{error,Error} -> {stop, {error,Error}};
+                error:Error ->     {stop, {error,Error}}
+            end;
+
+        {error,Error} ->
+            {stop, {shutdown,Error}}
+    end;
+
+handle_event(internal, socket_ready, {hello,_}=StateName, #data{ssh_params = Ssh0} = D) ->
+    VsnMsg = ssh_transport:hello_version_msg(string_version(Ssh0)),
+    send_bytes(VsnMsg, D),
+    case inet:getopts(Socket=D#data.socket, [recbuf]) of
+	{ok, [{recbuf,Size}]} ->
+	    %% Set the socket to the hello text line handling mode:
+	    inet:setopts(Socket, [{packet, line},
+				  {active, once},
+				  % Expecting the version string which might
+				  % be max ?MAX_PROTO_VERSION bytes:
+				  {recbuf, ?MAX_PROTO_VERSION},
+				  {nodelay,true}]),
+            Time = ?GET_OPT(hello_timeout, Ssh0#ssh.opts, infinity),
+	    {keep_state, D#data{inet_initial_recbuf_size=Size}, [{state_timeout,Time,no_hello_received}] };
+
+	Other ->
+            ?call_disconnectfun_and_log_cond("Option return", 
+                                             io_lib:format("Unexpected getopts return:~n  ~p",[Other]),
+                                             StateName, D),
+	    {stop, {shutdown,{unexpected_getopts_return, Other}}}
+    end;
+
+handle_event(internal, {info_line,_Line}, {hello,client}, D) ->
+    %% The server may send info lines to the client before the version_exchange
+    %% RFC4253/4.2
+    inet:setopts(D#data.socket, [{active, once}]),
+    keep_state_and_data;
+
+
+📁 Working directory: /app/workspace
+✅ Exit code: 0

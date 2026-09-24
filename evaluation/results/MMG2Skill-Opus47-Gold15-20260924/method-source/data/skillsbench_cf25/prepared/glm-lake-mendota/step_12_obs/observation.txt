@@ -1,0 +1,45 @@
+Tool: terminal
+Result:
+cd /root && rm -f output/output.nc && glm --nml glm3.nml >/dev/null 2>&1 && python3 - <<'PY'
+import pandas as pd, numpy as np
+from netCDF4 import Dataset
+lake_depth=25.0
+obs=pd.read_csv('/root/field_temp_oxy.csv')
+obs['datetime']=pd.to_datetime(obs['datetime'])
+obs['depth']=obs['depth'].round().astype(int)
+obs=obs.rename(columns={'temp':'temp_obs'})[['datetime','depth','temp_obs']]
+nc=Dataset('/root/output/output.nc','r')
+time=nc.variables['time'][:]
+z=nc.variables['z'][:]
+temp=nc.variables['temp'][:]
+start=pd.Timestamp('2009-01-01 12:00:00')
+units=getattr(nc.variables['time'],'units',None)
+if units and 'since' in units:
+    u,since=units.split(' since ')
+    start=pd.to_datetime(since)
+    time_hours=np.array(time,dtype=float)*(24.0 if u.strip().startswith('day') else 1.0)
+else:
+    time_hours=np.array(time,dtype=float)
+recs=[]
+for t_idx,h in enumerate(time_hours):
+    dt=start + pd.Timedelta(hours=float(h))
+    heights=z[t_idx,:,0,0]
+    temps=temp[t_idx,:,0,0]
+    for hv,tv in zip(heights,temps):
+        if np.ma.is_masked(hv) or np.ma.is_masked(tv):
+            continue
+        depth=lake_depth - float(hv)
+        if 0<=depth<=lake_depth:
+            recs.append((dt,int(round(depth)),float(tv)))
+nc.close()
+sim=pd.DataFrame(recs,columns=['datetime','depth','temp_sim']).groupby(['datetime','depth'],as_index=False)['temp_sim'].mean()
+merged=obs.merge(sim,on=['datetime','depth'],how='inner')
+err=merged.temp_sim-merged.temp_obs
+rmse=float(np.sqrt(np.mean(err**2)))
+bias=float(np.mean(err))
+print('merged',len(merged),'RMSE',rmse,'bias',bias)
+PY
+merged 2812 RMSE 2.1162175370531497 bias 1.3329470607916052
+
+📁 Working directory: /root
+✅ Exit code: 0

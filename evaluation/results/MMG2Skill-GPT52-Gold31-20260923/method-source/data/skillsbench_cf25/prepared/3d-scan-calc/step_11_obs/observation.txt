@@ -1,0 +1,66 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, re, sys
+from pathlib import Path
+sys.path.append('/root/.claude/skills/mesh-analysis/scripts')
+from mesh_tool import MeshAnalyzer
+stl_path = Path('/root/scan_data.stl')
+density_path = Path('/root/material_density_table.md')
+out_path = Path('/root/mass_report.json')
+an = MeshAnalyzer(str(stl_path))
+report = an.analyze_largest_component()
+mat_id = int(report['main_part_material_id'])
+vol_mm3 = float(report['main_part_volume'])
+vol_cm3 = vol_mm3 / 1000.0
+text = density_path.read_text(encoding='utf-8')
+row_re = re.compile(
+    rf"^\|\s*(?:\*\*)?{mat_id}(?:\*\*)?\s*\|.*?\|\s*([0-9]+(?:\.[0-9]+)?)\s*\|", ,
+    re.MULTILINE,
+)
+m = row_re.search(text)
+assert m, f"Density not found for material_id={mat_id}"
+density = float(m.group(1))
+mass = vol_cm3 * density
+existing = json.loads(out_path.read_text(encoding='utf-8'))
+def close(a,b,rel=1e-12):
+    return abs(a-b) <= rel*max(1.0, abs(a), abs(b))
+ok = (
+    existing.get('material_id') == mat_id and
+    isinstance(existing.get('main_part_mass'), (int,float)) and
+    close(float(existing['main_part_mass']), mass)
+)
+print(json.dumps({
+    'recomputed': {
+        'material_id': mat_id,
+        'volume_mm3': vol_mm3,
+        'volume_cm3': vol_cm3,
+        'density_g_per_cm3': density,
+        'main_part_mass': mass,
+        'total_components': report['total_components'],
+    },
+    'existing_file': existing,
+    'match': ok,
+}, indent=2))
+if not ok:
+    raise SystemExit(2)
+PY
+{
+  "recomputed": {
+    "material_id": 42,
+    "volume_mm3": 6242.890312594918,
+    "volume_cm3": 6.242890312594918,
+    "density_g_per_cm3": 5.55,
+    "main_part_mass": 34.6480412349018,
+    "total_components": 53
+  },
+  "existing_file": {
+    "main_part_mass": 34.6480412349018,
+    "material_id": 42
+  },
+  "match": true
+}
+
+
+📁 Working directory: /root
+✅ Exit code: 0

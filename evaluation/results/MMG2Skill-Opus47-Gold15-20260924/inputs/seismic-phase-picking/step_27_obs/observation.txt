@@ -1,0 +1,131 @@
+Tool: file_editor
+Result:
+[File /root/pick.py edited with 3 changes.]
+[begin of edit 1 / 3]
+(content before edit)
+ 67|
+ 68|MERGE_TOL = 10  # samples (0.1s at 100Hz) — cluster picks within tolerance
+-69|MIN_VOTES = 2   # require confirmation from at least this many models per cluster
+ 70|
+ 71|for i, path in enumerate(files):
+(content after edit)
+ 67|
+ 68|MERGE_TOL = 10  # samples (0.1s at 100Hz) — cluster picks within tolerance
++69|MIN_VOTES = 2
++70|
++71|# Physics/window priors (data is clearly event-centered near sample ~6000):
++72|# - Restrict picks to a plausible event window
++73|# - Enforce P < S at same station, with realistic S-P separation for local events
++74|EVENT_WIN = (3000, 9000)       # discard picks outside this window
++75|MIN_SP_GAP = 20                # 0.2 s
++76|MAX_SP_GAP = 800               # 8 s (~ up to ~60 km distance)
++77|
++78|def cluster_and_score(plist):
++79|    """Cluster picks within MERGE_TOL and return list of (best_idx, best_prob, n_votes)."""
++80|    if not plist:
++81|        return []
++82|    plist = sorted(plist)
++83|    clusters = [[plist[0]]]
++84|    for item in plist[1:]:
++85|        if item[0] - clusters[-1][-1][0] <= MERGE_TOL:
++86|            clusters[-1].append(item)
++87|        else:
++88|            clusters.append([item])
++89|    out = []
++90|    for cluster in clusters:
++91|        distinct_models = {c[2] for c in cluster}
++92|        best = max(cluster, key=lambda x: x[1])
++93|        out.append((best[0], best[1], len(distinct_models)))
++94|    return out
+ 95|
+ 96|for i, path in enumerate(files):
+[end of edit 1 / 3]
+-------------------------
+[begin of edit 2 / 3]
+(content before edit)
+  73|    stream, t0, dt = load_stream(path)
+  74|
+- 75|    all_picks = {"P": [], "S": []}  # each pick: (idx, prob, model_name)
+  76|    for name, m in models:
+  77|        try:
+(content after edit)
+  98|    stream, t0, dt = load_stream(path)
+  99|
++100|    all_picks = {"P": [], "S": []}
+ 101|    for name, m in models:
+ 102|        try:
+[end of edit 2 / 3]
+-------------------------
+[begin of edit 3 / 3]
+(content before edit)
+  84|            if idx < 0 or idx >= 12000:
+  85|                continue
+- 86|            prob = getattr(p, "peak_value", 1.0) or 1.0
+  87|            if p.phase in all_picks:
+- 88|                all_picks[p.phase].append((idx, float(prob), name))
+  89|
+- 90|    # Cluster picks by proximity; require agreement from >= MIN_VOTES models.
+- 91|    # This favors precision (agreement) while retaining ensemble recall.
+- 92|    for phase, plist in all_picks.items():
+- 93|        if not plist:
+- 94|            continue
+- 95|        plist.sort()
+- 96|        clusters = [[plist[0]]]
+- 97|        for item in plist[1:]:
+- 98|            if item[0] - clusters[-1][-1][0] <= MERGE_TOL:
+- 99|                clusters[-1].append(item)
+-100|            else:
+-101|                clusters.append([item])
+-102|        for cluster in clusters:
+-103|            distinct_models = {c[2] for c in cluster}
+-104|            best = max(cluster, key=lambda x: x[1])
+-105|            # Accept if either (a) confirmed by >=2 models, or
+-106|            # (b) high-confidence single-model pick.
+-107|            if len(distinct_models) >= MIN_VOTES or best[1] >= 0.5:
+-108|                rows.append((fname, phase, best[0]))
+ 109|
+ 110|    if (i + 1) % 20 == 0:
+(content after edit)
+ 109|            if idx < 0 or idx >= 12000:
+ 110|                continue
++111|            if idx < EVENT_WIN[0] or idx > EVENT_WIN[1]:
++112|                continue
++113|            prob = float(getattr(p, "peak_value", 1.0) or 1.0)
+ 114|            if p.phase in all_picks:
++115|                all_picks[p.phase].append((idx, prob, name))
+ 116|
++117|    p_cands = cluster_and_score(all_picks["P"])
++118|    s_cands = cluster_and_score(all_picks["S"])
++119|
++120|    def accept(cand):
++121|        idx, prob, votes = cand
++122|        return votes >= MIN_VOTES or prob >= 0.5
++123|
++124|    p_cands = [c for c in p_cands if accept(c)]
++125|    s_cands = [c for c in s_cands if accept(c)]
++126|
++127|    # S: pick single best (highest score = votes*prob) — S is the more reliable anchor
++128|    s_best = None
++129|    if s_cands:
++130|        s_best = max(s_cands, key=lambda c: (c[2], c[1]))
++131|        rows.append((fname, "S", s_best[0]))
++132|
++133|    # P: constrain to be plausibly before S with realistic S-P gap.
++134|    # If we have S: keep P candidates in [S - MAX_SP_GAP, S - MIN_SP_GAP], choose best.
++135|    # If no S: allow one high-confidence P candidate.
++136|    if p_cands:
++137|        if s_best is not None:
++138|            s_idx = s_best[0]
++139|            valid = [c for c in p_cands
++140|                     if s_idx - MAX_SP_GAP <= c[0] <= s_idx - MIN_SP_GAP]
++141|            if valid:
++142|                pbest = max(valid, key=lambda c: (c[2], c[1]))
++143|                rows.append((fname, "P", pbest[0]))
++144|        else:
++145|            # No S anchor: only keep the single strongest P.
++146|            pbest = max(p_cands, key=lambda c: (c[2], c[1]))
++147|            if pbest[2] >= MIN_VOTES or pbest[1] >= 0.5:
++148|                rows.append((fname, "P", pbest[0]))
+ 149|
+ 150|    if (i + 1) % 20 == 0:
+[end of edit 3 / 3]

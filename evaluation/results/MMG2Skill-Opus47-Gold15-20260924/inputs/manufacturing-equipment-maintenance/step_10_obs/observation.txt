@@ -1,0 +1,276 @@
+Tool: file_editor
+Result:
+[File /app/solve.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+-1|
+(content after edit)
++1|"""
++2|Reflow profile compliance computations from handbook + MES + thermocouples.
++3|
++4|Handbook-derived constants (from /app/data/handbook.pdf):
++5|- Preheat region: 100 C to 150 C (temp band)
++6|- Preheat ramp limit: 2 C/s (strict "less than")
++7|- Wetting/TAL window: 30 to 60 seconds above solder melting/liquidus
++8|- Peak margin above liquidus: +20 C ("must be exceeded by approximately 20 C")
++9|"""
++10|import os, json, math
++11|import pandas as pd
++12|
++13|DATA_DIR = "/app/data"
++14|OUT_DIR = "/app/output"
++15|
++16|# ---- Handbook cfg ----
++17|PREHEAT_TMIN = 100.0
++18|PREHEAT_TMAX = 150.0
++19|RAMP_LIMIT = 2.0        # C/s
++20|TAL_MIN_S = 30.0
++21|TAL_MAX_S = 60.0
++22|PEAK_MARGIN = 20.0      # C above liquidus
++23|
++24|def r2(x):
++25|    if x is None:
++26|        return None
++27|    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
++28|        return None
++29|    return float(round(float(x), 2))
++30|
++31|def max_slope_in_temp_band(g, tmin, tmax):
++32|    g = g.sort_values("time_s")
++33|    t = g["time_s"].to_numpy(dtype=float)
++34|    y = g["temp_c"].to_numpy(dtype=float)
++35|    best = None
++36|    for i in range(1, len(g)):
++37|        dt = t[i] - t[i-1]
++38|        if dt <= 0:
++39|            continue
++40|        if (tmin <= y[i-1] <= tmax) and (tmin <= y[i] <= tmax):
++41|            s = (y[i] - y[i-1]) / dt
++42|            if best is None or s > best:
++43|                best = s
++44|    return best
++45|
++46|def time_above_threshold_s(g, thr):
++47|    g = g.sort_values("time_s")
++48|    t = g["time_s"].to_numpy(dtype=float)
++49|    y = g["temp_c"].to_numpy(dtype=float)
++50|    total = 0.0
++51|    for i in range(1, len(g)):
++52|        t0, t1 = t[i-1], t[i]
++53|        y0, y1 = y[i-1], y[i]
++54|        if t1 <= t0:
++55|            continue
++56|        if y0 > thr and y1 > thr:
++57|            total += (t1 - t0)
++58|            continue
++59|        crosses = (y0 <= thr < y1) or (y1 <= thr < y0)
++60|        if crosses and (y1 != y0):
++61|            frac = (thr - y0) / (y1 - y0)
++62|            tcross = t0 + frac * (t1 - t0)
++63|            if y0 <= thr and y1 > thr:
++64|                total += (t1 - tcross)
++65|            else:
++66|                total += (tcross - t0)
++67|    return total
++68|
++69|# ---- Load ----
++70|runs = pd.read_csv(os.path.join(DATA_DIR, "mes_log.csv"))
++71|tc   = pd.read_csv(os.path.join(DATA_DIR, "thermocouples.csv"))
++72|defects = pd.read_csv(os.path.join(DATA_DIR, "test_defects.csv"))
++73|
++74|runs["run_id"] = runs["run_id"].astype(str)
++75|tc["run_id"]   = tc["run_id"].astype(str)
++76|tc["tc_id"]    = tc["tc_id"].astype(str)
++77|defects["run_id"] = defects["run_id"].astype(str)
++78|
++79|runs = runs.sort_values("run_id", kind="mergesort")
++80|tc   = tc.sort_values(["run_id","tc_id","time_s"], kind="mergesort")
++81|
++82|all_run_ids = sorted(runs["run_id"].unique())
++83|tc_run_ids = set(tc["run_id"].unique())
++84|
++85|# =========================================================
++86|# Q1: Max preheat ramp per run (temp band 100-150 C)
++87|#     Worst-case sensor = MAX ramp across TCs (stresses hardware)
++88|#     Tie-break: smallest tc_id lex.
++89|# =========================================================
++90|max_ramp_by_run = {}
++91|violating_runs = []
++92|
++93|for run_id in all_run_ids:
++94|    if run_id not in tc_run_ids:
++95|        max_ramp_by_run[run_id] = {"tc_id": None, "max_preheat_ramp_c_per_s": None}
++96|        # No data -> can't confirm compliance; not adding to violators.
++97|        continue
++98|    g_run = tc[tc["run_id"] == run_id]
++99|    items = []
++100|    for tc_id in sorted(g_run["tc_id"].unique()):
++101|        g = g_run[g_run["tc_id"] == tc_id]
++102|        s = max_slope_in_temp_band(g, PREHEAT_TMIN, PREHEAT_TMAX)
++103|        if s is not None:
++104|            items.append((s, tc_id))
++105|    if not items:
++106|        max_ramp_by_run[run_id] = {"tc_id": None, "max_preheat_ramp_c_per_s": None}
++107|        continue
++108|    # Choose max ramp; tie-break by smallest tc_id lex.
++109|    items.sort(key=lambda x: (-x[0], x[1]))
++110|    best_val, best_tc = items[0]
++111|    max_ramp_by_run[run_id] = {
++112|        "tc_id": best_tc,
++113|        "max_preheat_ramp_c_per_s": r2(best_val),
++114|    }
++115|    if best_val >= RAMP_LIMIT:  # handbook: "less than 2 C/s" -> >= 2 violates
++116|        violating_runs.append(run_id)
++117|
++118|q1 = {
++119|    "ramp_rate_limit_c_per_s": RAMP_LIMIT,
++120|    "violating_runs": sorted(violating_runs),
++121|    "max_ramp_by_run": {k: max_ramp_by_run[k] for k in sorted(max_ramp_by_run)},
++122|}
++123|with open(os.path.join(OUT_DIR, "q01.json"), "w") as f:
++124|    json.dump(q1, f, indent=2)
++125|
++126|# =========================================================
++127|# Q2: TAL per run using per-run solder_liquidus_c.
++128|#     Worst-case for TAL = coldest sensor -> MIN TAL across TCs.
++129|#     Tie-break: smallest tc_id.
++130|# =========================================================
++131|q2 = []
++132|runs_indexed = runs.set_index("run_id")
++133|
++134|for run_id in all_run_ids:
++135|    liq = float(runs_indexed.loc[run_id, "solder_liquidus_c"])
++136|    if run_id not in tc_run_ids:
++137|        q2.append({
++138|            "run_id": run_id,
++139|            "tc_id": None,
++140|            "tal_s": None,
++141|            "required_min_tal_s": TAL_MIN_S,
++142|            "required_max_tal_s": TAL_MAX_S,
++143|            "status": "non-compliant",
++144|        })
++145|        continue
++146|    g_run = tc[tc["run_id"] == run_id]
++147|    items = []
++148|    for tc_id in sorted(g_run["tc_id"].unique()):
++149|        g = g_run[g_run["tc_id"] == tc_id]
++150|        tal = time_above_threshold_s(g, liq)
++151|        items.append((tal, tc_id))
++152|    # coldest sensor => min TAL, smallest tc_id on tie
++153|    items.sort(key=lambda x: (x[0], x[1]))
++154|    tal_val, tal_tc = items[0]
++155|    status = "compliant" if (TAL_MIN_S <= tal_val <= TAL_MAX_S) else "non-compliant"
++156|    q2.append({
++157|        "run_id": run_id,
++158|        "tc_id": tal_tc,
++159|        "tal_s": r2(tal_val),
++160|        "required_min_tal_s": TAL_MIN_S,
++161|        "required_max_tal_s": TAL_MAX_S,
++162|        "status": status,
++163|    })
++164|
++165|q2 = sorted(q2, key=lambda x: x["run_id"])
++166|with open(os.path.join(OUT_DIR, "q02.json"), "w") as f:
++167|    json.dump(q2, f, indent=2)
++168|
++169|# =========================================================
++170|# Q3: Peak temperature per run.
++171|#     Handbook: peak must exceed liquidus by ~20 C.
++172|#     Worst-case = coldest sensor => MIN peak across TCs.
++173|#     Tie-break: smallest tc_id.
++174|#     No TC data => failing.
++175|# =========================================================
++176|failing_runs = []
++177|min_peak_by_run = {}
++178|for run_id in all_run_ids:
++179|    liq = float(runs_indexed.loc[run_id, "solder_liquidus_c"])
++180|    required_min_peak = liq + PEAK_MARGIN
++181|    if run_id not in tc_run_ids:
++182|        min_peak_by_run[run_id] = {
++183|            "tc_id": None,
++184|            "peak_temp_c": None,
++185|            "required_min_peak_c": r2(required_min_peak),
++186|        }
++187|        failing_runs.append(run_id)
++188|        continue
++189|    g_run = tc[tc["run_id"] == run_id]
++190|    items = []
++191|    for tc_id in sorted(g_run["tc_id"].unique()):
++192|        peak = float(g_run[g_run["tc_id"] == tc_id]["temp_c"].max())
++193|        items.append((peak, tc_id))
++194|    items.sort(key=lambda x: (x[0], x[1]))  # min peak, smallest tc_id
++195|    peak_val, peak_tc = items[0]
++196|    min_peak_by_run[run_id] = {
++197|        "tc_id": peak_tc,
++198|        "peak_temp_c": r2(peak_val),
++199|        "required_min_peak_c": r2(required_min_peak),
++200|    }
++201|    if peak_val < required_min_peak:
++202|        failing_runs.append(run_id)
++203|
++204|q3 = {
++205|    "failing_runs": sorted(failing_runs),
++206|    "min_peak_by_run": {k: min_peak_by_run[k] for k in sorted(min_peak_by_run)},
++207|}
++208|with open(os.path.join(OUT_DIR, "q03.json"), "w") as f:
++209|    json.dump(q3, f, indent=2)
++210|
++211|# =========================================================
++212|# Q4: Conveyor speed feasibility.
++213|#     Handbook dwell rule: wetting time <= 60 s (max TAL bound).
++214|#     Board geometry from MES: board_length_cm.
++215|#     required_min_speed_cm_min = (board_length_cm / t_max_s) * 60
++216|#       -> ensures board does not linger longer than 60 s at any point.
++217|# =========================================================
++218|q4 = []
++219|for run_id in all_run_ids:
++220|    row = runs_indexed.loc[run_id]
++221|    L = float(row["board_length_cm"])
++222|    actual = float(row["conveyor_speed_cm_min"])
++223|    required_min = (L / TAL_MAX_S) * 60.0
++224|    meets = actual >= required_min
++225|    q4.append({
++226|        "run_id": run_id,
++227|        "required_min_speed_cm_min": r2(required_min),
++228|        "actual_speed_cm_min": r2(actual),
++229|        "meets": bool(meets),
++230|    })
++231|q4 = sorted(q4, key=lambda x: x["run_id"])
++232|with open(os.path.join(OUT_DIR, "q04.json"), "w") as f:
++233|    json.dump(q4, f, indent=2)
++234|
++235|# =========================================================
++236|# Q5: Best run per board_family based on quality and efficiency.
++237|#     Quality  = fp_yield_pct  (higher better)
++238|#     Efficiency = boards_per_min (higher better)
++239|#     Rank by (quality desc, efficiency desc, run_id asc).
++240|# =========================================================
++241|summary = defects[defects["inspection_stage"] == "SUMMARY"][["run_id","fp_yield_pct"]].copy()
++242|summary = summary.drop_duplicates(subset=["run_id"])
++243|merged = runs.merge(summary, on="run_id", how="left")
++244|
++245|q5 = []
++246|for family, grp in merged.groupby("board_family"):
++247|    ranked = grp.sort_values(
++248|        by=["fp_yield_pct","boards_per_min","run_id"],
++249|        ascending=[False, False, True],
++250|        kind="mergesort",
++251|    )
++252|    run_ids = ranked["run_id"].tolist()
++253|    q5.append({
++254|        "board_family": family,
++255|        "best_run_id": run_ids[0],
++256|        "runner_up_run_ids": run_ids[1:],
++257|    })
++258|q5 = sorted(q5, key=lambda x: x["board_family"])
++259|with open(os.path.join(OUT_DIR, "q05.json"), "w") as f:
++260|    json.dump(q5, f, indent=2)
++261|
++262|# Print summary
++263|print("Q1 violating_runs:", q1["violating_runs"])
++264|print("Q3 failing_runs:", q3["failing_runs"])
++265|print("Q4 non-meeting:", [x["run_id"] for x in q4 if not x["meets"]])
++266|print("Q5 families:", [x["board_family"] for x in q5])
++267|print("Done.")
++268|
+[end of edit 1 / 1]

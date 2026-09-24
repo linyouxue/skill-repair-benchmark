@@ -1,0 +1,77 @@
+Tool: terminal
+Result:
+1437:start_cli(#connection{options = Options, 
+1807:            case start_cli(C0, ChId) of
+                {ok,LPort} when WantReply==true ->
+                    {[{connection_reply, request_success_msg(<<?UINT32(LPort)>>)}], Connection};
+
+                {error,_} when WantReply==true ->
+                    {[{connection_reply, request_failure_msg()}], Connection};
+
+                _ when WantReply==true ->
+                    {[{connection_reply, request_failure_msg()}], Connection};
+
+                _ ->
+                    {[], Connection}
+            end
+    end;
+
+
+[... 10124 characters omitted ...]
+n WindowSize =< PacketSize ->
+    <<Msg1:WindowSize/binary, Msg2/binary>> = Data,
+    {WindowSize - WindowSize, [{Type, Msg1} | Acc], {Type, Msg2}};
+handle_send_window({Type, Data}, _, PacketSize, WindowSize, Acc) ->
+    <<Msg1:PacketSize/binary, Msg2/binary>> = Data,
+    {WindowSize - PacketSize, [{Type, Msg1} | Acc], {Type, Msg2}}.
+
+%%%----------------------------------------------------------------
+%%%
+%%% Flow control
+%%% 
+
+flow_control(Channel, Cache) ->
+    flow_control([window_adjusted], Channel, Cache).
+
+flow_control([], Channel, Cache) ->
+    ssh_client_channel:cache_update(Cache, Channel),
+    [];
+flow_control([_|_], #channel{flow_control = From,
+			     send_buf = Buffer} = Channel, Cache) when From =/= undefined ->
+    case queue:is_empty(Buffer) of
+	true ->
+	    ssh_client_channel:cache_update(Cache, Channel#channel{flow_control = undefined}),
+	    [{flow_control, Cache, Channel, From, ok}];
+	false ->
+	    []
+    end;
+flow_control(_,_,_) ->
+    [].
+
+%%%----------------------------------------------------------------
+%%%
+%%% Pseudo terminal stuff
+%%% 
+
+pty_req(ConnectionRef, Channel, Term, Width, Height,
+	 PixWidth, PixHeight, PtyOpts, TimeOut) ->
+    ssh_connection_handler:request(ConnectionRef,
+				   Channel, "pty-req", true,
+				   [?string(Term),
+				    ?uint32(Width), ?uint32(Height),
+				    ?uint32(PixWidth),?uint32(PixHeight),
+				    encode_pty_opts(PtyOpts)], TimeOut).
+
+pty_default_dimensions(Dimension, TermData) ->
+    case proplists:get_value(Dimension, TermData, 0) of
+	N when is_integer(N), N > 0 ->
+	    {N, 0};
+	_ ->
+            PixelDim = list_to_atom("pixel_" ++ atom_to_list(Dimension)),
+	    case proplists:get_value(PixelDim, TermData, 0) of
+		N when is_integer(N), N > 0 ->
+		    {0, N};
+
+
+📁 Working directory: /app/workspace
+✅ Exit code: 0

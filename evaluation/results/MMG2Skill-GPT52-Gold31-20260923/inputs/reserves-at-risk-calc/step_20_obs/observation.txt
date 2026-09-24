@@ -1,0 +1,119 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import numbers
+TEMPLATE='/root/data/test-rar.xlsx'
+IMF='/root/data/imf/external-data.xlsx'
+OUT='/root/output/rar_result.xlsx'
+# --- Load IMF gold price series ---
+imf_wb=load_workbook(IMF, data_only=True)
+imf_ws=imf_wb['External']
+gold_col=None
+gold_desc_sub='Gold, Fixing Committee of the London Bullion Market Association'
+for c in range(1, imf_ws.max_column+1):
+    v=imf_ws.cell(2,c).value
+    if isinstance(v,str) and gold_desc_sub in v:
+        gold_col=c
+        gold_desc=v
+        break
+if gold_col is None:
+    raise SystemExit('Could not find gold series column in IMF file')
+# data rows start at row 5 (based on file structure)
+price_by_period={}
+for r in range(5, imf_ws.max_row+1):
+    period=imf_ws.cell(r,1).value
+    if not isinstance(period,str) or 'M' not in period:
+        continue
+    val=imf_ws.cell(r,gold_col).value
+    if val is None:
+        continue
+    price_by_period[period]=float(val)
+# --- Load template workbook ---
+wb=load_workbook(TEMPLATE)
+ws_gold=wb['Gold price']
+# Fill prices
+for r in range(2, ws_gold.max_row+1):
+    period=ws_gold.cell(r,1).value
+    if isinstance(period,str) and period in price_by_period:
+        cell=ws_gold.cell(r,2)
+        cell.value=price_by_period[period]
+        cell.number_format='0.00'
+# Add formulas for log returns and vols
+for r in range(2, ws_gold.max_row+1):
+    # C: monthly log return (percent)
+    if r == 2:
+        ws_gold.cell(r,3).value = ''
+    else:
+        ws_gold.cell(r,3).value = f'=IF(OR(B{r}="",B{r-1}=""),"",LN(B{r}/B{r-1})*100)'
+    ws_gold.cell(r,3).number_format='0.00'
+    # D: 3-month volatility of monthly log returns (percent)
+    if r < 5:
+        ws_gold.cell(r,4).value = ''
+    else:
+        ws_gold.cell(r,4).value = f'=IF(COUNT(C{r-2}:C{r})<3,"",STDEV.S(C{r-2}:C{r}))'
+    ws_gold.cell(r,4).number_format='0.00'
+    # E: 12-month volatility of monthly log returns (percent)
+    if r < 14:
+        ws_gold.cell(r,5).value = ''
+    else:
+        ws_gold.cell(r,5).value = f'=IF(COUNT(C{r-11}:C{r})<12,"",STDEV.S(C{r-11}:C{r}))'
+    ws_gold.cell(r,5).number_format='0.00'
+# --- Answer sheet ---
+ws_ans=wb['Answer']
+# Step 1
+ws_ans['C3'].value = '=NORM.S.INV(0.95)'
+ws_ans['C4'].value = '=INDEX(\'Gold price\'!D:D, MATCH("2025M9",\'Gold price\'!A:A,0))'
+ws_ans['C5'].value = '=C4*SQRT(12)'
+ws_ans['C6'].value = '=INDEX(\'Gold price\'!E:E, MATCH("2025M9",\'Gold price\'!A:A,0))'
+for addr in ['C3','C4','C5','C6']:
+    ws_ans[addr].number_format='0.000'
+# Helper: Jan-Sep 2025 avg gold price (embedded formula fragment)
+avg_2025_jan_sep = 'AVERAGE(INDEX(\'Gold price\'!$B:$B, MATCH("2025M1",\'Gold price\'!$A:$A,0)):INDEX(\'Gold price\'!$B:$B, MATCH("2025M9",\'Gold price\'!$A:$A,0)))'
+# Step 2 (place countries horizontally starting at column C)
+step2_cols = ['C','D','E','F','G','H']
+step2_countries = ['Belarus','Georgia','Uzbekistan','Czechia','Slovakia','Latvia']
+for col, country in zip(step2_cols, step2_countries):
+    ws_ans[f'{col}11'].value = country
+# Values (millions USD)
+ws_ans['C12'].value = '=Value!D18'
+ws_ans['D12'].value = '=Value!F18'
+ws_ans['E12'].value = f'=Volume!F18*({avg_2025_jan_sep})'
+ws_ans['F12'].value = f'=Volume!G18*({avg_2025_jan_sep})'
+ws_ans['G12'].value = f'=Volume!H18*({avg_2025_jan_sep})'
+ws_ans['H12'].value = f'=Volume!I18*({avg_2025_jan_sep})'
+for col in step2_cols:
+    ws_ans[f'{col}12'].number_format='0.0'
+# Exposure: 95% one-sided shock over 3-month horizon
+shock_3m = '($C$3*$C$5*SQRT(3/12))/100'
+for col in step2_cols:
+    ws_ans[f'{col}13'].value = f'=IF({col}12="","",{col}12*{shock_3m})'
+    ws_ans[f'{col}13'].number_format='0.0'
+# Step 3 (exclude Slovakia if Total Reserves missing)
+step3_cols = ['C','D','E','F','G']
+# map from step2 columns to step3 columns (skip Slovakia at step2 G)
+step3_from_step2 = {'C':'C','D':'D','E':'E','F':'F','G':'H'}  # G in step3 comes from H in step2 (Latvia)
+for col3, col2 in step3_from_step2.items():
+    ws_ans[f'{col3}20'].value = f'={col2}11'
+    ws_ans[f'{col3}21'].value = f'={col2}12'
+    ws_ans[f'{col3}22'].value = f'={col2}13'
+    ws_ans[f'{col3}21'].number_format='0.0'
+    ws_ans[f'{col3}22'].number_format='0.0'
+# Total reserves lookup (2025 row is row 18)
+for col in step3_cols:
+    ws_ans[f'{col}23'].value = f'=IFERROR(INDEX(\'Total Reserves\'!$18:$18, MATCH("*"&{col}20&"*",\'Total Reserves\'!$1:$1,0)),"")'
+    ws_ans[f'{col}23'].number_format='0.0'
+# RaR as percent of total reserves
+for col in step3_cols:
+    ws_ans[f'{col}24'].value = f'=IF({col}23="","",{col}22/{col}23)'
+    ws_ans[f'{col}24'].number_format='0.0%'
+# Save
+wb.save(OUT)
+print('Wrote',OUT)
+PY
+Wrote /root/output/rar_result.xlsx
+
+
+📁 Working directory: /root
+✅ Exit code: 0

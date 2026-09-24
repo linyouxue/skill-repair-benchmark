@@ -1,0 +1,42 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+fn='/root/data/BG.NEG..DP.0343655.npz'
+z=np.load(fn, allow_pickle=True)
+x=z['data'].astype('float32')
+dt=float(z['dt']); sr=1/dt
+chs=str(z['channels']).split(',')
+stime=UTCDateTime(str(z.get('start_time','1970-01-01T00:00:00Z')))
+for factor in [1,1e8,1e10,1e12,1e14]:
+    st=Stream()
+    for i,ch in enumerate(chs):
+        tr=Trace(data=(x[:,i]*factor).astype('float32'))
+        tr.stats.network=str(z.get('network','XX'))
+        tr.stats.station=str(z.get('station','STA'))
+        tr.stats.location=str(z.get('location_code',''))
+        tr.stats.channel=ch
+        tr.stats.starttime=stime
+        tr.stats.sampling_rate=sr
+        st+=tr
+    model=sbm.PhaseNet.from_pretrained('original')
+    ann=model.annotate(st)
+    pmax=float(ann.select(channel='*PhaseNet_P')[0].data.max())
+    smax=float(ann.select(channel='*PhaseNet_S')[0].data.max())
+    out=model.classify(st, P_threshold=0.3, S_threshold=0.3)
+    print('factor',factor,'input_std',float((x*factor).std()),'Pmax',pmax,'Smax',smax,'num_picks',len(out.picks))
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+factor 1 input_std 1.3328260360206652e-15 Pmax 8.798705493973102e-06 Smax 7.710418117312656e-07 num_picks 0
+factor 100000000.0 input_std 1.3328261161404953e-07 Pmax 0.9742729663848877 Smax 0.864421010017395 num_picks 2
+factor 10000000000.0 input_std 1.3328261047718115e-05 Pmax 0.9742658138275146 Smax 0.864418089389801 num_picks 2
+factor 1000000000000.0 input_std 0.001332826097495854 Pmax 0.9742658138275146 Smax 0.8644180297851562 num_picks 2
+factor 100000000000000.0 input_std 0.1332826167345047 Pmax 0.9742658138275146 Smax 0.8644180297851562 num_picks 2
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

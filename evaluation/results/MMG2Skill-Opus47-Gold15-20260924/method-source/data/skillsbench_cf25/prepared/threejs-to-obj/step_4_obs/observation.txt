@@ -1,0 +1,82 @@
+Tool: file_editor
+Result:
+[File /root/scripts/export_object_obj.mjs edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import fs from 'node:fs';
++2|import path from 'node:path';
+ 3|
++4|import * as THREE from 'three';
++5|import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
++6|import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
++7|
++8|import { createScene } from '../data/object.js';
++9|
++10|const OUTPUT_PATH = '/root/output/object.obj';
++11|
++12|function flipNonIndexedTriangles(geometry) {
++13|  con
+[... 2147 characters omitted ...]
+turn;
++86|
++87|    const worldDet = obj.matrixWorld.determinant();
++88|    const flipWinding = worldDet < 0;
++89|    const transform = axisMatrix.clone().multiply(obj.matrixWorld);
++90|
++91|    baked.push(
++92|      bakeGeometry({
++93|        baseGeometry: obj.geometry,
++94|        transform,
++95|        flipWinding,
++96|      }),
++97|    );
++98|  });
++99|
++100|  return baked;
++101|}
++102|
++103|function exportToObj(geometries, outPath) {
++104|  const exporter = new OBJExporter();
++105|
++106|  const merged = mergeGeometries(geometries, false);
++107|
++108|  let exportObject;
++109|  if (merged) {
++110|    exportObject = new THREE.Mesh(merged, new THREE.MeshNormalMaterial());
++111|    exportObject.name = 'object';
++112|  } else {
++113|    const group = new THREE.Group();
++114|    group.name = 'object';
++115|
++116|    geometries.forEach((g, idx) => {
++117|      const m = new THREE.Mesh(g, new THREE.MeshNormalMaterial());
++118|      m.name = `mesh_${idx}`;
++119|      group.add(m);
++120|    });
++121|
++122|    exportObject = group;
++123|  }
++124|
++125|  const objText = exporter.parse(exportObject);
++126|  fs.mkdirSync(path.dirname(outPath), { recursive: true });
++127|  fs.writeFileSync(outPath, objText, 'utf8');
++128|}
++129|
++130|function main() {
++131|  const root = createScene();
++132|
++133|  // Blender is Z-up. Per request, rotate by -90 degrees around X.
++134|  const axisMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
++135|
++136|  const geometries = collectBakedGeometries(root, axisMatrix);
++137|  if (geometries.length === 0) throw new Error('No mesh geometry found to export.');
++138|
++139|  exportToObj(geometries, OUTPUT_PATH);
++140|  console.log(`Wrote OBJ: ${OUTPUT_PATH} (meshes baked in world space, Z-up).`);
++141|}
++142|
++143|main();
++144|
+[end of edit 1 / 1]

@@ -1,0 +1,45 @@
+Tool: file_editor
+Result:
+[File /root/pick.py edited with 2 changes.]
+[begin of edit 1 / 2]
+(content before edit)
+ 33|def load_stream(path):
+ 34|    d = np.load(path, allow_pickle=True)
+-35|    data = d["data"].astype(np.float64) * SCALE  # (12000, 3)
+ 36|    dt = float(d["dt"])
+ 37|    channels = str(d["channels"]).split(",")
+(content after edit)
+ 33|def load_stream(path):
+ 34|    d = np.load(path, allow_pickle=True)
++35|    raw = d["data"].astype(np.float64) * SCALE  # (12000, 3) with unused columns zero-padded
+ 36|    dt = float(d["dt"])
+ 37|    channels = str(d["channels"]).split(",")
+[end of edit 1 / 2]
+-------------------------
+[begin of edit 2 / 2]
+(content before edit)
+ 43|    except Exception:
+ 44|        starttime = UTCDateTime(0)
+ 45|    traces = []
+-46|    for i, ch in enumerate(channels):
+-47|        tr = Trace(data=np.ascontiguousarray(data[:, i]))
+ 48|        tr.stats.network = network
+ 49|        tr.stats.station = station
+(content after edit)
+ 43|    except Exception:
+ 44|        starttime = UTCDateTime(0)
++45|
++46|    # Some files are single/two-component (e.g. NC.*.EHZ) but stored as (12000, 3)
++47|    # with zero-padded columns. The channel names in `channels` correspond in order
++48|    # to the non-zero data columns. Extract only non-zero columns.
++49|    nonzero_cols = [c for c in range(raw.shape[1]) if np.any(raw[:, c] != 0)]
++50|    if len(nonzero_cols) != len(channels):
++51|        # Fall back: assume last len(channels) columns
++52|        nonzero_cols = list(range(raw.shape[1] - len(channels), raw.shape[1]))
++53|
+ 54|    traces = []
++55|    for ch, col in zip(channels, nonzero_cols):
++56|        tr = Trace(data=np.ascontiguousarray(raw[:, col]))
+ 57|        tr.stats.network = network
+ 58|        tr.stats.station = station
+[end of edit 2 / 2]

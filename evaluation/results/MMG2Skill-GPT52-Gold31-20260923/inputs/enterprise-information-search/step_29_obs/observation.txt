@@ -1,0 +1,39 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json,re
+from datetime import datetime
+p='/root/DATA/products/PersonalizeForce.json'
+with open(p) as f: data=json.load(f)
+entries=data['slack']
+comp=re.compile(r"\b(PersonaAI|SmartSuggest|TailorAI)\b",re.I)
+demo=re.compile(r"demo available here|/demo\b",re.I)
+# extract insight messages (exclude short demo shares)
+ins=[]
+for e in entries:
+    for obj in [e.get('Message',{}).get('User',{})] + [r.get('User',{}) for r in (e.get('ThreadReplies') or [])]:
+        uid=obj.get('userId')
+        txt=(obj.get('text') or '').strip()
+        mid=obj.get('utterranceID')
+        if uid and uid.startswith('eid_') and comp.search(txt):
+            if demo.search(txt) and len(txt)<120:
+                continue
+            ins.append((uid,mid,txt))
+def parse_mid(mid):
+    # format YYYYMMDD-idx-hash
+    try:
+        return datetime.strptime(mid.split('-')[0],'%Y%m%d')
+    except Exception:
+        return datetime.max
+first={}
+for uid,mid,txt in ins:
+    d=parse_mid(mid)
+    first[uid]=min(first.get(uid,datetime.max), d)
+ordered=sorted(first.items(), key=lambda x:x[1])
+print('ordered uids:',[u for u,_ in ordered])
+PY
+ordered uids: ['eid_c9c3d8d5', 'eid_5318af37', 'eid_d2f0f99a', 'eid_2d8eff4d', 'eid_fce6544f', 'eid_caa2e58d', 'eid_a253c65a']
+
+
+📁 Working directory: /root
+✅ Exit code: 0

@@ -1,0 +1,42 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+fn=[f for f in sorted(glob.glob('/root/data/*.npz')) if 'NC.C029.01.HN.0335084' in f][0]
+z=np.load(fn, allow_pickle=True)
+data=z['data']; dt=float(z['dt']); sr=1/dt
+chs=str(z['channels']).split(',')
+stime=UTCDateTime(str(z.get('start_time','1970-01-01T00:00:00Z')))
+st=Stream()
+for i,ch in enumerate(chs):
+    tr=Trace(data=data[:,i].astype('float32'))
+    tr.stats.network=str(z.get('network','XX'))
+    tr.stats.station=str(z.get('station','STA'))
+    tr.stats.location=str(z.get('location_code',''))
+    tr.stats.channel=ch
+    tr.stats.starttime=stime
+    tr.stats.sampling_rate=sr
+    st+=tr
+model=sbm.PhaseNet.from_pretrained('original')
+out=model.classify(st, P_threshold=0.05, S_threshold=0.05)
+print('file',fn.split('/')[-1])
+print('num picks',len(out.picks))
+for p in out.picks:
+    rel=(p.time - stime)
+    idx=round(rel*sr)
+    print(p.phase,'prob',float(p.probability),'time',p.time,'rel_s',float(rel),'idx',idx)
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+file NC.C029.01.HN.0335084.npz
+num picks 6
+Traceback (most recent call last):
+  File "<stdin>", line 27, in <module>
+AttributeError: 'Pick' object has no attribute 'time'
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+❌ Exit code: 1

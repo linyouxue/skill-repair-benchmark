@@ -1,0 +1,72 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, numpy as np
+from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+cfg=json.load(open('/root/instance_config.json'))
+TW=cfg['time_window_width']
+H=1320
+total_trips=cfg['nb_trips']
+external_end=2*total_trips+1
+travel_ext=np.loadtxt('/root/t_matrix.csv', delimiter=',', dtype=np.int32)
+requests=json.load(open('/root/requests.json'))
+flat=[]
+for p in requests:
+    for t in p['trips']:
+        flat.append(t)
+# subset
+n=50
+V=5
+trips=flat[:n]
+# internal nodes layout for subset
+job_count=2*n
+start_nodes=list(range(job_count, job_count+V))
+[... 1708 characters omitted ...]
+lse, 'Time')
+time_dim=routing.GetDimensionOrDie('Time')
+demand_cb=routing.RegisterUnaryTransitVector(demand.tolist())
+routing.AddDimensionWithVehicleCapacity(demand_cb,0,[3]*V,True,'Capacity')
+shift=list(range(300,841,60))
+for v in range(V):
+    s=routing.Start(v); e=routing.End(v)
+    time_dim.CumulVar(s).SetRange(300,840)
+    time_dim.CumulVar(s).SetValues(shift)
+    time_dim.CumulVar(e).SetRange(0,H)
+    time_dim.SetSpanUpperBoundForVehicle(480,v)
+SKIP=1_000_000
+solver=routing.solver()
+for i,t in enumerate(trips):
+    pu=manager.NodeToIndex(i)
+    do=manager.NodeToIndex(n+i)
+    routing.AddDisjunction([pu], SKIP)
+    routing.AddDisjunction([do], 1)
+    solver.Add(routing.ActiveVar(pu) == routing.ActiveVar(do))
+    routing.AddPickupAndDelivery(pu, do)
+    solver.Add(routing.VehicleVar(pu)==routing.VehicleVar(do))
+    solver.Add(time_dim.CumulVar(pu) <= time_dim.CumulVar(do))
+    expected=int(t['expected_arrival_time'])
+    drop_low, drop_high = expected-TW, expected
+    ext_pu=1+i
+    ext_do=1+total_trips+i
+    direct=int(travel_ext[ext_pu, ext_do])
+    pick_low=expected-TW-direct
+    pick_high=expected-direct
+    time_dim.CumulVar(pu).SetRange(pick_low,pick_high)
+    time_dim.CumulVar(do).SetRange(drop_low,drop_high)
+params=pywrapcp.DefaultRoutingSearchParameters()
+params.first_solution_strategy=routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC C
+params.local_search_metaheuristic=routing_enums_pb2.LocalSearchMetaheuristic.GENERIC_TABU_SEARCH
+params.time_limit.seconds=10
+sol=routing.SolveWithParameters(params)
+print('sol', sol is not None)
+if sol:
+    served=sum(sol.Value(routing.ActiveVar(manager.NodeToIndex(i))) for i in range(n))
+    print('served', served)
+PY
+sol True
+served 46
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

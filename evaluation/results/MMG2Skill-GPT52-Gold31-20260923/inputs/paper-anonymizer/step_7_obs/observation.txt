@@ -1,0 +1,106 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import os
+import re
+import fitz
+def find_references_page(doc: fitz.Document):
+    for pno, page in enumerate(doc):
+        lines = [ln.strip().lower() for ln in page.get_text('text').splitlines()[:200] if ln.strip()]
+        for ln in lines:
+            if ln == 'references':
+                return pno
+            if re.match(r'^\d+\.?\s*references$', ln):
+                return pno
+            if re.match(r'^references\b', ln):
+                return pno
+    return None
+def verify_redaction(original_path, output_path):
+    orig = fitz.open(original_path)
+    redc = fitz.open(output_path)
+    orig_len = sum(len(p.get_text()) for p in orig)
+    redc_len = sum(len(p.get_text()) for p in redc)
+    print(f"VERIFY {os.path.basename(output_path)}: Original {len(orig)} pages {orig_len} chars; Redacted {len(redc)} pages {redc_len} chars; Retained {redc_len/orig_len:.1%}")
+    if len(redc) != len(orig):
+        raise ValueError(f"Page count changed: {len(orig)} -> {len(redc)}")
+    if redc_len < 1000:
+        raise ValueError(f"PDF corrupted: only {redc_len} chars remain")
+    if redc_len < orig_len * 0.7:
+        raise ValueError(f"Too much removed: kept only {redc_len/orig_len:.0%}") )
+    orig.close()
+    redc.close()
+def redact_pdf(input_path: str, output_path: str, patterns: list[str], footer_patterns: list[str]):
+    doc = fitz.open(input_path)
+    doc.set_metadata({})
+    ref_page = find_references_page(doc)
+    print(f"{os.path.basename(input_path)} references_page={ref_page}")
+    def apply_patterns(page: fitz.Page, pats: list[str]):
+        for pat in pats:
+            if not pat or len(pat.strip()) < 3:
+                continue
+            for rect in page.search_for(pat):
+                page.add_redact_annot(rect, fill=(0, 0, 0))
+    for pno, page in enumerate(doc):
+        # Always redact venue/footer patterns everywhere
+        apply_patterns(page, footer_patterns)
+        # Redact identifying patterns only before references
+        if ref_page is None or pno < ref_page:
+            apply_patterns(page, patterns)
+        page.apply_redactions()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    doc.save(output_path)
+    doc.close()
+    verify_redaction(input_path, output_path)
+paper1_patterns = [
+    'Yueqian Lin', 'Zhengmian Hu', 'Qinsi Wang', 'Yudong Liu', 'Hengfan Zhang',
+    'Jayakumar Subramanian', 'Nikos Vlassis', 'Hai “Helen” Li', 'Hai Helen Li', 'Yiran Chen',
+    'Duke University', 'Adobe', 'Durham, NC, USA', 'San Jose, CA, USA',
+    'Correspondence:', 'yueqian.lin@duke.edu', 'zhengmianh@adobe.com',
+    'arXiv:2509.26542v1',
+]
+paper2_patterns = [
+    'Jiatong Shi', 'Yueqian Lin', 'Xinyi Bai', 'Keyi Zhang', 'Yuning Wu', 'Yuxun Tang',
+    'Yifeng Yu', 'Qin Jin', 'Shinji Watanabe',
+    'Carnegie Mellon University', 'Duke Kunshan University', 'Cornell University',
+    'Multimodal Art Projection Community', 'Renmin University of China', 'Georgia Institute of Technology',
+    'jiatongs@cs.cmu.edu',
+]
+paper2_footer = [
+    'Interspeech 2024',
+    '1-5 September 2024, Kos, Greece',
+    '10.21437/Interspeech.2024-33',
+    'https://github.com/espnet/espnet',
+    'https://huggingface.co/datasets/espnet/',
+]
+paper3_patterns = [
+    'Yueqian Lin', 'Yuzhe Fu', 'Jingyang Zhang', 'Yudong Liu', 'Jianyi Zhang', 'Jingwei Sun',
+    'Hai Li', 'Yiran Chen',
+    '*Equal contribution',
+    'Duke University, Durham, USA.',
+    'Correspondence to:', 'yl768@duke.edu',
+    'NSF 2112562', 'ARO W911NF-23-2-0224',
+]
+paper3_footer = [
+    'ICML Workshop on Machine Learning for Audio',
+    'Vancouver,',
+    'Canada.',
+    'Copyright 2025 by the author(s).',
+    'Proceedings of the International Conference on Machine Learning 2025',
+]
+# Paper1 doesn't have repeating venue footer we must remove.
+redact_pdf('/root/paper1.pdf', '/root/redacted/paper1.pdf', paper1_patterns, footer_patterns=[])
+redact_pdf('/root/paper2.pdf', '/root/redacted/paper2.pdf', paper2_patterns, footer_patterns=paper2_footer)
+redact_pdf('/root/paper3.pdf', '/root/redacted/paper3.pdf', paper3_patterns, footer_patterns=paper3_footer)
+print('Done. Outputs in /root/redacted')
+PY
+paper1.pdf references_page=9
+VERIFY paper1.pdf: Original 23 pages 78966 chars; Redacted 23 pages 78721 chars; Retained 99.7%
+paper2.pdf references_page=4
+VERIFY paper2.pdf: Original 5 pages 30416 chars; Redacted 5 pages 29958 chars; Retained 98.5%
+paper3.pdf references_page=4
+VERIFY paper3.pdf: Original 12 pages 27686 chars; Redacted 12 pages 27394 chars; Retained 98.9%
+Done. Outputs in /root/redacted
+
+
+📁 Working directory: /root
+✅ Exit code: 0

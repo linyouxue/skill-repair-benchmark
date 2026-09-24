@@ -1,0 +1,43 @@
+Tool: terminal
+Result:
+❌ [An error occurred during execution.]
+Cannot execute multiple commands at once.
+Please run each command separately OR chain them into a single command via && or ;
+Provided commands:
+(1) python3 - <<'PY'
+import json
+from pathlib import Path
+from unified_planning.io import PDDLReader
+from unified_planning.shortcuts import OneshotPlanner, PlanValidator, get_environment
+
+get_environment().credits_stream = None
+
+root = Path('.')
+with open(root/'problem.json') as f:
+    tasks = json.load(f)
+
+reader = PDDLReader()
+
+with OneshotPlanner(name='pyperplan') as planner, PlanValidator(name='sequential_plan_validator') as validator:
+    for t in tasks:
+        domain = root / t['domain']
+        problem_p = root / t['problem']
+        out_p = root / t['plan_output']
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+
+        problem = reader.parse_problem(str(domain), str(problem_p))
+        res = planner.solve(problem)
+        if res.plan is None:
+            raise RuntimeError(f"No plan found for {t['id']} (status={res.status})")
+
+        vr = validator.validate(problem, res.plan)
+        if str(vr.status) != 'ValidationResultStatus.VALID':
+            raise RuntimeError(f"Plan invalid for {t['id']}: {vr}")
+
+        lines = [str(a) for a in res.plan.actions]
+        out_p.write_text("\n".join(lines) + "\n")
+        print(f"{t['id']}: wrote {len(lines)} actions to {out_p}")
+PY
+(2) ls -la task01.txt task02.txt && echo '--- task01.txt' && cat task01.txt && echo '--- task02.txt' && cat task02.txt
+
+⏳ Process still running (soft timeout)

@@ -1,0 +1,95 @@
+Tool: file_editor
+Result:
+[File /root/solve.py edited with 2 changes.]
+[begin of edit 1 / 2]
+(content before edit)
+ 113|
+ 114|# ---------- Dynamic object masks ----------
+ 115|k3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+ 116|k7 = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+-117|MIN_AREA = max(200, int(0.0005 * H * W))  # ~460 px for 720p
+ 118|
+ 119|npz_dict = {"shape": np.array([H, W], dtype=np.int32)}
+(content after edit)
+ 113|
+ 114|# ---------- Dynamic object masks ----------
++115|# Re-estimate homography for each pair for better global alignment (handles parallax better than affine).
+ 116|k3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+ 117|k7 = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
++118|k11 = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
++119|MIN_AREA = max(800, int(0.002 * H * W))  # ~1840 px for 720p
+ 120|
+ 121|npz_dict = {"shape": np.array([H, W], dtype=np.int32)}
+[end of edit 1 / 2]
+-------------------------
+[begin of edit 2 / 2]
+(content before edit)
+ 125|        prev = frames_gray[k - 1]
+ 126|        curr = frames_gray[k]
+-127|        M = transforms[k]
+-128|        warped_prev = cv2.warpAffine(prev, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=0)
+-129|        valid = cv2.warpAffine(np.ones((H, W), np.uint8), M, (W, H),
+-130|                               flags=cv2.INTER_NEAREST) > 0
+-131|        diff = cv2.absdiff(curr, warped_prev)
+ 132|        vals = diff[valid]
+ 133|        if vals.size > 0:
+ 134|            med = float(np.median(vals))
+ 135|            mad = float(np.median(np.abs(vals - med)))
+-136|            thr = max(20.0, med + 3.0 * 1.4826 * mad)
+ 137|        else:
+-138|            thr = 20.0
+ 139|        raw = (diff > thr) & valid
+ 140|        m = cv2.morphologyEx(raw.astype(np.uint8) * 255, cv2.MORPH_OPEN, k3)
+-141|        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k7)
+ 142|        ncc, cc, stats, _ = cv2.connectedComponentsWithStats(
+ 143|            (m > 0).astype(np.uint8), connectivity=8)
+(content after edit)
+ 127|        prev = frames_gray[k - 1]
+ 128|        curr = frames_gray[k]
++129|
++130|        # Estimate homography with dense features for better alignment
++131|        p0 = cv2.goodFeaturesToTrack(prev, maxCorners=3000, qualityLevel=0.005,
++132|                                     minDistance=6, blockSize=7)
++133|        Hmat = None
++134|        if p0 is not None and len(p0) >= 10:
++135|            p1, st, _ = cv2.calcOpticalFlowPyrLK(prev, curr, p0, None, **lk_params)
++136|            if p1 is not None:
++137|                st = st.reshape(-1)
++138|                g0 = p0[st == 1]
++139|                g1 = p1[st == 1]
++140|                if len(g0) >= 10:
++141|                    Hmat, _ = cv2.findHomography(g0, g1, cv2.RANSAC, 3.0)
++142|
++143|        if Hmat is not None:
++144|            warped_prev = cv2.warpPerspective(prev, Hmat, (W, H),
++145|                                              flags=cv2.INTER_LINEAR, borderValue=0)
++146|            valid = cv2.warpPerspective(np.ones((H, W), np.uint8), Hmat, (W, H),
++147|                                        flags=cv2.INTER_NEAREST) > 0
++148|        else:
++149|            M = transforms[k]
++150|            warped_prev = cv2.warpAffine(prev, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=0)
++151|            valid = cv2.warpAffine(np.ones((H, W), np.uint8), M, (W, H),
++152|                                   flags=cv2.INTER_NEAREST) > 0
++153|
++154|        # Blur to reduce residual misalignment noise
++155|        warped_blur = cv2.GaussianBlur(warped_prev, (5, 5), 0)
++156|        curr_blur = cv2.GaussianBlur(curr, (5, 5), 0)
++157|        diff = cv2.absdiff(curr_blur, warped_blur)
++158|
+ 159|        vals = diff[valid]
+ 160|        if vals.size > 0:
+ 161|            med = float(np.median(vals))
+ 162|            mad = float(np.median(np.abs(vals - med)))
++163|            thr = max(25.0, med + 4.5 * 1.4826 * mad)
+ 164|        else:
++165|            thr = 25.0
+ 166|        raw = (diff > thr) & valid
++167|        # Erode valid region a few px to discard warping border artifacts
++168|        valid_er = cv2.erode(valid.astype(np.uint8), k7, iterations=1) > 0
++169|        raw = raw & valid_er
++170|
+ 171|        m = cv2.morphologyEx(raw.astype(np.uint8) * 255, cv2.MORPH_OPEN, k3)
++172|        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k11)
+ 173|        ncc, cc, stats, _ = cv2.connectedComponentsWithStats(
+ 174|            (m > 0).astype(np.uint8), connectivity=8)
+[end of edit 2 / 2]

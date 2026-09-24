@@ -1,0 +1,37 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+from astropy.timeseries import BoxLeastSquares
+import astropy.units as u
+path='/root/data/tess_lc.txt'
+t, f, q, fe = np.genfromtxt(path).T
+m=(q==0)
+t,f,fe=t[m],f[m],fe[m]
+idx=np.argsort(t)
+t,f,fe=t[idx],f[idx],fe[idx]
+lc=lk.LightCurve(time=t, flux=f, flux_err=fe)
+lc=lc.remove_outliers(sigma=10)
+for wl in [801, 1201, 1601, 2001, 3001]:
+    lc_flat=lc.flatten(window_length=wl, polyorder=2, break_tolerance=5)
+    lc_flat=lc_flat.remove_outliers(sigma=6)
+    t_rel=(lc_flat.time.value - lc_flat.time.value.min())*u.day
+    flux=lc_flat.flux.value
+    err=lc_flat.flux_err.value
+    bls=BoxLeastSquares(t_rel, flux, dy=err)
+    durations=np.linspace(0.05,0.35,15)*u.day
+    pg=bls.autopower(durations, minimum_period=0.5*u.day, maximum_period=15*u.day, objective='snr')
+    ix=int(np.argmax(pg.power))
+    print('wl',wl,'bestP',pg.period[ix].to_value(u.day),'dur',pg.duration[ix].to_value(u.day),'power',pg.power[ix])
+PY
+wl 801 bestP 1.3967208247440979 dur 0.305 power 74.23615562103845
+wl 1201 bestP 1.3958163389592035 dur 0.35000000000000003 power 171.85806889500842
+wl 1601 bestP 1.3983820967925833 dur 0.35000000000000003 power 330.7259424487641
+wl 2001 bestP 1.398684570928127 dur 0.35000000000000003 power 387.08018261818904
+wl 3001 bestP 1.3989871759440597 dur 0.35000000000000003 power 373.35197541877193
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

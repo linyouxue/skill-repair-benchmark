@@ -1,0 +1,72 @@
+Tool: terminal
+Result:
+/root/.venv_pptx/bin/python - <<'PY'
+from __future__ import annotations
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import PP_PLACEHOLDER
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
+from pptx.oxml.xmlchemy import OxmlElement
+from pptx.oxml.ns import qn
+from pptx.util import Inches, Pt
+SRC = '/root/Awesome-Agent-Papers.pptx'
+DST = '/root/Awesome-Agent-Papers_processed.pptx'
+FONT_NAME = 'Arial'
+FONT_SIZE = Pt(16)
+FONT_COLOR = RGBColor(0x98, 0x95, 0x96)
+prs = Presentation(SRC)
+slide_w = prs.slide_width
+slide_h =
+[... 2097 characters omitted ...]
+e_layouts[0]
+ref_slide = prs.slides.add_slide(layout)
+# Title placeholder
+if ref_slide.shapes.title and ref_slide.shapes.title.has_text_frame:
+    ref_slide.shapes.title.text_frame.text = 'Reference'
+# Body placeholder
+body = None
+for ph in ref_slide.placeholders:
+    if ph.placeholder_format.type == PP_PLACEHOLDER.BODY:
+        body = ph
+        break
+if body is None:
+    # fall back to a content placeholder if template differs
+    for ph in ref_slide.placeholders:
+        if ph.placeholder_format.type in (PP_PLACEHOLDER.OBJECT, PP_PLACEHOLDER.CONTENT):
+            body = ph
+            break
+if body is not None and body.has_text_frame:
+    tf = body.text_frame
+    tf.clear()
+    tf.word_wrap = True
+    def apply_autonum(paragraph, *, start_at: int | None):
+        pPr = paragraph._p.get_or_add_pPr()
+        for tag in (
+            'a:buNone','a:buAutoNum','a:buChar','a:buBlip','a:buClr','a:buFont','a:buSzPct','a:buSzPts'
+        ):
+            el = pPr.find(qn(tag))
+            if el is not None:
+                pPr.remove(el)
+        bu = OxmlElement('a:buAutoNum')
+        bu.set('type', 'arabicPeriod')
+        if start_at is not None:
+            bu.set('startAt', str(start_at))
+        pPr.insert(0, bu)
+    for idx, t in enumerate(uniq_titles):
+        p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+        p.text = t
+        set_font(p.font)
+        for r in p.runs:
+            set_font(r.font)
+        apply_autonum(p, start_at=1 if idx == 0 else None)
+prs.save(DST)
+print('saved', DST)
+print('paper_titles_found', len(paper_titles), 'unique', len(uniq_titles))
+PY
+Traceback (most recent call last):
+  File "<stdin>", line 121, in <module>
+AttributeError: type object 'PP_PLACEHOLDER_TYPE' has no attribute 'CONTENT'
+
+
+📁 Working directory: /root
+❌ Exit code: 1

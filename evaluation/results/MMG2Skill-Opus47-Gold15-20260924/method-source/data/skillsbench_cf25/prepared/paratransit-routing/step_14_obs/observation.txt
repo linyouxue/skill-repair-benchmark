@@ -1,0 +1,57 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import json, numpy as np
+cfg=json.load(open('/root/instance_config.json'))
+nb_trips=cfg['nb_trips']
+H=1320
+TW=cfg['time_window_width']
+start=0
+end=2*nb_trips+1
+travel=np.loadtxt('/root/t_matrix.csv', delimiter=',', dtype=np.int32)
+req=json.load(open('/root/requests.json'))
+trips=[]
+for p in req:
+    for t in p['trips']:
+        trips.append(t)
+shift_starts=list(range(300,841,60))
+feasible=0
+feasible_any=0
+for i,t in enumerate(trips):
+    pu=1+i
+    do=1+nb_trips+i
+    exp=int(t['expected_arrival_time'])
+    direct=int(travel[pu,do])
+    if direct<0: continue
+    drop_low,drop_high=exp-TW,exp
+    pick_low,pick_high=exp-TW-direct,exp-direct
+    # Try each shift start: compute earliest possible pickup if drive from depot t
+    for s in shift_starts:
+        if travel[start,pu]<0 or travel[do,end]<0 or travel[pu,do]<0: 
+            break
+        # arrival at pickup if depart at s
+        arr_pu=s+int(travel[start,pu])
+        if arr_pu < pick_low: arr_pu=pick_low  # wait
+        if arr_pu>pick_high: 
+            continue
+        dep_pu=arr_pu+int(t['pickup_service_time'])
+        arr_do=dep_pu+int(travel[pu,do])
+        if arr_do < drop_low: arr_do=drop_low
+        if arr_do>drop_high:
+            continue
+        dep_do=arr_do+int(t['dropoff_service_time'])
+        arr_end=dep_do+int(travel[do,end])
+        if arr_end>H: 
+            continue
+        if arr_end - s > 480:
+            continue
+        feasible += 1
+        break
+print('Trips with simple single-trip route feasibility:', feasible, '/', nb_trips)
+PY
+Trips with simple single-trip route feasibility: 509 / 515
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

@@ -1,0 +1,38 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, glob
+from obspy import Stream, Trace, UTCDateTime
+import seisbench.models as sbm
+fn=[f for f in sorted(glob.glob('/root/data/*.npz')) if 'NC.JSB..HN.0405110' in f][0]
+z=np.load(fn, allow_pickle=True)
+data=z['data']; dt=float(z['dt']); sr=1/dt
+chs=str(z['channels']).split(',')
+stime=UTCDateTime(str(z.get('start_time','1970-01-01T00:00:00Z')))
+st=Stream()
+for i,ch in enumerate(chs):
+    tr=Trace(data=data[:,i].astype('float32'))
+    tr.stats.network=str(z.get('network','XX'))
+    tr.stats.station=str(z.get('station','STA'))
+    tr.stats.location=str(z.get('location_code',''))
+    tr.stats.channel=ch
+    tr.stats.starttime=stime
+    tr.stats.sampling_rate=sr
+    st+=tr
+model=sbm.PhaseNet.from_pretrained('original')
+ann=model.annotate(st)
+print('annotation traces:')
+for tr in ann:
+    print(tr.id, tr.stats.channel, tr.stats.starttime, tr.stats.sampling_rate, tr.data.min(), tr.data.max())
+PY
+/usr/local/lib/python3.12/site-packages/seisbench/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+annotation traces:
+NC.JSB.--.PhaseNet_N PhaseNet_N 2020-05-15T03:08:10.170000Z 100.0 0.023576923 1.0
+NC.JSB.--.PhaseNet_P PhaseNet_P 2020-05-15T03:08:10.170000Z 100.0 4.418672e-09 0.9764156
+NC.JSB.--.PhaseNet_S PhaseNet_S 2020-05-15T03:08:10.170000Z 100.0 3.9783687e-09 0.8853133
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

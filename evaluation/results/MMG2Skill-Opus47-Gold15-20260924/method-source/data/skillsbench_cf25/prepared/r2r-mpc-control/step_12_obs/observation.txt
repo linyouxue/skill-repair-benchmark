@@ -1,0 +1,62 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np, json
+from r2r_simulator import R2RSimulator
+def lin(params,x):
+  EA,J,R,fb,L = map(float,(params['EA'],params['J'],params['R'],params['fb'],params['L']))
+  n=6; T=x[:n]; v=x[n:]
+  A=np.zeros((12,12)); B=np.zeros((12,6))
+  for i in range(n):
+    A[i,i]+=-(1/L)*v[i]
+    A[i,n+i]+=(EA/L)-(1/L)*T[i]
+    if i>0:
+      A[i,i-1]+=(1/L)*v[i-1]
+      A[i,n+i-1]+=-(EA/L)+(1/L)*T[i-1]
+  for i in range(n):
+    row=n+i
+    A[row,i]+=-(R**2/J)
+    if i<n-1: A[row,i+1]+=(R**2/J)
+    A[row,n+i]+=-(fb/J)
+    B[row,i]+=(R/J)
+  return A,B
+def fh(A,B,Q,R,N):
+  P=Q.copy(); K0=None
+  for k in range(N-1,-1,-1):
+    S=R+B.T@P@B
+    S=0.5*(S+S.T)+1e-10*np.eye(S.shape[0])
+    K=np.linalg.solve(S,B.T@P@A)
+    P=Q+A.T@P@(A-B@K)
+    if k==0: K0=K
+  return K0
+np.random.seed(0)
+sim=R2RSimulator(); p=sim.get_params(); dt=p['dt']
+sim.reset(); xop,_=sim.get_reference(0)
+Ac,Bc=lin(p,xop)
+Ad=np.eye(12)+dt*Ac; Bd=dt*Bc
+Qt=40.0; Qv=0.2; Ru=0.8; N=9
+Q=np.diag([Qt]*6+[Qv]*6); R=np.diag([Ru]*6)
+K=fh(Ad,Bd,Q,R,N)
+x=sim.get_state()
+Ts=[]; Us=[]; times=[]
+for _ in range(int(round(5.0/dt))):
+  xref,uref=sim.get_reference(); u=uref-K@(x-xref)
+  x=sim.step(u)
+  Ts.append(x[:6]); Us.append(u); times.append(sim.get_time())
+Ts=np.array(Ts); Us=np.array(Us)
+print('maxT',Ts.max(),'minT',Ts.min())
+print('max|u|',np.max(np.abs(Us)))
+# metrics
+cfg=json.load(open('/root/system_config.json'))
+Tfinal=np.array(cfg['T_ref_final'],float)
+ss=np.array(times)>=times[-1]-1.0
+sse=np.mean(np.abs(Ts[ss]-Tfinal))
+print('sse',sse)
+PY
+maxT 45.42243224509952 minT 19.01369760608974
+max|u| 85.61457120267926
+sse 0.366555721499291
+
+
+📁 Working directory: /root
+✅ Exit code: 0

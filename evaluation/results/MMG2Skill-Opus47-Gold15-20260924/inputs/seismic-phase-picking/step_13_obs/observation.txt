@@ -1,0 +1,64 @@
+Tool: file_editor
+Result:
+[File /root/pick.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 57|print(f"Processing {len(files)} files with device={device}")
+ 58|
+ 59|for i, path in enumerate(files):
+ 60|    fname = os.path.basename(path)
+ 61|    stream, t0, dt = load_stream(path)
+-62|    try:
+-63|        picks = model.classify(stream, P_threshold=P_THR, S_threshold=S_THR).picks
+-64|    except Exception as e:
+-65|        print(f"Error on {fname}: {e}")
+-66|        continue
+-67|    for p in picks:
+-68|        idx = int(round((p.peak_time - t0) / dt))
+-69|        if idx < 0 or idx >= 12000:
+ 70|            continue
+-71|        rows.append((fname, p.phase, idx))
+ 72|    if (i + 1) % 20 == 0:
+ 73|        print(f"  done {i+1}/{len(files)}, picks so far: {len(rows)}")
+(content after edit)
+ 57|print(f"Processing {len(files)} files with device={device}")
+ 58|
++59|MERGE_TOL = 10  # samples (0.1s at 100Hz) — merge picks from ensemble within tolerance
++60|
+ 61|for i, path in enumerate(files):
+ 62|    fname = os.path.basename(path)
+ 63|    stream, t0, dt = load_stream(path)
++64|
++65|    all_picks = {"P": [], "S": []}  # list of (idx, prob)
++66|    for name, m in models:
++67|        try:
++68|            picks = m.classify(stream, P_threshold=P_THR, S_threshold=S_THR).picks
++69|        except Exception as e:
++70|            print(f"Error on {fname} with {name}: {e}")
+ 71|            continue
++72|        for p in picks:
++73|            idx = int(round((p.peak_time - t0) / dt))
++74|            if idx < 0 or idx >= 12000:
++75|                continue
++76|            prob = getattr(p, "peak_value", 1.0) or 1.0
++77|            if p.phase in all_picks:
++78|                all_picks[p.phase].append((idx, float(prob)))
++79|
++80|    # Merge picks within MERGE_TOL, keep highest-probability pick per cluster
++81|    for phase, plist in all_picks.items():
++82|        if not plist:
++83|            continue
++84|        plist.sort()
++85|        clusters = [[plist[0]]]
++86|        for idx, prob in plist[1:]:
++87|            if idx - clusters[-1][-1][0] <= MERGE_TOL:
++88|                clusters[-1].append((idx, prob))
++89|            else:
++90|                clusters.append([(idx, prob)])
++91|        for cluster in clusters:
++92|            best = max(cluster, key=lambda x: x[1])
++93|            rows.append((fname, phase, best[0]))
++94|
+ 95|    if (i + 1) % 20 == 0:
+ 96|        print(f"  done {i+1}/{len(files)}, picks so far: {len(rows)}")
+[end of edit 1 / 1]

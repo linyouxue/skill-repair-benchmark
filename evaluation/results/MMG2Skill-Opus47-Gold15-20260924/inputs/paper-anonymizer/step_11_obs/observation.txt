@@ -1,0 +1,90 @@
+Tool: terminal
+Result:
+cd /root && python3 <<'EOF'
+import fitz
+# Check paper2 acknowledgements page and paper3 for funding remnants
+doc = fitz.open('redacted/paper2.pdf')
+print("=== paper2 page 3 (acknowledgements) ===")
+t = doc[3].get_text()
+idx = t.lower().find('acknowledg')
+print(t[idx:idx+1200])
+doc.close()
+print()
+doc = fitz.open('redacted/paper3.pdf')
+print("=== paper3 page 0 funding line area ===")
+t = doc[0].get_text()
+# Find the paragraph after abstract
+for line in t.split('\n'):
+    if any(k in line for k in ['NSF', 'ARO', 'Copyright', 'ICML', 'Workshop', 'Vancouver', 'author(s)']):
+        print(repr(line))
+doc.close()
+# Search whole redacted docs for any leaked identifiers
+print()
+print("=== leak scan across pre-references pages ===")
+for p, ref_page in [('paper1.pdf', 9), ('paper2.pdf', 4), ('paper3.pdf', 4)]:
+    doc = fitz.open(f'redacted/{p}')
+    combined = ''
+    for i in range(ref_page):
+        combined += doc[i].get_text()
+    import re
+    print(f"[{p}] leaks found:")
+    for pattern, label in [
+        (r'\bDuke\b', 'Duke'),
+        (r'\bAdobe\b', 'Adobe'),
+        (r'\bCarnegie\b', 'Carnegie'),
+        (r'\bCornell\b', 'Cornell'),
+        (r'\bRenmin\b', 'Renmin'),
+        (r'\bGeorgia\b', 'Georgia'),
+        (r'\bInterspeech\b', 'Interspeech'),
+        (r'\bICML\b', 'ICML'),
+        (r'\bVancouver\b', 'Vancouver'),
+        (r'@[\w.]+\.(edu|com|cn|org)', 'email'),
+        (r'arXiv:\d{4}\.\d{4,5}', 'arxiv id'),
+        (r'\bYueqian\b', 'Yueqian'),
+        (r'\bJiatong\b', 'Jiatong'),
+        (r'\bShinji\b', 'Shinji'),
+        (r'\bYiran\b', 'Yiran'),
+        (r'\bWatanabe\b', 'Watanabe'),
+        (r'\b2509\.26542\b', '2509.26542'),
+        (r'W911NF', 'ARO grant'),
+        (r'2112562', 'NSF grant'),
+    ]:
+        matches = re.findall(pattern, combined)
+        if matches:
+            print(f"  {label}: {matches[:5]}")
+    doc.close()
+EOF
+=== paper2 page 3 (acknowledgements) ===
+Acknowledgements
+Experiments of this work used the Bridges2 system at PSC
+and Delta system at NCSA through allocations
+and
+from the ACCESS program, supported by
+NSF grants
+,
+,
+,
+, and
+. This work was partially supported by the National
+Natural Science Foundation of China (No.
+).
+We
+would like to thank
+and
+for their
+support in the data license. When utilizing singing voices from
+1883
+
+
+=== paper3 page 0 funding line area ===
+'and ARO W911NF-23-2-'
+
+=== leak scan across pre-references pages ===
+[paper1.pdf] leaks found:
+[paper2.pdf] leaks found:
+[paper3.pdf] leaks found:
+  ARO grant: ['W911NF']
+
+
+📁 Working directory: /root
+✅ Exit code: 0

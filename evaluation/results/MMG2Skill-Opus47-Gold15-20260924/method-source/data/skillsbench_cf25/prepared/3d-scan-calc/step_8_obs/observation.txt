@@ -1,0 +1,49 @@
+Tool: terminal
+Result:
+❌ [An error occurred during execution.]
+Cannot execute multiple commands at once.
+Please run each command separately OR chain them into a single command via && or ;
+Provided commands:
+(1) python3 - <<'PY'
+import json, re, sys
+from pathlib import Path
+
+sys.path.append('/root/.claude/skills/mesh-analysis/scripts')
+from mesh_tool import MeshAnalyzer
+
+stl_path = Path('/root/scan_data.stl')
+density_path = Path('/root/material_density_table.md')
+out_path = Path('/root/mass_report.json')
+
+an = MeshAnalyzer(str(stl_path))
+report = an.analyze_largest_component()
+mat_id = int(report['main_part_material_id'])
+vol_units3 = float(report['main_part_volume'])  # same units as STL coordinates
+
+# The provided table specifies density in g/cm^3 and asks for volume in cm^3.
+# STL coordinates here are in mm (largest component spans 20 units ~ 20mm), so:
+# 1 cm^3 = 1000 mm^3
+vol_cm3 = vol_units3 / 1000.0
+
+text = density_path.read_text(encoding='utf-8')
+# Match a markdown table row starting with the material id (optionally bolded)
+# Example: | **42** | Unobtanium | 5.55 | ... |
+pat = re.compile(r"^\|\s*(?:\*\*)?%d(?:\*\*)?\s*\|[^\n]*?\|\s*([0-9]+(?:\.[0-9]+)?)\s*\|" % mat_id, re.MULTILINE)
+m = pat.search(text)
+if not m:
+    raise SystemExit(f"Density not found for material_id={mat_id}")
+
+density_g_per_cm3 = float(m.group(1))
+mass_g = vol_cm3 * density_g_per_cm3
+
+out = {
+    "main_part_mass": mass_g,
+    "material_id": mat_id,
+}
+
+out_path.write_text(json.dumps(out, indent=1) + "\n", encoding='utf-8')
+print(json.dumps(out, indent=1))
+PY
+(2) python3 -c "import json; print('wrote', '/root/mass_report.json'); print(json.load(open('/root/mass_report.json')))"
+
+⏳ Process still running (soft timeout)

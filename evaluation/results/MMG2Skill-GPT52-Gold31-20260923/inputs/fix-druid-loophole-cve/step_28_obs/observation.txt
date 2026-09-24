@@ -1,0 +1,53 @@
+Tool: terminal
+Result:
+❌ [An error occurred during execution.]
+Cannot execute multiple commands at once.
+Please run each command separately OR chain them into a single command via && or ;
+Provided commands:
+(1) cd /root/druid && python3 - <<'PY'
+import pathlib, re
+files = [
+  'core/src/main/java/org/apache/druid/data/input/impl/JavaScriptParseSpec.java',
+  'processing/src/main/java/org/apache/druid/query/aggregation/JavaScriptAggregatorFactory.java',
+  'processing/src/main/java/org/apache/druid/query/aggregation/post/JavaScriptPostAggregator.java',
+  'processing/src/main/java/org/apache/druid/query/filter/JavaScriptDimFilter.java',
+  'processing/src/main/java/org/apache/druid/query/extraction/JavaScriptExtractionFn.java',
+  'server/src/main/java/org/apache/druid/server/router/JavaScriptTieredBrokerSelectorStrategy.java',
+  'indexing-service/src/main/java/org/apache/druid/indexing/overlord/setup/JavaScriptWorkerSelectStrategy.java',
+]
+
+for f in files:
+    p = pathlib.Path(f)
+    txt = p.read_text(encoding='utf-8')
+
+    # Ensure OptBoolean import exists when JacksonInject import exists
+    if 'import com.fasterxml.jackson.annotation.JacksonInject;' in txt and 'import com.fasterxml.jackson.annotation.OptBoolean;' not in txt:
+        txt = txt.replace(
+            'import com.fasterxml.jackson.annotation.JacksonInject;\n',
+            'import com.fasterxml.jackson.annotation.JacksonInject;\nimport com.fasterxml.jackson.annotation.OptBoolean;\n'
+        )
+
+    # Replace JavaScriptConfig injectable parameter annotation
+    txt2 = re.sub(
+        r'@JacksonInject\s+JavaScriptConfig\s+config',
+        r'@JacksonInject(useInput = OptBoolean.FALSE) JavaScriptConfig config',
+        txt
+    )
+
+    if txt2 == txt:
+        # Some files might have different whitespace (line breaks). Handle common newline split pattern.
+        txt2 = re.sub(
+            r'@JacksonInject\s*\n\s*JavaScriptConfig\s+config',
+            r'@JacksonInject(useInput = OptBoolean.FALSE)\n      JavaScriptConfig config',
+            txt
+        )
+
+    if txt2 == txt:
+        raise SystemExit(f'No replacement performed for {f}; please patch manually')
+
+    p.write_text(txt2, encoding='utf-8')
+    print('patched', f)
+PY
+(2) git --no-pager diff --stat
+
+⏳ Process still running (soft timeout)

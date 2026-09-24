@@ -1,0 +1,223 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import pandas as pd, numpy as np, re
+in_path='/root/environment/data/ckd_lab_data.csv'
+out_path='/root/ckd_lab_data_harmonized.csv'
+raw=pd.read_csv(in_path, dtype=str)
+MISSING_TOKENS={'', 'nan','NaN','None','NULL','null','NA','N/A'}
+_num_re=re.compile(r'[^0-9eE+\-\.,]')
+def parse_value(val):
+    if val is None or (isinstance(val,float) and np.isnan(val)):
+        return np.nan
+    s=str(val).strip()
+    if s in MISSING_TOKENS or s.lower()=='nan':
+        return np.nan
+    s=_num_re.sub('', s)  # remove stray characters
+    s=s.replace(' ', '')
+    # If both comma and dot exist, treat comma as thousands separator.
+    if ',' in s and '.' in s:
+        s=s.replace(',', '')
+    elif ',' in s:
+        # treat comma as decimal separator
+        s=s.replace(',', '.')
+    try:
+        return float(s)
+    except Exception:
+        return np.nan
+# ranges in target (US conventional) units
+RANGES={
+    'Serum_Creatinine': (0.2, 20.0),
+    'BUN': (1.0, 200.0),
+    'eGFR': (0.0, 150.0),
+    'Cystatin_C': (0.3, 10.0),
+    'BUN_Creatinine_Ratio': (1.0, 80.0),
+    'Sodium': (110.0, 170.0),
+    'Potassium': (2.0, 8.5),
+    'Chloride': (70.0, 140.0),
+    'Bicarbonate': (5.0, 40.0),
+    'Anion_Gap': (0.0, 40.0),
+    'Magnesium': (1.0, 4.0),
+    'Serum_Calcium': (4.0, 15.0),
+    'Ionized_Calcium': (3.0, 7.0),
+    'Phosphorus': (1.0, 15.0),
+    'Intact_PTH': (0.0, 2000.0),
+    'Vitamin_D_25OH': (0.0, 150.0),
+    'Vitamin_D_1_25OH': (0.0, 200.0),
+    'Alkaline_Phosphatase': (10.0, 2000.0),
+    'Hemoglobin': (2.0, 20.0),
+    'Hematocrit': (10.0, 70.0),
+    'RBC_Count': (1.0, 8.0),
+    'WBC_Count': (0.5, 50.0),
+    'Platelet_Count': (10.0, 1500.0),
+    'Serum_Iron': (10.0, 300.0),
+    'TIBC': (50.0, 600.0),
+    'Transferrin_Saturation': (0.0, 100.0),
+    'Ferritin': (1.0, 20000.0),
+    'Reticulocyte_Count': (0.0, 20.0),
+    'Total_Bilirubin': (0.0, 10.0),
+    'Direct_Bilirubin': (0.0, 5.0),
+    'Albumin_Serum': (0.5, 6.5),
+    'Total_Protein': (2.0, 12.0),
+    'Prealbumin': (0.0, 60.0),
+    'CRP': (0.0, 300.0),
+    'Total_Cholesterol': (50.0, 500.0),
+    'LDL_Cholesterol': (10.0, 300.0),
+    'HDL_Cholesterol': (10.0, 150.0),
+    'Triglycerides': (20.0, 2000.0),
+    'Non_HDL_Cholesterol': (20.0, 400.0),
+    'Glucose': (20.0, 600.0),
+    'HbA1c': (3.0, 20.0),
+    'Fructosamine': (100.0, 800.0),
+    'Uric_Acid': (1.0, 20.0),
+    'Urine_Albumin': (0.0, 10000.0),
+    'Urine_Creatinine': (1.0, 1000.0),
+    'Albumin_to_Creatinine_Ratio_Urine': (0.0, 5000.0),
+    'Protein_to_Creatinine_Ratio_Urine': (0.0, 20000.0),
+    'Urine_Protein': (0.0, 30000.0),
+    'Urine_pH': (4.0, 9.0),
+    'Urine_Specific_Gravity': (1.0, 1.05),
+    'BNP': (0.0, 5000.0),
+    'NT_proBNP': (0.0, 40000.0),
+    'Troponin_I': (0.0, 50000.0),
+    'Troponin_T': (0.0, 10000.0),
+    'Free_T4': (0.2, 6.0),
+    'Free_T3': (0.5, 10.0),
+    'pH_Arterial': (6.8, 7.8),
+    'pCO2_Arterial': (2.0, 100.0),
+    'pO2_Arterial': (4.0, 500.0),
+    'Lactate': (4.0, 200.0),
+    'Beta2_Microglobulin': (0.0, 50.0),
+    'Aluminum': (0.0, 300.0),
+}
+# conversion factors for alternative units -> target
+CONVERSIONS={
+    'Serum_Creatinine': [0.0113],  # umol/L -> mg/dL
+    'Urine_Creatinine': [0.0113],
+    'Uric_Acid': [0.01681],  # umol/L -> mg/dL
+    'Serum_Calcium': [4.0],  # mmol/L -> mg/dL
+    'Ionized_Calcium': [4.0],
+    'Phosphorus': [3.1],  # mmol/L -> mg/dL
+    'Magnesium': [2.43, 1.215, 0.1],  # mmol/L, mEq/L, mg/L -> mg/dL
+    'Hemoglobin': [0.1, 1.611],  # g/L -> g/dL, mmol/L -> g/dL
+    'Albumin_Serum': [0.1],  # g/L -> g/dL
+    'Total_Protein': [0.1],
+    'Prealbumin': [0.1, 100.0],  # mg/L -> mg/dL, g/L -> mg/dL
+    'Vitamin_D_25OH': [0.4],  # nmol/L -> ng/mL
+    'Vitamin_D_1_25OH': [0.3846],  # pmol/L -> pg/mL
+    'Serum_Iron': [5.585],  # umol/L -> ug/dL
+    'TIBC': [5.585],
+    'Total_Bilirubin': [0.0585],  # umol/L -> mg/dL
+    'Direct_Bilirubin': [0.0585],
+    'Total_Cholesterol': [38.67],  # mmol/L -> mg/dL
+    'LDL_Cholesterol': [38.67],
+    'HDL_Cholesterol': [38.67],
+    'Non_HDL_Cholesterol': [38.67],
+    'Triglycerides': [88.57],  # mmol/L -> mg/dL
+    'Glucose': [18.0182, 0.1],  # mmol/L -> mg/dL, mg/L -> mg/dL
+    'Free_T4': [0.0777],  # pmol/L -> ng/dL
+    'Free_T3': [0.651],  # pmol/L -> pg/mL
+    'Lactate': [9.0],  # mmol/L -> mg/dL
+}
+TOL=0.05
+def in_range(v, lo, hi):
+    return (lo * (1 - TOL)) <= v <= (hi * (1 + TOL))
+def clamp(v, lo, hi):
+    if v < lo: return lo
+    if v > hi: return hi
+    return v
+id_col='patient_id'
+cols=[c for c in raw.columns]
+num_cols=[c for c in cols if c!=id_col]
+# 1) parse numeric
+parsed=raw.copy()
+for c in num_cols:
+    parsed[c]=parsed[c].map(parse_value)
+# 1) drop missing rows
+before=len(parsed)
+parsed=parsed.dropna(axis=0, how='any', subset=num_cols).reset_index(drop=True)
+after_missing=len(parsed)
+# 2/3) range-based conversion + invalid rows removal
+out=parsed.copy()
+invalid_mask=np.zeros(len(out), dtype=bool)
+for c in num_cols:
+    lo,hi=RANGES.get(c, (-np.inf, np.inf))
+    factors=CONVERSIONS.get(c, [])
+    vals=out[c].astype(float).to_numpy()
+    new_vals=np.empty_like(vals)
+    for i,v in enumerate(vals):
+        vv=float(v)
+        if np.isnan(vv):
+            new_vals[i]=np.nan
+            continue
+        if in_range(vv, lo, hi):
+            vv2=vv
+        else:
+            vv2=None
+            for f in factors:
+                cand=vv*f
+                if in_range(cand, lo, hi):
+                    vv2=cand
+                    break
+            if vv2 is None:
+                # as a last-chance heuristic, try dividing by 10 or 1000
+                for f in [0.1, 0.01, 0.001, 10.0, 100.0, 1000.0]:
+                    cand=vv*f
+                    if in_range(cand, lo, hi):
+                        vv2=cand
+                        break
+        if vv2 is None or not in_range(vv2, lo, hi):
+            new_vals[i]=np.nan
+        else:
+            # clamp only if barely out due to float error
+            vv2=clamp(vv2, lo, hi)
+            new_vals[i]=vv2
+    out[c]=new_vals
+# drop rows that became invalid after conversion
+before_conv=len(out)
+out=out.dropna(axis=0, how='any', subset=num_cols).reset_index(drop=True)
+after_conv=len(out)
+# final strict range check
+for c in num_cols:
+    lo,hi=RANGES[c]
+    s=out[c].astype(float)
+    bad=(s < lo) | (s > hi)
+    if bad.any():
+        # drop any remaining bad rows
+        out=out.loc[~bad].copy()
+out=out.reset_index(drop=True)
+# 4) format as X.XX
+for c in num_cols:
+    out[c]=out[c].map(lambda x: f"{float(x):.2f}")
+# keep patient_id as-is (but strip whitespace)
+out[id_col]=out[id_col].astype(str).str.strip()
+out.to_csv(out_path, index=False)
+print('Input rows:', before)
+print('After drop missing:', after_missing)
+print('After conversion cleanup:', after_conv)
+print('Final rows:', len(out))
+print('Wrote:', out_path)
+print('Columns:', out.shape[1])
+# quick validation: commas, scientific notation, missing
+text=open(out_path,'r',encoding='utf-8').read(200000)
+assert 'e+' not in text and 'e-' not in text and 'E+' not in text and 'E-' not in text
+assert ',' not in text  # ensures no commas anywhere
+# verify 2dp pattern for numeric columns on first few rows
+sample=out.head(3)
+print('\nSample output:')
+print(sample.to_string(index=False))
+PY
+Input rows: 2590
+After drop missing: 2548
+After conversion cleanup: 1009
+Final rows: 1009
+Wrote: /root/ckd_lab_data_harmonized.csv
+Columns: 63
+Traceback (most recent call last):
+  File "<stdin>", line 240, in <module>
+AssertionError
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+❌ Exit code: 1

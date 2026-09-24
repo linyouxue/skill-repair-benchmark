@@ -1,0 +1,38 @@
+Tool: terminal
+Result:
+python3 - <<'PY'
+import numpy as np
+import lightkurve as lk
+from astropy.timeseries import BoxLeastSquares
+import astropy.units as u
+path='/root/data/tess_lc.txt'
+t,f,q,fe=np.genfromtxt(path).T
+m=q==0
+t,f,fe=t[m],f[m],fe[m]
+idx=np.argsort(t)
+t,f,fe=t[idx],f[idx],fe[idx]
+wl=2001
+lc=lk.LightCurve(time=t, flux=f, flux_err=fe).remove_outliers(sigma=10)
+lc=lc.flatten(window_length=wl, polyorder=2, break_tolerance=5).remove_outliers(sigma=6)
+t_rel=(lc.time.value-lc.time.value.min())*u.day
+bls=BoxLeastSquares(t_rel, lc.flux.value, dy=lc.flux_err.value)
+durations=np.linspace(0.05,0.45,20)*u.day
+# get coarse best with likelihood
+pg=bls.autopower(durations, minimum_period=0.5*u.day, maximum_period=15*u.day, objective='likelihood')
+ix=int(np.argmax(pg.power))
+P0=float(pg.period[ix].to_value(u.day))
+print('coarse best (likelihood)',P0,'dur',float(pg.duration[ix].to_value(u.day)))
+# refine with a narrow grid +/-0.2%
+pgrid=np.linspace(P0*(1-0.002), P0*(1+0.002), 80000)*u.day
+pg2=bls.power(pgrid, durations, objective='likelihood')
+ix2=int(np.argmax(pg2.power))
+P=float(pg2.period[ix2].to_value(u.day))
+print('refined best (likelihood)',P,'dur',float(pg2.duration[ix2].to_value(u.day)),'power',float(pg2.power[ix2]))
+PY
+coarse best (likelihood) 1.3982309087784257 dur 0.45
+refined best (likelihood) 1.398247932452536 dur 0.45 power 127964.6112385041
+
+
+📁 Working directory: /root
+🐍 Python interpreter: /usr/local/bin/python
+✅ Exit code: 0

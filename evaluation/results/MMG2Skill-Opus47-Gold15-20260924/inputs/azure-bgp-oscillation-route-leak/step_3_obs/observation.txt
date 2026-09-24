@@ -1,0 +1,136 @@
+Tool: file_editor
+Result:
+[File /app/analyze.py edited with 1 changes.]
+[begin of edit 1 / 1]
+(content before edit)
+ 1|
+(content after edit)
++1|import json
++2|from pathlib import Path
+ 3|
++4|DATA = Path("/app/data")
++5|OUT = Path("/app/output/oscillation_report.json")
++6|
++7|
++8|def load(name):
++9|    return json.loads((DATA / name).read_text())
++10|
++11|
++12|preferences = load("preferences.json")
++13|relationships = load("relationships.json")
++14|route_events = load("route_events.json")
++15|solutions = load("possible_solutions.json")
++16|
++17|
++18|# --- Oscillation detection: find cycle in preference graph ---
++19|pref_graph = {int(asn): v["prefer_via"] for asn, v in preferences.items()}
++20|
++21|
++22|def find_cycle(pref):
++23|    for start in pref:
++24|        seen = {}
++25|        path = []
++26|        cur = start
++27|        while cur in pref:
++28|            if cur in seen:
++29|                return path[seen[cur]:]
++30|            seen[cur] = len(path)
++31|            path.append(cur)
++32|            cur = pref[cur]
++33|    return None
++34|
++35|
++36|cycle = find_cycle(pref_graph)
++37|oscillation_detected = cycle is not None
++38|affected = sorted(cycle) if cycle else []
++39|
++40|
++41|# --- Route leak detection: valley-free violation from events ---
++42|# Valley-free: routes learned from peer/provider may only be exported to customers.
++43|leaks = []
++44|for ev in route_events:
++45|    src_t = ev["source_type"]
++46|    dst_t = ev["destination_type"]
++47|    if src_t in ("provider", "peer") and dst_t in ("provider", "peer"):
++48|        leaks.append({
++49|            "leaker_as": ev["advertiser_asn"],
++50|            "source_as": ev["source_asn"],
++51|            "destination_as": ev["destination_asn"],
++52|            "source_type": src_t,
++53|            "destination_type": dst_t,
++54|        })
++55|
++56|route_leak_detected = len(leaks) > 0
++57|
++58|
++59|# --- Solution evaluation ---
++60|# For each solution: (oscillation_resolved, route_leak_resolved)
++61|# Rules:
++62|#   - Oscillation resolved iff the solution breaks the preference cycle between 65002<->65003.
++63|#   - Route leak resolved iff it stops hub1/hub2 from advertising provider routes to peer hub via Virtual WAN.
++64|#   - Prohibited fixes (disable peering, restart BGP, disable BGP) are always invalid.
++65|#   - Timer tuning, dampening, prefix-limits, ECMP, waiting, RPKI (origin already correct),
++66|#     vague route maps -> neither.
++67|
++68|solution_map = {
++69|    "Apply route filter on vhubvnet1 to only accept prefixes 10.2.0.0/16 from vhubvnet2":
++70|        (False, False),
++71|    "Configure route policy on vhubvnet1 to enforce no-export of provider routes to peer vhubvnet2 by bgp community":
++72|        (True, True),
++73|    "Configure vhubvnet1 to prefer shorter AS-PATH length or use MED value 100 for route selection":
++74|        (False, False),
++75|    "Enable RPKI origin validation on vhubvnet2 to verify prefix 10.2.1.0/24 originates from ASN 65007 (VNET4)":
++76|        (False, False),
++77|    "Enable ingress filtering on vhubvnet2 (ASN 65003) to reject routes with AS_PATH containing Virtual WAN ASN 65001 when received from peer vhubvnet1":
++78|        (True, True),
++79|    "Configure user defined route override on vhubvnet1 defaultRouteTable to prefer specific next-hop":
++80|        (True, True),
++81|    "Enable Virtual WAN hub routing intent to enforce all hub-to-hub routes go through Virtual WAN (ASN 65001) only":
++82|        (True, True),
++83|    "Enable ECMP load balancing across hub1 and hub2 with equal-cost multipath":
++84|        (False, False),
++85|    "disable hub peering between vhubvnet1 and vhubvnet2":
++86|        (False, False),
++87|    "Wait for Virtual WAN automatic convergence or ASN 65003 to change AS_PATH length of routes":
++88|        (False, False),
++89|    "Restart BGP session on hub1 ":
++90|        (False, False),
++91|    "Configure export policy on vhubvnet1 (ASN 65002) to block announcing provider routes (from Virtual WAN ASN 65001) to peer vhubvnet2 (ASN 65003)":
++92|        (True, True),
++93|    "Set route preference hierarchy on hub1: customer routes (VNET1, VNET2) > Virtual WAN routes > peer routes (vhubvnet2)":
++94|        (True, False),
++95|    "Enable route dampening on vhubvnet1 S2S VPN Gateway with penalty threshold 1000 and suppress limit 2000":
++96|        (False, False),
++97|    "Set maximum-prefix limit of 10 prefixes on BGP session between vhubvnet1 and vhubvnet2":
++98|        (False, False),
++99|    "Configure export policy on hub1 to filter out routes learned from hub2 before re-advertising":
++100|        (True, False),
++101|    "Deploy Route Map in hub1 with centralized routing management":
++102|        (False, False),
++103|    "Change BGP keepalive timer of vhubvnet1 to 30 seconds and holdtime to 90 seconds":
++104|        (False, False),
++105|    "Update routing preference on hub1 (ASN 65002) to stop preferring routes via hub2 (ASN 65003)":
++106|        (True, False),
++107|}
++108|
++109|solution_results = {}
++110|for sol in solutions:
++111|    osc, leak = solution_map[sol]
++112|    solution_results[sol] = {
++113|        "oscillation_resolved": osc,
++114|        "route_leak_resolved": leak,
++115|    }
++116|
++117|report = {
++118|    "oscillation_detected": oscillation_detected,
++119|    "oscillation_cycle": cycle if cycle else [],
++120|    "affected_ases": affected,
++121|    "route_leak_detected": route_leak_detected,
++122|    "route_leaks": leaks,
++123|    "solution_results": solution_results,
++124|}
++125|
++126|OUT.write_text(json.dumps(report, indent=2))
++127|print(json.dumps(report, indent=2))
++128|
+[end of edit 1 / 1]
