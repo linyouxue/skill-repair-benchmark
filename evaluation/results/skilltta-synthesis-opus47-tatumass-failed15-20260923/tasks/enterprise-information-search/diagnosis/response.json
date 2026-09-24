@@ -1,0 +1,79 @@
+{
+  "task_id": "enterprise-information-search",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 30.1,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 29989,
+    "output_tokens": 1559,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "Reviewer enumeration under-recall across evidence channels",
+      "general_pattern": "The skill's reviewer extraction guidance stops at a single evidence channel (one review meeting's participants who spoke). It does not require the agent to union reviewer signals across ALL evidence channels — document `feedback` sections, PR reviewer fields, slack thread replies to the report-share message, and multiple related meeting transcripts — before returning the final set. As a result, when reviewers are distributed across multiple artifacts, the agent stops after the first artifact yields a plausible list and under-reports the count.",
+      "observable_evidence": "For q1 the agent returned 8 IDs derived solely from participants of a single meeting (`CoFoAIX_planning_1`) who spoke in the transcript. Verifier reports `q1 length mismatch. Expected 11, got 8`. The trajectory shows the agent inspected document `feedback` text (present on documents 1 and 2) but never extracted attributed reviewers from those feedback sections, nor from slack thread replies to the report-share message, nor from PR reviewer fields, before finalizing.",
+      "missing_reasoning_step": "An explicit 'union across evidence channels' step: after collecting Tier 1/2/3 reviewer candidates from each channel (explicit reviewer fields, document feedback attributions, meeting transcript contributors, slack thread replies to the report-share message, PR reviewers), merge and de-duplicate them, and only stop when all channels tied to the selected report have been exhausted.",
+      "correct_general_approach": "Restructure Step 5 to require the agent to (a) enumerate every artifact linked to the chosen report (document, slack share thread + replies, all meetings whose transcripts/chats discuss the report, PRs introducing it), (b) apply the reviewer tier rules to each artifact independently, (c) union the resulting employee IDs, and (d) record which channel contributed each ID before returning. Add a completeness checklist that fails 'USE_EVIDENCE' if any linked artifact was not searched for reviewer contributions.",
+      "skill_controllable": true,
+      "target_file": "enterprise-artifact-search/SKILL.md",
+      "target_section": "Step 5 — Extract key reviewers (DO NOT equate \"participants\" with reviewers)",
+      "confidence": "high"
+    },
+    {
+      "label": "No completeness/self-check gate before returning reviewer set",
+      "general_pattern": "The skill lacks a validation step that requires the agent to cross-check the assembled reviewer list against all reviewer-bearing evidence before declaring USE_EVIDENCE. Without such a gate, the agent commits to the first coherent list it assembles, even when other clearly relevant artifacts (e.g., document `feedback` fields it already read) have not been mined for attributions.",
+      "observable_evidence": "The agent read documents whose `feedback` fields contained explicit suggestions (docs 1 and 2 in CoachForce.json) but never mapped those feedback bullets to contributor IDs, and finalized the answer immediately after one meeting-transcript pass. No re-check step was triggered despite the skill's own NEED_MORE_SEARCH recommendation type existing.",
+      "missing_reasoning_step": "A mandatory 'reviewer completeness audit' before emitting the final JSON: for the chosen report, list every artifact that could carry reviewer signals, mark which have been mined, and require NEED_MORE_SEARCH if any remain unmined or if the union count is smaller than the number of distinct feedback-bearing artifacts.",
+      "correct_general_approach": "Add an explicit pre-output checklist and downgrade the recommendation to NEED_MORE_SEARCH whenever any linked artifact carrying potential reviewer contributions has not been individually inspected and attributed.",
+      "skill_controllable": true,
+      "target_file": "enterprise-artifact-search/SKILL.md",
+      "target_section": "Recommendation Types / Step 6 — Validate IDs & de-duplicate",
+      "confidence": "medium"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The verifier failure is a length mismatch on q1 (reviewer enumeration), and the trajectory shows the agent applied the skill's Step 5 in a single-channel manner and stopped early. The skill provides tiered reviewer sources but does not mandate unioning across channels or auditing completeness before returning, which is a reusable guidance gap the skill can address."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "Reviewer enumeration under-recall across evidence channels",
+        "general_pattern": "The skill's reviewer extraction guidance stops at a single evidence channel (one review meeting's participants who spoke). It does not require the agent to union reviewer signals across ALL evidence channels — document `feedback` sections, PR reviewer fields, slack thread replies to the report-share message, and multiple related meeting transcripts — before returning the final set. As a result, when reviewers are distributed across multiple artifacts, the agent stops after the first artifact yields a plausible list and under-reports the count.",
+        "observable_evidence": "For q1 the agent returned 8 IDs derived solely from participants of a single meeting (`CoFoAIX_planning_1`) who spoke in the transcript. Verifier reports `q1 length mismatch. Expected 11, got 8`. The trajectory shows the agent inspected document `feedback` text (present on documents 1 and 2) but never extracted attributed reviewers from those feedback sections, nor from slack thread replies to the report-share message, nor from PR reviewer fields, before finalizing.",
+        "missing_reasoning_step": "An explicit 'union across evidence channels' step: after collecting Tier 1/2/3 reviewer candidates from each channel (explicit reviewer fields, document feedback attributions, meeting transcript contributors, slack thread replies to the report-share message, PR reviewers), merge and de-duplicate them, and only stop when all channels tied to the selected report have been exhausted.",
+        "correct_general_approach": "Restructure Step 5 to require the agent to (a) enumerate every artifact linked to the chosen report (document, slack share thread + replies, all meetings whose transcripts/chats discuss the report, PRs introducing it), (b) apply the reviewer tier rules to each artifact independently, (c) union the resulting employee IDs, and (d) record which channel contributed each ID before returning. Add a completeness checklist that fails 'USE_EVIDENCE' if any linked artifact was not searched for reviewer contributions.",
+        "skill_controllable": true,
+        "target_file": "enterprise-artifact-search/SKILL.md",
+        "target_section": "Step 5 — Extract key reviewers (DO NOT equate \"participants\" with reviewers)",
+        "confidence": "high"
+      },
+      {
+        "label": "No completeness/self-check gate before returning reviewer set",
+        "general_pattern": "The skill lacks a validation step that requires the agent to cross-check the assembled reviewer list against all reviewer-bearing evidence before declaring USE_EVIDENCE. Without such a gate, the agent commits to the first coherent list it assembles, even when other clearly relevant artifacts (e.g., document `feedback` fields it already read) have not been mined for attributions.",
+        "observable_evidence": "The agent read documents whose `feedback` fields contained explicit suggestions (docs 1 and 2 in CoachForce.json) but never mapped those feedback bullets to contributor IDs, and finalized the answer immediately after one meeting-transcript pass. No re-check step was triggered despite the skill's own NEED_MORE_SEARCH recommendation type existing.",
+        "missing_reasoning_step": "A mandatory 'reviewer completeness audit' before emitting the final JSON: for the chosen report, list every artifact that could carry reviewer signals, mark which have been mined, and require NEED_MORE_SEARCH if any remain unmined or if the union count is smaller than the number of distinct feedback-bearing artifacts.",
+        "correct_general_approach": "Add an explicit pre-output checklist and downgrade the recommendation to NEED_MORE_SEARCH whenever any linked artifact carrying potential reviewer contributions has not been individually inspected and attributed.",
+        "skill_controllable": true,
+        "target_file": "enterprise-artifact-search/SKILL.md",
+        "target_section": "Recommendation Types / Step 6 — Validate IDs & de-duplicate",
+        "confidence": "medium"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The verifier failure is a length mismatch on q1 (reviewer enumeration), and the trajectory shows the agent applied the skill's Step 5 in a single-channel manner and stopped early. The skill provides tiered reviewer sources but does not mandate unioning across channels or auditing completeness before returning, which is a reusable guidance gap the skill can address."
+    }
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "task_id": "dynamic-object-aware-egomotion",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 33.66,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 34365,
+    "output_tokens": 1806,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "Insufficient guidance for parallax-heavy scenes",
+      "general_pattern": "The dyn-object-masks skill prescribes a single approach (2D affine/homography warp + intensity differencing + adaptive threshold + morphology) without warning that this approach fails on scenes with strong translational camera motion (walking/dolly) where parallax residuals dominate. It offers no alternative or decision criterion for switching methods, so the agent either produces massive false-positive masks (~15-20% of image) or, after ad-hoc switching to flow-residual methods, over-suppresses to near-empty masks.",
+      "observable_evidence": "Run produced Mean IoU 0.0143 and Boundary IoU 0.0008. Initial affine-differencing yielded ~15-20% pixel nnz per frame (verifier log lines 'mask frame k: nnz=~130k-190k (14-21%)'). Agent then switched to flow-residual method producing mostly 0-nnz frames (frames 10-17 all nnz=0). No skill guidance addressed either failure mode.",
+      "missing_reasoning_step": "The skill lacks a step to (a) diagnose whether a 2D global motion model is adequate (e.g., via residual distribution, dolly-in / large translation detection) and (b) select or combine a flow-consistency-based alternative when parallax is significant, plus sanity checks on plausible foreground fraction.",
+      "correct_general_approach": "Add explicit guidance: when egomotion indicates translational/dolly motion or when residual statistics show heavy tails covering large image fractions, switch from intensity differencing to a flow-direction/consistency check (residual optical flow against a fitted global flow model with epipolar or motion-consistency reasoning), and set a plausibility band on foreground area to reject implausible outputs.",
+      "skill_controllable": true,
+      "target_file": "dyn-object-masks/SKILL.md",
+      "target_section": "Workflow / When to use",
+      "confidence": "high"
+    },
+    {
+      "label": "Missing threshold/area calibration guidance for mask size plausibility",
+      "general_pattern": "The dyn-object-masks skill provides only illustrative constants (min threshold 20, area floor) with no rule for validating that final mask coverage is plausible. There is no self-check that flags frames where the moving-object fraction is implausibly high (e.g., >~10% of image) or entirely empty in scenes known to contain moving objects, so silent failures pass the local checks.",
+      "observable_evidence": "Multiple pipelines were tried; final masks ranged from 0% to 9% nnz per frame with no automated re-tuning. Verifier reports Mean IoU 0.0143 and P10 IoU 0.0000, indicating masks bear little spatial relation to ground truth despite passing format checks.",
+      "missing_reasoning_step": "A plausibility self-check on per-frame foreground fraction and temporal consistency, plus a directive to re-tune threshold/area when fraction is out of expected band.",
+      "correct_general_approach": "Add self-check items: expected foreground fraction bounds, temporal continuity of connected components, and a documented calibration loop to adjust threshold multiplier and min-area when outputs fall outside plausible bands.",
+      "skill_controllable": true,
+      "target_file": "dyn-object-masks/SKILL.md",
+      "target_section": "Self-check",
+      "confidence": "medium"
+    },
+    {
+      "label": "Output-validation skill omits mask-content plausibility checks",
+      "general_pattern": "output-validation focuses on structural correctness (keys, shape, CSR integrity) but does not include any content-level sanity checks for mask outputs (e.g., non-trivial coverage, temporal smoothness, foreground area range). Structural validity therefore hides content failure.",
+      "observable_evidence": "Agent's validation step reported 'Instructions VALID' and 'NPZ VALID' while final masks scored Mean IoU 0.0143; verifier's format tests all passed and only test_mask_comprehensive failed.",
+      "missing_reasoning_step": "A content-level validation step for masks (coverage bounds per frame, flicker/temporal consistency, non-empty across frames when motion labels are non-Stay) as part of the pre-submission checklist.",
+      "correct_general_approach": "Extend output-validation with mask-content sanity checks (plausible foreground fraction band, temporal flicker bound, correlation between non-Stay motion intervals and mask activity) so that structural passes do not mask semantic failures.",
+      "skill_controllable": true,
+      "target_file": "output-validation/SKILL.md",
+      "target_section": "Checks / Self-check list",
+      "confidence": "medium"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "Motion labeling passed (Macro-F1 0.86) and all format checks passed; the sole failure is mask quality (Mean IoU 0.014). Both the dyn-object-masks skill (single-model approach, no parallax handling, weak calibration/self-check guidance) and output-validation skill (no content-level mask sanity checks) contain reusable deficiencies that plausibly caused the failure without invoking task-specific answers."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "Insufficient guidance for parallax-heavy scenes",
+        "general_pattern": "The dyn-object-masks skill prescribes a single approach (2D affine/homography warp + intensity differencing + adaptive threshold + morphology) without warning that this approach fails on scenes with strong translational camera motion (walking/dolly) where parallax residuals dominate. It offers no alternative or decision criterion for switching methods, so the agent either produces massive false-positive masks (~15-20% of image) or, after ad-hoc switching to flow-residual methods, over-suppresses to near-empty masks.",
+        "observable_evidence": "Run produced Mean IoU 0.0143 and Boundary IoU 0.0008. Initial affine-differencing yielded ~15-20% pixel nnz per frame (verifier log lines 'mask frame k: nnz=~130k-190k (14-21%)'). Agent then switched to flow-residual method producing mostly 0-nnz frames (frames 10-17 all nnz=0). No skill guidance addressed either failure mode.",
+        "missing_reasoning_step": "The skill lacks a step to (a) diagnose whether a 2D global motion model is adequate (e.g., via residual distribution, dolly-in / large translation detection) and (b) select or combine a flow-consistency-based alternative when parallax is significant, plus sanity checks on plausible foreground fraction.",
+        "correct_general_approach": "Add explicit guidance: when egomotion indicates translational/dolly motion or when residual statistics show heavy tails covering large image fractions, switch from intensity differencing to a flow-direction/consistency check (residual optical flow against a fitted global flow model with epipolar or motion-consistency reasoning), and set a plausibility band on foreground area to reject implausible outputs.",
+        "skill_controllable": true,
+        "target_file": "dyn-object-masks/SKILL.md",
+        "target_section": "Workflow / When to use",
+        "confidence": "high"
+      },
+      {
+        "label": "Missing threshold/area calibration guidance for mask size plausibility",
+        "general_pattern": "The dyn-object-masks skill provides only illustrative constants (min threshold 20, area floor) with no rule for validating that final mask coverage is plausible. There is no self-check that flags frames where the moving-object fraction is implausibly high (e.g., >~10% of image) or entirely empty in scenes known to contain moving objects, so silent failures pass the local checks.",
+        "observable_evidence": "Multiple pipelines were tried; final masks ranged from 0% to 9% nnz per frame with no automated re-tuning. Verifier reports Mean IoU 0.0143 and P10 IoU 0.0000, indicating masks bear little spatial relation to ground truth despite passing format checks.",
+        "missing_reasoning_step": "A plausibility self-check on per-frame foreground fraction and temporal consistency, plus a directive to re-tune threshold/area when fraction is out of expected band.",
+        "correct_general_approach": "Add self-check items: expected foreground fraction bounds, temporal continuity of connected components, and a documented calibration loop to adjust threshold multiplier and min-area when outputs fall outside plausible bands.",
+        "skill_controllable": true,
+        "target_file": "dyn-object-masks/SKILL.md",
+        "target_section": "Self-check",
+        "confidence": "medium"
+      },
+      {
+        "label": "Output-validation skill omits mask-content plausibility checks",
+        "general_pattern": "output-validation focuses on structural correctness (keys, shape, CSR integrity) but does not include any content-level sanity checks for mask outputs (e.g., non-trivial coverage, temporal smoothness, foreground area range). Structural validity therefore hides content failure.",
+        "observable_evidence": "Agent's validation step reported 'Instructions VALID' and 'NPZ VALID' while final masks scored Mean IoU 0.0143; verifier's format tests all passed and only test_mask_comprehensive failed.",
+        "missing_reasoning_step": "A content-level validation step for masks (coverage bounds per frame, flicker/temporal consistency, non-empty across frames when motion labels are non-Stay) as part of the pre-submission checklist.",
+        "correct_general_approach": "Extend output-validation with mask-content sanity checks (plausible foreground fraction band, temporal flicker bound, correlation between non-Stay motion intervals and mask activity) so that structural passes do not mask semantic failures.",
+        "skill_controllable": true,
+        "target_file": "output-validation/SKILL.md",
+        "target_section": "Checks / Self-check list",
+        "confidence": "medium"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "Motion labeling passed (Macro-F1 0.86) and all format checks passed; the sole failure is mask quality (Mean IoU 0.014). Both the dyn-object-masks skill (single-model approach, no parallax handling, weak calibration/self-check guidance) and output-validation skill (no content-level mask sanity checks) contain reusable deficiencies that plausibly caused the failure without invoking task-specific answers."
+    }
+  }
+}

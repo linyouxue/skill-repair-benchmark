@@ -1,0 +1,101 @@
+{
+  "task_id": "seismic-phase-picking",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 43.67,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 39707,
+    "output_tokens": 2397,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "Missing guidance on multi-model ensembling / picker selection to hit both P and S thresholds",
+      "general_pattern": "The picker-selection skill describes tradeoffs among STA/LTA, template matching, and deep learning at a high level, but gives no concrete guidance for choosing among the several pretrained deep-learning pickers available in SeisBench (PhaseNet vs EQTransformer vs Skynet vs PickBlue, different `from_pretrained` weights) or for combining/ensembling them when a single model gives asymmetric P vs S performance. The agent picked one PhaseNet weight (`scedc`) and tuned only thresholds, achieving strong P F1 (0.77) but S F1 just below threshold (0.59), with no prompt to try alternative weights, ensemble multiple models, or use an S-specific model.",
+      "observable_evidence": "Verifier: P-wave F1 0.773 (passes) vs S-wave F1 0.593 (fails 0.6 threshold). Agent used only `sbm.PhaseNet.from_pretrained('scedc')` and adjusted P/S thresholds; trajectory shows a stub `models = []` loop that was never populated with alternates. Skill lists many pretrained weights and multiple picking models but offers no selection heuristic.",
+      "missing_reasoning_step": "Decision procedure for choosing/combining pretrained weights and models based on data characteristics (network, sampling rate, magnitude range) and for validating that both P and S recall are adequate, including trying multiple weights or ensembling picks when one phase underperforms.",
+      "correct_general_approach": "Add explicit guidance that (a) different pretrained weights are trained on different networks and can differ substantially in P vs S performance, (b) when metrics are asymmetric across phases, try alternative weights (e.g., `stead`, `instance`, `ethz`, `original`) or a second architecture (EQTransformer) and either pick the best per phase or ensemble/union picks with per-phase thresholds, and (c) validate on any available labels or held-out sanity checks before committing.",
+      "skill_controllable": true,
+      "target_file": "seismic-picker-selection/SKILL.md",
+      "target_section": "Deep Learning Pickers / When to Use",
+      "confidence": "medium"
+    },
+    {
+      "label": "No preprocessing recipe for deep-learning pickers (filtering, detrending, resampling, component handling)",
+      "general_pattern": "Neither the seisbench-model-api skill nor the picker-selection skill specifies concrete preprocessing steps that materially affect pick quality: detrend/demean/taper, bandpass filtering appropriate for local earthquakes, matching the model's expected sampling rate (`model.sampling_rate`), and correct handling of missing components (zero-padded channels). The best-practices section only warns about tiny-amplitude scaling. The agent scaled amplitudes and fixed the zero-column mapping only after noticing files with no picks, and never applied bandpass filtering in the final run, which likely contributed to lower S-wave recall/precision.",
+      "observable_evidence": "Trajectory shows the agent discovered zero-padded single/two-component files (e.g., `NC.BAV..EH.0095557.npz` with only EHZ nonzero) mid-run and had to add a fallback; no consistent detrend/filter/resample step was included in the final `load_stream`. Verifier reports S-wave MAE 101.6 samples (~1.0 s), suggesting timing/preprocessing sensitivity. The scedc PhaseNet model expects 100 Hz — never checked against `model.sampling_rate` or `dt`.",
+      "missing_reasoning_step": "A preprocessing checklist for feeding waveforms to SeisBench pickers: verify/resample to `model.sampling_rate`, detrend+taper+bandpass, handle multi-component vs single-component traces (do not fabricate zero channels), and re-scale extremely small amplitudes before normalization.",
+      "correct_general_approach": "Document a standard preprocessing pipeline for SeisBench picking (component selection, detrend, taper, bandpass appropriate to local vs regional events, resampling to `model.sampling_rate`, amplitude rescaling for tiny values) and warn that zero-padded channels must be dropped rather than passed as data, since they distort normalization and can suppress S-wave detections.",
+      "skill_controllable": true,
+      "target_file": "seisbench-model-api/SKILL.md",
+      "target_section": "Best Practices",
+      "confidence": "medium"
+    },
+    {
+      "label": "No guidance on threshold selection and precision/recall tradeoff for F1-optimized picking",
+      "general_pattern": "The skill does not explain how `P_threshold` / `S_threshold` in `classify` trade precision against recall, nor how to set them differently per phase when the task is scored by F1 with a tolerance. The agent picked arbitrary thresholds (0.3, then 0.15, then 0.1) by trial and error and settled without a principled procedure; S-wave precision (0.63) and recall (0.56) both remained low.",
+      "observable_evidence": "Trajectory shows repeated ad-hoc edits to `P_THR`/`S_THR` (0.3 → 0.15 → 0.1) with no calibration procedure. Verifier: S precision 0.629, recall 0.560. Skill's `classify` example passes no thresholds and gives no tuning advice.",
+      "missing_reasoning_step": "A method for choosing per-phase thresholds, e.g., sweep thresholds and use any available labeled subset or self-consistency (P-S ordering, expected number of picks) to select F1-maximizing values, and set S threshold typically lower than P because S waves are noisier.",
+      "correct_general_approach": "Add explicit tuning guidance: expose that `classify` accepts per-phase thresholds, describe the precision/recall tradeoff, recommend lower thresholds for S than P for local events, and suggest sweeping thresholds against any available ground truth or sanity heuristics when the metric is F1 with a tolerance.",
+      "skill_controllable": true,
+      "target_file": "seisbench-model-api/SKILL.md",
+      "target_section": "Overview / classify",
+      "confidence": "medium"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The run failed only on the S-wave F1 threshold (0.593 vs 0.6) while P-wave passed comfortably. The agent used a single PhaseNet weight without preprocessing, without a principled threshold-selection procedure, and without considering alternative pretrained weights or model ensembling — all decisions that the skill package guides. The skill files describe the SeisBench and ObsPy APIs and give high-level picker tradeoffs but omit concrete, reusable guidance on model/weight selection, preprocessing pipeline, and per-phase threshold tuning that would plausibly push S F1 across threshold."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "Missing guidance on multi-model ensembling / picker selection to hit both P and S thresholds",
+        "general_pattern": "The picker-selection skill describes tradeoffs among STA/LTA, template matching, and deep learning at a high level, but gives no concrete guidance for choosing among the several pretrained deep-learning pickers available in SeisBench (PhaseNet vs EQTransformer vs Skynet vs PickBlue, different `from_pretrained` weights) or for combining/ensembling them when a single model gives asymmetric P vs S performance. The agent picked one PhaseNet weight (`scedc`) and tuned only thresholds, achieving strong P F1 (0.77) but S F1 just below threshold (0.59), with no prompt to try alternative weights, ensemble multiple models, or use an S-specific model.",
+        "observable_evidence": "Verifier: P-wave F1 0.773 (passes) vs S-wave F1 0.593 (fails 0.6 threshold). Agent used only `sbm.PhaseNet.from_pretrained('scedc')` and adjusted P/S thresholds; trajectory shows a stub `models = []` loop that was never populated with alternates. Skill lists many pretrained weights and multiple picking models but offers no selection heuristic.",
+        "missing_reasoning_step": "Decision procedure for choosing/combining pretrained weights and models based on data characteristics (network, sampling rate, magnitude range) and for validating that both P and S recall are adequate, including trying multiple weights or ensembling picks when one phase underperforms.",
+        "correct_general_approach": "Add explicit guidance that (a) different pretrained weights are trained on different networks and can differ substantially in P vs S performance, (b) when metrics are asymmetric across phases, try alternative weights (e.g., `stead`, `instance`, `ethz`, `original`) or a second architecture (EQTransformer) and either pick the best per phase or ensemble/union picks with per-phase thresholds, and (c) validate on any available labels or held-out sanity checks before committing.",
+        "skill_controllable": true,
+        "target_file": "seismic-picker-selection/SKILL.md",
+        "target_section": "Deep Learning Pickers / When to Use",
+        "confidence": "medium"
+      },
+      {
+        "label": "No preprocessing recipe for deep-learning pickers (filtering, detrending, resampling, component handling)",
+        "general_pattern": "Neither the seisbench-model-api skill nor the picker-selection skill specifies concrete preprocessing steps that materially affect pick quality: detrend/demean/taper, bandpass filtering appropriate for local earthquakes, matching the model's expected sampling rate (`model.sampling_rate`), and correct handling of missing components (zero-padded channels). The best-practices section only warns about tiny-amplitude scaling. The agent scaled amplitudes and fixed the zero-column mapping only after noticing files with no picks, and never applied bandpass filtering in the final run, which likely contributed to lower S-wave recall/precision.",
+        "observable_evidence": "Trajectory shows the agent discovered zero-padded single/two-component files (e.g., `NC.BAV..EH.0095557.npz` with only EHZ nonzero) mid-run and had to add a fallback; no consistent detrend/filter/resample step was included in the final `load_stream`. Verifier reports S-wave MAE 101.6 samples (~1.0 s), suggesting timing/preprocessing sensitivity. The scedc PhaseNet model expects 100 Hz — never checked against `model.sampling_rate` or `dt`.",
+        "missing_reasoning_step": "A preprocessing checklist for feeding waveforms to SeisBench pickers: verify/resample to `model.sampling_rate`, detrend+taper+bandpass, handle multi-component vs single-component traces (do not fabricate zero channels), and re-scale extremely small amplitudes before normalization.",
+        "correct_general_approach": "Document a standard preprocessing pipeline for SeisBench picking (component selection, detrend, taper, bandpass appropriate to local vs regional events, resampling to `model.sampling_rate`, amplitude rescaling for tiny values) and warn that zero-padded channels must be dropped rather than passed as data, since they distort normalization and can suppress S-wave detections.",
+        "skill_controllable": true,
+        "target_file": "seisbench-model-api/SKILL.md",
+        "target_section": "Best Practices",
+        "confidence": "medium"
+      },
+      {
+        "label": "No guidance on threshold selection and precision/recall tradeoff for F1-optimized picking",
+        "general_pattern": "The skill does not explain how `P_threshold` / `S_threshold` in `classify` trade precision against recall, nor how to set them differently per phase when the task is scored by F1 with a tolerance. The agent picked arbitrary thresholds (0.3, then 0.15, then 0.1) by trial and error and settled without a principled procedure; S-wave precision (0.63) and recall (0.56) both remained low.",
+        "observable_evidence": "Trajectory shows repeated ad-hoc edits to `P_THR`/`S_THR` (0.3 → 0.15 → 0.1) with no calibration procedure. Verifier: S precision 0.629, recall 0.560. Skill's `classify` example passes no thresholds and gives no tuning advice.",
+        "missing_reasoning_step": "A method for choosing per-phase thresholds, e.g., sweep thresholds and use any available labeled subset or self-consistency (P-S ordering, expected number of picks) to select F1-maximizing values, and set S threshold typically lower than P because S waves are noisier.",
+        "correct_general_approach": "Add explicit tuning guidance: expose that `classify` accepts per-phase thresholds, describe the precision/recall tradeoff, recommend lower thresholds for S than P for local events, and suggest sweeping thresholds against any available ground truth or sanity heuristics when the metric is F1 with a tolerance.",
+        "skill_controllable": true,
+        "target_file": "seisbench-model-api/SKILL.md",
+        "target_section": "Overview / classify",
+        "confidence": "medium"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The run failed only on the S-wave F1 threshold (0.593 vs 0.6) while P-wave passed comfortably. The agent used a single PhaseNet weight without preprocessing, without a principled threshold-selection procedure, and without considering alternative pretrained weights or model ensembling — all decisions that the skill package guides. The skill files describe the SeisBench and ObsPy APIs and give high-level picker tradeoffs but omit concrete, reusable guidance on model/weight selection, preprocessing pipeline, and per-phase threshold tuning that would plausibly push S F1 across threshold."
+    }
+  }
+}
