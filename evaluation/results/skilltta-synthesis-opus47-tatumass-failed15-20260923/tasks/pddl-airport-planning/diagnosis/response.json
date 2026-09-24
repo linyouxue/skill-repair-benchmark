@@ -1,0 +1,79 @@
+{
+  "task_id": "pddl-airport-planning",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 27.19,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 22523,
+    "output_tokens": 1434,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "Ambiguous plan output format specification",
+      "general_pattern": "The skill's save-plan guidance says only 'standard PDDL plan format' and points to PDDLWriter, but never defines the concrete line syntax required for plan files. When the task prompt shows an example using functional syntax `action(arg1, arg2, ...)`, the skill does not warn that PDDL plan readers (e.g., unified_planning.PDDLReader.parse_plan) require Lisp-style `(action arg1 arg2 ...)` lines. Without this disambiguation, the agent formats each action using the misleading prompt example and produces plan files that a PDDL plan parser cannot interpret, even though the plan itself was validated in-memory.",
+      "observable_evidence": "The agent wrote lines like `move_seg_rw_0_400_seg_rww_0_50_south_south_medium(airplane_cfbeg)`. The verifier's `reader.parse_plan(...)` raised `UPException: Cannot interpret move_seg_rw_0_400_seg_rww_0_50_south_south_medium(airplane_cfbeg)`, while the agent's own in-process `PlanValidator` reported `VALID`. The failure is purely a serialization/format mismatch, not a planning error.",
+      "missing_reasoning_step": "A validation step that (a) specifies the exact required plan-file syntax (`(action arg1 arg2 ...)` per line, lowercase, no commas/parentheses around args) and (b) mandates round-tripping the written file back through `PDDLReader.parse_plan` before considering the task complete.",
+      "correct_general_approach": "In the save-plan section, explicitly define the required per-line grammar for PDDL plan files, warn that prompt-provided illustrative examples may not match parser-accepted syntax, and prescribe using the library's own writer (or a documented template matching `parse_plan`'s regex) plus a post-write parse-back check to guarantee the file is machine-readable.",
+      "skill_controllable": true,
+      "target_file": "pddl-skills/SKILL.md",
+      "target_section": "3. Plan Saving / save-plan",
+      "confidence": "high"
+    },
+    {
+      "label": "Validation scope limited to in-memory plan object",
+      "general_pattern": "The validate step in the skill only checks the in-memory plan object against the problem, and the Example Workflow performs validation before saving. This lets a run pass internal validation while the persisted artifact—the only thing the grader consumes—remains unverified. The skill provides no guidance to re-load and re-validate the written plan file.",
+      "observable_evidence": "Agent logs show `task01 validation: ValidationResultStatus.VALID` and `task02 validation: ValidationResultStatus.VALID`, yet the verifier failed at `reader.parse_plan(problem, plan_file)` because the on-disk plan file could not be parsed. The skill's workflow (validate → save) never revisits the saved file.",
+      "missing_reasoning_step": "A post-save verification step: read the written plan file back with `PDDLReader.parse_plan` and re-run the validator on the reparsed plan, ensuring end-to-end file-level correctness rather than only object-level correctness.",
+      "correct_general_approach": "Reorder/augment the Example Workflow so that after `save-plan`, the plan file is reloaded via the reader's plan-parsing API and re-validated; treat any parse or validation failure on the reloaded file as a task failure requiring reformatting.",
+      "skill_controllable": true,
+      "target_file": "pddl-skills/SKILL.md",
+      "target_section": "4. Plan Validation and Example Workflow",
+      "confidence": "medium"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The planner produced a valid plan; the failure was entirely due to the on-disk plan file using a non-PDDL-parser-compatible syntax. The skill's save-plan section is vague about the required plan-file grammar and its workflow validates only the in-memory plan, never the written artifact. Both gaps are addressable via clearer, reusable guidance in the existing SKILL.md."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "Ambiguous plan output format specification",
+        "general_pattern": "The skill's save-plan guidance says only 'standard PDDL plan format' and points to PDDLWriter, but never defines the concrete line syntax required for plan files. When the task prompt shows an example using functional syntax `action(arg1, arg2, ...)`, the skill does not warn that PDDL plan readers (e.g., unified_planning.PDDLReader.parse_plan) require Lisp-style `(action arg1 arg2 ...)` lines. Without this disambiguation, the agent formats each action using the misleading prompt example and produces plan files that a PDDL plan parser cannot interpret, even though the plan itself was validated in-memory.",
+        "observable_evidence": "The agent wrote lines like `move_seg_rw_0_400_seg_rww_0_50_south_south_medium(airplane_cfbeg)`. The verifier's `reader.parse_plan(...)` raised `UPException: Cannot interpret move_seg_rw_0_400_seg_rww_0_50_south_south_medium(airplane_cfbeg)`, while the agent's own in-process `PlanValidator` reported `VALID`. The failure is purely a serialization/format mismatch, not a planning error.",
+        "missing_reasoning_step": "A validation step that (a) specifies the exact required plan-file syntax (`(action arg1 arg2 ...)` per line, lowercase, no commas/parentheses around args) and (b) mandates round-tripping the written file back through `PDDLReader.parse_plan` before considering the task complete.",
+        "correct_general_approach": "In the save-plan section, explicitly define the required per-line grammar for PDDL plan files, warn that prompt-provided illustrative examples may not match parser-accepted syntax, and prescribe using the library's own writer (or a documented template matching `parse_plan`'s regex) plus a post-write parse-back check to guarantee the file is machine-readable.",
+        "skill_controllable": true,
+        "target_file": "pddl-skills/SKILL.md",
+        "target_section": "3. Plan Saving / save-plan",
+        "confidence": "high"
+      },
+      {
+        "label": "Validation scope limited to in-memory plan object",
+        "general_pattern": "The validate step in the skill only checks the in-memory plan object against the problem, and the Example Workflow performs validation before saving. This lets a run pass internal validation while the persisted artifact—the only thing the grader consumes—remains unverified. The skill provides no guidance to re-load and re-validate the written plan file.",
+        "observable_evidence": "Agent logs show `task01 validation: ValidationResultStatus.VALID` and `task02 validation: ValidationResultStatus.VALID`, yet the verifier failed at `reader.parse_plan(problem, plan_file)` because the on-disk plan file could not be parsed. The skill's workflow (validate → save) never revisits the saved file.",
+        "missing_reasoning_step": "A post-save verification step: read the written plan file back with `PDDLReader.parse_plan` and re-run the validator on the reparsed plan, ensuring end-to-end file-level correctness rather than only object-level correctness.",
+        "correct_general_approach": "Reorder/augment the Example Workflow so that after `save-plan`, the plan file is reloaded via the reader's plan-parsing API and re-validated; treat any parse or validation failure on the reloaded file as a task failure requiring reformatting.",
+        "skill_controllable": true,
+        "target_file": "pddl-skills/SKILL.md",
+        "target_section": "4. Plan Validation and Example Workflow",
+        "confidence": "medium"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The planner produced a valid plan; the failure was entirely due to the on-disk plan file using a non-PDDL-parser-compatible syntax. The skill's save-plan section is vague about the required plan-file grammar and its workflow validates only the in-memory plan, never the written artifact. Both gaps are addressable via clearer, reusable guidance in the existing SKILL.md."
+    }
+  }
+}

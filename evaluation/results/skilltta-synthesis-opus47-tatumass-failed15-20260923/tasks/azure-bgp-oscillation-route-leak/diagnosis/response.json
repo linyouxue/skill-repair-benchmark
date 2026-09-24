@@ -1,0 +1,57 @@
+{
+  "task_id": "azure-bgp-oscillation-route-leak",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 23.05,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 28636,
+    "output_tokens": 1147,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "Export/ingress leak-only fixes miscategorized as oscillation fixes",
+      "general_pattern": "The skill's Tier 2 export-policy guidance conflates leak-only mitigations (no-export community, block provider→peer export, ingress AS_PATH filtering, RPKI) with oscillation resolution. It states filtering peer-learned routes before re-advertising breaks the cycle, but does not distinguish this from filtering provider→peer exports, which stops the leak without removing the mutual peer-learned preference edges that create the cycle. As a result, the agent labels no-export/ingress/RPKI-style solutions as resolving oscillation too.",
+      "observable_evidence": "Verifier failed 4 solutions where the agent marked oscillation_resolved=True but expected False: 'Configure export policy on vhubvnet1 ... to block announcing provider routes ... to peer vhubvnet2', 'Enable ingress filtering on vhubvnet2 ... reject routes with AS_PATH containing 65001', 'Enable RPKI origin validation ...', and 'Configure route policy on vhubvnet1 to enforce no-export of provider routes to peer vhubvnet2 by bgp community'. Agent's summary explicitly justified these as breaking the preference cycle by citing the skill's Tier 2 guidance.",
+      "missing_reasoning_step": "A decision rule that separates (a) fixes that remove the mutual peer-learned edges causing the preference cycle (which resolve oscillation) from (b) fixes that only block provider-learned or leaked routes from being exported/accepted (which resolve leaks but leave the peer-preference cycle intact). The skill also fails to state that RPKI origin validation does not address a valley-free export leak whose origin is legitimate.",
+      "correct_general_approach": "In the fix-selection section, add explicit criteria: oscillation is resolved only when the preference cycle edges themselves are removed or overridden (e.g., preference change, forwarding-plane override, filtering the specific peer-learned routes that feed the cycle). Leak-only mitigations (no-export community on a subset of routes, export block of provider routes to peer, ingress AS_PATH filter, RPKI) should be classified as resolving leaks but not oscillation unless they also eliminate the mutual preference edges. Include a checklist step that evaluates each candidate against both criteria independently and clarify RPKI's scope (origin authorization, not valley-free export).",
+      "skill_controllable": true,
+      "target_file": "azure-bgp/SKILL.md",
+      "target_section": "Fix Selection Logic (Ranked) — Tier 2 Export / Route Policy (and Common Pitfalls)",
+      "confidence": "high"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All four verifier failures stem from the same reasoning error: the agent applied the skill's Tier 2 language ('filter routes learned from a peer before re-advertising breaks the cycle') broadly to any export/ingress/RPKI leak fix, marking oscillation_resolved=True. The skill lacks explicit criteria distinguishing cycle-breaking fixes from leak-only fixes and does not scope RPKI's applicability, which are reusable, skill-controllable deficiencies."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "Export/ingress leak-only fixes miscategorized as oscillation fixes",
+        "general_pattern": "The skill's Tier 2 export-policy guidance conflates leak-only mitigations (no-export community, block provider→peer export, ingress AS_PATH filtering, RPKI) with oscillation resolution. It states filtering peer-learned routes before re-advertising breaks the cycle, but does not distinguish this from filtering provider→peer exports, which stops the leak without removing the mutual peer-learned preference edges that create the cycle. As a result, the agent labels no-export/ingress/RPKI-style solutions as resolving oscillation too.",
+        "observable_evidence": "Verifier failed 4 solutions where the agent marked oscillation_resolved=True but expected False: 'Configure export policy on vhubvnet1 ... to block announcing provider routes ... to peer vhubvnet2', 'Enable ingress filtering on vhubvnet2 ... reject routes with AS_PATH containing 65001', 'Enable RPKI origin validation ...', and 'Configure route policy on vhubvnet1 to enforce no-export of provider routes to peer vhubvnet2 by bgp community'. Agent's summary explicitly justified these as breaking the preference cycle by citing the skill's Tier 2 guidance.",
+        "missing_reasoning_step": "A decision rule that separates (a) fixes that remove the mutual peer-learned edges causing the preference cycle (which resolve oscillation) from (b) fixes that only block provider-learned or leaked routes from being exported/accepted (which resolve leaks but leave the peer-preference cycle intact). The skill also fails to state that RPKI origin validation does not address a valley-free export leak whose origin is legitimate.",
+        "correct_general_approach": "In the fix-selection section, add explicit criteria: oscillation is resolved only when the preference cycle edges themselves are removed or overridden (e.g., preference change, forwarding-plane override, filtering the specific peer-learned routes that feed the cycle). Leak-only mitigations (no-export community on a subset of routes, export block of provider routes to peer, ingress AS_PATH filter, RPKI) should be classified as resolving leaks but not oscillation unless they also eliminate the mutual preference edges. Include a checklist step that evaluates each candidate against both criteria independently and clarify RPKI's scope (origin authorization, not valley-free export).",
+        "skill_controllable": true,
+        "target_file": "azure-bgp/SKILL.md",
+        "target_section": "Fix Selection Logic (Ranked) — Tier 2 Export / Route Policy (and Common Pitfalls)",
+        "confidence": "high"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four verifier failures stem from the same reasoning error: the agent applied the skill's Tier 2 language ('filter routes learned from a peer before re-advertising breaks the cycle') broadly to any export/ingress/RPKI leak fix, marking oscillation_resolved=True. The skill lacks explicit criteria distinguishing cycle-breaking fixes from leak-only fixes and does not scope RPKI's applicability, which are reusable, skill-controllable deficiencies."
+    }
+  }
+}

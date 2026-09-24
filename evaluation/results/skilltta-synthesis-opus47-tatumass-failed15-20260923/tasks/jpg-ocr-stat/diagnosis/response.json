@@ -1,0 +1,79 @@
+{
+  "task_id": "jpg-ocr-stat",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 32.15,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 54405,
+    "output_tokens": 1482,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "OCR post-processing lacks receipt total-extraction guidance",
+      "general_pattern": "The image-ocr skill documents raw text extraction, multi-pass OCR, and preprocessing, but provides no reusable guidance for the downstream step of parsing structured fields (totals, dates) from noisy receipt OCR output. When Tesseract yields characters like colons or letters embedded in numbers (e.g., '92:80' instead of '92.80'), a naive numeric regex fails and returns null, even though the correct keyword line was located.",
+      "observable_evidence": "Verifier failed at row 16 col 3: actual '' vs expected '92.80'. Trajectory shows OCR for 078.jpg produced lines like 'a Total — 92:80' and 'GrandTotal. = SSCS 92.80'; the agent's NUM_RE required a '.' decimal separator and rejected '92:80'/'92 80' variants, so extract_total_candidates returned empty and the cell was left blank.",
+      "missing_reasoning_step": "The skill never tells the caller to (a) normalize common OCR digit-adjacency artifacts (':' or spaces between the integer and decimal part, stray letters attached to numbers) before applying numeric regexes, or (b) cross-validate a keyword-line hit by scanning neighboring OCR variants when the primary variant fails to yield a clean number.",
+      "correct_general_approach": "Add a 'Post-OCR numeric normalization' subsection to the image-ocr skill that warns Tesseract frequently substitutes ':' for '.', inserts spaces inside decimals, and glues letters to digits; recommend normalizing such patterns before regex extraction and combining candidates across multiple preprocessing/PSM passes rather than accepting the first variant's numeric parse.",
+      "skill_controllable": true,
+      "target_file": "image-ocr/SKILL.md",
+      "target_section": "Multi-Pass OCR Strategy / new 'Post-OCR Numeric Normalization' subsection",
+      "confidence": "high"
+    },
+    {
+      "label": "No guidance on task-length budgeting for batch OCR pipelines",
+      "general_pattern": "The image-ocr skill's Batch Processing example iterates over a directory with a single OCR pass per file but gives no guidance on structuring an end-to-end pipeline (OCR + parse + write output) so it completes within a bounded iteration/turn budget. Callers naturally expand into multi-pass OCR plus iterative debugging, exhausting the agent budget before producing the required output file.",
+      "observable_evidence": "The run terminated with stop_reason 'max_iterations' after 65 iterations while the agent was still tuning preprocessing variants for a single failing image (078.jpg). The verifier had to run against a stale xlsx that still contained a blank total, indicating the agent never converged on a completed extraction within the available turns.",
+      "missing_reasoning_step": "The skill lacks a 'Plan before iterating' step: decide on a fixed OCR variant set, run the full batch once, write the output artifact, and only then diagnose per-file failures with targeted re-OCR — instead of interleaving whole-batch reruns for every heuristic tweak.",
+      "correct_general_approach": "Add batch-workflow guidance recommending: (1) produce the required output artifact after the first full pass so partial results are always available, (2) cap the number of preprocessing/PSM variants tried per image, and (3) isolate per-image debugging to a subset rather than re-running the whole directory on every change.",
+      "skill_controllable": true,
+      "target_file": "image-ocr/SKILL.md",
+      "target_section": "Batch Processing Multiple Images",
+      "confidence": "medium"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The single verifier failure (blank total for 078.jpg where OCR clearly saw 'Grand Total ... 92.80'/'92:80') stems from missing image-ocr guidance on normalizing common Tesseract digit artifacts before numeric parsing, and the run-out of iterations reflects missing batch-workflow guidance. Both are reusable, skill-level deficiencies in image-ocr/SKILL.md rather than task-specific answers or infrastructure faults."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "OCR post-processing lacks receipt total-extraction guidance",
+        "general_pattern": "The image-ocr skill documents raw text extraction, multi-pass OCR, and preprocessing, but provides no reusable guidance for the downstream step of parsing structured fields (totals, dates) from noisy receipt OCR output. When Tesseract yields characters like colons or letters embedded in numbers (e.g., '92:80' instead of '92.80'), a naive numeric regex fails and returns null, even though the correct keyword line was located.",
+        "observable_evidence": "Verifier failed at row 16 col 3: actual '' vs expected '92.80'. Trajectory shows OCR for 078.jpg produced lines like 'a Total — 92:80' and 'GrandTotal. = SSCS 92.80'; the agent's NUM_RE required a '.' decimal separator and rejected '92:80'/'92 80' variants, so extract_total_candidates returned empty and the cell was left blank.",
+        "missing_reasoning_step": "The skill never tells the caller to (a) normalize common OCR digit-adjacency artifacts (':' or spaces between the integer and decimal part, stray letters attached to numbers) before applying numeric regexes, or (b) cross-validate a keyword-line hit by scanning neighboring OCR variants when the primary variant fails to yield a clean number.",
+        "correct_general_approach": "Add a 'Post-OCR numeric normalization' subsection to the image-ocr skill that warns Tesseract frequently substitutes ':' for '.', inserts spaces inside decimals, and glues letters to digits; recommend normalizing such patterns before regex extraction and combining candidates across multiple preprocessing/PSM passes rather than accepting the first variant's numeric parse.",
+        "skill_controllable": true,
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Multi-Pass OCR Strategy / new 'Post-OCR Numeric Normalization' subsection",
+        "confidence": "high"
+      },
+      {
+        "label": "No guidance on task-length budgeting for batch OCR pipelines",
+        "general_pattern": "The image-ocr skill's Batch Processing example iterates over a directory with a single OCR pass per file but gives no guidance on structuring an end-to-end pipeline (OCR + parse + write output) so it completes within a bounded iteration/turn budget. Callers naturally expand into multi-pass OCR plus iterative debugging, exhausting the agent budget before producing the required output file.",
+        "observable_evidence": "The run terminated with stop_reason 'max_iterations' after 65 iterations while the agent was still tuning preprocessing variants for a single failing image (078.jpg). The verifier had to run against a stale xlsx that still contained a blank total, indicating the agent never converged on a completed extraction within the available turns.",
+        "missing_reasoning_step": "The skill lacks a 'Plan before iterating' step: decide on a fixed OCR variant set, run the full batch once, write the output artifact, and only then diagnose per-file failures with targeted re-OCR — instead of interleaving whole-batch reruns for every heuristic tweak.",
+        "correct_general_approach": "Add batch-workflow guidance recommending: (1) produce the required output artifact after the first full pass so partial results are always available, (2) cap the number of preprocessing/PSM variants tried per image, and (3) isolate per-image debugging to a subset rather than re-running the whole directory on every change.",
+        "skill_controllable": true,
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Batch Processing Multiple Images",
+        "confidence": "medium"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The single verifier failure (blank total for 078.jpg where OCR clearly saw 'Grand Total ... 92.80'/'92:80') stems from missing image-ocr guidance on normalizing common Tesseract digit artifacts before numeric parsing, and the run-out of iterations reflects missing batch-workflow guidance. Both are reusable, skill-level deficiencies in image-ocr/SKILL.md rather than task-specific answers or infrastructure faults."
+    }
+  }
+}

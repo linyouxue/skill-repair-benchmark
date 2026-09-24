@@ -1,0 +1,79 @@
+{
+  "task_id": "reserves-at-risk-calc",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 27.29,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 33521,
+    "output_tokens": 1411,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "Missing finance-domain guidance for volatility horizon scaling",
+      "general_pattern": "The skill only covers generic Excel mechanics (formulas, formatting, recalc) and provides no domain guidance for financial risk calculations. When a task requires computing a value-at-risk / shock exposure from a periodic volatility, the agent must decide whether to apply a horizon scaling factor (e.g., √n) or use the periodic volatility directly. Without explicit guidance or a validation step, the agent silently over-scales the exposure by an extra √n factor, producing values that are a consistent multiple of the expected answer.",
+      "observable_evidence": "All row-13 exposures and row-24 RaR values are wrong by the same ratio (~1.7267×), e.g. Belarus risk expected 593.35 vs got 1024.59, Uzbekistan expected 4375.43 vs got 7555.50. The agent's own summary states it used '= reserves × Z × σ_3m × √3 / 100', i.e. it multiplied the already-3-month volatility by √3 again. The skill provided no check or convention for horizon scaling of a period volatility.",
+      "missing_reasoning_step": "A validation/sanity step reminding the agent that a k-period volatility already covers a k-period horizon and should not be multiplied again by √k, and to cross-check exposure magnitudes against an order-of-magnitude expectation before finalizing.",
+      "correct_general_approach": "Add finance-model guidance (or a dedicated section) noting that when a volatility is already computed over the target horizon, the shock formula is simply value × Z × σ (no extra √n); scaling by √n applies only when converting a shorter-period volatility to a longer horizon. Include a self-check: compare shock/value ratio to Z·σ before saving.",
+      "skill_controllable": true,
+      "target_file": "xlsx/SKILL.md",
+      "target_section": "Financial models / Formula Construction Rules",
+      "confidence": "medium"
+    },
+    {
+      "label": "No self-verification checklist for numeric outputs against task hints",
+      "general_pattern": "The skill's verification guidance is limited to formula-error detection via recalc.py (#REF!, #DIV/0!, etc.). It does not instruct the agent to sanity-check the numeric results themselves against explicit task hints (e.g., 'near-term valuation swing') or expected magnitudes. As a result, systematically biased numbers pass all checks because no formula error is raised.",
+      "observable_evidence": "Verifier reports 2 failed numeric tests (Step 2 and Step 3) while recalc.py-based checks all passed ('test_no_errors_or_macros PASSED', '1 pre-existing #N/A' dismissed). The agent's final summary confidently reports the wrong numbers because its only 'verification' was the formula-error scan prescribed by the skill.",
+      "missing_reasoning_step": "A post-computation numeric review step: interpret hints in the prompt, reason about expected magnitude/direction of key outputs, and reconcile any conflict before declaring success.",
+      "correct_general_approach": "Extend the Formula Verification Checklist with a 'numeric plausibility review' item: after recalc succeeds, re-derive one or two key outputs by hand or with an independent formula, and compare against qualitative hints in the task before finalizing.",
+      "skill_controllable": true,
+      "target_file": "xlsx/SKILL.md",
+      "target_section": "Formula Verification Checklist",
+      "confidence": "low"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The failing tests stem from a systematic modeling error (double-application of √n horizon scaling to a 3-month volatility) rather than any Excel/tooling failure: recalc.py reports zero new errors and formulas populate correctly. The provided xlsx skill is purely mechanical and offers no financial-modeling conventions or numeric self-check guidance, so a reusable improvement in the skill (horizon-scaling convention plus a numeric plausibility check) is directly relevant."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "Missing finance-domain guidance for volatility horizon scaling",
+        "general_pattern": "The skill only covers generic Excel mechanics (formulas, formatting, recalc) and provides no domain guidance for financial risk calculations. When a task requires computing a value-at-risk / shock exposure from a periodic volatility, the agent must decide whether to apply a horizon scaling factor (e.g., √n) or use the periodic volatility directly. Without explicit guidance or a validation step, the agent silently over-scales the exposure by an extra √n factor, producing values that are a consistent multiple of the expected answer.",
+        "observable_evidence": "All row-13 exposures and row-24 RaR values are wrong by the same ratio (~1.7267×), e.g. Belarus risk expected 593.35 vs got 1024.59, Uzbekistan expected 4375.43 vs got 7555.50. The agent's own summary states it used '= reserves × Z × σ_3m × √3 / 100', i.e. it multiplied the already-3-month volatility by √3 again. The skill provided no check or convention for horizon scaling of a period volatility.",
+        "missing_reasoning_step": "A validation/sanity step reminding the agent that a k-period volatility already covers a k-period horizon and should not be multiplied again by √k, and to cross-check exposure magnitudes against an order-of-magnitude expectation before finalizing.",
+        "correct_general_approach": "Add finance-model guidance (or a dedicated section) noting that when a volatility is already computed over the target horizon, the shock formula is simply value × Z × σ (no extra √n); scaling by √n applies only when converting a shorter-period volatility to a longer horizon. Include a self-check: compare shock/value ratio to Z·σ before saving.",
+        "skill_controllable": true,
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Financial models / Formula Construction Rules",
+        "confidence": "medium"
+      },
+      {
+        "label": "No self-verification checklist for numeric outputs against task hints",
+        "general_pattern": "The skill's verification guidance is limited to formula-error detection via recalc.py (#REF!, #DIV/0!, etc.). It does not instruct the agent to sanity-check the numeric results themselves against explicit task hints (e.g., 'near-term valuation swing') or expected magnitudes. As a result, systematically biased numbers pass all checks because no formula error is raised.",
+        "observable_evidence": "Verifier reports 2 failed numeric tests (Step 2 and Step 3) while recalc.py-based checks all passed ('test_no_errors_or_macros PASSED', '1 pre-existing #N/A' dismissed). The agent's final summary confidently reports the wrong numbers because its only 'verification' was the formula-error scan prescribed by the skill.",
+        "missing_reasoning_step": "A post-computation numeric review step: interpret hints in the prompt, reason about expected magnitude/direction of key outputs, and reconcile any conflict before declaring success.",
+        "correct_general_approach": "Extend the Formula Verification Checklist with a 'numeric plausibility review' item: after recalc succeeds, re-derive one or two key outputs by hand or with an independent formula, and compare against qualitative hints in the task before finalizing.",
+        "skill_controllable": true,
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Formula Verification Checklist",
+        "confidence": "low"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The failing tests stem from a systematic modeling error (double-application of √n horizon scaling to a 3-month volatility) rather than any Excel/tooling failure: recalc.py reports zero new errors and formulas populate correctly. The provided xlsx skill is purely mechanical and offers no financial-modeling conventions or numeric self-check guidance, so a reusable improvement in the skill (horizon-scaling convention plus a numeric plausibility check) is directly relevant."
+    }
+  }
+}

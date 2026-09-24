@@ -1,0 +1,67 @@
+Repository: /home/github/build/failed/AgentOps-AI/agentops
+Python: 3.10.12 (using venv at /home/github/build/failed/cacher/env)
+
+Reproduction
+------------
+Command run (as in tox.ini [testenv]):
+    coverage run --source agentops -m pytest
+
+Result: 5 collection ERRORS. All 5 tests fail to import with the same root
+cause:
+
+    tests/test_canary.py:5: in <module>
+        import agentops
+    agentops/__init__.py:12: in <module>
+        from .langchain_callback_handler import LangchainCallbackHandler, AsyncLangchainCallbackHandler
+    agentops/langchain_callback_handler.py:8: in <module>
+        from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+    E   ModuleNotFoundError: No module named 'langchain.callbacks'
+
+Root cause
+----------
+This is a source-code / API-compatibility bug in the project, not a build
+configuration issue.
+
+`agentops/__init__.py` unconditionally imports the Langchain callback
+handler. That handler (`agentops/langchain_callback_handler.py`, line 8)
+imports `BaseCallbackHandler` and `AsyncCallbackHandler` from
+`langchain.callbacks.base`.
+
+The tox environment installs the current `langchain` and `langchain-core`
+packages (langchain 1.4.2 here). In modern langchain (>= 0.2 the module was
+deprecated; in >= 1.0 the `langchain.callbacks` submodule was removed
+entirely). The canonical, stable location for those two classes has been
+`langchain_core.callbacks.base` for a long time.
+
+Every other langchain import in this file already comes from `langchain_core`
+(`langchain_core.agents`, `langchain_core.documents`,
+`langchain_core.outputs`, `langchain_core.messages`), so switching this one
+import to `langchain_core.callbacks.base` is consistent, minimal, and works
+across old and new langchain versions (langchain_core.callbacks.base has
+existed since langchain-core was split out).
+
+Other observations (not blockers):
+- `pyproject.toml` is valid and produces a properly named wheel when built
+  with a modern setuptools (>=61) as declared in `[build-system].requires`.
+  An earlier `pip install .` with an old system pip produced an
+  `UNKNOWN-0.0.0` wheel because that pip shipped setuptools 59.6.0, which
+  predates PEP 621 support. Inside the project's own venv (cacher/env) the
+  build works. No change needed.
+- `pip install -e .` fails because setuptools.build_meta as declared by the
+  project does not expose PEP 660. Not exercised by tox; leaving alone.
+
+Fix plan
+--------
+patch_1.diff: In `agentops/langchain_callback_handler.py`, change the
+import on line 8 from
+    from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+to
+    from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+Verification
+------------
+After applying the patch, re-run:
+    coverage run --source agentops -m pytest
+Test collection must succeed (the ModuleNotFoundError is gone). Any
+remaining test failures unrelated to imports are out of scope for this
+build-failure fix.

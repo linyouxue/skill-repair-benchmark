@@ -1,0 +1,79 @@
+{
+  "task_id": "data-to-d3",
+  "method": "skilltta-with-evidence-grounded-diagnosis",
+  "diagnosis_model": "claude-opus-4-7@AIHUBMIX-default",
+  "diagnosis_provider": "tatumass",
+  "elapsed_sec": 26.8,
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 33781,
+    "output_tokens": 1267,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard"
+  },
+  "diagnoses": [
+    {
+      "label": "port-reuse leaves verifier port occupied",
+      "general_pattern": "Skill guidance for self-verification of web outputs does not require the agent to release any background HTTP server (or use ephemeral ports) after validation, so a lingering server on a fixed port collides with the verifier that binds the same port and every browser-dependent test errors at fixture setup.",
+      "observable_evidence": "Agent started a static server on port 8765 for a jsdom check; cleanup used `pkill -f \"http.server 8765\"` but the verifier's TCPServer bind on port 8765 subsequently failed with `OSError: [Errno 98] Address already in use`, causing 7 browser tests to ERROR at setup while file-existence tests passed.",
+      "missing_reasoning_step": "Before finishing, verify that any agent-launched local server is fully stopped (process gone, port released) or was bound to an ephemeral port, and warn that reusing common serving ports may conflict with downstream verifiers.",
+      "correct_general_approach": "Add explicit guidance in the D3 skill's interactive/verification section: prefer ephemeral ports (port 0) or short-lived subprocesses with explicit shutdown+wait, never leave background servers running, and document a teardown checklist (kill PID, poll port until free) before declaring the task complete.",
+      "skill_controllable": true,
+      "target_file": "d3-visualization/SKILL.md",
+      "target_section": "Interactive features (tooltips, click handlers, hover effects) / self-verification of HTML outputs",
+      "confidence": "high"
+    },
+    {
+      "label": "no guidance on serving HTML outputs for verification",
+      "general_pattern": "The skill tells the agent to produce standalone HTML using D3 but does not describe how to self-check outputs that rely on `d3.csv`/fetch (which fail under `file://`), leading the agent to improvise ad-hoc jsdom+HTTP-server setups whose side effects (installed packages, background processes, occupied ports) leak into the verifier environment.",
+      "observable_evidence": "Agent installed jsdom into /tmp, spawned a python http.server, patched fetch polyfills, and iterated through multiple failing attempts (ESM require error, IPv6 ECONNREFUSED, missing fetch) before succeeding; the leftover server then broke the verifier.",
+      "missing_reasoning_step": "Provide a lightweight, side-effect-free self-check recipe (or explicitly instruct the agent to skip runtime validation when the HTML uses fetch-based data loading) so the agent does not introduce environment state that outlives the task.",
+      "correct_general_approach": "Document an approved verification pattern in the skill: e.g., static structural checks on generated HTML/JS, or a scoped headless-browser routine that uses ephemeral ports, context managers, and guaranteed teardown; explicitly forbid leaving servers or installed packages behind.",
+      "skill_controllable": true,
+      "target_file": "d3-visualization/SKILL.md",
+      "target_section": "Outputs you should produce / Determinism rules (add a Verification subsection)",
+      "confidence": "medium"
+    }
+  ],
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The generated artifacts passed all static file-existence and data-integrity tests; the browser-based tests failed solely because the agent left a background HTTP server bound to a fixed port (8765), which the verifier then could not bind. The skill lacks any guidance on safe self-verification of HTML outputs or teardown of agent-launched services, and adding such guidance would prevent the observed port-conflict failure without dictating task-specific answers."
+  },
+  "raw_response": {
+    "diagnoses": [
+      {
+        "label": "port-reuse leaves verifier port occupied",
+        "general_pattern": "Skill guidance for self-verification of web outputs does not require the agent to release any background HTTP server (or use ephemeral ports) after validation, so a lingering server on a fixed port collides with the verifier that binds the same port and every browser-dependent test errors at fixture setup.",
+        "observable_evidence": "Agent started a static server on port 8765 for a jsdom check; cleanup used `pkill -f \"http.server 8765\"` but the verifier's TCPServer bind on port 8765 subsequently failed with `OSError: [Errno 98] Address already in use`, causing 7 browser tests to ERROR at setup while file-existence tests passed.",
+        "missing_reasoning_step": "Before finishing, verify that any agent-launched local server is fully stopped (process gone, port released) or was bound to an ephemeral port, and warn that reusing common serving ports may conflict with downstream verifiers.",
+        "correct_general_approach": "Add explicit guidance in the D3 skill's interactive/verification section: prefer ephemeral ports (port 0) or short-lived subprocesses with explicit shutdown+wait, never leave background servers running, and document a teardown checklist (kill PID, poll port until free) before declaring the task complete.",
+        "skill_controllable": true,
+        "target_file": "d3-visualization/SKILL.md",
+        "target_section": "Interactive features (tooltips, click handlers, hover effects) / self-verification of HTML outputs",
+        "confidence": "high"
+      },
+      {
+        "label": "no guidance on serving HTML outputs for verification",
+        "general_pattern": "The skill tells the agent to produce standalone HTML using D3 but does not describe how to self-check outputs that rely on `d3.csv`/fetch (which fail under `file://`), leading the agent to improvise ad-hoc jsdom+HTTP-server setups whose side effects (installed packages, background processes, occupied ports) leak into the verifier environment.",
+        "observable_evidence": "Agent installed jsdom into /tmp, spawned a python http.server, patched fetch polyfills, and iterated through multiple failing attempts (ESM require error, IPv6 ECONNREFUSED, missing fetch) before succeeding; the leftover server then broke the verifier.",
+        "missing_reasoning_step": "Provide a lightweight, side-effect-free self-check recipe (or explicitly instruct the agent to skip runtime validation when the HTML uses fetch-based data loading) so the agent does not introduce environment state that outlives the task.",
+        "correct_general_approach": "Document an approved verification pattern in the skill: e.g., static structural checks on generated HTML/JS, or a scoped headless-browser routine that uses ephemeral ports, context managers, and guaranteed teardown; explicitly forbid leaving servers or installed packages behind.",
+        "skill_controllable": true,
+        "target_file": "d3-visualization/SKILL.md",
+        "target_section": "Outputs you should produce / Determinism rules (add a Verification subsection)",
+        "confidence": "medium"
+      }
+    ],
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The generated artifacts passed all static file-existence and data-integrity tests; the browser-based tests failed solely because the agent left a background HTTP server bound to a fixed port (8765), which the verifier then could not bind. The skill lacks any guidance on safe self-verification of HTML outputs or teardown of agent-launched services, and adding such guidance would prevent the observed port-conflict failure without dictating task-specific answers."
+    }
+  }
+}
