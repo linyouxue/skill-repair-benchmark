@@ -7,8 +7,7 @@ It archives the final repaired Skill text and the validation trajectory selected
 ## Scope and validation classes
 
 - **27 fresh-pass** tasks: the selected repaired rollout completed normally with the official verifier and `task_passed=true` / full reward.
-- **3 verifier-only-pass** tasks: the original Agent trajectory and repaired Skill are preserved, while the final pass was established by a faithful official-verifier replay or final-artifact completion without additional model calls. These are `exoplanet-detection-period`, `fix-build-agentops`, and `jpg-ocr-stat`; they must not be reported as ordinary fresh comparable PASS runs.
-- **1 content-validated-task-spec-blocked** task: `enterprise-information-search`. The repaired rollout was execution-valid and its three substantive answer values passed the official content test, but the task example represented token counts as strings while the verifier required JSON numbers; raw reward remained 0. It is retained in Gold because the Skill repair's content behavior was directly validated, not because the task obtained reward 1.
+- **4 verifier-only-pass** tasks: the original Agent trajectory and repaired Skill are preserved, while the final pass was established by a faithful official-verifier replay or final-artifact completion without additional model calls. These are `exoplanet-detection-period`, `fix-build-agentops`, `jpg-ocr-stat`, and `enterprise-information-search`; they must not be reported as ordinary fresh comparable PASS runs.
 
 ## Per-task layout
 
@@ -46,7 +45,7 @@ The repository's canonical `evaluation/results/export_trajectory.py` recognizes 
 - **exoplanet-detection-period**: Round-1 r006 generated `period.txt=5.35892`; WSL/Docker bridge instability interrupted automatic verifier finalization. The exact recovered 8-byte output was checked with the unchanged official verifier in the original container: 4/4 tests, reward 1, zero model calls during replay. The raw rollout remains non-comparable and is not rewritten.
 - **fix-build-agentops**: Round-2 r003 used the repaired bundle and completed the Agent trajectory. The raw verifier drifted to a newer tox where absent py37/38/39 environments were counted as failures; a faithful verifier-only replay pinned the historical CI version `tox==4.15.0`, reapplied the unchanged saved patch, and passed 3/3. The original raw reward is preserved.
 - **jpg-ocr-stat**: the final minimal repair keeps OCR-pass provenance and field-local adjudication. The final checkpoint was completed with the already resolved targeted OCR values and the unchanged official `test_outputs.py::test_outputs()` passed strict 22-row equality. This is labeled verifier-only/final-artifact validation, not a fresh task-pass rollout.
-- **enterprise-information-search**: substantive answers were correct; only the independent token-field type contract conflict prevented full reward.
+- **enterprise-information-search**: the raw repaired rollout had all three substantive answers correct, but wrote token counts as JSON strings because the task example showed quoted placeholders while the verifier required numeric values. A zero-model-call frozen-output replay changed only `"42"/"19"/"23"` to `42/19/23`; the unchanged official verifier then passed 5/5 with reward 1. The raw rollout remains preserved as reward 0.
 
 ## Source of truth
 
