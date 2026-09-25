@@ -1,0 +1,39 @@
+{
+  "edits": [
+    {
+      "file": "trivy-offline-vulnerability-scanning/SKILL.md",
+      "old": "TARGET_FILE = 'package-lock.json'\nOUTPUT_FILE = 'trivy_report.json'\nTRIVY_CACHE_PATH = './trivy-cache'",
+      "new": "TARGET_FILE = '/root/package-lock.json'\nOUTPUT_FILE = '/root/trivy_report.json'\nTRIVY_CACHE_PATH = './trivy-cache'"
+    },
+    {
+      "file": "trivy-offline-vulnerability-scanning/SKILL.md",
+      "old": "    run_trivy_offline_scan(\n        target_file='package-lock.json',\n        output_file='trivy_report.json'\n    )",
+      "new": "    run_trivy_offline_scan(\n        target_file='/root/package-lock.json',\n        output_file='/root/trivy_report.json'\n    )"
+    },
+    {
+      "file": "vulnerability-csv-reporting/SKILL.md",
+      "old": "with open('security_audit.csv', 'w', newline='', encoding='utf-8') as f:",
+      "new": "with open('/root/security_audit.csv', 'w', newline='', encoding='utf-8') as f:"
+    },
+    {
+      "file": "vulnerability-csv-reporting/SKILL.md",
+      "old": "                # Apply severity filter\n                if severity in severity_filter:\n                    vulnerabilities.append({\n                        \"Package\": vuln.get('PkgName'),\n                        \"Version\": vuln.get('InstalledVersion'),\n                        \"CVE_ID\": vuln.get('VulnerabilityID'),\n                        \"Severity\": severity,\n                        \"CVSS_Score\": get_cvss_score(vuln),\n                        \"Fixed_Version\": vuln.get('FixedVersion', 'N/A'),\n                        \"Title\": vuln.get('Title', 'No description'),\n                        \"Url\": vuln.get('PrimaryURL', '')\n                    })",
+      "new": "                # Apply severity filter\n                if severity in severity_filter:\n                    cve_id = normalize_cve_id(vuln)\n                    # Contract requires a CVE ID; skip entries where we can't determine one\n                    if not cve_id:\n                        continue\n\n                    vulnerabilities.append({\n                        \"Package\": vuln.get('PkgName'),\n                        \"Version\": vuln.get('InstalledVersion'),\n                        \"CVE_ID\": cve_id,\n                        \"Severity\": severity,\n                        \"CVSS_Score\": get_cvss_score(vuln),\n                        \"Fixed_Version\": vuln.get('FixedVersion', 'N/A'),\n                        \"Title\": vuln.get('Title', 'No description'),\n                        \"Url\": vuln.get('PrimaryURL', '')\n                    })"
+    },
+    {
+      "file": "vulnerability-csv-reporting/SKILL.md",
+      "old": "    # Write CSV\n    if vulnerabilities:\n        headers = [\"Package\", \"Version\", \"CVE_ID\", \"Severity\", \n                   \"CVSS_Score\", \"Fixed_Version\", \"Title\", \"Url\"]\n        \n        with open(csv_output, 'w', newline='', encoding='utf-8') as f:\n            writer = csv.DictWriter(f, fieldnames=headers)\n            writer.writeheader()\n            writer.writerows(vulnerabilities)\n        \n        print(f\"\\n[SUCCESS] Found {len(vulnerabilities)} \"\n              f\"{'/'.join(severity_filter)} vulnerabilities\")\n        print(f\"[SUCCESS] Report saved to: {csv_output}\")\n    else:\n        print(f\"\\n[SUCCESS] No {'/'.join(severity_filter)} vulnerabilities found\")",
+      "new": "    # Write CSV (always write a valid CSV, even if there are zero findings)\n    headers = [\"Package\", \"Version\", \"CVE_ID\", \"Severity\",\n               \"CVSS_Score\", \"Fixed_Version\", \"Title\", \"Url\"]\n\n    with open(csv_output, 'w', newline='', encoding='utf-8') as f:\n        writer = csv.DictWriter(f, fieldnames=headers)\n        writer.writeheader()\n        if vulnerabilities:\n            writer.writerows(vulnerabilities)\n\n    if vulnerabilities:\n        print(f\"\\n[SUCCESS] Found {len(vulnerabilities)} \"\n              f\"{'/'.join(severity_filter)} vulnerabilities\")\n    else:\n        print(f\"\\n[SUCCESS] No {'/'.join(severity_filter)} vulnerabilities found\")\n    print(f\"[SUCCESS] Report saved to: {csv_output}\")"
+    },
+    {
+      "file": "vulnerability-csv-reporting/SKILL.md",
+      "old": "def get_cvss_score(vuln_data):\n    \"\"\"Extract CVSS score with source priority.\"\"\"\n    cvss = vuln_data.get('CVSS', {})\n    for source in ['nvd', 'ghsa', 'redhat']:\n        if source in cvss:\n            score = cvss[source].get('V3Score')\n            if score is not None:\n                return score\n    return 'N/A'",
+      "new": "def normalize_cve_id(vuln_data):\n    \"\"\"\n    Return a CVE identifier for the vulnerability if present.\n\n    Trivy may emit non-CVE IDs (e.g., GHSA-*). This function enforces CVE formatting\n    and attempts to recover a CVE from other fields/URLs when possible.\n\n    Returns:\n        A string like 'CVE-YYYY-NNNN...' or None if no CVE can be determined.\n    \"\"\"\n    import re\n\n    def first_cve_in_text(text):\n        if not text:\n            return None\n        m = re.search(r\"CVE-\\d{4}-\\d{4,}\", str(text), flags=re.IGNORECASE)\n        return m.group(0).upper() if m else None\n\n    vid = vuln_data.get('VulnerabilityID')\n    cve = first_cve_in_text(vid)\n    if cve:\n        return cve\n\n    # Common Trivy fields that may contain a CVE (URLs often include it)\n    for key in (\"PrimaryURL\", \"Title\"):\n        cve = first_cve_in_text(vuln_data.get(key))\n        if cve:\n            return cve\n\n    # References may include NVD/MITRE URLs\n    for ref in (vuln_data.get('References') or []):\n        cve = first_cve_in_text(ref)\n        if cve:\n            return cve\n\n    return None\n\n\ndef get_cvss_score(vuln_data):\n    \"\"\"Extract CVSS score with source priority.\"\"\"\n    cvss = vuln_data.get('CVSS', {})\n    for source in ['nvd', 'ghsa', 'redhat']:\n        if source in cvss:\n            score = cvss[source].get('V3Score')\n            if score is not None:\n                return score\n    return 'N/A'"
+    },
+    {
+      "file": "vulnerability-csv-reporting/SKILL.md",
+      "old": "        json_input='trivy_report.json',\n        csv_output='security_audit.csv',\n        severity_filter=['CRITICAL', 'HIGH']",
+      "new": "        json_input='/root/trivy_report.json',\n        csv_output='/root/security_audit.csv',\n        severity_filter=['CRITICAL', 'HIGH']"
+    }
+  ]
+}

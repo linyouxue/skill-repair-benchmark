@@ -1,0 +1,19 @@
+{
+  "edits": [
+    {
+      "file": "motor-model-dynamics/SKILL.md",
+      "old": "3. **Euler angle derivative** = current angular velocity (`state[9:12]`).\n4. **Angular velocity derivative** = `I⁻¹ M` (solve inertia matrix against moment vector).\n",
+      "new": "3. **Euler angle derivative** (ZYX) — do **not** set `[φ̇, θ̇, ψ̇] = [p, q, r]`. Instead map body rates to Euler rates:\n\n   `euler_dot = T(φ, θ) @ omega_body`, where `omega_body = [p, q, r]` and\n\n   ```\n   T(φ,θ) = [[1,  sin(φ)*tan(θ),  cos(φ)*tan(θ)],\n             [0,  cos(φ),        -sin(φ)],\n             [0,  sin(φ)/cos(θ),  cos(φ)/cos(θ)]]\n   ```\n\n4. **Angular velocity derivative** (rigid-body) — include the nonlinear coupling term:\n\n   `omega_dot = I^{-1} @ (M − omega × (I @ omega))`.\n"
+    },
+    {
+      "file": "position-controller-trajectory-planner/SKILL.md",
+      "old": "# Save tuning results (same content for every command):\nwith open(os.path.join(out_dir, 'tuning_results.json'), 'w') as f:\n    json.dump(tuning_results, f, indent=2)\n",
+      "new": "# Save tuning results (best gains found for THIS command):\nwith open(os.path.join(out_dir, 'tuning_results.json'), 'w') as f:\n    json.dump(tuning_results, f, indent=2)\n"
+    },
+    {
+      "file": "position-controller-trajectory-planner/SKILL.md",
+      "old": "## Physical Acceleration Limits\n\nThese are derived from `system_params.yaml` and must not be exceeded in any timestep of the planned trajectory (rows 12:15 = `[ax, ay, az]`):\n\n| Direction | Limit | Derivation |\n|---|---|---|\n| Upward (`az`) | ≤ **6.962 m/s²** | `(T_max − m·g) / m` |\n| Downward (`az`) | ≥ **−9.429 m/s²** | `−(m·g − T_min) / m` |\n| Horizontal `√(ax²+ay²)` | ≤ **13.602 m/s²** | `√(T_max² − (m·g)²) / m` |\n\nIf the trajectory planner requests more acceleration than these limits, the motors will saturate and tracking will fail.\n",
+      "new": "## Physical Acceleration Limits\n\nAcceleration limits must be enforced using the **source-of-truth values** in `system_params.yaml`:\n\n- `accel_limit_up`\n- `accel_limit_down`\n- `accel_limit_horiz`\n\nFor every timestep of the **planned** trajectory (rows 12:15 = `[ax, ay, az]`), ensure:\n\n- `sqrt(ax**2 + ay**2) <= accel_limit_horiz`\n- `az <= accel_limit_up`\n- `az >= -accel_limit_down` (when `accel_limit_down` is a positive “magnitude” for downward acceleration; if the YAML already stores a negative bound, use it directly).\n\nIf the planner requests more than these bounds at any timestep, the controller will saturate and tracking/constraints will fail."
+    }
+  ]
+}

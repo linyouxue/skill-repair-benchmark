@@ -1,0 +1,39 @@
+{
+  "edits": [
+    {
+      "file": "lab-unit-harmonization/SKILL.md",
+      "old": "- **CKD-Specific Labs**: Complete reference for chronic kidney disease-related lab features\n",
+      "new": "- **CKD-Specific Labs**: Reference ranges and common unit conversions for many CKD-related lab features (some datasets may include additional columns not covered by the reference)\n"
+    },
+    {
+      "file": "lab-unit-harmonization/SKILL.md",
+      "old": "### Step 0: Filter Incomplete Records (Preprocessing)\n\nBefore harmonization, filter out rows with any missing values:\n\n```python\ndef count_missing(row, numeric_cols):\n    \"\"\"Count missing/empty values in numeric columns\"\"\"\n    count = 0\n    for col in numeric_cols:\n        val = row[col]\n        if pd.isna(val) or str(val).strip() in ['', 'NaN', 'None', 'nan', 'none']:\n            count += 1\n    return count\n\n# Keep only rows with NO missing values\nmissing_counts = df.apply(lambda row: count_missing(row, numeric_cols), axis=1)\ncomplete_mask = missing_counts == 0\ndf = df[complete_mask].reset_index(drop=True)\n```\n\n**Rationale**: Clinical datasets often contain incomplete records (e.g., partial lab panels, cancelled orders, data entry errors). For harmonization tasks, only complete records with all features measured can be reliably processed. Rows with any missing values should be excluded to ensure consistent output quality.\n",
+      "new": "### Step 0: Filter Incomplete Records (Preprocessing)\n\n**Important ordering note**: Do **not** permanently filter rows *before* numeric parsing. Parsing/cleaning (Step 1) can turn previously non-empty strings into `NaN` (e.g., corrupted comma/thousands formatting), which would leave incomplete rows in the output if you only drop rows up-front.\n\nUse a **two-pass** completeness policy:\n1) Normalize obvious missing tokens early (so they parse as missing)\n2) After Step 1 parsing (and after any unit conversion), **drop rows with any `NaN` in numeric lab columns**\n\n```python\nimport numpy as np\n\nMISSING_TOKENS = {\n    '', 'NaN', 'nan', 'None', 'none', 'NULL', 'null', '-999', '-999.0'\n}\n\n# Pass 1: normalize explicit missing tokens (but keep rows for now)\nfor col in numeric_cols:\n    df[col] = df[col].apply(\n        lambda v: np.nan if (pd.isna(v) or str(v).strip() in MISSING_TOKENS) else v\n    )\n\n# Pass 2 (run AFTER Step 1 parsing + any conversions): enforce complete cases\n# df = df.dropna(subset=numeric_cols).reset_index(drop=True)\n```\n\n**Rationale**: This guarantees the final exported table has only fully-populated numeric cells and prevents silently emitting blanks after formatting.\n"
+    },
+    {
+      "file": "lab-unit-harmonization/SKILL.md",
+      "old": "    # Handle European decimals (comma as decimal separator)\n    # In this dataset, comma is used as decimal separator, not thousands\n    if ',' in s:\n        s = s.replace(',', '.')\n",
+      "new": "    # Handle commas safely:\n    # - If both ',' and '.' appear, treat ',' as a thousands separator and remove it (e.g., \"1,234.5\" -> \"1234.5\").\n    # - If only ',' appears, treat it as a decimal comma (e.g., \"12,34\" -> \"12.34\").\n    if ',' in s:\n        if '.' in s:\n            s = s.replace(',', '')\n        else:\n            s = s.replace(',', '.')\n"
+    },
+    {
+      "file": "lab-unit-harmonization/SKILL.md",
+      "old": "```python\ndef convert_unit_if_needed(value, column, reference_ranges, conversion_factors):\n    \"\"\"\n    If value is outside expected range, try conversion factors.\n\n    Logic:\n    1. If value is within range [min, max], return as-is\n    2. If outside range, try each conversion factor\n    3. Return first converted value that falls within range\n    4. If no conversion works, return original (NO CLAMPING!)\n    \"\"\"\n    if pd.isna(value):\n        return value\n\n    if column not in reference_ranges:\n        return value\n\n    min_val, max_val = reference_ranges[column]\n\n    # If already in range, no conversion needed\n    if min_val <= value <= max_val:\n        return value\n\n    # Get conversion factors for this column\n    factors = conversion_factors.get(column, [])\n\n    # Try each factor\n    for factor in factors:\n        converted = value * factor\n        if min_val <= converted <= max_val:\n            return converted\n\n    # No conversion worked - return original (NO CLAMPING!)\n    return value\n\n# Apply to all numeric columns\nfor col in numeric_cols:\n    df[col] = df[col].apply(lambda x: convert_unit_if_needed(x, col, reference_ranges, conversion_factors))\n```\n",
+      "new": "```python\ndef convert_unit_if_needed(value, column, reference_ranges, conversion_factors):\n    \"\"\"\n    If value is outside the expected range, try per-cell unit conversions.\n\n    Logic:\n    1. If value is within range [min, max] (with a small numerical tolerance), return as-is\n    2. If outside range, try each conversion factor\n    3. Return first converted value that falls within range\n    4. If no conversion works, return original (do NOT clamp)\n    \"\"\"\n    if pd.isna(value):\n        return value\n\n    if column not in reference_ranges:\n        return value\n\n    min_val, max_val = reference_ranges[column]\n\n    # Small tolerance for float boundary effects (NOT for forcing true outliers into range)\n    tol = max(1e-6, 1e-3 * max(abs(min_val), abs(max_val), 1.0))\n\n    def in_range(v):\n        return (min_val - tol) <= v <= (max_val + tol)\n\n    # If already in range, no conversion needed\n    if in_range(value):\n        return value\n\n    # Get conversion factors for this column\n    factors = conversion_factors.get(column, [])\n\n    # Try each factor\n    for factor in factors:\n        converted = value * factor\n        if in_range(converted):\n            return converted\n\n    # No conversion worked - keep original for audit/review\n    return value\n\n# Apply to all numeric columns\nfor col in numeric_cols:\n    df[col] = df[col].apply(lambda x: convert_unit_if_needed(x, col, reference_ranges, conversion_factors))\n```\n"
+    },
+    {
+      "file": "lab-unit-harmonization/SKILL.md",
+      "old": "**Important**: Avoid aggressive clamping of values to the valid range. However, due to floating point precision issues from format conversions, some converted values may end up just outside the boundary (e.g., 0.49 instead of 0.50). In these edge cases, it's acceptable to use a 5% tolerance and clamp values slightly outside the boundary.\n",
+      "new": "**Important**: Do not clamp values to the valid range. If you are only worried about floating point boundary effects, use a **small tolerance in the range check** (as in the code above) so values very near the boundary still count as in-range, but do not modify the measured value.\n"
+    },
+    {
+      "file": "lab-unit-harmonization/SKILL.md",
+      "old": "```python\n# Format all numeric columns to X.XX format\nfor col in numeric_cols:\n    df[col] = df[col].apply(lambda x: f\"{x:.2f}\" if pd.notna(x) else '')\n```\n\nThis produces clean output like `12.34`, `0.50`, `1234.00`.\n",
+      "new": "```python\n# After parsing + unit conversion, enforce complete rows (no missing/NaN numeric labs)\ndf = df.dropna(subset=numeric_cols).reset_index(drop=True)\n\n# Format all numeric columns to fixed X.XX strings (prevents scientific notation on write)\nfor col in numeric_cols:\n    df[col] = df[col].map(lambda x: f\"{float(x):.2f}\")\n```\n\nThis produces clean output like `12.34`, `0.50`, `1234.00` and guarantees no empty numeric cells remain.\n"
+    },
+    {
+      "file": "lab-unit-harmonization/SKILL.md",
+      "old": "See `reference/ckd_lab_features.md` for the complete dictionary of 60 CKD-related lab features including:\n",
+      "new": "See `reference/ckd_lab_features.md` for a dictionary of 60 common CKD-related lab features including:\n"
+    }
+  ]
+}

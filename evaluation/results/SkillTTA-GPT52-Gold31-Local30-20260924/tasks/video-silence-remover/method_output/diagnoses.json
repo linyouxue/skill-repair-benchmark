@@ -1,0 +1,74 @@
+[
+  {
+    "prediction_id": "P1",
+    "description": "ffmpeg is invoked with the global overwrite flag `-y` placed after the output filename, which makes ffmpeg interpret `-y` as a second output file (positional), causing the command to fail or behave unexpectedly. `-y` must appear before any output file arguments.",
+    "locations": [
+      {
+        "file": "audio-extractor/scripts/extract_audio.py",
+        "section": "extract_audio(): cmd construction (cmd.extend([output_path, \"-y\"]))"
+      },
+      {
+        "file": "video-processor/scripts/process_video.py",
+        "section": "process_video(): ffmpeg cmd list ends with output_path then \"-y\""
+      }
+    ]
+  },
+  {
+    "prediction_id": "P2",
+    "description": "Combined removal segments are only concatenated and sorted; overlaps/adjacent segments are not merged and durations are not recomputed. This can create overlapping/duplicate removals, double-count removed duration, and later break video cutting logic that assumes non-overlap.",
+    "locations": [
+      {
+        "file": "segment-combiner/scripts/combine_segments.py",
+        "section": "combine_segments(): appends segments then only sorts; total_duration sums raw durations"
+      }
+    ]
+  },
+  {
+    "prediction_id": "P3",
+    "description": "Video processing assumes removal segments are clean (sorted, non-overlapping, within duration). It does not merge/clip/validate segments before computing keep intervals, so overlapping or out-of-range segments can produce incorrect keep segments (gaps lost, negative/zero-length keeps) and incorrect removed_duration (double-counting).",
+    "locations": [
+      {
+        "file": "video-processor/scripts/process_video.py",
+        "section": "main(): removed_duration = sum(s[\"duration\"] for s in remove_segments) (assumes no overlaps)"
+      },
+      {
+        "file": "video-processor/scripts/process_video.py",
+        "section": "calculate_keep_segments(): builds keep intervals without overlap/ordering validation or clipping to [0,total_duration]"
+      }
+    ]
+  },
+  {
+    "prediction_id": "P4",
+    "description": "If the removal segments cover the full timeline (or validation yields no keep segments), the ffmpeg filter builder will generate concat filters with n=0, which is invalid and will crash instead of producing a graceful empty/no-op output.",
+    "locations": [
+      {
+        "file": "video-processor/scripts/process_video.py",
+        "section": "build_ffmpeg_filter(): concat=n={len(keep_segments)} without handling len==0"
+      }
+    ]
+  },
+  {
+    "prediction_id": "P5",
+    "description": "Pause/silence timestamps are treated as array indices (seconds) regardless of the energy window size. Since energy-calculator supports non-1.0 `--window-seconds`, detectors can output incorrect start/end times (off by a factor of window_seconds) and therefore cut the wrong parts of the video.",
+    "locations": [
+      {
+        "file": "pause-detector/scripts/detect_pauses.py",
+        "section": "detect_pauses(): uses index i as time in seconds; start_time interpreted as index"
+      },
+      {
+        "file": "silence-detector/scripts/detect_silence.py",
+        "section": "main()/detect_initial_silence(): returns silence_end as an index treated as seconds; ignores energy_data[\"window_seconds\"]"
+      }
+    ]
+  },
+  {
+    "prediction_id": "P6",
+    "description": "Initial silence detection uses a moving average with convolution mode=\"valid\" but does not compensate for the resulting index offset (smoothed series is shorter). The returned silence_end index is therefore systematically misaligned with the original timeline (up to smoothing_window-1 seconds), producing inaccurate cut boundaries.",
+    "locations": [
+      {
+        "file": "silence-detector/scripts/detect_silence.py",
+        "section": "detect_initial_silence(): np.convolve(..., mode=\"valid\") then uses loop index i directly as silence_end"
+      }
+    ]
+  }
+]

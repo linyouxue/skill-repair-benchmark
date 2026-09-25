@@ -1,0 +1,54 @@
+{
+  "edits": [
+    {
+      "file": "economic-dispatch/SKILL.md",
+      "old": "pmax_MW = gen[8]\npmin_MW = gen[9]",
+      "new": "pmax_MW = gens[:, 8]\npmin_MW = gens[:, 9]"
+    },
+    {
+      "file": "locational-marginal-prices/SKILL.md",
+      "old": "    # Scale: constraint is in per-unit, multiply by baseMVA to get $/MWh\n    lmp = float(dual_val) * baseMVA if dual_val is not None else 0.0",
+      "new": "    # With balance written as (pg_at_bus - pd == B[i, :] @ theta), the marginal cost of +1 MW load is:\n    #   LMP = -dual(balance_con) * baseMVA\n    # (If you write the balance with the opposite sign convention, this sign flips.)\n    lmp = -float(dual_val) * baseMVA if dual_val is not None else 0.0"
+    },
+    {
+      "file": "locational-marginal-prices/SKILL.md",
+      "old": "reserve_mcp = float(reserve_con.dual_value) if reserve_con.dual_value is not None else 0.0",
+      "new": "reserve_mcp = -float(reserve_con.dual_value) if reserve_con.dual_value is not None else 0.0"
+    },
+    {
+      "file": "locational-marginal-prices/SKILL.md",
+      "old": "congestion_relieved = was_binding_in_base and not is_binding_in_cf",
+      "new": "congestion_relieved = not is_binding_in_cf  # per contract: true indicates the adjusted line is not binding in counterfactual"
+    },
+    {
+      "file": "dc-power-flow/SKILL.md",
+      "old": "bus_num_to_idx = {int(buses[i, 0]): i for i in range(n_bus)}\nB = np.zeros((n_bus, n_bus))\n\nfor br in branches:\n    f = bus_num_to_idx[int(br[0])]  # Map bus number to index\n    t = bus_num_to_idx[int(br[1])]\n    x = br[3]  # Reactance\n    if x != 0:\n        b = 1.0 / x\n        B[f, f] += b\n        B[t, t] += b\n        B[f, t] -= b\n        B[t, f] -= b",
+      "new": "bus_num_to_idx = {int(buses[i, 0]): i for i in range(n_bus)}\nB = np.zeros((n_bus, n_bus))\nPshift = np.zeros(n_bus)  # phase-shift injections (pu), for Pg - Pd - Pshift = B @ theta\n\nfor br in branches:\n    # Skip out-of-service branches (BR_STATUS at index 10)\n    if int(br[10]) == 0:\n        continue\n\n    f = bus_num_to_idx[int(br[0])]  # Map bus number to index\n    t = bus_num_to_idx[int(br[1])]\n    x = br[3]  # Reactance\n    if x == 0:\n        continue\n\n    # Transformer modeling (TAP at index 8, SHIFT at index 9 in degrees)\n    tap = float(br[8]) if br[8] not in (0, None) else 1.0\n    shift = np.deg2rad(float(br[9])) if len(br) > 9 else 0.0\n\n    b = 1.0 / x\n\n    # B matrix contributions with off-nominal tap\n    B[f, f] += b / (tap * tap)\n    B[t, t] += b\n    B[f, t] -= b / tap\n    B[t, f] -= b / tap\n\n    # Phase shift modeled as constant injections\n    if shift != 0.0:\n        Pshift[f] += -(b / tap) * shift\n        Pshift[t] += +(b / tap) * shift"
+    },
+    {
+      "file": "dc-power-flow/SKILL.md",
+      "old": "At each bus: `Pg - Pd = B[i, :] @ θ`",
+      "new": "At each bus: `Pg - Pd - Pshift = B[i, :] @ θ` (include `Pshift` if any in-service transformer has nonzero SHIFT)"
+    },
+    {
+      "file": "dc-power-flow/SKILL.md",
+      "old": "f = bus_num_to_idx[int(br[0])]\nt = bus_num_to_idx[int(br[1])]\nb = 1.0 / br[3]  # Susceptance = 1/X\nflow_pu = b * (theta[f] - theta[t])\nflow_MW = flow_pu * baseMVA",
+      "new": "f = bus_num_to_idx[int(br[0])]\nt = bus_num_to_idx[int(br[1])]\n\n# Skip out-of-service branches\nif int(br[10]) == 0:\n    continue\n\ntap = float(br[8]) if br[8] not in (0, None) else 1.0\nshift = np.deg2rad(float(br[9])) if len(br) > 9 else 0.0\nb = 1.0 / br[3]  # Susceptance = 1/X\n\n# Transformer DC flow model (tap + phase shift)\nflow_pu = (b / tap) * ((theta[f] - theta[t]) - shift)\nflow_MW = flow_pu * baseMVA"
+    },
+    {
+      "file": "dc-power-flow/SKILL.md",
+      "old": "flow = b * (theta[f] - theta[t]) * baseMVA",
+      "new": "if int(br[10]) == 0:\n    continue\n\ntap = float(br[8]) if br[8] not in (0, None) else 1.0\nshift = np.deg2rad(float(br[9])) if len(br) > 9 else 0.0\nflow = (b / tap) * ((theta[f] - theta[t]) - shift) * baseMVA"
+    },
+    {
+      "file": "locational-marginal-prices/SKILL.md",
+      "old": "BINDING_THRESHOLD = 99.0  # Percent loading",
+      "new": "import numpy as np\n\nBINDING_THRESHOLD = 99.0  # Percent loading"
+    },
+    {
+      "file": "locational-marginal-prices/SKILL.md",
+      "old": "        b = 1.0 / x\n        flow_MW = b * (theta.value[f] - theta.value[t]) * baseMVA",
+      "new": "        # Skip out-of-service branches (BR_STATUS at index 10)\n        if int(br[10]) == 0:\n            continue\n\n        tap = float(br[8]) if br[8] not in (0, None) else 1.0\n        shift = np.deg2rad(float(br[9])) if len(br) > 9 else 0.0\n        b = 1.0 / x\n        flow_MW = (b / tap) * ((theta.value[f] - theta.value[t]) - shift) * baseMVA"
+    }
+  ]
+}

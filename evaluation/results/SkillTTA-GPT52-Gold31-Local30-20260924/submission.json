@@ -1,0 +1,1416 @@
+{
+  "method_id": "skilltta-repair-gpt52-gold31-20260924",
+  "benchmark_version": "manual-gold-defects-20260917-v25",
+  "tasks": [
+    {
+      "task_id": "azure-bgp-oscillation-route-leak",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Expected input filenames and structures do not match the task’s specified inputs. The skill expects `topology.json`, `relationships.json`, and `route_leaks.json`, but the task provides `route.json`, `preferences.json`, and `local_pref.json` (relationship type weight). Following the skill as written would cause incorrect file loading/assumptions and may block analysis.",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Expected Inputs"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Solution-evaluation guidance conflicts with the task’s explicit resolution criteria. The skill claims Routing Intent and UDR can ‘resolve’ oscillation/leaks by overriding forwarding even if BGP oscillation or leak advertisements continue, but the task requires: (a) oscillation resolved only if the routing-preference cycle is broken, and (b) leak resolved only if hub1/hub2 stop advertising routes to each other via Virtual WAN. This mismatch would lead to false positives (marking solutions as resolved when they don’t meet the required conditions).",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Fix Selection Logic (Ranked) / Tier 1 — Virtual WAN Routing Intent (Preferred)"
+            },
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Fix Selection Logic (Ranked) / Tier 3 — User Defined Routes (UDR)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "Hardcoded topology facts (specific ASNs and hub names) appear in normative reasoning text, encouraging brittle, non-input-derived logic. The skill references Virtual WAN as ASN 65001 and uses concrete hub ASNs/names (e.g., vhubvnet1 ASN 65002, vhubvnet2 ASN 65003) in explanatory sections, which can bias an agent toward hardcoding instead of deriving identifiers from the provided JSON inputs.",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Fix Selection Logic (Ranked) / Tier 1 — Virtual WAN Routing Intent (Preferred)"
+            },
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Fix Selection Logic (Ranked) / Tier 2 — Export / Route Policy (Protocol-Correct)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "Overly strict input-validation rule: the skill requires relationship symmetry and declares the input invalid if symmetry checks fail. The task does not guarantee symmetric relationship encoding (and uses `local_pref.json` weights rather than an explicit bidirectional relationship map), so this rule can incorrectly halt or invalidate processing instead of performing best-effort detection.",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "Reasoning Workflow (Executable Checklist) / Step 1 — Sanity-Check Inputs"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/azure-bgp-oscillation-route-leak/repaired_skill",
+      "executor_run_id": "azure-bgp-oscillation-route-leak-skilltta-gpt52-r002"
+    },
+    {
+      "task_id": "bike-rebalance",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Station identifier key mismatch: the skill’s parsing/mapping code assumes each station record has an \"id\" field (e.g., s[\"id\"]) for building station_ids and labels. The bike-rebalance task/output schema uses \"station_id\" (and related station fields like initial_bikes, station_capacity), so this will cause KeyError or incorrect ID↔index mappings when applied to the task’s data.json.",
+          "locations": [
+            {
+              "file": "geospatial-routing-data/SKILL.md",
+              "section": "## Parse Data Safely"
+            },
+            {
+              "file": "geospatial-routing-data/SKILL.md",
+              "section": "## Coordinate Validation"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Hard-coded input path: the skill reads the instance from an absolute path \"/root/data.json\". The task specification only states a \"data.json\" file (no absolute location), so this assumption can break in environments where the file is not located at /root/data.json.",
+          "locations": [
+            {
+              "file": "geospatial-routing-data/SKILL.md",
+              "section": "## Parse Data Safely"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/bike-rebalance/repaired_skill",
+      "executor_run_id": "bike-rebalance-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "SKILL.md claims the skill is for D3.js (v6) in the header/front matter, but later instructs to pin D3 to v7.9.0 by default, creating an internal version inconsistency that can mislead implementations needing v6.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Front matter / \"Offline + dependency determinism\" (default: d3@7.9.0)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "bubble_chart_example.js uses an absolute data path (d3.csv('/data/stocks.csv')), which is brittle for standalone apps opened from disk and contradicts the common need for relative paths within the output tree.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/bubble_chart_example.js",
+              "section": "Load and process data (d3.csv('/data/stocks.csv'))"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "bubble_chart_example.js tooltip suppression for ETFs is implemented as `if (d.sector !== 'ETF')`, but ETF-ness is not reliably represented by the `sector` field; the example simultaneously computes `hasValue`/missing marketCap but does not use it for tooltip gating, which is logically inconsistent and encourages incorrect behavior.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/bubble_chart_example.js",
+              "section": "Data parsing (hasValue) vs. circle mouseover handler (sector !== 'ETF')"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "bubble_chart_example.js uses a force simulation without any determinism controls (no deterministic initial node positions, no fixed tick count + stop), conflicting with the skill’s own determinism rules and yielding non-reproducible layouts.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/bubble_chart_example.js",
+              "section": "Create force simulation / simulation.on('tick', ...)"
+            },
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Determinism rules → Rendering determinism (force simulation guidance: fixed tick count, deterministic initial positions)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P5",
+          "description": "interactive_table_example.js formatNumber double-applies a negative sign: it computes `formatted` from `num` (which already includes the negative sign in the division/toFixed result) and then prefixes another '-' when `num < 0`, producing strings like '--1.23B'.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/interactive_table_example.js",
+              "section": "Number formatting utility (formatNumber: `return num < 0 ? '-' + formatted : formatted;`)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P6",
+          "description": "tooltip_handler.js helper formatNumber treats 0 as missing due to `if (!num) return '-'`, and defaultFormat similarly hides legitimate zero values via truthiness checks (`data.value ? ... : ''`), causing incorrect tooltip output for zero-valued data.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/tooltip_handler.js",
+              "section": "Helper function formatNumber (`if (!num) return '-'`) and defaultFormat (`data.value ? ...`)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/data-to-d3/repaired_skill",
+      "executor_run_id": "data-to-d3-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "dialogue-parser",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "SKILL.md instructs users to import a `dialogue_graph` module (`from dialogue_graph import Graph, Node, Edge`), but the bundle only provides `dialogue-graph/scripts/dialogue_graph.py` and does not define an installable/importable `dialogue_graph` package/module at the documented import path. This makes the documented usage likely to fail without extra, undocumented PYTHONPATH/package setup.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "How to use (Import the module)"
+            },
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "File location / module name mismatch relative to documented `from dialogue_graph import ...`"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`Graph.validate()` is advertised as validating graph integrity, but it only checks edge endpoint existence and does not validate key constraints that the task/evaluators commonly enforce (e.g., all nodes reachable from the first node). Using this validation as-is can allow structurally invalid graphs to pass \"validate\" while failing downstream constraints.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.validate"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "5. Validation (\"Check for integrity.\")"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The implementation treats the special target `\"End\"` inconsistently across validation/serialization/visualization: `validate()` explicitly allows edges to point to `End` even when `End` is not present in `self.nodes`, `to_dict()`/`to_json()` will omit an `End` node unless the user added one, but `visualize()` always injects an `End` node into the DOT output. This can produce a JSON graph with dangling `to: \"End\"` references (depending on consumer expectations) and a DOT graph that does not faithfully represent the serialized JSON graph.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.validate (edge.target != \"End\" exception)"
+            },
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.to_dict / Graph.to_json (serializes only self.nodes)"
+            },
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.visualize (unconditionally adds 'End' node)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/dialogue-parser/repaired_skill",
+      "executor_run_id": "dialogue-parser-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "drone-planning-control",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Dynamics description uses incorrect rotational kinematics by setting Euler angle derivatives equal to body angular rates (`Euler angle derivative = current angular velocity`). For ZYX Euler angles, `[φ̇, θ̇, ψ̇]` is not equal to `[p, q, r]` except under small-angle/approximate assumptions; using this as “nonlinear equations of motion” will yield wrong attitude evolution.",
+          "locations": [
+            {
+              "file": "motor-model-dynamics/SKILL.md",
+              "section": "Dynamics (Equations of Motion) → Implementation Logic → 3. Euler angle derivative"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Rotational dynamics are described as `Angular velocity derivative = I⁻¹ M` while calling the model “nonlinear equations of motion”. This omits the standard rigid-body coupling term `ω × (I ω)` (i.e., `I ω̇ = M − ω×(Iω)`), which is a concrete modeling error for a supposedly nonlinear quadrotor simulator.",
+          "locations": [
+            {
+              "file": "motor-model-dynamics/SKILL.md",
+              "section": "Dynamics (Equations of Motion) → Implementation Logic → 4. Angular velocity derivative"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "Physical acceleration-limit guidance hardcodes specific numeric limits (e.g., 6.962, −9.429, 13.602 m/s²) and frames them as the required bounds. The task explicitly requires enforcing the limits from `system_params.yaml` keys (`accel_limit_up`, `accel_limit_down`, `accel_limit_horiz`). Hardcoding derived constants can directly violate the task’s stated source of truth.",
+          "locations": [
+            {
+              "file": "position-controller-trajectory-planner/SKILL.md",
+              "section": "Physical Acceleration Limits"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "Example output-writing code states “Save tuning results (same content for every command)”, which contradicts the task requirement to tune PID parameters per command and save the best PID gains found for that command in each command’s results folder.",
+          "locations": [
+            {
+              "file": "position-controller-trajectory-planner/SKILL.md",
+              "section": "Required Output File Locations (example code block)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/drone-planning-control/repaired_skill",
+      "executor_run_id": "drone-planning-control-skilltta-gpt52-r002"
+    },
+    {
+      "task_id": "dynamic-object-aware-egomotion",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "`sampling-and-indexing` treats interval end semantics as a free choice (inclusive vs. exclusive) and uses `sample_ids` as original video frame indices. In this task, instruction keys are defined on *sample indices* and intervals are explicitly *half-open* (end-exclusive), so this guidance can produce systematically mis-keyed or wrong-semantics JSON intervals.",
+          "locations": [
+            {
+              "file": "sampling-and-indexing/SKILL.md",
+              "section": "Core steps"
+            },
+            {
+              "file": "sampling-and-indexing/SKILL.md",
+              "section": "Pseudocode"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`output-validation` validates instruction interval bounds against the video frame count `n` and enforces `end < n`, which is incompatible with this task’s definition (keys are *sample indices* and half-open intervals often use `end == num_samples`). It also allows `start==end` (empty intervals) and fails to assert that each JSON value is a `list` (iterating a string would incorrectly pass per-character checks).",
+          "locations": [
+            {
+              "file": "output-validation/SKILL.md",
+              "section": "Checks"
+            },
+            {
+              "file": "output-validation/SKILL.md",
+              "section": "Reference snippet"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "`egomotion-estimation` decision sketch assigns labels only for `i>0`, which can omit coverage for sampled frame index 0 and/or conflate per-transition labels with per-frame interval labels. This conflicts with the task’s interval semantics example where `\"0->1\"` must label sampled frame 0, and with the skill’s own requirement that compressed intervals cover all sampled frames.",
+          "locations": [
+            {
+              "file": "egomotion-estimation/SKILL.md",
+              "section": "Decision sketch"
+            },
+            {
+              "file": "egomotion-estimation/SKILL.md",
+              "section": "Self-check"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/dynamic-object-aware-egomotion/repaired_skill",
+      "executor_run_id": "dynamic-object-aware-egomotion-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "energy-market-pricing",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Incorrect LMP sign: the skill states LMPs are the duals of nodal balance constraints directly, but with the demonstrated balance constraint written as `pg_at_bus - pd == B @ theta` (i.e., load enters with a negative sign), the marginal cost of increasing load is the negative of the dual (LMP = -dual * baseMVA). Using `dual * baseMVA` will flip LMP signs.",
+          "locations": [
+            {
+              "file": "locational-marginal-prices/SKILL.md",
+              "section": "LMP Extraction from CVXPY"
+            },
+            {
+              "file": "locational-marginal-prices/SKILL.md",
+              "section": "LMP Sign Convention"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Counterfactual congestion flag logic conflicts with the task contract: the skill computes `congestion_relieved = was_binding_in_base and not is_binding_in_cf`, but the task defines the flag based on whether the adjusted line is binding in the counterfactual (\"true indicates not binding\"), without requiring it to have been binding in the base case.",
+          "locations": [
+            {
+              "file": "locational-marginal-prices/SKILL.md",
+              "section": "Counterfactual Analysis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "DC network modeling is incomplete for MATPOWER branch records: the B-matrix construction and line flow formulas ignore transformer tap ratios/phase shifts and also do not filter out out-of-service branches (BR_STATUS). This yields incorrect flows/constraints for transformers and can incorrectly include disconnected elements in the network model.",
+          "locations": [
+            {
+              "file": "dc-power-flow/SKILL.md",
+              "section": "Susceptance Matrix (B)"
+            },
+            {
+              "file": "dc-power-flow/SKILL.md",
+              "section": "Line Flow Calculation"
+            },
+            {
+              "file": "dc-power-flow/scripts/build_b_matrix.py",
+              "section": "build_susceptance_matrix"
+            },
+            {
+              "file": "dc-power-flow/scripts/build_b_matrix.py",
+              "section": "calculate_line_flows"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "Economic dispatch snippet contains a concrete variable-name error: it defines `gens` but then uses `gen[8]`/`gen[9]` (undefined) when showing how to read PMAX/PMIN, which would cause runtime errors or mis-implementation if followed literally.",
+          "locations": [
+            {
+              "file": "economic-dispatch/SKILL.md",
+              "section": "Generator Data Indices"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/energy-market-pricing/repaired_skill",
+      "executor_run_id": "energy-market-pricing-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "energy-unit-commitment",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The provided “above-minimum” startup-capability linearization can fail to enforce a stated startup_limit when startup_limit < Pmin. The constraint is written on (p_above_min + reserve) and does not include the Pmin*u term, so it can allow actual output = Pmin during a startup period even if that exceeds startup_limit (i.e., it does not correctly encode a limit on total MW during startup in the above-minimum variable convention).",
+          "locations": [
+            {
+              "file": "unit-commitment-operating-rules/SKILL.md",
+              "section": "Reserve Deliverability (startup_limit and the “startup_reduction” above-minimum pattern)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/energy-unit-commitment/repaired_skill",
+      "executor_run_id": "energy-unit-commitment-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "enterprise-information-search",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Skill is not aligned with the task contract of answering *multiple* questions from `/root/question.txt` and writing a single JSON file to `/root/answer.json` with per-question `{answer, tokens}` objects; the skill instead frames a single-question subagent retrieval workflow and never specifies reading a questions file, iterating over qids, or writing the required output file.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "When to Invoke This Skill"
+            },
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Invocation"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Output schema defined by the skill conflicts with the task-required schema. The skill mandates a \"Final Answer Object\" with fields like `target_product`, `report_doc_id`, etc., plus a separate \"Evidence Map\", while the task requires `/root/answer.json` to be keyed by question ids (e.g., `q1`, `q2`) each containing `{ \"answer\": <list>, \"tokens\": <...> }`.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Output Format (Strict, JSON-ready)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "Skill provides no guidance for the task’s strict requirement that every answer be stored as a list (including singletons) and that token consumption be logged per question; the skill’s output format uses scalar strings (e.g., `report_doc_id`) and does not include any `tokens` field.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Output Format (Strict, JSON-ready)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "Skill is overly specialized to a particular benchmark scenario (e.g., 'Market Research Report' for 'CoachForce' vs 'CoFoAIX') rather than general enterprise information retrieval across heterogeneous datasets, creating a concrete mismatch with the generic 'enterprise information search' task description.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Core Procedure (Must Follow)"
+            },
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "Mini Example (Your case)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/enterprise-information-search/repaired_skill",
+      "executor_run_id": "enterprise-information-search-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "exceltable-in-ppt",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The OOXML unpack script pretty-prints XML using ASCII encoding (`toprettyxml(..., encoding=\"ascii\")`). This can rewrite non-ASCII text into character references and changes the XML encoding declaration, reducing round-trip fidelity and risking unintended changes when the task requires keeping everything else unchanged.",
+          "locations": [
+            {
+              "file": "pptx/ooxml/scripts/unpack.py",
+              "section": "Pretty print all XML files (dom.toprettyxml(..., encoding=\"ascii\"))"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "The PPTX skill documentation is generic about editing PPTX via OOXML, but provides no workflow guidance for the task’s core requirement: extracting/updating/re-embedding an embedded Excel worksheet/table (OLE object under `ppt/embeddings/*`) while preserving formulas and avoiding full-deck rewrites. This misalignment can lead to using inappropriate approaches (e.g., editing only slide XML or saving via python-pptx) that won’t update the embedded workbook correctly or may rewrite unrelated parts.",
+          "locations": [
+            {
+              "file": "pptx/SKILL.md",
+              "section": "Editing an existing PowerPoint presentation (OOXML unpack/edit/pack workflow) and overall Overview/Reading sections (no embedded Excel/OLE handling)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "There is an internal validation inconsistency: `pack.py` supports validating `.xlsx` outputs via soffice conversion, but `validate.py` explicitly treats `.xlsx` as unsupported and exits with an error. This mismatch can confuse/impede validation workflows when editing an embedded workbook for this task.",
+          "locations": [
+            {
+              "file": "pptx/ooxml/scripts/pack.py",
+              "section": "validate_document(): includes case \".xlsx\" with filter \"html:HTML (StarCalc)\""
+            },
+            {
+              "file": "pptx/ooxml/scripts/validate.py",
+              "section": "Validator selection match-case: default branch prints \"Validation not supported\" for .xlsx"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/exceltable-in-ppt/repaired_skill",
+      "executor_run_id": "exceltable-in-ppt-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "exoplanet-detection-period",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The bundle incorrectly states that Transit Least Squares (TLS) requires flux uncertainties (`flux_err`) as a mandatory third argument. In `transitleastsquares`, uncertainties are optional (recommended for weighting), so presenting them as required can mislead users and cause unnecessary failures when uncertainties are missing or unusable.",
+          "locations": [
+            {
+              "file": "transit-least-squares/SKILL.md",
+              "section": "Basic Usage (\"CRITICAL: Always include flux_err ... REQUIRED!\")"
+            },
+            {
+              "file": "transit-least-squares/SKILL.md",
+              "section": "Common Issues (\"flux_err is required\")"
+            },
+            {
+              "file": "exoplanet-workflows/SKILL.md",
+              "section": "Common Issues and Solutions -> \"Issue: flux_err required error\""
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "The preprocessing skill recommends a basic symmetric 3-sigma clip using mean/standard deviation around the median. For transit searches, symmetric clipping (especially based on std) can preferentially remove real transit dips as 'negative outliers' and is not transit-safe; this advice is presented without a caution or a transit-preserving alternative in that section.",
+          "locations": [
+            {
+              "file": "light-curve-preprocessing/SKILL.md",
+              "section": "Manual Outlier Removal"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/exoplanet-detection-period/repaired_skill",
+      "executor_run_id": "exoplanet-detection-period-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "fix-build-agentops",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Temporal testing resource snippets are not self-contained: multiple code examples use Temporal decorators/APIs (e.g., `workflow.defn`, `activity.defn`, `ApplicationError`, `RetryPolicy`, `timedelta`, `asyncio`) without importing the required symbols. Copy/pasting these examples will fail with `NameError`/`ImportError`.",
+          "locations": [
+            {
+              "file": "temporal-python-testing/resources/unit-testing.md",
+              "section": "WorkflowEnvironment with Time-Skipping / Time-Skipping Examples / ActivityEnvironment Testing / Common Patterns"
+            },
+            {
+              "file": "temporal-python-testing/resources/integration-testing.md",
+              "section": "Activity Mocking Strategy / Error Injection Patterns / Multi-Activity Workflow Testing / Signal and Query Testing"
+            },
+            {
+              "file": "temporal-python-testing/resources/local-setup.md",
+              "section": "Health Check Script / Shared Test Fixtures"
+            },
+            {
+              "file": "temporal-python-testing/resources/replay-testing.md",
+              "section": "Basic Replay Testing / Testing Against Multiple Histories / Determinism Validation / CI/CD Integration Patterns"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`uv-package-manager` contains an incorrect command form for selecting a Python version. It shows `uv --python 3.11 run ...`, but `--python` is an option to `uv run` (i.e., `uv run --python 3.11 ...`). This is a concrete CLI syntax error that will fail when followed literally.",
+          "locations": [
+            {
+              "file": "uv-package-manager/SKILL.md",
+              "section": "Python Version Management / Pattern 9: Setting Python Version"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "`testing-python` includes highly project-specific rules (e.g., FastMCP-only guidance and a blanket ban on `@pytest.mark.asyncio` based on `asyncio_mode = \"auto\"`) despite being presented as a general Python testing skill. This can mislead users working on repositories that do not use FastMCP or do not have global `asyncio_mode=auto` configured.",
+          "locations": [
+            {
+              "file": "testing-python/SKILL.md",
+              "section": "Project-Specific Rules"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "`analyze-ci` has an internal inconsistency between the declared `allowed-tools` command pattern and the documented usage. Frontmatter restricts usage to `uv run skills analyze-ci:*` while the Usage section instructs `uv run skills analyze-ci <pr_url>` (no `:*`). This mismatch can cause tool invocation confusion/failure under enforcement.",
+          "locations": [
+            {
+              "file": "analyze-ci/SKILL.md",
+              "section": "Frontmatter `allowed-tools` vs Usage"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/fix-build-agentops/repaired_skill",
+      "executor_run_id": "fix-build-agentops-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "fix-build-google-auto",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The skill suggests `mvn clean -DbuildDirectory=out` to clean a specific directory, but `buildDirectory` is not a standard Maven Clean Plugin system property/CLI option. This is misleading guidance for changing the clean target directory (which is normally configured via plugin `<configuration><directory>...`).",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "Clean Lifecycle"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "The skill claims `mvn install -amd` will \"Skip unchanged modules\", but `-amd` means \"also make dependents\" (typically used with `-pl`) and does not implement incremental/changed-module skipping. This is incorrect and can mislead build triage strategy in multi-module projects.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "Build Optimization -> Incremental Builds"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The Jenkins example uses `mvn -B verify -DskipUnitTests` to skip unit tests. `skipUnitTests` is not a standard Surefire/Failsafe property (common ones are `-DskipTests`, `-Dmaven.test.skip=true`, or `-DskipITs` for failsafe). Presenting it as a generic Maven flag is misleading.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "CI/CD Integration -> Jenkins Pipeline"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/fix-build-google-auto/repaired_skill",
+      "executor_run_id": "fix-build-google-auto-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "`senior-data-engineer/scripts/data_quality_validator.py` has a broken CLI wiring: `DataQualityValidator.__init__` expects a single `config: Dict`, but `main()` instantiates it with `(args.target, verbose=...)`, and then calls `tool.run()` even though the class only defines `process()` (no `run()` method). This will raise `TypeError`/`AttributeError` and makes the script unusable as documented.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/data_quality_validator.py",
+              "section": "class DataQualityValidator.__init__ signature vs main(): tool instantiation and tool.run() call"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`senior-data-engineer/scripts/pipeline_orchestrator.py` has the same concrete CLI defects as the other tools: the class constructor signature is `__init__(self, config: Dict)` but `main()` passes `(args.target, verbose=...)`, and `main()` calls `tool.run()` which is not implemented (only `process()` exists). Script will fail at runtime.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/pipeline_orchestrator.py",
+              "section": "class PipelineOrchestrator.__init__ signature vs main(): tool instantiation and tool.run() call"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "`senior-data-engineer/scripts/etl_performance_optimizer.py` has invalid CLI wiring: `EtlPerformanceOptimizer.__init__` expects `config: Dict`, but `main()` instantiates it with `(args.target, verbose=...)` and calls a nonexistent `tool.run()` method (only `process()` exists). This is a direct runtime error.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/etl_performance_optimizer.py",
+              "section": "class EtlPerformanceOptimizer.__init__ signature vs main(): tool instantiation and tool.run() call"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "`senior-data-engineer/scripts/stream_processor.py` generates invalid Flink scaffolding: the generated PyFlink code string uses `DeliveryGuarantee.EXACTLY_ONCE` but does not import `DeliveryGuarantee`, so the generated job will not run. The generated Java code string also references `DeliveryGuarantee.EXACTLY_ONCE` without importing `DeliveryGuarantee`, so it will not compile.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/stream_processor.py",
+              "section": "FlinkJobGenerator._generate_pyflink_code template (uses DeliveryGuarantee without import)"
+            },
+            {
+              "file": "senior-data-engineer/scripts/stream_processor.py",
+              "section": "FlinkJobGenerator._generate_java_code template (uses DeliveryGuarantee without import)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P5",
+          "description": "`senior-data-engineer/HOW_TO_USE.md` instructs users to run the provided Python tools directly (e.g., `data_quality_validator.py`, `etl_performance_optimizer.py`, `pipeline_orchestrator.py`), but these scripts currently crash due to the constructor/method mismatches in their `main()` functions, making the usage instructions inaccurate.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/HOW_TO_USE.md",
+              "section": "Python Tools Available / You can run these tools directly"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/flink-query/repaired_skill",
+      "executor_run_id": "flink-query-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "jpg-ocr-stat",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "In the `analyze_image_to_json` example, the `except json.JSONDecodeError` handler references `response.choices[0].message.content`, but `response` may be undefined if the API call fails before assignment. This can raise an `UnboundLocalError`, masking the original failure and breaking the example’s error handling.",
+          "locations": [
+            {
+              "file": "openai-vision/SKILL.md",
+              "section": "Code Examples > Full Analysis with JSON Output"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`check_fillable_fields.py` executes PDF reading at import time and does not validate CLI arguments. If run without an argument it will crash with `IndexError`, and importing the module will immediately attempt to open `sys.argv[1]` as a PDF (undesired side effect).",
+          "locations": [
+            {
+              "file": "pdf/scripts/check_fillable_fields.py",
+              "section": "Top-level module code (no __main__ guard / no argv length check)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "`convert_pdf_to_images.py` writes PNGs into `output_dir` but never creates the directory. If the provided output directory does not already exist, image saving will fail with a file-not-found error.",
+          "locations": [
+            {
+              "file": "pdf/scripts/convert_pdf_to_images.py",
+              "section": "convert()"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/jpg-ocr-stat/repaired_skill",
+      "executor_run_id": "jpg-ocr-stat-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "lab-unit-harmonization",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Row-dropping is performed before numeric parsing, but the parsing step can introduce new NaNs (e.g., from non-parsable strings or comma/thousands formatting). The later formatting step then converts NaNs to empty strings instead of dropping those rows, which can violate the task contract to remove incomplete records and output fully-populated numeric cells.",
+          "locations": [
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Step 0: Filter Incomplete Records (Preprocessing)"
+            },
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Step 1: Parse Numeric Formats"
+            },
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Step 3: Format Output (2 Decimal Places)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "The numeric parser replaces every comma with a dot unconditionally, while the same document lists 'Thousand Separators' as a common issue. This implementation will corrupt values like \"1,234.5\" into \"1.234.5\" (NaN) and provides no heuristic to distinguish decimal commas from thousands separators, creating avoidable parse failures and downstream row loss.",
+          "locations": [
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Data Quality Issues Reference"
+            },
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Step 1: Parse Numeric Formats"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "Unit conversion guidance is internally inconsistent: it instructs 'do NOT clamp' when no conversion works, but later says it is acceptable to clamp values to boundaries with a 5% tolerance. This ambiguity can lead to incorrect harmonization (masking true outliers or wrong-unit values) and inconsistent outputs across implementations.",
+          "locations": [
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Step 2: Unit Conversion (Range-Based Detection)"
+            },
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Best Practices"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "The bundle’s 'complete feature reference' is incomplete/inconsistent: the reference file declares '60 Features' and the SKILL also describes a complete dictionary of 60 CKD-related features, but the task’s input is stated to contain 62 lab features. This mismatch can cause columns to have no defined physiological ranges/conversions, undermining the range-based detection approach described.",
+          "locations": [
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Overview"
+            },
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "Complete Feature Reference"
+            },
+            {
+              "file": "lab-unit-harmonization/reference/ckd_lab_features.md",
+              "section": "CKD Lab Features Dictionary (60 Features)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/lab-unit-harmonization/repaired_skill",
+      "executor_run_id": "lab-unit-harmonization-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "`time_above_threshold_s` treats “above threshold” as strictly `>` (not `>=`), which will undercount TAL when temperatures equal the threshold (e.g., at liquidus). It also fails to count segments where both endpoints equal the threshold (flat-at-threshold dwell). This is a concrete computation defect because the function’s logic omits equality cases rather than making the comparison operator configurable.",
+          "locations": [
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md",
+              "section": "Reference codes → `def time_above_threshold_s(df_tc, thr):` (the `if y0 > thr and y1 > thr:` block and crossing logic)"
+            },
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "Deterministic thermocouple computation recipes → 3. Time above threshold with linear interpolation → `def time_above_threshold_s(df_tc, thr):` (the `if y0 > thr and y1 > thr:` block and crossing logic)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Conveyor feasibility guidance contains a direction/labeling error: for a minimum dwell time requirement over heated length, the derived constraint is a **maximum** conveyor speed (speed must be ≤ L/t_min), but the skill labels/formulates it as `speed_min_cm_min`. This can directly lead to reversed compliance logic when computing `required_min_speed_cm_min` or comparing against actual speed.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "6. Conveyor feasibility (rule object approach) → Common patterns → “Minimum dwell time across effective heated length” (uses `speed_min_cm_min = (L_eff_cm / t_min_s) * 60`)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The deterministic thermocouple selection example for “max metric” is not executable and encodes an incorrect/undefined tie-break: it references `lex(...)` (undefined) and uses `-lex(x.tc_id)` (nonsensical for strings), which contradicts the stated tie-break “smallest_tc_id” and can mislead implementation.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "4. Deterministic sensor selection (tie-breaks) → Examples (the `best = max(items, key=lambda x: (x.value, -lex(x.tc_id)))` snippet)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/manufacturing-equipment-maintenance/repaired_skill",
+      "executor_run_id": "manufacturing-equipment-maintenance-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "multilingual-video-dubbing",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Invalid FFmpeg syntax: the example for blurring a specific region uses non-existent `boxblur` options (`x`, `y`, `w`, `h`). `boxblur` does not support region coordinates directly, so the command as written will fail or mislead users; regional blur requires a crop/blur/overlay (or mask) approach.",
+          "locations": [
+            {
+              "file": "ffmpeg-video-filters/SKILL.md",
+              "section": "## Blur Effects"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/multilingual-video-dubbing/repaired_skill",
+      "executor_run_id": "multilingual-video-dubbing-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "organize-messy-files",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The file-organizer skill encourages renaming as a normal part of organizing (including prescribing naming conventions), but it does not clearly default to preserving filenames unless the user explicitly requests renaming. This is risky for tasks with hard constraints like “Do not change files' name / files' content.”",
+          "locations": [
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "## Instructions → 6. Execute Organization (\"Moves, renames, and organizes files\" + rename examples)"
+            },
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "## Best Practices → File Naming"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "The file-organizer skill claims it can organize files by “understanding context,” but its procedure does not include any concrete, content-based extraction workflow for PDFs/DOCX/PPTX (e.g., extracting text to classify by subject). It mainly suggests grouping by type/purpose/date and simple shell inspection, which is insufficient for a content-driven classification task like organizing papers by subject.",
+          "locations": [
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "## What This Skill Does"
+            },
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "## Instructions → 2. Analyze Current State"
+            },
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "## Instructions → 3. Identify Organization Patterns"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The file-organizer skill’s suggested outputs and workflow allow extra folders like “ToSort”/“Archive” and does not enforce a fixed, pre-specified set of destination folders with an “exactly one folder per file, no leftovers” guarantee. This conflicts with tasks that require distributing every file into exactly one of a fixed set of subject folders (no additional buckets).",
+          "locations": [
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "## Instructions → 5. Propose Organization Plan (example structure includes \"To-Sort\"/\"Archive\")"
+            },
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "## Examples → Example 1: Organizing Downloads (includes \"ToSort/\")"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/organize-messy-files/repaired_skill",
+      "executor_run_id": "organize-messy-files-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "paper-anonymizer",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The skill lists redaction “patterns” like email wildcards (`*@*.edu`), arXiv IDs (`arXiv:XXXX.XXXXX`), and DOI formats (`10.XXXX/...`), but the provided PyMuPDF implementation uses `page.search_for(pattern)` which only finds exact literal substrings (no wildcard/regex support). This will systematically miss real emails/IDs/DOIs unless the caller enumerates every exact string beforehand, undermining anonymization.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "Patterns to Redact (Before References Only)"
+            },
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "PyMuPDF (fitz) - Recommended Approach"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "The skill hard-codes a policy to stop redacting at the first page whose text contains the substring “references”. This heuristic is brittle (the word “references” can appear in running text or headings earlier), potentially causing redaction to stop too early and leave author-identifying info unredacted on later pages.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "PyMuPDF (fitz) - Recommended Approach"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The skill instructs redacting only “Before References” / skipping the References section entirely. For anonymization, identity leaks can appear after references (appendices, author contribution/bio sections, repeated footers/headers, camera-ready/accepted statements, etc.). This restriction can cause missed leaks and conflicts with the task’s requirement to redact all authorship-revealing information.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "Patterns to Redact (Before References Only)"
+            },
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "PyMuPDF (fitz) - Recommended Approach"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "The skill provides no procedure for sanitizing PDF metadata/XMP (Author/Creator/Producer/Keywords/etc.) or for removing/redacting link annotations that can embed deanonymizing URLs (e.g., arXiv links, personal webpages). This is a common leakage channel for anonymization tasks and is not addressed in the skill guidance or example code.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "PDF Redaction for Blind Review"
+            },
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "PyMuPDF (fitz) - Recommended Approach"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P5",
+          "description": "The “CRITICAL RULES” require verifying that 80%+ of original text remains, but the provided `verify_redaction` enforces only a 70% retention threshold. This internal inconsistency can allow over-redaction to pass verification contrary to the skill’s stated requirements.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "CRITICAL RULES"
+            },
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "REQUIRED: Verification Function"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/paper-anonymizer/repaired_skill",
+      "executor_run_id": "paper-anonymizer-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Inconsistent API naming between the declared skill signatures (hyphenated names like `load-problem`, `generate-plan`, `save-plan`) and the provided usage examples (underscored names like `load_problem`, `generate_plan`, `save_plan`). This creates ambiguity about the actual callable/tool names and can directly cause invocation errors in an automated workflow.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 1. Load Domain and Problem / `load-problem(domain_path, problem_path)` (and its Example)"
+            },
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 2. Plan Generation / `generate-plan(problem_object)` (and its Example)"
+            },
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 3. Plan Saving / `save-plan(plan_object, output_path)` (and its Example)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`save-plan` claims it \"Uses `unified_planning.io.PDDLWriter`\" to write a plan in \"standard PDDL plan format\". `PDDLWriter` is for emitting PDDL domain/problem text, not serializing a computed plan into a plain action-per-line plan file. This is likely to produce the wrong output format or fail at runtime, and it does not align with the task requirement of writing a textual plan (one action per line) to `plan_output`.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 3. Plan Saving / Notes (\"Uses `unified_planning.io.PDDLWriter`.\")"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The plan-generation notes hard-code the default planner as `pyperplan`, but `pyperplan` is commonly limited to STRIPS-style fragments and may not support typical IPC Airport encodings that use richer PDDL requirements (e.g., ADL features, conditional effects, negative/disjunctive preconditions). This makes the documented default approach unreliable for the stated benchmark suite.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 2. Plan Generation / Notes (\"Default planner: `pyperplan`.\")"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/pddl-airport-planning/repaired_skill",
+      "executor_run_id": "pddl-airport-planning-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "python-scala-translation",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The “enum type” guidance is incorrect and the example does not compile: it recommends UPPERCASE case-object names and explicitly discourages PascalCase (which is the conventional Scala style for types/constructors). Additionally, the example defines `object BaseType` but never defines a `sealed trait BaseType`, so `case object STRING extends BaseType` refers to a non-existent type and will not compile.",
+          "locations": [
+            {
+              "file": "python-scala-collections/SKILL.md",
+              "section": "## enum type"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Several Scala code examples reuse the same `val` name multiple times in the same snippet (e.g., defining `val doubled` twice, `val total` twice). As written, these snippets are non-compiling Scala and can mislead implementation or copy/paste usage.",
+          "locations": [
+            {
+              "file": "python-scala-collections/SKILL.md",
+              "section": "### Map"
+            },
+            {
+              "file": "python-scala-collections/SKILL.md",
+              "section": "### Reduce/Fold"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The functional programming guide includes Scala 3-only syntax (`trait Show[A]:`, `given`, `using`) inside the skill bundle, which targets Scala 2.13 translation. Even though a Scala 2 alternative is shown later, including Scala 3 syntax in a primary translation skill risks producing non-compiling Scala 2.13 output.",
+          "locations": [
+            {
+              "file": "python-scala-functional/SKILL.md",
+              "section": "## Implicit Conversions and Type Classes"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "The type-mapping table suggests mapping Python `None` directly to Scala `None` “(of type Option)”, which is misleading: `None` is only valid where the Scala type is `Option[T]`. For non-Option types, the appropriate guidance is to model absence as `Option[T]` rather than implying `None` is a general-purpose null substitute.",
+          "locations": [
+            {
+              "file": "python-scala-syntax-mapping/SKILL.md",
+              "section": "## Type Mappings"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/python-scala-translation/repaired_skill",
+      "executor_run_id": "python-scala-translation-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "reserves-at-risk-calc",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "`recalc.py` treats a command timeout (exit code 124) as non-fatal and continues to scan the workbook as if recalculation succeeded. This can silently produce stale/unrecalculated formula values while still returning `status: success` (or only reporting cell errors), undermining the script’s purpose as a mandatory formula-recalc verifier.",
+          "locations": [
+            {
+              "file": "xlsx/recalc.py",
+              "section": "recalc(): subprocess returncode handling (`if result.returncode != 0 and result.returncode != 124` ...)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/reserves-at-risk-calc/repaired_skill",
+      "executor_run_id": "reserves-at-risk-calc-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "`holding_analysis.py` ignores the `--quarter` argument when loading data: it reads `/root/INFOTABLE.tsv` instead of `/root/{quarter}/INFOTABLE.tsv`, so results can come from the wrong quarter and the quarter parameter only affects printing.",
+          "locations": [
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py",
+              "section": "topk_managers() data load (infotable = pd.read_csv...)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`holding_analysis.py` claims to return/print “fund managers” but only groups by and prints `ACCESSION_NUMBER` values; it never joins to `COVERPAGE.tsv` (or similar) to retrieve manager names, so it cannot actually output manager names as stated.",
+          "locations": [
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py",
+              "section": "topk_managers() aggregation and print loop"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "`one_fund_analysis.py` has a malformed `title_class_of_stocks` list due to missing commas between many string literals (Python concatenates adjacent string literals). This collapses many intended entries into a few long strings, breaking the stock-filtering logic that relies on `.isin(title_class_of_stocks)`.",
+          "locations": [
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py",
+              "section": "module constant: title_class_of_stocks"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "`one_fund_analysis.py` reports “Total AUM” as `infotable['VALUE'].sum()`, which is the sum of reported position values in INFOTABLE, not an AUM field from fund metadata/cover page. This mislabels holdings value as AUM and can be incorrect for tasks requiring fund AUM from filing metadata.",
+          "locations": [
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py",
+              "section": "read_one_quarter_data(): print('- Total AUM: ...')"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P5",
+          "description": "`one_fund_analysis.py` reports “Number of stock holdings” as `stock_infotable.shape[0]` (row count). This overcounts when the same stock/CUSIP appears in multiple rows; the task-style question “how many stocks are held” typically requires a distinct CUSIP count.",
+          "locations": [
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py",
+              "section": "read_one_quarter_data(): print('- Number of stock holdings: ...')"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P6",
+          "description": "`search_stock_cusip.py` hardcodes the dataset to `/root/2025-q2/INFOTABLE.tsv` and provides no quarter argument, so stock CUSIP lookup is limited to Q2 data and can fail/mislead for Q3-only securities or datasets stored only under other quarter folders.",
+          "locations": [
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py",
+              "section": "search_stock_by_name(): pd.read_csv(f\"{data_root}/2025-q2/INFOTABLE.tsv\"...)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P7",
+          "description": "`search_stock_cusip.py` repeats the same malformed `title_class_of_stocks` list issue (missing commas causing unintended string concatenation), making its equity filtering unreliable.",
+          "locations": [
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py",
+              "section": "module constant: title_class_of_stocks"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/sec-financial-report/repaired_skill",
+      "executor_run_id": "sec-financial-report-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "seismic-phase-picking",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Broken internal documentation link: the datacenter client skill instructs readers to open `obspy-client-fdsn.md`, but the bundle actually contains `obspy-clients-fdsn.md` (plural). This makes the referenced usage guide unreachable from the skill.",
+          "locations": [
+            {
+              "file": "obspy-datacenter-client/SKILL.md",
+              "section": "Retrieving Data from Data Centers (paragraph: \"Read [obspy-client-fdsn.md](obspy-client-fdsn.md) for usage of the FDSN client API.\")"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/seismic-phase-picking/repaired_skill",
+      "executor_run_id": "seismic-phase-picking-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "shock-analysis-supply",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "LibreOffice macro is written into the user profile (user macros) but recalc.py invokes it with `location=application`, which targets application-installed macros instead of user macros. This mismatch can prevent the macro from being found/executed, causing formula recalculation to fail even when the macro file exists.",
+          "locations": [
+            {
+              "file": "xlsx/recalc.py",
+              "section": "recalc(): cmd macro URL uses `vnd.sun.star.script:Standard.Module1.RecalculateAndSave?language=Basic&location=application` while setup_libreoffice_macro() writes to the user profile macro directory"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/shock-analysis-supply/repaired_skill",
+      "executor_run_id": "shock-analysis-supply-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "simpo-code-reproduction",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Environment logging instructions conflict with the task requirement: this skill tells users to write Python version + pip freeze output to `/root/python_int.txt`, but the task explicitly requires `/root/python_info.txt`. Following the skill as-written would produce the wrong artifact path.",
+          "locations": [
+            {
+              "file": "nlp-research-repo-package-installment/SKILL.md",
+              "section": "Step 2: Log the current environment (Python version is critical)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`convert_pdf_to_images.convert()` saves images into `output_dir` but never creates the directory. If `output_dir` does not already exist, `image.save(...)` will fail with a file-not-found error, breaking the documented workflow (`convert_pdf_to_images.py <file.pdf> <output_directory>`).",
+          "locations": [
+            {
+              "file": "pdf/scripts/convert_pdf_to_images.py",
+              "section": "convert(pdf_path, output_dir, max_dim=1000) / __main__ CLI usage"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "`check_fillable_fields.py` runs unguarded top-level code that immediately accesses `sys.argv[1]` without checking argument count and without an `if __name__ == \"__main__\"` guard. Importing the module (or running it with missing args) will raise `IndexError` rather than printing usage/help.",
+          "locations": [
+            {
+              "file": "pdf/scripts/check_fillable_fields.py",
+              "section": "module top-level code (unconditional PdfReader(sys.argv[1]))"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/simpo-code-reproduction/repaired_skill",
+      "executor_run_id": "simpo-code-reproduction-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "software-dependency-audit",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "CSV report generator only writes the output file when at least one HIGH/CRITICAL vulnerability is found; when none are found it prints a message and exits without creating `/root/security_audit.csv`. This violates the task guidance to still write a valid CSV (header-only) for zero findings.",
+          "locations": [
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "## Complete Vulnerability CSV Report Generator"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Skills map Trivy's `VulnerabilityID` directly into the `CVE_ID` column without enforcing CVE formatting or performing GHSA→CVE mapping. Trivy can emit non-CVE IDs (e.g., GHSA-*), which would violate the task contract requiring a CVE ID per row when a mapping exists / prioritizing CVE-providing sources.",
+          "locations": [
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "## Field Mapping from JSON to CSV"
+            },
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "## Complete Vulnerability CSV Report Generator"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "Examples use relative paths (`package-lock.json`, `security_audit.csv`) instead of the task-required absolute paths (`/root/package-lock.json`, `/root/security_audit.csv`). Following these instructions can scan the wrong file and/or write the CSV to the wrong location.",
+          "locations": [
+            {
+              "file": "trivy-offline-vulnerability-scanning/SKILL.md",
+              "section": "### Step 2: Construct Trivy Command"
+            },
+            {
+              "file": "trivy-offline-vulnerability-scanning/SKILL.md",
+              "section": "## Complete Example"
+            },
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "### Basic Usage"
+            },
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "## Complete Vulnerability CSV Report Generator"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/software-dependency-audit/repaired_skill",
+      "executor_run_id": "software-dependency-audit-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "syzkaller-ppdev-syzlang",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "The constants skill makes an unsupported environment assumption (“does not include kernel source”) and simultaneously recommends using `make extract` as the solution for missing constants, which is internally contradictory and can mislead users about the correct remediation (adding the missing constant / fixing `arches`).",
+          "locations": [
+            {
+              "file": "syz-extract-constants/SKILL.md",
+              "section": "## Method 2: Using syz-extract (Requires kernel source) (Note about environment not including kernel source)"
+            },
+            {
+              "file": "syz-extract-constants/SKILL.md",
+              "section": "## Common Errors -> \"is defined for none of the arches\" (Solution suggests running `make extract`)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "The constants skill advises listing all architectures for “architecture-independent constants” and provides an example `arches = 386, amd64, arm, ...`, which conflicts with tasks that explicitly require restricting `arches` (here: only amd64 and 386). Following this guidance would violate the task requirements.",
+          "locations": [
+            {
+              "file": "syz-extract-constants/SKILL.md",
+              "section": "### Constants file format (example `arches = 386, amd64, arm, ...` and guidance to list all architectures)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The ioctl basics skill incorrectly describes `intptr[min:max]` as an “Integer pointer with range”. In syzlang, `intptr` is an integer type with pointer width (not a pointer), optionally range-constrained; confusing this can cause incorrect type selection in ioctl argument descriptions.",
+          "locations": [
+            {
+              "file": "syzlang-ioctl-basics/SKILL.md",
+              "section": "## Common Type Patterns (table row for `intptr[min:max]`)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "The constants skill’s “Missing headers” example error references `uapi/linux/ppdev.h`, but the task (and typical syzlang usage) uses `include <linux/ppdev.h>`; presenting the wrong include path/error pattern can misdirect debugging.",
+          "locations": [
+            {
+              "file": "syz-extract-constants/SKILL.md",
+              "section": "## Common Errors -> Missing headers (example error `cannot find include file: uapi/linux/ppdev.h`)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/syzkaller-ppdev-syzlang/repaired_skill",
+      "executor_run_id": "syzkaller-ppdev-syzlang-skilltta-gpt52-r001"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "ffmpeg is invoked with the global overwrite flag `-y` placed after the output filename, which makes ffmpeg interpret `-y` as a second output file (positional), causing the command to fail or behave unexpectedly. `-y` must appear before any output file arguments.",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py",
+              "section": "extract_audio(): cmd construction (cmd.extend([output_path, \"-y\"]))"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py",
+              "section": "process_video(): ffmpeg cmd list ends with output_path then \"-y\""
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Combined removal segments are only concatenated and sorted; overlaps/adjacent segments are not merged and durations are not recomputed. This can create overlapping/duplicate removals, double-count removed duration, and later break video cutting logic that assumes non-overlap.",
+          "locations": [
+            {
+              "file": "segment-combiner/scripts/combine_segments.py",
+              "section": "combine_segments(): appends segments then only sorts; total_duration sums raw durations"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "Video processing assumes removal segments are clean (sorted, non-overlapping, within duration). It does not merge/clip/validate segments before computing keep intervals, so overlapping or out-of-range segments can produce incorrect keep segments (gaps lost, negative/zero-length keeps) and incorrect removed_duration (double-counting).",
+          "locations": [
+            {
+              "file": "video-processor/scripts/process_video.py",
+              "section": "main(): removed_duration = sum(s[\"duration\"] for s in remove_segments) (assumes no overlaps)"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py",
+              "section": "calculate_keep_segments(): builds keep intervals without overlap/ordering validation or clipping to [0,total_duration]"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "If the removal segments cover the full timeline (or validation yields no keep segments), the ffmpeg filter builder will generate concat filters with n=0, which is invalid and will crash instead of producing a graceful empty/no-op output.",
+          "locations": [
+            {
+              "file": "video-processor/scripts/process_video.py",
+              "section": "build_ffmpeg_filter(): concat=n={len(keep_segments)} without handling len==0"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P5",
+          "description": "Pause/silence timestamps are treated as array indices (seconds) regardless of the energy window size. Since energy-calculator supports non-1.0 `--window-seconds`, detectors can output incorrect start/end times (off by a factor of window_seconds) and therefore cut the wrong parts of the video.",
+          "locations": [
+            {
+              "file": "pause-detector/scripts/detect_pauses.py",
+              "section": "detect_pauses(): uses index i as time in seconds; start_time interpreted as index"
+            },
+            {
+              "file": "silence-detector/scripts/detect_silence.py",
+              "section": "main()/detect_initial_silence(): returns silence_end as an index treated as seconds; ignores energy_data[\"window_seconds\"]"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P6",
+          "description": "Initial silence detection uses a moving average with convolution mode=\"valid\" but does not compensate for the resulting index offset (smoothed series is shorter). The returned silence_end index is therefore systematically misaligned with the original timeline (up to smoothing_window-1 seconds), producing inaccurate cut boundaries.",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py",
+              "section": "detect_initial_silence(): np.convolve(..., mode=\"valid\") then uses loop index i directly as silence_end"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/video-silence-remover/repaired_skill",
+      "executor_run_id": "video-silence-remover-skilltta-gpt52-r001"
+    }
+  ]
+}

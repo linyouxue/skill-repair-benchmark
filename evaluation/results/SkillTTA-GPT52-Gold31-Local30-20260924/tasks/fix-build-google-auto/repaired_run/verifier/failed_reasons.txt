@@ -1,0 +1,23 @@
+Repository: /home/travis/build/failed/google/auto
+
+Observed failure
+- Running the project the way CI does (`mvn -f build-pom.xml verify`) fails during dependency resolution in multiple modules (auto-common, auto-factory, auto-service).
+- Error:
+  "Could not find artifact com.sun:tools:jar:11.0.27 at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar"
+
+Root cause
+- The module POMs (common/, factory/, service/, value/) all declare their parent as:
+    com.google.auto:auto-parent:3
+  which is resolved from Maven Central.
+- That released parent POM expects a JDK that still has `lib/tools.jar` (JDK8 and earlier) and declares a system dependency on com.sun:tools with systemPath `${java.home}/../lib/tools.jar`.
+- On modern JDKs (9+), `tools.jar` no longer exists, so Maven fails before compilation.
+
+Additional issue to address
+- This repository *already contains* a newer parent POM in the root (`pom.xml`) with artifactId auto-parent and version `4-SNAPSHOT`, but the modules are not using it.
+- Once modules switch to the local parent, the parent’s `java.version` property must be at least 1.7 because JDK11+ no longer supports compiling with -source/-target 1.6.
+
+Plan
+1) Update module POMs (common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml) to use the local parent version `4-SNAPSHOT` (optionally setting relativePath to ../pom.xml).
+   - This avoids inheriting the old `tools.jar` system dependency from the released parent.
+2) Update the root parent POM’s `<java.version>` from 1.6 to 1.7 so the code can compile on JDK11+.
+3) Re-run `mvn -f build-pom.xml verify` to confirm the full reactor build succeeds.
