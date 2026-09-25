@@ -33,6 +33,8 @@ Raw executor outcomes are never overwritten. verifier-adjudications.json records
     ├── protocol.json
     ├── verifier-adjudications.json
     └── tasks/<task-id>/
+        ├── original_run/
+        │   └── trajectory/acp_trajectory.jsonl
         ├── repaired_skill/
         ├── repaired_run/
         │   ├── executor_request.json
@@ -44,3 +46,7 @@ Raw executor outcomes are never overwritten. verifier-adjudications.json records
         └── task_state.json
 
 Readable Markdown trajectory timelines can be generated later with the repository's canonical evaluation/results/export_trajectory.py; the raw ACP JSONL files in this archive are already complete source evidence.
+
+## Readable trajectory timelines
+
+This archive now follows the repository method-result format with both original_run (before) and repaired_run (after) evidence for all 30 tasks. The repository's canonical evaluation/results/export_trajectory.py logic was used to generate deterministic readable Markdown timelines: 30 under trajectory_timelines/before, 30 under trajectory_timelines/after, and 0 unknown. trajectory_timeline_index.json records the pairing metadata. Raw ACP JSONL remains the source of truth.
