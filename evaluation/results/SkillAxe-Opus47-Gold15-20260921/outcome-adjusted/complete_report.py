@@ -74,12 +74,12 @@ lines += ["", "## 执行与产物", "", "| 项目 | 结果 |", "|---|---|",
           f"| 全部计划任务中已证实通过占比 | {npass}/{len(runs)} = {pct(npass/len(runs))} |",
           "| 执行P→F回归率 | 不适用：本轮只有原始失败任务 |",
           f"| 实际skill工具调用 / 正文暴露任务数 | {invocations} / {exposed} |",
-          "| JPG补跑 | r002真实预算60，达到迭代上限；只恢复原XLSX的verifier，未再调用模型。后续jpg预算已改65，历史记录不改写。 |",
-          "| 裁判新增调用 | 仅jpg与shock：4个有效响应；另有1次入站429拒绝，成功响应未重复调用。 |",
+          "| JPG补跑 | 原 r002 在 60/60 iterations 达到上限；按统一要求将预算改为 65 后进行 fresh r004，复用同一 SkillAxe repaired bundle，27 iterations 正常 end_turn，官方 verifier 1/1 PASS。r003 为宿主前台命令超时造成的基础设施无效运行，不计分。 |",
+          "| 裁判新增调用 | 本次仅更新执行结果与F→P替代计分；内容Gold裁判不重跑，沿用既有判断。 |",
           "", "## 评测配置", "", "| 字段 | 值 |", "|---|---|"]
 for key in ("method_id", "benchmark_version", "judge_model", "reasoning_effort", "max_output_tokens", "temperature", "prompt_version", "scoring_version", "original_pass_policy", "evaluation_scope", "mode", "maximum_judge_requests", "confidence_threshold", "confidence_policy", "regression_basis", "status"):
     lines.append(f"| {key} | {summary[key]} |")
-lines += ["", "SkillAxe诊断/修复与任务重跑使用Claude Opus 4.7；裁判为GPT-5.5 medium。原始轨迹、修复bundle与其他13题内容裁判均复用。", "", "来源：gold-evaluation/summary.json、details.json和outcome-adjusted/scores.json；evaluation-provenance.json记录裁判复用。每个数值保留全精度；显示百分比四舍五入至两位小数。", ""]
+lines += ["", "SkillAxe诊断/修复与任务重跑使用Claude Opus 4.7；裁判为GPT-5.5 medium。原始轨迹、修复bundle与既有内容裁判均复用；jpg-ocr-stat 的执行判决由有效 65-budget r004 fresh rollout 替换。", "", "来源：gold-evaluation/summary.json、details.json和outcome-adjusted/scores.json；evaluation-provenance.json记录裁判复用。每个数值保留全精度；显示百分比四舍五入至两位小数。", ""]
 (OUT / "complete-report.md").write_text("\n".join(lines), encoding="utf-8")
 (OUT / "complete-scores.json").write_text(json.dumps({"versions": versions, "location_policy": "retain original location_correct_count; divide by version-specific diagnosis TP", "other_judgments_policy": "retain original regression/confidence/review judgments"}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 assert set(summary["metrics"]) == set(versions["pass_task_full_credit"]["metrics"])
