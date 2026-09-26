@@ -2,7 +2,7 @@
 
 This directory is an incremental partial archive of formally completed `skillgrad-formal` tasks for benchmark version `manual-gold-defects-20260917-v25`. It is a **partial intermediate archive**, not the final 31-task submission.
 
-The archive contains 23 tasks completed as of `2026-09-24T02:02:15.094535+00:00`. The canonical formal coordinator had exited naturally at this snapshot; running and blocked tasks are intentionally excluded from this increment.
+The archive contains 24 tasks completed as of 2026-09-26T03:15:01.591133+00:00. The canonical formal coordinator had exited naturally at this snapshot; running, infrastructure-blocked, deferred, smoke-only, and provenance-only tasks are excluded.
 
 The S0 `original_run` for each task is reused verbatim from the reviewed GPT-5.2 representative archive under `GPT52-AllTasks-RepresentativeRuns-20260916`. These historical baselines used `openrouter/openai/gpt-5.2` through OpenRouter. SkillGrad method rollouts used `vllm/gpt-5.2` through TATU. This provider difference is intentional and is retained explicitly in the archived request and result metadata.
 

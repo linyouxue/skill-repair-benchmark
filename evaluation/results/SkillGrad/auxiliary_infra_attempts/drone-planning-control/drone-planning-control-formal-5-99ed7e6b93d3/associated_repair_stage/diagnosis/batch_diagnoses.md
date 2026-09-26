@@ -1,0 +1,35 @@
+# Batch Diagnoses
+
+## Task drone-planning-control (reward: 0.566667)
+
+<label>Evidence access and mapping</label>
+
+1) <first_observable_failure>
+The agent attempted to load verifier evidence via a hardcoded filename (`.../verifier/evidence.json`) that does not exist in the sandbox output tree, and then attempted to read skills via an absolute path that is outside the allowed project root (“escapes the allowed project root”). This prevents discovering the actual graded failure mode(s) and breaks the required “access evidence inside the sandbox” workflow.
+</first_observable_failure>
+
+2) <trajectory_step_that_produced_it>
+In the early tool steps of the trace (initial diagnostics phase), the agent issued `read_file` calls to:
+- `/.../verifier/evidence.json` → file not found
+- `/home/.../evolved_skills/skills.yaml` → blocked for escaping project root
+These are the first concrete, logged failures before any domain reasoning about controller performance can be grounded.
+</trajectory_step_that_produced_it>
+
+3) <relevant_skill_rule_or_missing_rule>
+This directly violates the preloaded skill rule (Position Controller and Trajectory Planner / Flight Plan Parser / Motor Model and Dynamics):
+- “If a referenced trace/evidence path is missing… enumerate the verifier/results directories to discover what artifacts actually exist (do not guess filenames like `evidence.json`).”
+- “If a path is reported as ‘escapes the allowed project root’, do not retry with other absolute paths; instead, move/copy the artifact under the sandbox root and read it there.”
+So this is a skill-controllable workflow error, not an API/dependency/grader issue.
+</relevant_skill_rule_or_missing_rule>
+
+4) <general_corrective_behavior>
+When diagnosing failures, never guess evidence filenames or use blocked absolute paths. Instead:
+- List the sandbox-visible verifier/results directories and open the actual present artifact(s) (e.g., verifier stdout, JSON summaries, per-command failure reports).
+- Use only relative paths under the allowed root; if something must be read from outside, copy it into the sandbox root first.
+Only after successfully loading the verifier’s reported failing command(s) and metrics should the agent tune PID gains or adjust planning/controller logic.
+</general_corrective_behavior>
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/drone-planning-control/iter_4/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/drone-planning-control/iter_4/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/drone-planning-control/workspace

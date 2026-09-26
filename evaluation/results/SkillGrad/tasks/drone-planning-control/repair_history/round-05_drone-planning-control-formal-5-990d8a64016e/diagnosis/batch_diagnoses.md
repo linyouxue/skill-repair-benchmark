@@ -1,0 +1,25 @@
+# Batch Diagnoses
+
+## Task drone-planning-control (reward: 0.566667)
+
+<label>Missing required output artifacts</label>
+
+(1) First observable failure:
+- The run fails evaluation because the required per-command results tree (`/root/results/<id>/...`) was not produced (or not populated with all required files). This is corroborated by the verifier artifacts being absent in the rollout output area (no verifier `summary/results/log` files found) and the overall “task_passed: false” despite “execution_ok: true”, which is typical when the harness can run but finds missing/incorrect deliverables.
+
+(2) Trajectory step that produced it:
+- The agent never executed the “required deliverables loop” (enumerate commands → for each command: plan → simulate → compute metrics → save `.npy/.json` → generate plots → completeness check). In the trace, there are tool calls, but the end state indicates no harness-facing outputs were written where the grader expects them; the failure is effectively produced at the point the agent ends the turn without creating `/root/results/<id>/` folders and artifacts for all commands.
+
+(3) Relevant skill rule or missing rule:
+- Violated explicit skill rule from `position-controller-trajectory-planner`:
+  - “Workflow: Required deliverables loop (non-optional)” steps 1–5.
+  - “Common Pitfalls: Stopping ... without serializing harness-facing artifacts: verifiers check the on-disk `/root/results/<id>/...` tree.”
+- Also violated “Access evidence inside the sandbox” rule #3 by guessing evidence filenames/paths (attempted to read `verifier/evidence.json`, `summary.json`, etc. that didn’t exist) instead of enumerating the verifier directory to discover actual artifact names. This prevents diagnosing metric failures and leads to premature termination.
+
+(4) General corrective behavior:
+- Always begin by enumerating inputs and creating the full required directory structure under the expected results root; then, for each command, run the complete pipeline end-to-end and immediately serialize: `planned_trajectory.npy`, `actual_trajectory.npy`, `metrics_3d.json`, `tuning_results.json`, and `plots/*.png`. Finish with an explicit completeness/parseability check across all command IDs. If verifier artifact filenames are unknown/missing, list the verifier directory first rather than guessing paths. This is skill-controllable (process/IO discipline), not an API/dependency/permission issue.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/drone-planning-control/iter_5/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/drone-planning-control/iter_5/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/drone-planning-control/workspace

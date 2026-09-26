@@ -1,0 +1,8 @@
+### deliverables-generation-loop | workflow | executor fails to run the end-to-end per-command pipeline that writes all required `/root/results/<id>/` artifacts
+- anchor: required-output-file-locations
+- appeared_in: iter_1
+- description: The executor may reason about controllers/planners but does not execute the mandatory workflow that (a) iterates over every command file/ID, (b) runs parsing → planning → simulation → metrics → plotting, and crucially (c) serializes the required outputs to the exact paths and filenames the harness expects. The observable symptom is an empty `/root/results/` tree (no per-command result folders; no `metrics_3d.json`, `tuning_results.json`, `planned_trajectory.npy`, `actual_trajectory.npy`, plots). Because verification is artifact-based, this causes immediate failure regardless of control quality.
+- latest_executor_action: Treat output generation as non-optional: implement a top-level driver that enumerates all command inputs, creates `/root/results/<cmd_id>/` (and `plots/`), runs the full pipeline for each command, saves `planned_trajectory.npy` immediately after planning, saves `actual_trajectory.npy` after simulation, writes `metrics_3d.json` and `tuning_results.json` (including chosen gains and key metrics), and saves plots. Before terminating, perform a final completeness check: for every command ID, assert the directory exists and all required files are present and readable.
+- remedy_log:
+  - iter_1 | diagnosis: rollout ended without creating any `/root/results/*` artifacts; no per-command outputs were written before termination
+            | patch: add a mandatory “per-command loop + final file-existence verification” workflow rule anchored at `required-output-file-locations`
