@@ -1,6 +1,6 @@
 # MMG2Skill / GPT-5.2 Gold31 existing results
 
-GPT-5.2已有结果快照：31题方法/bundle已完成，30题有效执行（5 PASS、25 FAIL），Druid 1题INFRA_ERROR。**这不是31题最终完成报告；语义Gold未启动，不能填造TP/FP/FN。**
+GPT-5.2已有结果快照：31题方法/bundle已完成，31题有效执行（5 PASS、26 FAIL），Druid 已完成有效运行并判定 FAIL。**这不是31题最终完成报告；语义Gold未启动，不能填造TP/FP/FN。**
 
 本次仅整理并发布已有结果，模型/裁判新增调用均为0。MMG原Analyzer分块15、一次Refiner、include_tutorial_in_refine=false，32768限制；复用历史original-skill轨迹，不重跑基线。固定本地OpenHands，fresh60步/JPG65步。两个模型的响应和评分独立保存。
 
@@ -24,7 +24,7 @@ GPT未裁判；不在发布时追加付费评分或伪造最终指标。冻结�
 
 - AgentOps按用户授权修正为py38–py312矩阵，原断言/依赖pins保持。GPT选用真实snapshot的verifier-only派生验收结果，原超时r001保留；不能据raw r001覆盖有效派生结果。Claude为有效timestamp断言失败。
 - GPT manufacturing允许且仅执行过一次额外Analyzer重试，旧不完整响应及授权记录保留；此例外未套用Claude。
-- Druid远端GPT首请求被OpenRouter地区访问门限403拒绝，无成功模型响应或正式verifier；`remote-evidence/`保留真实失败，不能算有效模型FAIL。
+- Druid早期远端请求曾受地区访问门限阻断；2026-09-27 已通过有效服务器运行完成 50 次模型请求与正式 verifier，最终为模型/方法 FAIL；早期基础设施失败证据仍保留。
 - Shock题面的Excel/Playwright/Solver能力与基础harness不完全匹配；结构健康不等于环境完全满足要求。
 - Claude Python→Scala原轨迹输入采用已授权重建副本，误脱敏/重建限制在独立审计中保留；Flink/PDDL等其他限制见完整报告。
 - n_skill_invocations与正文预加载证据分别保留在真实result和审计中。fresh通过不等于语义Gold内容修复成功。

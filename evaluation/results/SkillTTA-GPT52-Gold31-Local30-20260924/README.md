@@ -1,6 +1,6 @@
 # SkillTTA GPT-5.2 — Gold31 Local30 execution evidence
 
-This directory archives the 30 execution-valid local tasks from the SkillTTA + repair-adapter GPT-5.2 run started on 2026-09-24. fix-druid-loophole-cve is intentionally excluded because provider-region access prevented a valid local rollout.
+This directory archives the 31 execution-valid tasks from the SkillTTA + repair-adapter GPT-5.2 run started on 2026-09-24. fix-druid-loophole-cve was completed on 2026-09-27 through the verified server/reverse-tunnel route and is included as a valid FAIL.
 
 ## Scope
 
@@ -8,10 +8,10 @@ This directory archives the 30 execution-valid local tasks from the SkillTTA + r
 - Method ID: skilltta-repair-gpt52-gold31-20260924
 - Benchmark: manual-gold-defects-20260917-v25
 - Model: openrouter/openai/gpt-5.2
-- Valid tasks archived: 30
+- Valid tasks archived: 31
 - Effective PASS: 4
-- Effective FAIL: 26
-- Druid: NOT_RUN / excluded from Local30
+- Effective FAIL: 27
+- Druid: FAIL / valid execution
 
 ## Evidence policy
 
@@ -49,4 +49,4 @@ Readable Markdown trajectory timelines can be generated later with the repositor
 
 ## Readable trajectory timelines
 
-This archive now follows the repository method-result format with both original_run (before) and repaired_run (after) evidence for all 30 tasks. The repository's canonical evaluation/results/export_trajectory.py logic was used to generate deterministic readable Markdown timelines: 30 under trajectory_timelines/before, 30 under trajectory_timelines/after, and 0 unknown. trajectory_timeline_index.json records the pairing metadata. Raw ACP JSONL remains the source of truth.
+This archive now follows the repository method-result format with both original_run (before) and repaired_run (after) evidence for all 31 tasks. The repository's canonical evaluation/results/export_trajectory.py logic was used to generate deterministic readable Markdown timelines: 31 under trajectory_timelines/before, 31 under trajectory_timelines/after, and 0 unknown. trajectory_timeline_index.json records the pairing metadata. Raw ACP JSONL remains the source of truth.
