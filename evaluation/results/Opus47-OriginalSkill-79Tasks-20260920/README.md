@@ -9,3 +9,20 @@ LLM trajectories and files larger than 40 MB are losslessly gzip-compressed for 
 Druid uses the original model trajectory with 14 recorded edits replayed against the same baseline, rebuilt, and verified 4/4. ADA uses original exported artifacts and verifier-only recovery (6/6). Effective results are PASS; `verification_recovery/original/` retains the original results, while `verification_recovery/evidence/` records recovery provenance and verifier output. These are not additional model rollouts.
 
 `summary.json` and `batch_state.json` preserve the original local-only accounting and scheduler state. `final_task_results.json` is the final 79-task P/F index including the server task. Unknown model costs remain unknown.
+
+# 其中15 fail中和gold重合的任务列表如下:
+azure-bgp-oscillation-route-leak
+data-to-d3
+dynamic-object-aware-egomotion
+enterprise-information-search
+fix-build-agentops
+flink-query
+jpg-ocr-stat
+manufacturing-equipment-maintenance
+paper-anonymizer
+pddl-airport-planning
+python-scala-translation
+reserves-at-risk-calc
+seismic-phase-picking
+shock-analysis-supply
+video-silence-remover
