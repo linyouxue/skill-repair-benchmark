@@ -11,18 +11,18 @@ Druid uses the original model trajectory with 14 recorded edits replayed against
 `summary.json` and `batch_state.json` preserve the original local-only accounting and scheduler state. `final_task_results.json` is the final 79-task P/F index including the server task. Unknown model costs remain unknown.
 
 # 其中15 fail中和gold重合的任务列表如下:
-azure-bgp-oscillation-route-leak
-data-to-d3
-dynamic-object-aware-egomotion
-enterprise-information-search
-fix-build-agentops
-flink-query
-jpg-ocr-stat
-manufacturing-equipment-maintenance
-paper-anonymizer
-pddl-airport-planning
-python-scala-translation
-reserves-at-risk-calc
-seismic-phase-picking
-shock-analysis-supply
-video-silence-remover
+- azure-bgp-oscillation-route-leak
+- data-to-d3
+- dynamic-object-aware-egomotion
+- enterprise-information-search
+- fix-build-agentops
+- flink-query
+- jpg-ocr-stat
+- manufacturing-equipment-maintenance
+- paper-anonymizer
+- pddl-airport-planning
+- python-scala-translation
+- reserves-at-risk-calc
+- seismic-phase-picking
+- shock-analysis-supply
+- video-silence-remover
