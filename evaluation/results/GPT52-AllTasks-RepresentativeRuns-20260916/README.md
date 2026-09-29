@@ -280,3 +280,10 @@ GPT52-AllTasks-RepresentativeRuns-20260916/
 - `EXCLUDED_RUNS.json`：自动筛掉的基础设施无效/无明确 P/F GPT-5.2 Original-Skill 候选运行及原因。
 - `VALIDATION.json`：归档完成后的结构、P/F、轨迹数和 Skill bundle 泄漏检查。
 - `trajectory_timelines/`：使用仓库统一的 `evaluation/results/export_trajectory.py` 生成的 Markdown 可读轨迹；原始 `trajectory/acp_trajectory.jsonl` 仍是 source of truth。
+
+
+## Google Auto verifier 补验（2026-09-28）
+
+`fix-build-google-auto` 补验完成：**FAIL，reward=0，2 passed / 1 failed**。原模型轨迹及历史 verifier 记录保持原位置；新证据见 [r003 补验](tasks/fix-build-google-auto/selected_run/verifier_replays/20260928-r003/)，包含命令、脚本、日志、CTRF、reward 和补验前工作区归档。此前构建超时与代理 DNS 失败尝试也已保留。
+
+本次没有模型调用，工作区由清洁基线与原导出 patch/note 重建，并非找回原容器。修复 Maven 代理后进入实际 Java 单元测试，因 `com/sun/tools/javac/api/JavacTool` 缺失失败。新增 [frozen_task](tasks/fix-build-google-auto/frozen_task/) 为历史 exact task tree；恢复审计文件描述的是补验前的历史状态。总 PASS/FAIL 数量不变。
