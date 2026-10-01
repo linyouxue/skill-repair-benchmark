@@ -1,0 +1,31 @@
+# Batch Diagnoses
+
+## Task multilingual-video-dubbing (reward: 0.0)
+
+<label>Missing required output artifacts</label>
+
+(1) **First observable failure**
+- The run ends without producing the required deliverables at the exact required paths—most critically `/outputs/dubbed.mp4`, `/outputs/report.json`, and `/outputs/tts_segments/seg_0.wav`. The task is graded primarily on presence + validity of these files; missing files is the earliest hard failure.
+
+(2) **Trajectory step that produced it**
+- The **final “end_turn” termination** of the agent run (last agent message/termination) occurred **without a deliverables check** and while required output paths were still absent/unverified. In other words: the failure is created at the moment the agent stops instead of returning to generate/check artifacts.
+
+(3) **Relevant skill rule or missing rule**
+- Relevant existing rule: **“Deliverables Gate (block end-turn)”** in `text-to-speech/SKILL.md`:
+  - “Immediately before ending the run, verify that every required artifact exists at the exact required path and is minimally readable; if not, do not terminate—produce/fix the artifact and re-run the gate until it passes.”
+- This rule was not followed (or not triggered) before termination. No additional/missing rule is needed to explain the failure; it’s a skill-controllable omission.
+
+(4) **General corrective behavior**
+- Before ending any dubbing workflow, **treat outputs as a checklist** and run a **hard deliverables gate**:
+  1. `mkdir -p /outputs/tts_segments`
+  2. Generate TTS segment(s) and ensure they meet spec (48kHz, mono, loudnorm to ITU-R BS.1770-4 target, readable WAV).
+  3. Assemble the dubbed audio aligned to segment windows, then mux into `/outputs/dubbed.mp4` (and verify stream properties with `ffprobe`).
+  4. Write `/outputs/report.json` with required fields and computed durations/drift.
+  5. Finally: `ls -ლა /outputs/...` and `ffprobe` each artifact; if any check fails or any file missing, **do not stop**—go back and fix.
+
+Error classification: **skill-controllable** (not an API/dependency/permission/grader issue). The harness and environment executed; the agent simply terminated without producing/validating required files.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/multilingual-video-dubbing/iter_8/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/multilingual-video-dubbing/iter_8/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/multilingual-video-dubbing/workspace

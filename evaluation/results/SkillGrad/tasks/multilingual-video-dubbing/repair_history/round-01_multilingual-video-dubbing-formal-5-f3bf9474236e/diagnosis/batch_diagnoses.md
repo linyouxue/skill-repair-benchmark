@@ -1,0 +1,31 @@
+# Batch Diagnoses
+
+## Task multilingual-video-dubbing (reward: 0.0)
+
+<label>Outputs never produced</label>
+
+1) **First observable failure**
+- The run ends with an **empty output inventory** (`[]`): none of the required artifacts were created (`/outputs/tts_segments/seg_0.wav`, `/outputs/dubbed.mp4`, `/outputs/report.json`). This is the earliest externally observable failure because it directly violates the task’s required deliverables.
+
+2) **Trajectory step that produced it**
+- The **finalization/end-turn step** of the agent trajectory: the agent terminates without having executed (or successfully completed) the workflow steps that write the required files under `/outputs/...`. In other words, the failure occurs when the agent **stops** despite missing required outputs.
+
+3) **Relevant skill rule or missing rule**
+- **Missing/insufficient “deliverables gate” rule** in the dubbing workflow skill:
+  - No enforced check like: *“Before ending, verify required files exist at specified paths; if not, continue tool execution to generate them.”*
+  - Also missing: *“Always create output directories and write at least one TTS segment wav for seg_0.”*
+
+4) **General corrective behavior**
+- Add a **pre-submit validation and retry loop** to the skill-controlled workflow:
+  - Ensure `/outputs/tts_segments/` exists.
+  - Generate TTS audio for segment 0, normalize to BS.1770-4 target loudness, and export **48kHz mono** wav to the exact required path.
+  - Mux dubbed audio with original video to `/outputs/dubbed.mp4` with placement constraints checked (start within 10ms, drift ≤0.2s).
+  - Write `/outputs/report.json` with required fields and language codes.
+  - **Block termination** until `ls /outputs` confirms all three deliverables exist and basic metadata checks pass.
+
+Error type: **Skill-controllable** (not an API/dependency/grader issue); the harness executed OK, but the agent failed to produce any required artifacts before ending.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/multilingual-video-dubbing/iter_0/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/multilingual-video-dubbing/iter_0/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/multilingual-video-dubbing/workspace

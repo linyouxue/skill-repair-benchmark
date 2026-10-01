@@ -1,0 +1,18 @@
+# Batch Diagnoses
+
+## Task bike-rebalance (reward: 0.0)
+
+<label>Missing required output artifact</label>
+
+(1) **First observable failure:** No `report.json` was produced at all (output inventory is empty), so the verifier cannot evaluate feasibility/objective and the task fails immediately on missing deliverable.
+
+(2) **Trajectory step that produced it:** The finalization/write-output step at the end of the rollout—i.e., the agent ended the turn without creating the required `report.json` file. This is the earliest externally observable failure because nothing is emitted for grading.
+
+(3) **Relevant skill rule or missing rule:** A missing/violated “**always write the required output file**” rule in the planning/optimization skill. The skill should enforce: generate a complete JSON conforming to schema (all vehicles + all stations) and **persist it to `report.json`** before termination.
+
+(4) **General corrective behavior:** Add a mandatory “output-commit” behavior: before ending, (a) assemble a full `report.json` with all required fields, (b) validate internal consistency (loads, station inventories, no mixed pickup/drop at a stop, route starts/ends at depot, no repeat station per vehicle, objective math), and (c) write the file to disk and confirm it exists. This is skill-controllable (not an API/permission/grader issue).
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/bike-rebalance/iter_0/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/bike-rebalance/iter_0/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/bike-rebalance/workspace

@@ -1,0 +1,22 @@
+# Batch Diagnoses
+
+## Task bike-rebalance (reward: 0.0)
+
+<label>Missing required output file</label>
+
+(1) First observable failure:
+- The run produced no `report.json` (output inventory contains only `data.json`). This is the earliest concrete, externally observable failure because the verifier expects a decision written to `report.json`.
+
+(2) Trajectory step that produced it:
+- The final agent execution ended (`termination_reason: end_turn`) without ever writing `report.json`. In the trace summary: 24 tool calls occurred, but there is no evidence of a file-write action or a terminal command creating `report.json` before the agent message/end.
+
+(3) Relevant skill rule or missing rule:
+- Skill-controllable and missing: there is no enforced “always generate and save `report.json`” completion rule in the exposed skills. The planning/optimization skills (routing + SCIP) may describe modeling/solving, but they do not appear to include a hard requirement to (a) materialize the computed solution into the exact JSON schema and (b) persist it to disk as `report.json` before finishing.
+
+(4) General corrective behavior:
+- Add a mandatory end-of-task behavior: after computing any solution (even a heuristic/partial one), always serialize it into the required schema and write it to `report.json`, then (optionally) locally validate key constraints (vehicle count, route format, load/inventory bounds, distance metric consistency) before ending the turn. If solving fails, still emit a structurally valid `report.json` with explicit unmet targets and correctly computed penalty/objective rather than producing no file.
+
+Evidence:
+- trace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/bike-rebalance/iter_5/trace.jsonl
+- assessment: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/bike-rebalance/iter_5/assessment.json
+- workspace: /home/linyuanjing/SkillGrad/experiments/skillgrad_skillsbench87_31/batch/bike-rebalance/workspace

@@ -1,0 +1,10 @@
+### output-commit-report-json | workflow | always emit required report.json deliverable before terminating
+- anchor: output-commit-write-the-deliverable
+- appeared_in: iter_0, iter_4
+- description: The executor sometimes reaches the end of a task without creating the required output artifact (here: `report.json`). This is an earliest-failure class: the verifier cannot even begin feasibility/objective checks because the output inventory is empty. This is distinct from “wrong schema” or “infeasible solution”: nothing is written at all. Evidence pattern: trace ends with termination (e.g., `termination_reason: end_turn`) and no tool/file action that writes the deliverable, despite prior modeling/solving work.
+- latest_executor_action: Treat writing the deliverable as a mandatory final phase (“output commit”). Before ending: (1) assemble a complete `report.json` payload including all required top-level keys and required per-vehicle/per-station records (emit empty/default records when needed); (2) run internal consistency checks; (3) write `report.json` to disk; (4) immediately re-open and parse it to confirm existence and valid JSON; (5) re-run the key presence/entity coverage checks on the parsed object. Use the branched scaffold in `scip-opt/references/output-commit-report-json.md` to handle list-vs-dict entity encodings.
+- remedy_log:
+  - iter_0 | diagnosis: no `report.json` was produced; output inventory empty so grading fails on missing deliverable
+            | patch: (none yet; to be added) output-commit rule in L2 (likely in optimization/reporting workflow)
+  - iter_4 | diagnosis: run produced no `report.json` at all; trace ends with `termination_reason: end_turn` and no explicit deliverable write/readback step, despite skill rule existing in `scip-opt` “Output Commit (Write The Deliverable)”
+            | patch: set anchor to existing L2 section `scip-opt` → `output-commit-write-the-deliverable`; strengthen executor behavior by requiring post-write readback + required-keys/entity-coverage checks per `references/output-commit-report-json.md`
