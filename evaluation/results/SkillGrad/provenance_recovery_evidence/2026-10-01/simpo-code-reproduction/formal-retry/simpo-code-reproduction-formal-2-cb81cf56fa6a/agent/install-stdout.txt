@@ -1,0 +1,82 @@
+provisioning_source=runtime_archive
+archive_path=/home/linyuanjing/openhands-runtime/openhands-runtime-linux-x86_64.tar.gz
+archive_sha256=2118c847c929863e87fda4b89a7800a2dd0786cffa251059d5aa14ba2354d857
+manifest=commit=2df8a2835d3f1bd2f2eadf5a7a2e1ad0dfb0d271 openhands_cli=1.16.0 openhands_sdk=1.28.1 openhands_tools=1.28.1 platform=x86_64 python=3.12.13 tmux=3.2a
+tmux_compat_path=/home/linyuanjing/openhands-runtime/tmux-3.2a-static-x86_64
+tmux_compat_sha256=affd00cb8ba4b885e072c6a3c985f8b9df3e27bf53644e54a078f71fbcfa0139
+$ upload_file /home/linyuanjing/openhands-runtime/openhands-runtime-linux-x86_64.tar.gz /opt/benchflow/vendor/openhands-runtime.tar.gz
+$ upload_file /home/linyuanjing/openhands-runtime/tmux-3.2a-static-x86_64 /opt/benchflow/vendor/tmux-3.2a-static-x86_64
+$ set -e
+tar -xzf /opt/benchflow/vendor/openhands-runtime.tar.gz -C /
+export PATH="/opt/benchflow/openhands-runtime/bin:$PATH"
+TMUX_LIB=/opt/benchflow/openhands-runtime/tmux-lib
+mkdir -p "$TMUX_LIB"
+for lib in libevent_core-2.1.so.7 libtinfo.so.6 libutempter.so.0; do
+    test -f "/opt/benchflow/openhands-runtime/lib/$lib"
+    ln -sfn "../lib/$lib" "$TMUX_LIB/$lib"
+done
+if [ -f /opt/benchflow/vendor/tmux-3.2a-static-x86_64 ]; then
+  echo "affd00cb8ba4b885e072c6a3c985f8b9df3e27bf53644e54a078f71fbcfa0139  /opt/benchflow/vendor/tmux-3.2a-static-x86_64" | sha256sum -c -
+  mkdir -p /opt/benchflow/openhands-runtime/compat
+  install -m 0755 /opt/benchflow/vendor/tmux-3.2a-static-x86_64 /opt/benchflow/openhands-runtime/compat/tmux
+fi
+cat > /opt/benchflow/openhands-runtime/bin/tmux <<'SH'
+#!/bin/sh
+RUNTIME_ROOT=/opt/benchflow/openhands-runtime
+export TERMINFO="$RUNTIME_ROOT/share/terminfo"
+TMUX_BIN="$RUNTIME_ROOT/bin/tmux.bin"
+TMUX_RUNTIME_LIBS="$RUNTIME_ROOT/tmux-lib"
+version_output="$(LD_LIBRARY_PATH="$TMUX_RUNTIME_LIBS" "$TMUX_BIN" -V 2>/dev/null)" || version_output=""
+if [ -z "$version_output" ]; then
+  for candidate in "$RUNTIME_ROOT/compat/tmux"; do
+    if [ -x "$candidate" ] && [ "$(env -u LD_LIBRARY_PATH "$candidate" -V 2>/dev/null)" = "tmux 3.2a" ]; then
+      TMUX_BIN="$candidate"
+      TMUX_RUNTIME_LIBS=""
+      version_output="tmux 3.2a"
+      break
+    fi
+  done
+fi
+if [ "$#" -eq 1 ] && [ "$1" = "-V" ]; then
+  case "$version_output" in
+    "tmux.bin "*) version_output="tmux ${version_output#tmux.bin }" ;;
+  esac
+  printf '%s\n' "$version_output"
+  exit 0
+fi
+if [ -n "$TMUX_RUNTIME_LIBS" ]; then
+  exec env LD_LIBRARY_PATH="$TMUX_RUNTIME_LIBS" "$TMUX_BIN" "$@"
+fi
+exec env -u LD_LIBRARY_PATH "$TMUX_BIN" "$@"
+SH
+chmod 0755 /opt/benchflow/openhands-runtime/bin/tmux
+test "$(uname -m)" = "x86_64"
+test -x /opt/benchflow/openhands-runtime/python/bin/python3.12
+/opt/benchflow/openhands-runtime/python/bin/python3.12 - <<'PY'
+import sys
+assert sys.version_info[:3] == (3, 12, 13), sys.version
+PY
+command -v uv
+uv --version
+command -v openhands
+OH_BIN="$(command -v openhands)"
+OH_REAL="$(readlink -f "$OH_BIN")"
+OH_PY="$(dirname "$OH_REAL")/python"
+test -x "$OH_PY"
+"$OH_PY" - <<'PY'
+import sys
+import importlib.metadata as m
+assert sys.version_info[:3] == (3, 12, 13), sys.version
+assert m.version('openhands') == '1.16.0'
+assert m.version('openhands-sdk') == '1.28.1'
+assert m.version('openhands-tools') == '1.28.1'
+PY
+test -x /opt/benchflow/bin/openhands-benchmark-executor
+test -x /opt/benchflow/openhands-runtime/bin/tmux
+test "$(/opt/benchflow/openhands-runtime/bin/tmux -V)" = "tmux 3.2a"
+
+=== stdout ===
+/opt/benchflow/vendor/tmux-3.2a-static-x86_64: OK
+/opt/benchflow/openhands-runtime/bin/uv
+uv 0.12.3 (x86_64-unknown-linux-gnu)
+/opt/benchflow/openhands-runtime/bin/openhands
