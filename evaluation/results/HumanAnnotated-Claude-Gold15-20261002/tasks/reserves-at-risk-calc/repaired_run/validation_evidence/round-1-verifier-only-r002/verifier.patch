@@ -1,0 +1,59 @@
+--- original
++++ rar-confidence-consistency-v1
+@@ -9,6 +9,8 @@
+ """
+ 
+ import csv
++import math
++from statistics import NormalDist
+ import glob
+ import zipfile
+ from pathlib import Path
+@@ -213,6 +215,21 @@
+ }
+ 
+ 
++# Protocol revision: rar-confidence-consistency-v1.
++# Public template specifies 95% one-sided, without a decimal rounding rule.
++# Preserve the original reference convention as well as correctly rounded quantiles.
++# Validate the confidence assumption independently, then propagate it consistently.
++def validated_confidence(ws):
++    actual = cell_value(ws, "C3")
++    exact = NormalDist().inv_cdf(0.95)
++    supported = [EXPECTED_STEP1["C3"][1], exact] + [round(exact, digits) for digits in range(2, 9)]
++    assert isinstance(actual, (int, float)) and math.isfinite(actual)
++    assert any(abs(actual - z) <= 1e-8 for z in supported), (
++        f"C3 must be a 95% one-sided normal quantile or its 2+ decimal rounding, got {actual}"
++    )
++    return actual
++
++
+ def test_step1_volatility_calculations():
+     """Test Step 1: Gold price volatility calculations (confidence level, 3m/12m volatility)."""
+     assert EXCEL_FILE.exists(), f"Excel file not found at {EXCEL_FILE}"
+@@ -220,6 +237,7 @@
+     wb = get_workbook()
+     ws = get_answer_sheet(wb)
+ 
++    validated_confidence(ws)
+     errors = []
+     for cell, (name, expected) in EXPECTED_STEP1.items():
+         actual = cell_value(ws, cell)
+@@ -252,7 +270,7 @@
+ 
+         # Check risk values (row 13)
+         risk_cell = f"{col}13"
+-        risk_expected = EXPECTED_STEP2["risk"][i]
++        risk_expected = EXPECTED_STEP2["gold"][i] * validated_confidence(ws) * EXPECTED_STEP1["C4"][1] / 100
+         risk_actual = cell_value(ws, risk_cell)
+         if risk_actual is None or not isinstance(risk_actual, (int, float)):
+             errors.append(f"{country} risk ({risk_cell}): expected {risk_expected}, got {risk_actual}")
+@@ -292,7 +310,7 @@
+ 
+         # Check RaR percentage (row 24)
+         rar_cell = f"{col}24"
+-        rar_expected = EXPECTED_STEP3["rar_pct"][i]
++        rar_expected = EXPECTED_STEP3["gold"][i] * validated_confidence(ws) * EXPECTED_STEP1["C4"][1] / EXPECTED_STEP3["total_reserves"][i]
+         rar_actual = cell_value(ws, rar_cell)
+         if rar_actual is None or not isinstance(rar_actual, (int, float)):
+             errors.append(f"{country} RaR% ({rar_cell}): expected {rar_expected}, got {rar_actual}")

@@ -1,0 +1,98 @@
+Analysis of failed builds under /home/github/build/failed
+=========================================================
+
+Repositories found:
+  1. AgentOps-AI/agentops   -- actual Python project with source, tests, tox.ini
+  2. cacher/env             -- ONLY a Python virtualenv directory (bin/, lib/, pyvenv.cfg),
+                              no project source, no CI config, no .git. Nothing to
+                              "build" or "fix" in there; it is tooling, not a project.
+                              No changes required.
+
+================================================================
+Failure investigation: AgentOps-AI/agentops
+================================================================
+
+CI: .github/workflows/python-testing.yml runs `tox`.
+tox.ini installs (unpinned): pytest, pytest-asyncio, pytest-mock, requests_mock,
+coverage, types-requests, psutil, openai, langchain-core, langchain
+and runs `coverage run --source agentops -m pytest`.
+
+Reproduction (fresh venv, same deps):
+    coverage run --source agentops -m pytest
+    -> 5 collection errors, all identical:
+
+        tests/test_canary.py:5: in <module>
+            import agentops
+        agentops/__init__.py:12: in <module>
+            from .langchain_callback_handler import ...
+        agentops/langchain_callback_handler.py:8: in <module>
+            from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+        E   ModuleNotFoundError: No module named 'langchain.callbacks'
+
+Root cause
+----------
+`langchain_callback_handler.py` line 8 imports from `langchain.callbacks.base`.
+Since langchain >= ~0.2 (and definitely by the installed 1.4.3) the
+`langchain.callbacks` subpackage was removed / relocated. The concrete classes
+`BaseCallbackHandler` and `AsyncCallbackHandler` now live in
+`langchain_core.callbacks.base`, and the file already imports several other
+symbols from `langchain_core.*` (agents, documents, outputs, messages), so the
+right fix is to import these two from `langchain_core.callbacks.base` as well.
+
+The tox.ini pulls langchain unpinned, so CI installs whatever is current on
+PyPI (which is why this now breaks; previously langchain still exposed the
+`callbacks` submodule).
+
+Verification of the fix path:
+    >>> from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+    ok
+
+Plan
+----
+Single one-line source change in agentops/langchain_callback_handler.py:
+
+    - from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+    + from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+That is the minimal, forward-compatible fix. No build/config changes needed;
+the rest of the module already uses the langchain_core namespace.
+
+Follow-on failure exposed once collection succeeded
+---------------------------------------------------
+Once imports work, `pytest` collects 10 tests. In-suite one fails:
+
+    tests/test_events.py::TestEvents::test_record_timestamp
+    AssertionError: event.init_timestamp == event.end_timestamp
+    (warning right before: "Cannot record event - no current session")
+
+Investigation (isolated + full-suite reproduction):
+  - Client is a `@singleton`, so `agentops.init(...)` from test_events reuses
+    the instance created by the preceding test_canary. test_canary ends its
+    session with `agentops.end_session('Success')`, which sets
+    `self._session = None`.
+  - test_events then constructs an ActionEvent, sleeps 0.15s, and calls
+    `agentops.record(event)`. In current `Client.record`, the first line is:
+        if self._session is None or self._session.has_ended: return
+    so `event.end_timestamp` is never assigned and stays equal to
+    `event.init_timestamp` -- the assertion fires.
+  - `git log -p agentops/client.py` shows commit af29a63 "Fixed crash on
+    end_timestamp does not exist" moved the end_timestamp assignment from
+    BEFORE the session check to AFTER it. The test (added in 2a0ee73)
+    relies on the older ordering. The refactor is the earliest broken
+    state transition -- fix the ordering rather than weaken the assertion.
+
+Fix: in `agentops/client.py::Client.record`, compute `event_local` and set
+its `end_timestamp` at the top of the method, BEFORE the "no current
+session" early return. The subsequent `event_local` block keeps only the
+ErrorEvent trigger-propagation logic. Semantics preserved: an active
+session still results in `add_event` being called; the only observable
+change is that `event.end_timestamp` is now finalized even when there is
+no session (matching the pre-af29a63 contract and the test's expectation).
+
+Verification: full `coverage run --source agentops -m pytest`
+  -> 10 passed, 0 failed. `coverage report -m` runs to completion.
+
+Deliverables (in AgentOps-AI/agentops/):
+  * patch_1.diff -- fixes langchain import path (langchain -> langchain_core.callbacks.base)
+  * patch_2.diff -- fixes test_events by finalizing end_timestamp before the session guard
+  * cacher/env has nothing to patch (venv only, no project code, no CI).
