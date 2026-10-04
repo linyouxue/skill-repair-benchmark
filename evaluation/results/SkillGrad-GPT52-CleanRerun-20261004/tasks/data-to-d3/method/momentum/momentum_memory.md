@@ -1,0 +1,8 @@
+### tooltip-requirements-binding-checklist | operation | tooltips omit or mis-map required fields because prompt-to-data binding is not verified
+- anchor: interactive-features-tooltips-click-handlers-hover-effects
+- appeared_in: iter_1
+- description: When implementing D3 tooltips, the executor may include some fields (e.g., ticker, sector) but omit a required field or mis-map a prompt label to the dataset column. A common failure mode is treating a “close enough” field (e.g., CSV “full name”) as satisfying a prompt-required “name”, but then rendering it only under a different label (e.g., `fullName`) so the grader’s spec check fails. This also shows up as drift between earlier intended tooltip contents and the final `tooltip.html(...)` template.
+- latest_executor_action: Before finalizing any visualization with tooltips, extract the tooltip requirements from the prompt verbatim and build a one-to-one mapping table (prompt field → data property/column). Then (1) implement the tooltip template using the prompt’s semantic labels (e.g., render “Name:” populated from `d.fullName` if that is the dataset’s company name), and (2) perform a static verification pass: open/grep the final JS and confirm every required field appears in the tooltip HTML string. For conditional tooltips (e.g., exclude ETFs), implement an explicit guard using the prompt’s definition and verify the guard exists alongside the tooltip handler.
+- remedy_log:
+  - iter_1 | diagnosis: tooltip omitted required “name” field / misaligned prompt label (“name”) vs dataset (“full name”), causing spec mismatch
+            | patch: (none yet in skill) add an explicit prompt-to-tooltip field checklist + static grep/read verification step under the tooltips section
