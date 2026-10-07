@@ -1,4 +1,4 @@
-# Human-annotated Claude Gold28 repair evidence
+# Claude 人工标注的28题修复证据
 
 截至2026-10-07，Claude Opus 4.7 人工标注结果为 **28个Gold任务、29组RI/D标注**：2026-10-02已完成的15题保持不变，本次新增13题验收通过。原始Claude FAIL选择集共29题，其中制造排程题单列为任务/检查器契约冲突，未计入Gold或PASS。
 
@@ -99,4 +99,4 @@ HumanAnnotated-Claude-Gold28-20261007/
 
 所有PASS只证明所记录的验收口径；模型对已有正确指导的遗漏、工具行为、任务契约与Skill正文边界分别归因。`sole_causality_established=false` 与缺失原始实物等限制不会因通过而删除。已归档任务资源按用户规则精确清理；物理磁盘回收未知，不作为实验效果指标。
 
-`evaluation/data/skillsBench_claude` 仍是固定的历史15题evaluation版本，本次只修正其证据目录链接；本目录提供完整的28题结果。GPT Gold与01/02/03历史Gold未修改。
+[Claude标准答案目录](../../data/skillsBench_claude/README.md) 已同步为28题、29组标注；其中原Skill快照和题面来源路径改为仓库内可解析的相对路径，标注语义保持一致。本结果目录的两份Gold仍保留主记录原始来源指针。GPT标准答案与01/02/03历史Gold未修改。
