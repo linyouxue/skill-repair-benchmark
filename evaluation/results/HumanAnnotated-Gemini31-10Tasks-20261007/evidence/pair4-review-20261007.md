@@ -1,0 +1,13 @@
+# 第四批修复前原始机制对照
+
+Gemini官方原版健康门复用shock-health-20261006.json与enterprise-health-20261006.json，不重复原版或provider探针。本轮只使用公开task.md、公开环境输入、原Skill快照及真实ACP；不使用评分答案、已修补工作簿或隐藏阈值设计候选。
+
+供给冲击：Gemini原版60步，1/9，仅交付5表但0公式工作簿。最初下载Stata而误命名xlsx（ACP18确认），ACP20/21已恢复Excel读取；持续问题是只读模板开头的空目标区域，随后在旧WEO端点404、浏览器表等待和Datamapper组合请求上消耗预算，末尾修正脚本未执行。冻结公开模板WEO_Data实际包含远离表头的重复源metadata/历史数据块，本次只读确认（不注入任何数据或地址）。原xlsx含公式/重算强要求，不能把未执行这些要求写成缺少指导。候选仅补来源库存、完整有效数据范围、格式/metadata/年份校验及无效下载转官方链接的通用流程，不移植旧Gold的经济系数、单位倍率、国家值或精简9路径。
+
+GPT供给冲击的r001/r002仅2步早停；另有guarddiag-r001安装infra，不能混用。实际较完整官方guarddiag-infra-r003为60步有效FAIL，ACP7只查WEO前200行、51统计0公式，尾部62/63仍查PWT Legend。Claude官方r001–r003中断不计模型缺陷；r004-credit-recovery为52步有效FAIL，已形成并重算公式模型，ACP48/59/70显示旧PWT外推及million资本/billion GDP混用，不能倒推Gemini尚未进入的单位错误。在线数据获取有部分共同步骤，尚不足以为某一经济缺陷标cross_model_consistent。题面要求真实Excel/Solver/Playwright MCP；现有目录及工具目录未证明这些原生接口存在，保留能力/程序契约边界，不宣称Python或数学等价步骤等同于原生接口。
+
+企业检索：Gemini原版60步、native调用1，全文Skill真实暴露，未交付answer.json。ACP13尝试书写假想Skills模块但未调用；持续首错在产品名/内部代号过滤及实际嵌套schema读取。ACP33/35发现候选报告名与公开产品容器不同，38/41/51/57精确名称搜索反复无结果；47用content读取Slack/meeting导致无命中，63才读feedback字符串。公开输入的文档、Slack和会议chat有相同报告链接，内部命名可由多类来源核实，不应仅按名称差异全部排除。原Skill明确声称另一个产品名为distractor，同时允许derive alias但未给出冲突解除流程；候选保留两信号门和证据作者要求，补先核实alias、按实际schema检索，并服从公开任务的多问题输出契约。没有写死任何alias配对、employee IDs、report IDs、URL答案或token数量。
+
+GPT企业原版3步有效FAIL，ACP6反复承诺调用工具却未继续检索；不能等同Gemini的实际字面过滤循环。Claude官方r001 idle中断不作缺陷；有效r002为28步，ACP13/15通过实际嵌套消息与会议识别内部代号并交付答案，尚有跨来源reviewer遗漏。其后未改Skill的人工恢复Round1仍有来源遗漏，但不是本轮Gemini首错。候选不机械继承Claude的reviewer/计量修补；正式defect级model_sensitivity/Gold仍须真实F→P及机制支持。
+
+两题完整round-1/bundle/skills从各自Gemini原版inputs/skills复制，分别只改xlsx/SKILL.md和enterprise-artifact-search/SKILL.md。所有support files保留，公开输入不变。候选须有限独立审查后各一次fresh Gemini验证；正常FAIL不能因未PASS无证据重跑。

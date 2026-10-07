@@ -1,0 +1,29 @@
+--- original/seisbench-model-api/SKILL.md
++++ candidate/seisbench-model-api/SKILL.md
+@@ -24,13 +24,23 @@
+ annotations = model.annotate(stream)  # Returns obspy stream object with annotations
+ ```
+ 
+-The `classify` function also takes an obspy stream as input, but in contrast to the `annotate` function returns discrete results. The structure of these results might be model dependent. For example, a pure picking model will return a list of picks, while a picking and detection model might return a list of picks and a list of detections.
++The `classify` function takes an ObsPy stream and returns discrete results. Inspect the installed model's result type: current picking models expose a `ClassifyOutput` with `.picks` and, where supported, `.detections`. Each Pick has a phase, probability peak time (`peak_time`), and a threshold window (`start_time`, `end_time`). Use `peak_time` for the estimated arrival; window boundaries describe the detection interval.
++
++For sample-index output, retain each station's original timebase. This example assumes a single station whose components share a start time and sampling interval.
+ 
+ ```python
+ stream = obspy.read("my_waveforms.mseed")
+-outputs = model.classify(stream)  # Returns a list of picks
+-print(outputs)
++input_t0 = stream[0].stats.starttime
++input_dt = stream[0].stats.delta
++input_npts = stream[0].stats.npts
++outputs = model.classify(stream)
++for pick in outputs.picks:
++    pick_idx = round((pick.peak_time - input_t0) / input_dt)
++    if 0 <= pick_idx < input_npts:
++        print(pick.phase, pick_idx)
+ ```
++
++When input is resampled or cropped, retain the original input origin and sample interval for output indices. Annotation arrays have their own start time and sample interval: convert an annotation peak to an absolute time with that metadata before mapping it to the original input. Check a returned Pick against its annotation peak on a small public waveform before processing the full collection.
+ 
+ Both `annotate` and `classify` can be supplied with waveforms from multiple stations at once and will automatically handle the correct grouping of the traces. For details on how to build your own model with SeisBench, check the documentation of `WaveformModel`. For details on how to apply models, check out the Examples.
+ 
