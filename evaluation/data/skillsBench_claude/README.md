@@ -1,13 +1,43 @@
-# skillsBench_claude
+# Claude 人工标注标准答案
 
-Claude Opus 4.7 human-curated Gold15 metadata for SkillsBench / Skill Repair evaluation.
+本目录提供截至2026年10月7日的 **28个任务、29组缺陷与修补标注**，用于技能诊断与修复评测。模型为 Claude Opus 4.7：保留原有15题，新增13题；制造排程题因任务与检查器契约冲突单列排除。
 
-- gold.json: canonical evaluation-format Gold defects.
-- gold_repairs.json: human repair records (RI-001) with validation/evidence/limitations.
-- MANIFEST.json: dataset metadata and link to the published execution evidence.
-- STATUS.csv: selected validation run and validation class per task.
+## 文件说明
 
-Full repaired Skill bundles and trajectories are archived at:
-evaluation/results/HumanAnnotated-Claude-Gold28-20261007/
+| 文件 | 内容 |
+| --- | --- |
+| [gold.json](gold.json) | 评测使用的标准答案：任务正文、原Skill快照路径、缺陷描述、定位、修补要求及来源说明。 |
+| [gold_repairs.json](gold_repairs.json) | 人工修补标注主记录：原始归因、已有指导、修补类别、验收证据和限制。 |
+| [MANIFEST.json](MANIFEST.json) | 版本、数量、验收类别、证据目录，以及来源路径转换清单。 |
+| [STATUS.csv](STATUS.csv) | 28题的选定验收运行和验收类别。 |
+| [EXCLUSIONS.csv](EXCLUSIONS.csv) | 未纳入标准答案的制造排程契约冲突。 |
 
-该目录继续固定为2026-10-02的15题版本；证据目录已扩展并改名为Gold28，其中原15题的Gold记录、修复bundle和原始轨迹保持不变。新增13题与制造排程冲突的说明见[Gold28 README](../../results/HumanAnnotated-Claude-Gold28-20261007/README.md)。
+每个 `RI-*` 修补记录对应一个 `D*` 缺陷记录。辅助交通路线题有两条记录，其余任务各一条，所以28题共29组，未重复追加。版本标识为 `claude-opus47-manual-gold-20261007-final28`。
+
+## 数量与验收口径
+
+| 类别 | 任务数 | 说明 |
+| --- | ---: | --- |
+| 独立模型运行通过 | 24 | 原15题中的12题，加新增13题中的12题；按各自记录的原检查器验收。 |
+| 仅补跑检查器后通过 | 3 | 原15题中的构建修复、风险储备计算、网络路由三题；保留原模型记录及独立补验证据。 |
+| 独立修订检查器后通过 | 1 | LaTeX公式提取题；原检查器仍为6/7、奖励0，同一真实交付在修订第二版下为7/7、奖励1。 |
+| 标准答案合计 | **28** | 原15题加新增13题。 |
+| 排除项 | **1** | 制造排程题；不计为通过，不纳入标准答案和提交清单。 |
+
+LaTeX的检查器修订与原口径不能直接等同，原失败没有被覆盖。制造题的公开冻结约束与停机窗口冲突，原检查器还存在冻结检查空通过问题；本流程没有放宽约束、修改任务或复现无效通过。
+
+## 证据与使用方式
+
+完整冻结Skill包、真实模型轨迹、预验收导出、逐题标注与审计见 [28题结果说明](../../results/HumanAnnotated-Claude-Gold28-20261007/README.md)，可通过 [证据索引](../../results/HumanAnnotated-Claude-Gold28-20261007/EVIDENCE_INDEX.json) 查找各题文件。已发布原始Skill输入见 [原始79题运行记录](../../results/Opus47-OriginalSkill-79Tasks-20260920/README.md)。
+
+使用 `gold.json` 作为评测脚本的 `--gold` 输入。原Skill快照及题面来源路径已改为相对于本目录、在仓库内可解析的路径；仅修改这些来源指针，任务正文、缺陷描述、定位、修补要求、归因及限制保持主记录内容。`gold_repairs.json` 与结果目录中的人工记录逐字节一致，其历史本地证据指针以证据索引提供的发布路径为准。共享转换器未修改。
+
+标准答案与修补要求用于评测，不应提供给待诊断或待修复的方法作为输入。
+
+## 归因与限制
+
+这是经人工核查的参考标注集，包含Skill内容修补和已有指导的执行强化。部分原指导已经正确存在而模型未遵循，因此不能把所有失败都算成Skill缺陷，也不能用通过证明Skill修改的唯一因果。
+
+原实物缺口、运行时和依赖差异、检查器修订、未验证的指标或视觉语义、显式Skill调用与正文预加载差别，以及偶然暴露评分信息的隔离说明，均保留在逐题标注中。制造题没有继承GPT通过；附件中的答案数量、具体标识和评分信息没有写入修补候选、模型输入或验收目标。
+
+本次只同步已经完成的标注，没有重跑模型或任务，也没有修改GPT标准答案。
