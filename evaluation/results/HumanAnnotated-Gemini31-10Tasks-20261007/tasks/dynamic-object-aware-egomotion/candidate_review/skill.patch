@@ -1,0 +1,42 @@
+--- original/sampling-and-indexing/SKILL.md
++++ candidate/sampling-and-indexing/SKILL.md
+@@ -8,9 +8,9 @@
+ 
+ # Core steps
+ - Read video metadata: frame count, fps, resolution.
+-- Choose a sampling strategy (e.g., every 10 frames or target ~10–15 fps) to produce `sample_ids`.
+-- Only produce instructions and masks for `sample_ids`; the max index must be `< total_frames`.
+-- Use a strict interval key format such as `"{start}->{end}"` (integers only). Decide (and document) whether `end` is inclusive or exclusive, and be consistent.
++- Use the requested target FPS to define one time grid beginning at zero with timestamps strictly before the video duration; map each grid time to a source frame. For a constant-rate video, duration is `total_frames / source_fps`. Follow explicit task endpoint rules when provided.
++- Keep the mapped source frame IDs in `sample_ids`, all `< total_frames`. Index downstream masks and intervals by sample ordinal `0..len(sample_ids)-1`, using the same schedule for both. A source tail frame belongs only when selected by the grid or explicitly required by the task; keep the grid unchanged otherwise.
++- Use a strict interval key format such as `"{start}->{end}"` (integers only) and the task's endpoint convention. For half-open sample intervals, the final endpoint is `len(sample_ids)` and each sampled ordinal appears exactly once.
+ 
+ # Pseudocode
+ ```python
+@@ -19,15 +19,21 @@
+ cap=cv2.VideoCapture(VIDEO_PATH)
+ n=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+ fps=cap.get(cv2.CAP_PROP_FPS)
+-step=10  # example
+-sample_ids=list(range(0, n, step))
+-if sample_ids[-1] != n-1:
+-    sample_ids.append(n-1)
++target_fps = ...  # use the requested rate, with 0 < target_fps <= fps
++assert n > 0 and fps > 0 and 0 < target_fps <= fps
++sample_ids = []
++k = 0
++while k / target_fps < n / fps:
++    source_id = min(n - 1, int(round(k * fps / target_fps)))
++    if not sample_ids or source_id != sample_ids[-1]:
++        sample_ids.append(source_id)
++    k += 1
+ # Generate all downstream outputs only for sample_ids
+ ```
+ 
+ # Self-check list
+ - [ ] `sample_ids` strictly increasing, all < total frame count.
+-- [ ] Output coverage max index matches `sample_ids[-1]` (or matches your documented sampling policy).
++- [ ] Sampling count and timestamps follow the target grid, including a clip whose duration is not a multiple of the sample period; no extra off-grid endpoint.
++- [ ] Output coverage uses sampled ordinals, independent of source frame IDs; for half-open intervals the last endpoint equals `len(sample_ids)`.
+ - [ ] JSON keys are plain `start->end`, no extra text.
+ - [ ] Any per-frame artifact store (e.g., NPZ) contains exactly the sampled frames and no extras.

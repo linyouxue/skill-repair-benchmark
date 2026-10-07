@@ -1,0 +1,9 @@
+# 第三批收束
+
+两份round-1-r001均经一次独立健康审计为有效FAIL，见pair3-r001-health-20261007.json及pair3-r001-causal-review-20261007.json。真实成功provider usage、ACP/LLM、原始产物导出与候选正文暴露齐全；两题native调用均0，但各4份正文已整份预加载。费用未知null，无基础设施补验或重复模型运行。
+
+地震题60 parent/60 provider正常预算结束。已采用ClassifyOutput.picks及peak_time转原始采样索引，最后仍在前10个样本比较预训练模型。真实预评分tar为空，模型从未交付results.csv，评分按缺少输出失败。输入、依赖和预训练推理均有成功执行证据，空包不能记为导出故障；无交付预测也不能判定F1改善或时间索引错误复现。短channel探索错误已恢复，目前没有支持追加提醒或重复本候选的新决定性Skill证据。
+
+动态题19 parent/19 provider正常结束。新采样网格被采用，真实产物18个ordinal；10/11检查通过，mask_comprehensive通过，只剩motion_macro_f1失败。运动方向映射与原egomotion-estimation示例一致，不能从分数反推特定方向错误。未读取隐藏标签调参，也不把恢复过的scipy/OpenCV错误当最终首错。结构性改善不等于全题FAIL→PASS。
+
+两题没有实际F→P，故不创建Gemini正式defect/独立Gold或预贴cross_model_consistent。保留完整原始对照、候选、失败尝试及审计；本批收束后推进固定第四批shock-analysis-supply与enterprise-information-search。若后续获得新的可复核Skill缺口，可重新评估，当前不重复相同候选或只增加提醒。
