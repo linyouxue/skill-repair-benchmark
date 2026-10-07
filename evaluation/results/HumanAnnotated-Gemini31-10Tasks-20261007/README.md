@@ -1,3 +1,8 @@
+# 发现gemini好像和openhands不太适配，也许不太能用openhands,后面要用gemini跑实验的话可能还是要用Gemini CLI,下面是失败模式
+```text
+Gemini 生成工具调用 → OpenHands 正常执行，但命令报错/参数格式不兼容 → 错误反馈完整返回给 Gemini → Gemini 没有稳定纠正，反而重复、换一种近似错误调用或继续局部探索 → OpenHands 的 stuck detector 触发 / parent budget 耗尽
+```
+
 # Gemini 3.1 Pro 十题人工证据验证
 
 本目录保存10题官方原版、9题已审核候选fresh验证及逐题失败机制对照。它是十题证据集，**不是十题Gold集**，也不是匹配条件下的三模型能力排名。
