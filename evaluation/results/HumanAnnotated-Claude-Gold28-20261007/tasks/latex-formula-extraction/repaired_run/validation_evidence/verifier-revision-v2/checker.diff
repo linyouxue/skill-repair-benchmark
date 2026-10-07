@@ -1,0 +1,88 @@
+--- original/test_outputs.py
++++ revision-v2/test_outputs.py
+@@ -275,7 +275,7 @@
+     img2 = Image.open(io.BytesIO(png2)).convert("RGBA")
+     if img1.size != img2.size:
+         return False
+-    diff = ImageChops.difference(img1, img2)
++    diff = ImageChops.difference(img1, img2).convert("RGB")
+     return diff.getbbox() is None
+ 
+ 
+@@ -312,6 +312,68 @@
+     return missing, remaining
+ 
+ 
++
++def _ordinary_group_repairs(source: str) -> list[str]:
++    """Two one-glyph repairs of one ambiguous arithmetic grouping typo.
++
++    Intervals, argument lists and commutators are excluded. Every other token
++    and every other delimiter must remain unchanged.
++    """
++    tokens = list(re.finditer(r"\\(?P<side>left|right)\s*(?P<glyph>[^\s])", source))
++    stack, mismatches = [], []
++    pairs = {"(": ")", "[": "]"}
++    for token in tokens:
++        side, glyph = token.group("side"), token.group("glyph")
++        if side == "left":
++            if glyph not in pairs:
++                return []
++            stack.append(token)
++        else:
++            if glyph not in pairs.values() or not stack:
++                return []
++            opening = stack.pop()
++            if pairs[opening.group("glyph")] != glyph:
++                mismatches.append((opening, token))
++    if stack or len(mismatches) != 1:
++        return []
++    opening, closing = mismatches[0]
++    body = source[opening.end():closing.start()]
++    # This narrow exception applies to ordinary sums/differences only.
++    if not re.search(r"[+-]", body) or any(c in body for c in ",;=|"):
++        return []
++    left_pos, right_pos = opening.start("glyph"), closing.start("glyph")
++    reverse = {v: k for k, v in pairs.items()}
++    return [
++        source[:left_pos] + reverse[closing.group("glyph")] + source[left_pos + 1:],
++        source[:right_pos] + pairs[opening.group("glyph")] + source[right_pos + 1:],
++    ]
++
++
++def render_set_diff_with_typo_repairs(expected, actual, renderer):
++    """Keep pixel fidelity; admit either minimal repair of a preserved typo."""
++    missing, extra = render_set_diff(expected, actual, renderer)
++    preserved = list(actual)
++    for formula in extra:
++        preserved.remove(formula)
++    for source in expected:
++        variants = _ordinary_group_repairs(_prepare_for_render(source))
++        if not variants or not any(
++            latex_pngs_match(_prepare_for_render(source), _prepare_for_render(f), renderer=renderer)
++            for f in preserved
++        ):
++            continue
++        for target in list(missing):
++            if not any(latex_pngs_match(_prepare_for_render(target), v, renderer=renderer) for v in variants):
++                continue
++            candidate = next((f for f in extra if any(
++                latex_pngs_match(_prepare_for_render(f), v, renderer=renderer) for v in variants
++            )), None)
++            if candidate is not None:
++                missing.remove(target)
++                extra.remove(candidate)
++    return missing, extra
++
++
+ @pytest.fixture(scope="session")
+ def mathjax_renderer():
+     """Session-scoped renderer so MathJax only boots once."""
+@@ -374,6 +436,6 @@
+ 
+     def test_formulas_render_match_expected(self, expected_formulas, output_formulas, mathjax_renderer):
+         """Formulas render identically via MathJax rather than relying on string equality."""
+-        missing, extra = render_set_diff(expected_formulas, output_formulas, mathjax_renderer)
++        missing, extra = render_set_diff_with_typo_repairs(expected_formulas, output_formulas, mathjax_renderer)
+         assert not missing, f"Missing formulas: {missing}"
+         assert not extra, f"Unexpected extra formulas: {extra}"

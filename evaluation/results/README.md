@@ -126,3 +126,7 @@ method-skill   → after/
 脚本优先根据 executor_request.json、result.json 和 benchmark_result.json 中的运行条件判断 Before / After。
 转换脚本会额外生成 trajectory_timeline_index.json，用于记录各任务 before/after 轨迹的对应关系，供后续批量分析使用，请勿手工修改。
 请把所有模型运行轨迹转换完成之后把文件夹上传上来
+
+## Claude人工标注结果
+
+[Claude Gold28，2026-10-07](HumanAnnotated-Claude-Gold28-20261007/README.md)：原15题加新增13题；制造排程契约冲突另列，LaTeX的独立verifier修订与原FAIL分别保留。包含28题完整最终bundle、真实执行轨迹、验收证据及29组RI/D标注。
