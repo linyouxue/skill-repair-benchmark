@@ -15,6 +15,13 @@ diagnosed and repaired by the bundle-aware SkillRevise extension.
 - `provenance.json` records target selection, diagnosis/revision decisions, and
   artifact provenance for every task.
 
+## No-Skill baseline
+
+`baselines/no_skill/no_skill_merged.json` is the final merged no-skill baseline
+for the same 39 tasks. Its compact summary is in
+`baselines/no_skill/no_skill_merged_summary.json`: all 39 tasks have a valid
+score and there are zero infrastructure errors.
+
 Run the official converter from the benchmark checkout:
 
 ```bash
