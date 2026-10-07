@@ -52,3 +52,13 @@ PDDL原版PASS无需修补，其空预评分tar是runner路径归档缺口；真
 Azure原版实际20/22，fresh21/22，官方reward仍0；CTRF聚合为四类，参数级stdout才是22项计数。剩余契约争议保留，不借用旧Claude修改契约后的22/22。Shock的原生接口未确证限制仍保留。当前只有一次候选fresh PASS，不声称组件独立效果或重复稳定性。
 
 本机任务必要实际产物已经归档，所属停止容器/零引用任务镜像按实际收据精确清理；清理数及逻辑/物理空间边界见`evidence/`。Gemini巡检已暂停，活动rollout为0；其他工作流未改变。
+
+## 后续预算复验（2026-10-07）
+
+上述10题官方原版与60轮候选记录保留为初始批次。新增复验继续使用同一完整候选和冻结task/verifier，分别保存在本目录下：
+
+- [六题100轮fresh复验](budget100-20261007/README.md)：1 PASS / 5 FAIL；Scala实际67 parent后通过10/10，尾部stuck与任务评分分别记录。
+- [五题100/200轮单次复跑](budget-followup-20261007/README.md)：0 PASS / 5 FAIL；此前stuck的失败题仍设100，此前实际耗尽100的失败题设200；Scala已PASS，未复跑。
+- [60→100→复跑比较](budget-followup-20261007/evidence/summary-60-100-followup-20261007.md)与[工具接口及停滞原因](budget-followup-20261007/HARNESS_ANALYSIS.md)。
+
+两个子目录各有独立submission、MANIFEST、完整候选、原始轨迹、官方评分、审查与真实产物。LLM与训练行以gzip保存原字节，ACP和可读Markdown保持直接可读。Shock100、RaR200、Shock200的控制面失败原记录与零模型原verifier补验的派生评分分别保留，评分来源由各子目录MANIFEST明确索引。初始Gold保持原样。
