@@ -1,0 +1,561 @@
+{
+  "audited_at": "2026-10-06T23:26:08.504170+08:00",
+  "rollout_id": "fix-visual-stability-opus47-manual-round-2-r001",
+  "status": "valid_FAIL",
+  "reward": 0,
+  "stop_reason": "max_iterations",
+  "parent_iterations": 60,
+  "observed_provider_requests": 61,
+  "successful_provider_responses": 60,
+  "provider_http_status_counts": {
+    "200": 60,
+    "500": 1
+  },
+  "provider_transient_errors": [
+    {
+      "record": 46,
+      "http_status": 500,
+      "kind": "proxy_or_adapter_response_parse_error",
+      "recovered_before_terminal_result": true,
+      "upstream_billing_unknown": true
+    }
+  ],
+  "tool_calls": 56,
+  "explicit_skill_invocations": 0,
+  "full_skill_exposure": [
+    {
+      "file": "browser-testing/SKILL.md",
+      "bytes": 6965,
+      "sha256": "2b403e7b94381c845f99a75254fd5303b783e5c7068a1fb7db855265a9f9296d",
+      "first_request_exact_occurrences": 1
+    },
+    {
+      "file": "react-best-practices/SKILL.md",
+      "bytes": 5282,
+      "sha256": "66e4e2f0be453c3082087a0c52e1f702c43355c4e46a68ed5c649ebb10c65f3c",
+      "first_request_exact_occurrences": 1
+    },
+    {
+      "file": "web-interface-guidelines/SKILL.md",
+      "bytes": 2892,
+      "sha256": "4ecd4428603ab5e53bf8c9b31a5da738a77a3bccc77db1ebd92831ef414ed795",
+      "first_request_exact_occurrences": 1
+    }
+  ],
+  "acp_records": 88,
+  "partial_trajectory": false,
+  "text_only_continuations": 0,
+  "agent_error": null,
+  "verifier_error": null,
+  "export_error": null,
+  "cost_usd": null,
+  "free_before_provider_gate": {
+    "container_id": "d3c193c42018",
+    "execution_user": "uid0_before_agent_bootstrap",
+    "dependency": {
+      "uid": 0,
+      "python_playwright": "1.49.1",
+      "browser_version": "131.0.6778.33",
+      "font_magic": "wOF2"
+    },
+    "candidate_syntax": {
+      "typescript": "5.3.3",
+      "syntax_errors": 0
+    },
+    "before_first_provider": true,
+    "cost_usd": null
+  },
+  "verifier": {
+    "passed": 2,
+    "failed": 4,
+    "skipped": 0,
+    "tests": [
+      {
+        "name": "::TestFlickerFixed::test_no_theme_flicker",
+        "status": "failed",
+        "raw_status": "call_failed",
+        "duration": 686,
+        "start": 1791299632077,
+        "stop": 1791299632763,
+        "retries": 0,
+        "file_path": "../verifier/test_outputs.py",
+        "trace": "self = <test_outputs.TestFlickerFixed object at 0x7a3e56454a70>\n\n    def test_no_theme_flicker(self):\n        \"\"\"Theme should be applied fast enough to prevent visible flicker.\"\"\"\n        with sync_playwright() as p:\n            browser = p.chromium.launch(headless=True)\n            page = browser.new_page()\n    \n            # Check if there's an inline script that applies theme before React hydration\n            page.goto(\"http://localhost:3000\", wait_until=\"domcontentloaded\")\n    \n            # Look for inline script pattern that prevents flicker:\n            # - Should read localStorage('theme') and apply styles/class/attribute\n            # - In Next.js, this is added via dangerouslySetInnerHTML\n            has_theme_script = page.evaluate(\"\"\"\n                () => {\n                    // Check all inline scripts on the page\n                    const scripts = document.querySelectorAll('script');\n                    for (const script of scripts) {\n                        const content = script.textContent || script.innerHTML || '';\n                        // Check for pattern: reads theme from localStorage and applies it\n                        // This covers dangerouslySetInnerHTML patterns in Next.js\n                        if (content.includes('localStorage') &&\n                            content.includes('theme') &&\n                            (content.includes('classList') || content.includes('className') ||\n                             content.includes('setAttribute') || content.includes('data-theme') ||\n                             content.includes('getElementById') || content.includes('style'))) {\n                            return true;\n                        }\n                    }\n                    return false;\n                }\n            \"\"\")\n            browser.close()\n    \n>       assert has_theme_script, \\\n            \"Missing theme flicker prevention. Add inline <script> in <head> to apply theme from localStorage before React hydrates.\"\nE       AssertionError: Missing theme flicker prevention. Add inline <script> in <head> to apply theme from localStorage before React hydrates.\nE       assert False\n\n/verifier/test_outputs.py:42: AssertionError",
+        "message": "The test failed in the call phase due to an assertion error"
+      },
+      {
+        "name": "::TestPerformanceMetrics::test_cls_acceptable",
+        "status": "failed",
+        "raw_status": "call_failed",
+        "duration": 14305,
+        "start": 1791299632765,
+        "stop": 1791299647070,
+        "retries": 0,
+        "file_path": "../verifier/test_outputs.py",
+        "trace": "self = <test_outputs.TestPerformanceMetrics object at 0x7a3e56867cb0>\n\n    def test_cls_acceptable(self):\n        \"\"\"CLS should be under 0.1 (Google's 'good' threshold).\"\"\"\n        with sync_playwright() as p:\n            browser = p.chromium.launch(headless=True)\n            page = browser.new_page()\n    \n            # Use correct CLS session window calculation\n            page.add_init_script(\"\"\"\n                window.__cls = 0;\n                let currentWindowScore = 0;\n                let windowStart = 0;\n                let lastShiftTime = 0;\n    \n                new PerformanceObserver((list) => {\n                    for (const entry of list.getEntries()) {\n                        if (entry.hadRecentInput) continue;\n    \n                        const t = entry.startTime / 1000; // seconds\n    \n                        // New window if: first shift, >1s gap, or >5s window\n                        const newWindow =\n                            windowStart === 0 ||\n                            (t - lastShiftTime) > 1 ||\n                            (t - windowStart) > 5;\n    \n                        if (newWindow) {\n                            currentWindowScore = 0;\n                            windowStart = t;\n                        }\n    \n                        currentWindowScore += entry.value;\n                        lastShiftTime = t;\n    \n                        // CLS = maximum session window score\n                        if (currentWindowScore > window.__cls) {\n                            window.__cls = currentWindowScore;\n                        }\n                    }\n                }).observe({ type: 'layout-shift', buffered: true });\n            \"\"\")\n    \n            # 1. Load page\n            page.goto(\"http://localhost:3000\", wait_until=\"networkidle\")\n    \n            # 2. Wait for late-loading content (banners at 1500ms, 1800ms, side pane, results bar)\n            page.wait_for_timeout(3000)\n    \n            # 3. Scroll to bottom\n            page.evaluate(\"window.scrollTo(0, document.body.scrollHeight)\")\n            page.wait_for_timeout(2000)\n    \n            # 4. Scroll back to top\n            page.evaluate(\"window.scrollTo(0, 0)\")\n            page.wait_for_timeout(1000)\n    \n            # 5. Trigger UI action: navigate to next page\n            next_button = page.query_selector('[data-testid=\"next-page-btn\"]')\n            if next_button and next_button.is_enabled():\n                next_button.click()\n                page.wait_for_timeout(1000)\n                prev_button = page.query_selector('[data-testid=\"prev-page-btn\"]')\n                if prev_button and prev_button.is_enabled():\n                    prev_button.click()\n                    page.wait_for_timeout(1000)\n    \n            # 6. Final wait for any remaining shifts\n            page.wait_for_timeout(1000)\n    \n            cls = page.evaluate(\"window.__cls\")\n            browser.close()\n    \n        print(f\"CLS value: {cls}\")\n>       assert cls < 0.1, f\"CLS is {cls}, should be under 0.1 (Google's 'good' threshold)\"\nE       AssertionError: CLS is 0.3130488077799479, should be under 0.1 (Google's 'good' threshold)\nE       assert 0.3130488077799479 < 0.1\n\n/verifier/test_outputs.py:121: AssertionError",
+        "message": "The test failed in the call phase due to an assertion error"
+      },
+      {
+        "name": "::TestAppFunctions::test_app_responds_200",
+        "status": "passed",
+        "duration": 14,
+        "start": 1791299647072,
+        "stop": 1791299647086,
+        "retries": 0,
+        "file_path": "../verifier/test_outputs.py"
+      },
+      {
+        "name": "::TestAppFunctions::test_products_render",
+        "status": "passed",
+        "duration": 5088,
+        "start": 1791299647087,
+        "stop": 1791299652175,
+        "retries": 0,
+        "file_path": "../verifier/test_outputs.py"
+      },
+      {
+        "name": "::TestFontLoading::test_foit_prevented",
+        "status": "failed",
+        "raw_status": "call_failed",
+        "duration": 5074,
+        "start": 1791299652176,
+        "stop": 1791299657250,
+        "retries": 0,
+        "file_path": "../verifier/test_outputs.py",
+        "trace": "self = <test_outputs.TestFontLoading object at 0x7a3e564e6780>\n\n    def test_foit_prevented(self):\n        \"\"\"CSS should have font-display: swap to prevent FOIT.\"\"\"\n        with sync_playwright() as p:\n            browser = p.chromium.launch(headless=True)\n            page = browser.new_page()\n            page.goto(\"http://localhost:3000\", wait_until=\"networkidle\")\n    \n            # Check FontFace objects for display: swap (works in prod, no cross-origin issues)\n            has_font_display_swap = page.evaluate(\"\"\"\n                () => [...document.fonts].some(f => f.display === 'swap')\n            \"\"\")\n    \n            browser.close()\n    \n>       assert has_font_display_swap, \\\n            \"Missing font-display: swap. Add to @font-face rules to prevent Flash of Invisible Text (FOIT).\"\nE       AssertionError: Missing font-display: swap. Add to @font-face rules to prevent Flash of Invisible Text (FOIT).\nE       assert False\n\n/verifier/test_outputs.py:168: AssertionError",
+        "message": "The test failed in the call phase due to an assertion error"
+      },
+      {
+        "name": "::TestImageDimensions::test_images_no_cls",
+        "status": "failed",
+        "raw_status": "call_failed",
+        "duration": 5084,
+        "start": 1791299657251,
+        "stop": 1791299662335,
+        "retries": 0,
+        "file_path": "../verifier/test_outputs.py",
+        "trace": "self = <test_outputs.TestImageDimensions object at 0x7a3e564e69c0>\n\n    def test_images_no_cls(self):\n        \"\"\"Product images should have width and height attributes to prevent CLS.\"\"\"\n        with sync_playwright() as p:\n            browser = p.chromium.launch(headless=True)\n            page = browser.new_page()\n            page.goto(\"http://localhost:3000\", wait_until=\"networkidle\")\n    \n            # Wait for products to load\n            page.wait_for_selector('[data-testid=\"product-card\"]', timeout=5000)\n    \n            # Check that images have explicit dimensions\n            images_info = page.evaluate(\"\"\"\n                () => {\n                    const imgs = document.querySelectorAll('[data-testid=\"product-image\"]');\n                    let withDimensions = 0;\n                    for (const img of imgs) {\n                        const hasWidth = img.hasAttribute('width') || img.style.width ||\n                            getComputedStyle(img).aspectRatio !== 'auto';\n                        const hasHeight = img.hasAttribute('height') || img.style.height ||\n                            getComputedStyle(img).aspectRatio !== 'auto';\n                        if (hasWidth && hasHeight) withDimensions++;\n                    }\n                    return { total: imgs.length, withDimensions };\n                }\n            \"\"\")\n    \n            browser.close()\n    \n        assert images_info['total'] > 0, \"No product images found\"\n>       assert images_info['withDimensions'] == images_info['total'], \\\n            f\"Only {images_info['withDimensions']}/{images_info['total']} images have dimensions. Add width/height attributes to prevent CLS.\"\nE       AssertionError: Only 0/15 images have dimensions. Add width/height attributes to prevent CLS.\nE       assert 0 == 15\n\n/verifier/test_outputs.py:204: AssertionError",
+        "message": "The test failed in the call phase due to an assertion error"
+      }
+    ],
+    "original_semantics_unchanged": true,
+    "normal_assertion_not_infra": true,
+    "additional_verifier_or_threshold_relaxation": false
+  },
+  "archive": {
+    "path": "runs\\claude-manual-annotation\\fix-visual-stability-opus47-manual-round-2-r001\\artifacts\\pre-verifier-inputs.tar.gz",
+    "bytes": 44642,
+    "sha256": "63e09143ac29718b618bc090a1d3d2d13797a0a52e765705177c8af9a2916729",
+    "real_pre_verifier": true,
+    "stopped_container_original_archive_identical": true,
+    "files": [
+      {
+        "path": "app/src/components/ProductSkeleton.tsx",
+        "bytes": 782,
+        "sha256": "41533f12544dd122306893ab59e92e8a6fde1aeb6c3dbcd1ce1b3761b414ce89",
+        "stopped_main_sha256": "41533f12544dd122306893ab59e92e8a6fde1aeb6c3dbcd1ce1b3761b414ce89",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/components/Banner.tsx",
+        "bytes": 506,
+        "sha256": "f525ab170ace8e0321839cf5053808606d1f9a63e0a7da79e14362f5169ddcec",
+        "stopped_main_sha256": "f525ab170ace8e0321839cf5053808606d1f9a63e0a7da79e14362f5169ddcec",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/components/ProductCard.tsx",
+        "bytes": 781,
+        "sha256": "7ef5c6551c7c891dd5f931af7f6d272a63c0571e03c60d5e99778497918ffcf8",
+        "stopped_main_sha256": "7ef5c6551c7c891dd5f931af7f6d272a63c0571e03c60d5e99778497918ffcf8",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/components/ResultsBar.tsx",
+        "bytes": 1951,
+        "sha256": "7969a309f2b298a824478a10ab9e3043db071bd84d1b4f8fe385814863d6c0b9",
+        "stopped_main_sha256": "7969a309f2b298a824478a10ab9e3043db071bd84d1b4f8fe385814863d6c0b9",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/components/ProductList.tsx",
+        "bytes": 1271,
+        "sha256": "0f0614f399abc219f9e45e35dd92105f04a93df71f0cf4c686b1dfd04fb67a9d",
+        "stopped_main_sha256": "0f0614f399abc219f9e45e35dd92105f04a93df71f0cf4c686b1dfd04fb67a9d",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/components/LateBanner.tsx",
+        "bytes": 512,
+        "sha256": "b946d55f14966601a221185ab9bad6c85b2ad7a1da4e7fedb5ab5579b3dc96cf",
+        "stopped_main_sha256": "b946d55f14966601a221185ab9bad6c85b2ad7a1da4e7fedb5ab5579b3dc96cf",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/components/ThemeProvider.tsx",
+        "bytes": 1162,
+        "sha256": "6652a652918b2b7be1f099e5d14f294ab085611ac550b948501c8afb22270055",
+        "stopped_main_sha256": "6652a652918b2b7be1f099e5d14f294ab085611ac550b948501c8afb22270055",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/components/SidePane.tsx",
+        "bytes": 1326,
+        "sha256": "781310b5e770f140976fd9862f9050f2b216ad1e0eb9eceb543f4ea35cd05906",
+        "stopped_main_sha256": "781310b5e770f140976fd9862f9050f2b216ad1e0eb9eceb543f4ea35cd05906",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/data/products.json",
+        "bytes": 25119,
+        "sha256": "934494e0021fb5f40c58a54ca8dab0dfc2289becb79b3090f4361f22967b17a0",
+        "stopped_main_sha256": "934494e0021fb5f40c58a54ca8dab0dfc2289becb79b3090f4361f22967b17a0",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/app/globals.css",
+        "bytes": 864,
+        "sha256": "9e7fc83780b988306645de23bdc5d84a110b73ab5b4d53ac942c4accf459ee29",
+        "stopped_main_sha256": "9e7fc83780b988306645de23bdc5d84a110b73ab5b4d53ac942c4accf459ee29",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/app/layout.tsx",
+        "bytes": 482,
+        "sha256": "94cfbfe54bf8268431e95d8f8e3d83329de022b0ce0688da72ba8fdb12ebc7df",
+        "stopped_main_sha256": "94cfbfe54bf8268431e95d8f8e3d83329de022b0ce0688da72ba8fdb12ebc7df",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/src/app/page.tsx",
+        "bytes": 1438,
+        "sha256": "976fbc6f8172b782df9518a2118bb21c0c2c0ff9cae19bbb689bb269c0ed13d7",
+        "stopped_main_sha256": "976fbc6f8172b782df9518a2118bb21c0c2c0ff9cae19bbb689bb269c0ed13d7",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/package.json",
+        "bytes": 560,
+        "sha256": "9d948bbfab62436d9415bd6f1e1889a366fd132b98f7b77441f77e5328a506e1",
+        "stopped_main_sha256": "9d948bbfab62436d9415bd6f1e1889a366fd132b98f7b77441f77e5328a506e1",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/package-lock.json",
+        "bytes": 47359,
+        "sha256": "b5f5a04b0d2310de32404b0d33c4ed7345bd3331070798f2bf6140701936f590",
+        "stopped_main_sha256": "b5f5a04b0d2310de32404b0d33c4ed7345bd3331070798f2bf6140701936f590",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/next.config.js",
+        "bytes": 371,
+        "sha256": "f2d4fccd4202dfb9d7a75c93a01ddb986a1d52132f9a1ce1761cd23bbb113771",
+        "stopped_main_sha256": "f2d4fccd4202dfb9d7a75c93a01ddb986a1d52132f9a1ce1761cd23bbb113771",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/tsconfig.json",
+        "bytes": 588,
+        "sha256": "caef8720ae3abd4ae5b783518364ed6aee1f944941825167b22c7c1e8a5e2dd8",
+        "stopped_main_sha256": "caef8720ae3abd4ae5b783518364ed6aee1f944941825167b22c7c1e8a5e2dd8",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/public/fonts/custom.woff2",
+        "bytes": 23664,
+        "sha256": "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc",
+        "stopped_main_sha256": "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/measure-cls.js",
+        "bytes": 1965,
+        "sha256": "26df66b0f1ae46b4996195991b08678c316640bfd4060f9c9aac0abb71520a36",
+        "stopped_main_sha256": "26df66b0f1ae46b4996195991b08678c316640bfd4060f9c9aac0abb71520a36",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "app/detect-flicker.js",
+        "bytes": 2042,
+        "sha256": "6a89b60da08b5bf16eedc19bf80ce4f542896c5485ea8556b5421ccf86c3f5e2",
+        "stopped_main_sha256": "6a89b60da08b5bf16eedc19bf80ce4f542896c5485ea8556b5421ccf86c3f5e2",
+        "matches_stopped_main": true
+      },
+      {
+        "path": "tmp/mock-api.js",
+        "bytes": 1634,
+        "sha256": "4c251da553accf7a26eaaf1e3e4296adaaaa51c161ab7a4ce7d7d108308fa15c",
+        "stopped_main_sha256": "4c251da553accf7a26eaaf1e3e4296adaaaa51c161ab7a4ce7d7d108308fa15c",
+        "matches_stopped_main": true
+      }
+    ]
+  },
+  "recovered_temporary_fixed_source_and_scripts": [
+    {
+      "container_path": "/tmp/layout.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\layout.fixed.tsx",
+      "bytes": 778,
+      "sha256": "fe940bb739ff7256828dff00395faf20fbbf6c23e135778af5fd4b3e8fd3732f",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/app/layout.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/TP.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\TP.fixed.tsx",
+      "bytes": 1438,
+      "sha256": "3be59ea3c2375e48f58390369616bbc72a874b1a026f619ef73143f4fd1213d1",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/ThemeProvider.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/B.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\B.fixed.tsx",
+      "bytes": 708,
+      "sha256": "a589784891358b79cb3ea468c072d2976c7bd861ad324749289617df42bce34b",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/Banner.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/LB.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\LB.fixed.tsx",
+      "bytes": 714,
+      "sha256": "2a519cb8c7ace83ead46c6dbeb96100c340cf923cbaf8402b8547ce6f7625e5f",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/LateBanner.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/SP.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\SP.fixed.tsx",
+      "bytes": 1532,
+      "sha256": "f30f1283b456cc8b8ee2fde5eb1c69a2f23da7ec63b541963ade32db3125adc3",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/SidePane.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/RB.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\RB.fixed.tsx",
+      "bytes": 2180,
+      "sha256": "992b1d36b13bd373b6f365c0ed76717e7f1920606a072282ed38adf31afcd516",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/ResultsBar.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/PL.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\PL.fixed.tsx",
+      "bytes": 1624,
+      "sha256": "0d91d3d23c07ae785d7f8f860935b6bd4eb68aa4e674e5367176c7a9f81d7246",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/ProductList.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/PC.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\PC.fixed.tsx",
+      "bytes": 903,
+      "sha256": "e99346dd79042847a9fc3f1f93ecd0916f00bdbd9ee207344a429c6bb5924bce",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/ProductCard.tsx",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/PS.fixed.tsx",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\PS.fixed.tsx",
+      "bytes": 782,
+      "sha256": "41533f12544dd122306893ab59e92e8a6fde1aeb6c3dbcd1ce1b3761b414ce89",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/components/ProductSkeleton.tsx",
+      "delivery_still_matches_fixed_backup": true
+    },
+    {
+      "container_path": "/tmp/globals.fixed.css",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\globals.fixed.css",
+      "bytes": 995,
+      "sha256": "c7903d80f709c452696dd80a98398246a132c573372187078eac34dd9a9066ee",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false,
+      "delivery_path": "app/src/app/globals.css",
+      "delivery_still_matches_fixed_backup": false
+    },
+    {
+      "container_path": "/tmp/ThemeScript.tsx.bak",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\ThemeScript.tsx.bak",
+      "bytes": 454,
+      "sha256": "fc0a7db4f961a81fb8c462be8124d1f8dd2e4b684cd7612d25d9131221b27d9a",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false
+    },
+    {
+      "container_path": "/tmp/baseline-check.sh",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\baseline-check.sh",
+      "bytes": 619,
+      "sha256": "4e084d093996b267f6a9d688240ac18b3f2908c1a4ef73b38d94cc4171606648",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false
+    },
+    {
+      "container_path": "/tmp/restore-baseline.sh",
+      "saved_path": "round-2-r001-audit\\real-post-verifier-source\\restore-baseline.sh",
+      "bytes": 9471,
+      "sha256": "3e2f9980e3f1ddeab98da4cf128330561a1ced41346d1810b0e34582a05ba30e",
+      "phase": "actual_post_verifier_stopped_main",
+      "pre_verifier_export": false,
+      "reconstructed": false
+    }
+  ],
+  "actual_restore_script_matches_delivery_paths": [
+    "app/src/app/layout.tsx",
+    "app/src/components/ThemeProvider.tsx",
+    "app/src/components/Banner.tsx",
+    "app/src/components/LateBanner.tsx",
+    "app/src/components/SidePane.tsx",
+    "app/src/components/ResultsBar.tsx",
+    "app/src/components/ProductList.tsx",
+    "app/src/components/ProductCard.tsx",
+    "app/src/app/globals.css"
+  ],
+  "containers": [
+    {
+      "id": "d3c193c42018cfc5e04f3dff60c4e0227c7a8f1636a3452056a196662e98de83",
+      "name": "/fix-visual-stability-opus47-manual-round-2-r001-main-1",
+      "project": "fix-visual-stability-opus47-manual-round-2-r001",
+      "service": "main",
+      "image": "sha256:63b0e492d4b25699bbe7408a919c76f505d01a653a7c39d8eedf80267a4afda2",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 137,
+        "Error": "",
+        "StartedAt": "2026-10-06T14:59:42.654505247Z",
+        "FinishedAt": "2026-10-06T15:14:45.987462811Z"
+      }
+    },
+    {
+      "id": "55ca76f9d11160576ee910d9256fca0c1d16a7a10cdab91dcf12b04735736041",
+      "name": "/fix-visual-stability-opus47-manual-round-2-r001-api-1",
+      "project": "fix-visual-stability-opus47-manual-round-2-r001",
+      "service": "api",
+      "image": "sha256:0f582eb7ec429475c04d0dc3baa36c28bfad457d88e67cd1133472a25e360984",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 1,
+        "Error": "",
+        "StartedAt": "2026-10-06T14:59:42.142152567Z",
+        "FinishedAt": "2026-10-06T15:14:46.858600959Z"
+      }
+    }
+  ],
+  "api_termination": "API started successfully then cleanup SIGTERM. Main137/OOMKilled=false does not diagnose OOM.",
+  "functional_steps": [
+    {
+      "id": "S1",
+      "acp": [
+        3,
+        12
+      ],
+      "activity": "source diagnosis",
+      "finding": "Recognizes the known business defects; original business guidance already exists."
+    },
+    {
+      "id": "S3",
+      "acp": [
+        15,
+        39
+      ],
+      "activity": "apply source-confirmed fixes before measurement",
+      "finding": "Actually implements theme/font/asynchronous space/image/skeleton fixes. Round2 ordering branch is followed."
+    },
+    {
+      "id": "S2",
+      "acp": [
+        50,
+        64
+      ],
+      "activity": "measurement setup and fixed-app CLS",
+      "finding": "Still ignores exposed Python driver fallback. Adapts observer to JS and Node browser1148; fixed CLS approximately0.001 under own shorter observation and mock API."
+    },
+    {
+      "id": "S4",
+      "acp": [
+        65,
+        88
+      ],
+      "activity": "baseline comparison and final delivery",
+      "finding": "ACP65 elects in-place baseline restoration;75/76 saves actual fixed source;78/79 rewrites nine delivered files. ACP84 measures baseline0.291. ACP87 plans to restore fixes but88 stops on budget before any restore tool. Final verifier sees reverted baseline2/6."
+    }
+  ],
+  "earliest_actionable_new_error": {
+    "acp": [
+      65,
+      78,
+      79
+    ],
+    "finding": "Measures baseline by reverting the repaired delivery tree, leaving restoration dependent on remaining budget.",
+    "original_related_guidance": "Existing comparative-results sentence prioritizes before/after difference but gives no tree-isolation or final-delivery criterion.",
+    "does_not_prove_original_defect_or_sole_cause": true
+  },
+  "primary_attribution": "agent_budget_exhaustion_after_in_place_baseline_reversion",
+  "secondary_attribution": [
+    "agent_delivery_regression_during_comparison",
+    "measurement_delivery_boundary_underspecified",
+    "agent_did_not_follow_driver_fallback"
+  ],
+  "guidance_execution": {
+    "original_business_guidance_present": true,
+    "round2_repairs_before_baseline_followed": true,
+    "round2_driver_fallback_exposed_but_unused": true,
+    "corrected_observer_used_in_model_port": true,
+    "candidate_caused_regression_proved": false,
+    "known_business_guidance_missing": false
+  },
+  "limitations": [
+    "Original baseline source/export gap remains; no reconstruction.",
+    "Replacement official font changes input metrics and CLS comparability.",
+    "Model mock API invents delays and data; original task localhost rewrite and separate API context remain.",
+    "Model baseline is an approximate manual reconstruction and leaves fixed ProductSkeleton unchanged.",
+    "Model first-paint detector is coarse: baseline brightness27 to100 both below150, falsely described as no flicker.",
+    "Model shorter observation differs from verifier; missing telemetry check was omitted in its JS port.",
+    "Temporary fixed source changes some classes/skeleton markup despite literal task class preservation requirement; not verified as a valid completed delivery.",
+    "One recovered HTTP500 parse error is separate from normal assertion failures and terminal budget outcome; billing unknown.",
+    "Actual fixed backups are diagnostic evidence, not a replacement submission or Gold. Original FAIL and verifier preserved."
+  ],
+  "sole_causality_established": false,
+  "next_hypothesis": "Replace the existing comparative-results sentence with separate-copy baseline measurement and final verification on the repaired delivery tree; trim unused specific driver fallback. Retain successful early-repair ordering and genuine observer correction; no new steps/helper/answers/checker edits."
+}

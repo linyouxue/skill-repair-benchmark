@@ -61,5 +61,5 @@ Azure数字来自参数化pytest stdout；其CTRF将分类参数聚合成一个�
 - [第三批原始对照](evidence/pair3-review-20261007.md)、[因果](evidence/pair3-r001-causal-review-20261007.json)。
 - [第四批原始对照](evidence/pair4-review-20261007.md)、[因果](evidence/pair4-r002-causal-review-20261007.json)。
 - [第五批原始对照](evidence/pair5-review-20261007.md)、[健康](evidence/pair5-r001-health-20261007.json)、[因果](evidence/pair5-r001-causal-review-20261007.json)。
-- [旧Claude Gold15](../HumanAnnotated-Claude-Gold15-20261002/README.md)、[旧GPT Gold31](../HumanAnnotated-Gold31-20260917/README.md)：注意各自fresh/补验与修补轮次边界。
+- [旧Claude Gold15（现并入Gold28）](../HumanAnnotated-Claude-Gold28-20261007/README.md)、[旧GPT Gold31](../HumanAnnotated-Gold31-20260917/README.md)：注意各自fresh/补验与修补轮次边界。
 
