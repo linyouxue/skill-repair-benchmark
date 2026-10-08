@@ -1,0 +1,31 @@
+{
+  "task_id": "energy-unit-commitment",
+  "initial_run_id": "energy-unit-commitment-original-skill-v11x-20260903-r002",
+  "selected_run_id": "energy-unit-commitment-bundle-1-published-original-revi-b5341de351b1",
+  "selected_reward": 1.0,
+  "selected_success": true,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-claude-opus47-fail39-published-trace-r4-resume12-r2/energy-unit-commitment/bundle-1-published-original-revised-55cdaecdf4b06785/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-claude-opus47-fail39-published-trace-r4-resume12-r2/skillrevise-bundle-claude-opus47-fail39-published-trace-top3-r4-resume12-r2/energy-unit-commitment-bundle-1-published-original-revi-b5341de351b1",
+  "selected_overrides": {
+    "unit-commitment-operating-rules/SKILL.md": "# Unit Commitment Operating Rules\n\n## Purpose\nProduce a day-ahead or multi-period unit commitment schedule (commitment, dispatch, reserve, costs) that passes the task's external verifier, not just internal self-checks.\n\n## When to Use\nTask supplies generators, demand, reserve requirement, and operating constraints across T periods and asks for a schedule plus feasibility/cost report. Do not use for single-period economic dispatch.\n\n## Procedure\n- Discover environment: list the task directory; read the input file and print its top-level keys and per-resource field names; locate any output path, report schema, or verifier/acceptance script. Do not assume field names, hour indexing, or MW convention.\n- Probe solver availability in order (pulp, pyomo, scipy.optimize.milp); record which is used. If none supports MILP, fall back to a documented heuristic and flag it in the report.\n- Pick one production convention (actual MW vs above-minimum) and apply it consistently across capacity, ramping, reserve deliverability, cost, and reporting. Convert at output boundary to whatever the input/verifier uses.\n- Build MILP with: u/start/stop binaries; transition identity u[t]-prev_u == start-stop; joint `production + reserve <= pmax*u` (and startup/shutdown capability when startup_limit/shutdown_limit fields exist); ramping with prev set to initial output at t=0; min up/down windows that account for pre-horizon on/off duration; startup cost chosen by largest tier lag <= offline_duration only if the data encodes lags that way, otherwise match the field name observed in step 1.\n- After writing the report, reload it and independently recompute every constraint from the input: demand balance, reserve sum, per-unit capacity with u, offline zeros, transition identity, min up/down, ramping, deliverability, cost. Set each `constraint_check` to 'pass' only if its numeric residual is within tol; otherwise record the residual and do not label 'pass'.\n- If a verifier/acceptance script was discovered, run it against the written report and iterate on failures before finalizing. If none exists, keep residuals in the report rather than fabricating 'pass'.\n\n## Constraints / Pitfalls\n- Do not set any `constraint_check` to 'pass' without a numeric recomputation from the written arrays vs the input file.\n- Do not hard-code paths, field names, hour base (0 vs 1), or startup-tier semantics; derive them from step 1.\n- Reserve only from online thermal units; never from renewable headroom unless input explicitly permits.\n- First-period ramping and min up/down must use initial output and initial on/off duration from the input.\n- Keep one MW convention end-to-end; mismatched conventions silently break deliverability and cost.\n- If internal checks pass but the external verifier fails, re-run step 1 to recheck schema and output-path assumptions before re-solving."
+  },
+  "selection": {
+    "targets": [
+      "unit-commitment-operating-rules/SKILL.md",
+      "milp-solver-workflow/SKILL.md"
+    ],
+    "rationale": "The agent produced a schedule that solver and internal checks marked optimal/pass, yet reward=0.0 indicates the external verifier found the schedule infeasible or non-optimal. Trace shows late fixes to initial-period transition/ramp constants and ramp-handling of p0, which are exactly the subtle UC operating-rule couplings (transition linking, ramp deliverability with reserve, initial conditions, joint production+reserve capability) covered by unit-commitment-operating-rules. The MILP workflow skill is also implicated because the agent's self-validation declared pass while the external check failed, pointing to a model-vs-validation mismatch and extraction/convention issues the milp-solver-workflow skill addresses. The data-modeling skill is not implicated since parsing of network.json was not the failure point.",
+    "raw_response": "{\"targets\":[\"unit-commitment-operating-rules/SKILL.md\",\"milp-solver-workflow/SKILL.md\"],\"rationale\":\"The agent produced a schedule that solver and internal checks marked optimal/pass, yet reward=0.0 indicates the external verifier found the schedule infeasible or non-optimal. Trace shows late fixes to initial-period transition/ramp constants and ramp-handling of p0, which are exactly the subtle UC operating-rule couplings (transition linking, ramp deliverability with reserve, initial conditions, joint production+reserve capability) covered by unit-commitment-operating-rules. The MILP workflow skill is also implicated because the agent's self-validation declared pass while the external check failed, pointing to a model-vs-validation mismatch and extraction/convention issues the milp-solver-workflow skill addresses. The data-modeling skill is not implicated since parsing of network.json was not the failure point.\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "unit-commitment-operating-rules/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.0,
+      "score_after": 1.0
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "task_id": "fix-druid-loophole-cve",
+  "initial_run_id": "fix-druid-loophole-cve-original-skill-server-r006",
+  "selected_run_id": "fix-druid-loophole-cve-bundle-1-published-original-revi-15a45932e415",
+  "selected_reward": 0.0,
+  "selected_success": false,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-claude-opus47-fail39-published-trace-r4-resume12-r2/fix-druid-loophole-cve/bundle-1-published-original-revised-92c7471d5a2da581/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-claude-opus47-fail39-published-trace-r4-resume12-r2/skillrevise-bundle-claude-opus47-fail39-published-trace-top3-r4-resume12-r2/fix-druid-loophole-cve-bundle-1-published-original-revi-15a45932e415",
+  "selected_overrides": {
+    "jackson-security/SKILL.md": "# Jackson Empty-Key Deserialization Patch Workflow\n\n## Purpose\nGuide remediation of Java CVEs where a crafted JSON body uses an empty key (`\"\"`) or similar structural trick to drive Jackson into a sensitive sink (field injection, any-setter, custom deserializer) before application code validates the resulting object. The workflow enforces sink enumeration, remediation choice, and reproducer-based verification rather than relying on a single annotation fix.\n\n## When to Use\nUse when a CVE or report implicates Jackson deserialization and mentions empty keys, `@JacksonInject`, `useInput`, `@JsonAnySetter`, or value override via JSON structure. Do not use for polymorphic-type (`@JsonTypeInfo`) RCE, duplicate-key WAF bypass, or pure post-deserialization validation bugs; those need different vectors.\n\n## Procedure\n- Identify the sink class and field named by the CVE or reproducer. Record the fully qualified type (e.g., `com.example.FooConfig`) and the field or setter under attack.\n- Enumerate all candidate sinks across the repository for that type: grep for `@JacksonInject`, `@JsonAnySetter`, `@JsonCreator`, `@JsonSetter(\"\")`, and `StdDeserializer`/`JsonDeserializer` subclasses that reference the type. Produce a file:line list; do not assume a single site.\n- Choose remediation per sink, in this order of preference: (1) `@JacksonInject(useInput = OptBoolean.FALSE)` on injected fields so JSON cannot override the server-provided value; (2) override or guard the `@JsonAnySetter` / custom deserializer to reject empty or unexpected keys; (3) at the `ObjectMapper` level, enable `DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES` and `JsonParser.Feature.STRICT_DUPLICATE_DETECTION`, and configure explicit empty-key rejection in the request filter; (4) re-assert the runtime enabled/authorization check at the execution site (defense in depth).\n- Verify with a reproducer: construct a JSON body containing the empty-key payload against the real endpoint or a unit test invoking the mapper. Confirm the exploit path triggers before the patch and is blocked after. If the annotation-level fix leaves the reproducer succeeding, fall back to step 3 remediations and re-run.\n\n## Constraints / Pitfalls\n- Do not stop after patching one annotation site; the same config type may be injected or any-set in multiple modules, and partial coverage leaves the CVE exploitable.\n- Do not rely on post-`readValue` object inspection to detect empty keys; the key is gone by then. Verification must drive the raw JSON through the real deserialization path and observe sink behavior, not the resulting object."
+  },
+  "selection": {
+    "targets": [
+      "jackson-security/SKILL.md"
+    ],
+    "rationale": "The task is an Apache Druid Jackson deserialization vulnerability where an empty JSON key ('\"\"') bypasses injected JavaScriptConfig security settings. The jackson-security skill directly covers the empty-key attack vector and @JacksonInject/useInput mitigation guidance relevant to crafting the patch. The senior-java skill is generic Spring Boot scaffolding, unrelated to the Druid Jackson injection issue.",
+    "raw_response": "{\"targets\":[\"jackson-security/SKILL.md\"],\"rationale\":\"The task is an Apache Druid Jackson deserialization vulnerability where an empty JSON key ('\\\"\\\"') bypasses injected JavaScriptConfig security settings. The jackson-security skill directly covers the empty-key attack vector and @JacksonInject/useInput mitigation guidance relevant to crafting the patch. The senior-java skill is generic Spring Boot scaffolding, unrelated to the Druid Jackson injection issue.\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "jackson-security/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.0,
+      "score_after": 0.0
+    }
+  ]
+}
