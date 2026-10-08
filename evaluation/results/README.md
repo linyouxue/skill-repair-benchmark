@@ -130,3 +130,7 @@ method-skill   → after/
 ## Claude人工标注结果
 
 [Claude Gold28，2026-10-07](HumanAnnotated-Claude-Gold28-20261007/README.md)：原15题加新增13题；制造排程契约冲突另列，LaTeX的独立verifier修订与原FAIL分别保留。包含28题完整最终bundle、真实执行轨迹、验收证据及29组RI/D标注。
+
+## 十题跨模型结果
+
+[Gemini / DeepSeek 十题合并结果](HumanAnnotated-CrossModel-10Tasks-20261008/README.md)：Gemini与OpenHands不适配；PDDL、Scala、Flink、Video按具体模型组合保留共同机制，四模型共同复现的是Scala。
