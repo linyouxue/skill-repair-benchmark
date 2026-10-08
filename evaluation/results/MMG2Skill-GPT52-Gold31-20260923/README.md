@@ -40,3 +40,9 @@ GPT未裁判；不在发布时追加付费评分或伪造最终指标。冻结�
 The listed canonical repaired runs and submission IDs now select the audited guard3 reruns. SkillTTA replaces Azure, Energy, Reserves and Python→Scala; MMG2Skill replaces Dialogue only. Each method directory contains only its corresponding replacements. Energy changes from FAIL to PASS; the other four remain valid FAILs. SkillTTA is now 5 PASS / 26 FAIL (31 valid tasks); MMG2Skill remains 5 PASS / 26 FAIL (31 valid tasks). All other task candidates, method diagnoses, baselines and historical semantic scores are unchanged. The full method bundles are byte-identical reused inputs; only these selected executions use guard3 with the same 60-step parent budget. No semantic judge was invoked for this publication, and execution PASS is not substituted for semantic TP. Prior canonical files remain available in Git history; MMG raw historical runs also remain under runs/.
 
 Current readable export: 31 before / 35 after / 0 unknown unique rollouts. MMG includes explicitly historical runs in this count; current selection is defined by submission.json and task-index.json. RESULT_PROVENANCE.json identifies the original private snapshot SHA and public credential-sanitized derivative SHA; only the obsolete local proxy token is redacted, not workspace output content.
+
+## 2026-10-08 additional guard3 replacement
+
+[drone-planning-control: audited canonical rerun](reruns/completion-guard3-two-20261008/README.md) · [Replacement index](reruns/completion-guard3-two-20261008/replacement-index.json).
+
+Drone had one textual file_editor response at LLM15, resumed a real tool call at LLM16, and reached real finish at LLM37. Textual calls did not disappear, but no early stop or guard exhaustion recurred. The task remains a valid FAIL (3/5); overall counts remain 5 PASS / 26 FAIL. Full frozen method bundle and historical semantic scores remain unchanged. The previous canonical execution is retained in Git history.

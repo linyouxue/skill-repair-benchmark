@@ -1,113 +1,129 @@
-from __future__ import annotations
-
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple
 
 import numpy as np
 
 
-_RE_TAKEOFF = re.compile(
-    r"^\s*take\s*off\s*to\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*m\s*height\s*in\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*seconds\s*$",
+_PAT_TAKEOFF = re.compile(
+    r"^\s*take\s+off\s+to\s+([0-9]*\.?[0-9]+)\s*m\s*height\s*in\s*([0-9]*\.?[0-9]+)\s*seconds\s*$",
     re.IGNORECASE,
 )
-_RE_HOVER = re.compile(
-    r"^\s*hover\s*at\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*m\s*height\s*for\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*seconds\s*$",
+_PAT_HOVER = re.compile(
+    r"^\s*hover\s+at\s+([0-9]*\.?[0-9]+)\s*m\s*height\s*for\s*([0-9]*\.?[0-9]+)\s*seconds\s*$",
     re.IGNORECASE,
 )
-_RE_LAND = re.compile(
-    r"^\s*land\s*from\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*m\s*height\s*in\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*seconds\s*$",
+_PAT_LAND = re.compile(
+    r"^\s*land\s+from\s+([0-9]*\.?[0-9]+)\s*m\s*height\s*in\s*([0-9]*\.?[0-9]+)\s*seconds\s*$",
     re.IGNORECASE,
 )
-_RE_FLY = re.compile(
-    r"^\s*fly\s*from\s*\(\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*,\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*,\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*\)\s*"
-    r"to\s*\(\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*,\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*,\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*\)\s*"
-    r"in\s*([+-]?(?:\d+\.?\d*|\d*\.?\d+))\s*seconds\s*$",
+_PAT_FLY = re.compile(
+    r"^\s*fly\s+from\s*\(\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*\)\s*"
+    r"to\s*\(\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*,\s*([+-]?[0-9]*\.?[0-9]+)\s*\)\s*"
+    r"in\s*([0-9]*\.?[0-9]+)\s*seconds\s*$",
     re.IGNORECASE,
 )
 
 
 @dataclass
-class _ParserState:
-    t: float = 0.0
-    pos: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
-    yaw: float = 0.0
-    waypoints: List[List[float]] = field(default_factory=list)  # each [x,y,z,yaw]
-    waypoint_times: List[float] = field(default_factory=list)
-    modes: List[str] = field(default_factory=list)
-
-    def _ensure_start(self) -> None:
-        if not self.waypoints:
-            self.waypoints.append([self.pos[0], self.pos[1], self.pos[2], self.yaw])
-            self.waypoint_times.append(self.t)
-
-    def _push_end(self, mode: str, dt: float, new_pos: Tuple[float, float, float]) -> None:
-        self._ensure_start()
-        self.t += float(dt)
-        self.pos = [float(new_pos[0]), float(new_pos[1]), float(new_pos[2])]
-        self.waypoints.append([self.pos[0], self.pos[1], self.pos[2], self.yaw])
-        self.waypoint_times.append(self.t)
-        self.modes.append(mode)
+class FlightPlan:
+    waypoints: np.ndarray  # (4, n) rows [x,y,z,yaw]
+    waypoint_times: np.ndarray  # (n,)
+    modes: List[str]  # (n-1)
 
 
-def parse_flight_plan(text: str) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Parse natural-language command(s) into (waypoints, times, modes).
+class FlightPlanParser:
+    def __init__(self):
+        self._t = 0.0
+        self._pos = [0.0, 0.0, 0.0]
+        self._yaw = 0.0
+        self._wps: List[List[float]] = []
+        self._times: List[float] = []
+        self._modes: List[str] = []
+
+    def _ensure_start(self, pos_xyz: Tuple[float, float, float]):
+        if self._wps:
+            return
+        self._pos = [float(pos_xyz[0]), float(pos_xyz[1]), float(pos_xyz[2])]
+        self._wps.append([*self._pos, self._yaw])
+        self._times.append(self._t)
+
+    def handle_line(self, line: str):
+        line = line.strip()
+        if not line:
+            return
+
+        m = _PAT_TAKEOFF.match(line)
+        if m:
+            h, dur = map(float, m.groups())
+            self._ensure_start((0.0, 0.0, 0.0))
+            self._t += dur
+            self._pos = [self._pos[0], self._pos[1], h]
+            self._wps.append([*self._pos, self._yaw])
+            self._times.append(self._t)
+            self._modes.append("takeoff")
+            return
+
+        m = _PAT_HOVER.match(line)
+        if m:
+            h, dur = map(float, m.groups())
+            self._ensure_start((0.0, 0.0, h))
+            self._t += dur
+            self._pos = [self._pos[0], self._pos[1], h]
+            self._wps.append([*self._pos, self._yaw])
+            self._times.append(self._t)
+            self._modes.append("hover")
+            return
+
+        m = _PAT_LAND.match(line)
+        if m:
+            h, dur = map(float, m.groups())
+            self._ensure_start((0.0, 0.0, h))
+            self._t += dur
+            self._pos = [self._pos[0], self._pos[1], 0.0]
+            self._wps.append([*self._pos, self._yaw])
+            self._times.append(self._t)
+            self._modes.append("land")
+            return
+
+        m = _PAT_FLY.match(line)
+        if m:
+            x0, y0, z0, x1, y1, z1, dur = map(float, m.groups())
+            if not self._wps:
+                self._ensure_start((x0, y0, z0))
+            else:
+                # If this flight plan is multi-line, we accept the provided start,
+                # but do not insert an extra waypoint.
+                self._pos = [x0, y0, z0]
+            self._t += float(dur)
+            self._pos = [x1, y1, z1]
+            self._wps.append([*self._pos, self._yaw])
+            self._times.append(self._t)
+            self._modes.append("fly")
+            return
+
+        raise ValueError(f"Unrecognised command line: {line!r}")
+
+    def build(self) -> FlightPlan:
+        if not self._wps:
+            self._ensure_start((0.0, 0.0, 0.0))
+
+        waypoints = np.array(self._wps, dtype=float).T
+        waypoint_times = np.array(self._times, dtype=float)
+        return FlightPlan(waypoints=waypoints, waypoint_times=waypoint_times, modes=list(self._modes))
+
+
+def parse_flight_plan(text: str):
+    """Parse one or more natural-language flight plan lines.
 
     Returns:
-      waypoints: (4, n) [x,y,z,yaw]
-      waypoint_times: (n,) seconds
-      modes: list length n-1 with one of {'takeoff','hover','fly','land'}
+        waypoints: (4, n) array rows [x,y,z,yaw]
+        waypoint_times: (n,) arrival times in seconds
+        modes: list of (n-1) segment mode strings
     """
 
-    st = _ParserState()
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        m = _RE_TAKEOFF.match(line)
-        if m:
-            h = float(m.group(1))
-            dt = float(m.group(2))
-            st.pos = [0.0, 0.0, 0.0] if not st.waypoints else st.pos
-            st._ensure_start()
-            st._push_end("takeoff", dt, (st.pos[0], st.pos[1], h))
-            continue
-
-        m = _RE_HOVER.match(line)
-        if m:
-            h = float(m.group(1))
-            dt = float(m.group(2))
-            if not st.waypoints:
-                st.pos = [0.0, 0.0, h]
-            st._ensure_start()
-            st._push_end("hover", dt, (st.pos[0], st.pos[1], h))
-            continue
-
-        m = _RE_LAND.match(line)
-        if m:
-            h = float(m.group(1))
-            dt = float(m.group(2))
-            if not st.waypoints:
-                st.pos = [0.0, 0.0, h]
-            st._ensure_start()
-            st._push_end("land", dt, (st.pos[0], st.pos[1], 0.0))
-            continue
-
-        m = _RE_FLY.match(line)
-        if m:
-            x0, y0, z0 = float(m.group(1)), float(m.group(2)), float(m.group(3))
-            x1, y1, z1 = float(m.group(4)), float(m.group(5)), float(m.group(6))
-            dt = float(m.group(7))
-            if not st.waypoints:
-                st.pos = [x0, y0, z0]
-            st._ensure_start()
-            st._push_end("fly", dt, (x1, y1, z1))
-            continue
-
-        raise ValueError(f"Unsupported command line: {raw_line!r}")
-
-    waypoints = np.asarray(st.waypoints, dtype=float).T
-    waypoint_times = np.asarray(st.waypoint_times, dtype=float)
-    return waypoints, waypoint_times, st.modes
+    parser = FlightPlanParser()
+    for line in text.splitlines():
+        parser.handle_line(line)
+    plan = parser.build()
+    return plan.waypoints, plan.waypoint_times, plan.modes
