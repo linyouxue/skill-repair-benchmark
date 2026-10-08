@@ -1,6 +1,6 @@
 # DeepSeek V4 Pro — 10 original-skill task results (2026-10-08)
 
-This publication records **10 independent interpretable original-skill evaluations** of the original GPT/Claude-consistent task shortlist under a fixed DeepSeek V4 Pro + OpenHands harness, plus cross-model atomic-mechanism reviews. It **does not** claim that the ten tasks have common defects in all four models. No DeepSeek fresh Skill repair or F→P Gold was generated.
+This publication records **10 canonical Original-Skill run records** of the original GPT/Claude-consistent task shortlist under a fixed DeepSeek V4 Pro + OpenHands harness, plus cross-model atomic-mechanism reviews. One of the ten has an environment-fidelity confound; canonical official scoring is not the same as verified single-cause attribution. It **does not** claim that the ten tasks have common defects in all four models. No DeepSeek fresh Skill repair or F→P Gold was generated.
 
 ## Canonical outcomes
 

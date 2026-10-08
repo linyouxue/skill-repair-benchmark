@@ -12,7 +12,7 @@
 | Condition | `original-skill` |
 | Model | `deepseek/deepseek-v4-pro` |
 | Result | `FAIL` |
-| Official verifier | `None/None` |
+| Official verifier | `3/4` |
 | Agent iterations | `10` |
 | Provider requests | `10` |
 | Termination reason | `end_turn` |
