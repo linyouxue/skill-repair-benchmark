@@ -1,0 +1,240 @@
+diff --git a/src/benchflow/acp/runtime.py b/src/benchflow/acp/runtime.py
+index 49d77711..6268f069 100644
+--- a/src/benchflow/acp/runtime.py
++++ b/src/benchflow/acp/runtime.py
+@@ -676,7 +676,7 @@ async def execute_prompts(
+                     or (
+                         isinstance(text_only_retry_limit, int)
+                         and not isinstance(text_only_retry_limit, bool)
+-                        and text_only_retry_limit == 1
++                        and text_only_retry_limit in {1, 2, 3}
+                         and isinstance(text_only_retries_used, int)
+                         and not isinstance(text_only_retries_used, bool)
+                         and 0 <= text_only_retries_used <= text_only_retry_limit
+diff --git a/src/benchflow/agents/openhands_benchmark_adapter.py b/src/benchflow/agents/openhands_benchmark_adapter.py
+index d2d51629..58b90c81 100644
+--- a/src/benchflow/agents/openhands_benchmark_adapter.py
++++ b/src/benchflow/agents/openhands_benchmark_adapter.py
+@@ -63,10 +63,12 @@ def _text_only_retry_limit(env: Mapping[str, str]) -> int:
+         value = int(raw)
+     except ValueError as exc:
+         raise RuntimeError(
+-            f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be 0 or 1, got {raw!r}"
++            f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be an integer from 0 to 3, got {raw!r}"
+         ) from exc
+-    if value not in {0, 1}:
+-        raise RuntimeError(f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be 0 or 1, got {raw!r}")
++    if value not in {0, 1, 2, 3}:
++        raise RuntimeError(
++            f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be an integer from 0 to 3, got {raw!r}"
++        )
+     return value
+ 
+ 
+@@ -324,7 +326,7 @@ def _instrument_runtime_delegation_guard(agent: Any) -> None:
+ 
+ 
+ def _instrument_text_only_completion_guard(agent: Any) -> None:
+-    """Allow one explicit, auditable retry after a text-only pseudo-finish."""
++    """Allow bounded, auditable retries after a text-only pseudo-finish."""
+ 
+     agent_class = type(agent)
+     if getattr(agent_class, "_benchmark_executor_text_only_guard_instrumented", False):
+diff --git a/src/benchflow/benchmark_executor.py b/src/benchflow/benchmark_executor.py
+index 34bc61bf..f8ff4195 100644
+--- a/src/benchflow/benchmark_executor.py
++++ b/src/benchflow/benchmark_executor.py
+@@ -105,11 +105,13 @@ def completion_guard_metadata(retry_limit: int) -> dict[str, Any]:
+     if (
+         isinstance(retry_limit, bool)
+         or not isinstance(retry_limit, int)
+-        or retry_limit not in {0, 1}
++        or retry_limit not in {0, 1, 2, 3}
+     ):
+-        raise ValueError("text-only completion guard limit must be 0 or 1")
++        raise ValueError(
++            "text-only completion guard limit must be an integer from 0 to 3"
++        )
+     return {
+-        "enabled": retry_limit == 1,
++        "enabled": retry_limit > 0,
+         "scope": "openhands-root-agent-text-only-finish",
+         "text_only_retry_limit_per_step": retry_limit,
+         "uses_remaining_parent_iteration_budget": True,
+@@ -216,8 +218,8 @@ def apply_openhands_executor_env(
+     if agent != EXECUTOR_AGENT:
+         return result
+ 
+-    if text_only_retry_limit not in {"0", "1"}:
+-        raise ValueError(f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be '0' or '1'")
++    if text_only_retry_limit not in {"0", "1", "2", "3"}:
++        raise ValueError(f"{ENV_TEXT_ONLY_RETRY_LIMIT} must be '0', '1', '2', or '3'")
+     result[ENV_TEXT_ONLY_RETRY_LIMIT] = text_only_retry_limit
+     result[ENV_MAX_ITERATIONS] = str(MAX_PARENT_ITERATIONS_PER_STEP)
+     result[ENV_LLM_TIMEOUT] = str(LLM_REQUEST_SAFETY_TIMEOUT_SEC)
+diff --git a/src/benchmark_executor/executor.py b/src/benchmark_executor/executor.py
+index bf6b933c..ddfbc2aa 100644
+--- a/src/benchmark_executor/executor.py
++++ b/src/benchmark_executor/executor.py
+@@ -97,9 +97,11 @@ class BenchmarkExecutor:
+         if (
+             isinstance(experimental_text_only_retry_limit, bool)
+             or not isinstance(experimental_text_only_retry_limit, int)
+-            or experimental_text_only_retry_limit not in {0, 1}
++            or experimental_text_only_retry_limit not in {0, 1, 2, 3}
+         ):
+-            raise ValueError("experimental_text_only_retry_limit must be 0 or 1")
++            raise ValueError(
++                "experimental_text_only_retry_limit must be an integer from 0 to 3"
++            )
+         root = Path(tasks_root).expanduser().resolve(strict=True)
+         if not root.is_dir():
+             raise ValueError(f"tasks_root is not a directory: {root}")
+diff --git a/tests/agents/test_openhands_benchmark_adapter.py b/tests/agents/test_openhands_benchmark_adapter.py
+index 33715bb7..d037c91c 100644
+--- a/tests/agents/test_openhands_benchmark_adapter.py
++++ b/tests/agents/test_openhands_benchmark_adapter.py
+@@ -479,6 +479,41 @@ def test_text_only_completion_guard_retries_once_then_stops(
+     assert len(emitted) == 1
+ 
+ 
++def test_opt_in_guard_three_retries_then_exhausts_without_resetting_budget(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """Guards the opt-in guard3 patch on base commit 603c7db2: no extra step budget."""
++    (tmp_path / "one").mkdir()
++    (tmp_path / "one" / "SKILL.md").write_text("BODY")
++    env = _adapter_env(tmp_path)
++    env[adapter.ENV_TEXT_ONLY_RETRY_LIMIT] = "3"
++    local_agent, _ = _install_fake_openhands(monkeypatch)
++    monkeypatch.setattr(adapter, "_PATCHED", False)
++    adapter.install_adapter(env)
++    conversation = local_agent.Conversation(agent=_Agent(), workspace="/app")
++    conversation._benchmark_executor_total_iterations = 56
++    emitted = []
++    for index in range(4):
++        conversation.agent.step(conversation)
++        conversation.agent._handle_content_response(
++            _Message(role="assistant", content=[_TextContent(text="text tool call")]),
++            SimpleNamespace(id=f"response-{index}"),
++            conversation,
++            conversation.state,
++            emitted.append,
++        )
++        assert conversation._benchmark_executor_text_only_retries_used == min(
++            index + 1, 3
++        )
++        assert conversation._benchmark_executor_total_iterations == 57 + index
++        assert conversation.kwargs["max_iteration_per_run"] == 60
++        assert conversation.state.execution_status == (
++            _ExecutionStatus.RUNNING if index < 3 else _ExecutionStatus.FINISHED
++        )
++    assert len(emitted) == 3
++    assert conversation._benchmark_executor_text_only_retry_exhausted is True
++
++
+ def test_delegation_filter_fails_closed_on_malformed_tool(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+diff --git a/tests/test_benchmark_executor.py b/tests/test_benchmark_executor.py
+index a9ad7ab9..1221fd0e 100644
+--- a/tests/test_benchmark_executor.py
++++ b/tests/test_benchmark_executor.py
+@@ -159,10 +159,10 @@ def test_executor_env_applies_only_valid_canonical_guard_control(
+         "uses_remaining_parent_iteration_budget": True,
+     }
+ 
+-    with pytest.raises(ValueError, match="must be '0' or '1'"):
++    with pytest.raises(ValueError, match="must be '0', '1', '2', or '3'"):
+         apply_openhands_executor_env(
+             "openhands",
+-            {ENV_TEXT_ONLY_RETRY_LIMIT: "2"},
++            {ENV_TEXT_ONLY_RETRY_LIMIT: "4"},
+             skill_policy=policy,
+             manifest=None,
+         )
+@@ -670,8 +670,11 @@ def test_result_metadata_distinguishes_iteration_limit_from_infra_error() -> Non
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_acp_records_guard_evidence_without_extra_benchflow_prompt() -> None:
+-    """Adapter guard evidence survives capture without adding a BenchFlow prompt."""
++@pytest.mark.parametrize("retry_limit", [1, 3])
++async def test_acp_records_guard_evidence_without_extra_benchflow_prompt(
++    retry_limit: int,
++) -> None:
++    """Guards the opt-in guard3 patch on base commit 603c7db2: preserve ACP evidence."""
+ 
+     class Client:
+         async def prompt(self, prompt: str) -> SimpleNamespace:
+@@ -687,7 +690,7 @@ async def test_acp_records_guard_evidence_without_extra_benchflow_prompt() -> No
+                         "skill_context_preloaded": False,
+                         "skill_bundle_sha256": None,
+                         "preloaded_skill_count": 0,
+-                        "experimental_text_only_retry_limit": 1,
++                        "experimental_text_only_retry_limit": retry_limit,
+                         "experimental_text_only_retries_used": 1,
+                         "experimental_text_only_retry_exhausted": False,
+                     }
+@@ -705,7 +708,7 @@ async def test_acp_records_guard_evidence_without_extra_benchflow_prompt() -> No
+     assert len(outcomes) == 1
+     assert outcomes[0]["iterations_used"] == 7
+     assert outcomes[0]["max_iterations"] == MAX_PARENT_ITERATIONS_PER_STEP
+-    assert outcomes[0]["experimental_text_only_retry_limit"] == 1
++    assert outcomes[0]["experimental_text_only_retry_limit"] == retry_limit
+     assert outcomes[0]["experimental_text_only_retries_used"] == 1
+     assert outcomes[0]["experimental_text_only_retry_exhausted"] is False
+     observed = executor_result_metadata(
+diff --git a/tests/test_public_benchmark_executor.py b/tests/test_public_benchmark_executor.py
+index b21a060b..45efe0e2 100644
+--- a/tests/test_public_benchmark_executor.py
++++ b/tests/test_public_benchmark_executor.py
+@@ -446,6 +446,34 @@ def test_text_only_guard_is_enabled_by_default(
+     assert "comparable" not in summary
+ 
+ 
++def test_opt_in_guard_three_is_propagated_and_protocol_evidence_valid(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """Guards the opt-in guard3 patch on base commit 603c7db2 through the public API."""
++    captured = _install_fake_rollout(monkeypatch)
++    executor = BenchmarkExecutor(
++        tasks_root=_task_root(tmp_path),
++        jobs_root=tmp_path / "jobs",
++        model="openrouter/openai/gpt-5.2",
++        reasoning_effort="high",
++        experimental_text_only_retry_limit=3,
++    )
++    result = executor.run(
++        task_id="task-a",
++        condition="method-skill",
++        skill_bundle=_bundle(tmp_path),
++        method_id="guard3-experiment",
++        stage="diagnostic",
++        rollout_id="task-a-guard3-r001",
++    )
++    assert captured[0].agent_env == {ENV_TEXT_ONLY_RETRY_LIMIT: "3"}
++    request = json.loads(result.artifacts.request_json.read_text())
++    assert request["completion_guard"]["enabled"] is True
++    assert request["completion_guard"]["text_only_retry_limit_per_step"] == 3
++    assert request["completion_guard"]["uses_remaining_parent_iteration_budget"] is True
++    assert result.protocol_evidence_valid is True
++
++
+ def test_explicitly_disabling_guard_is_accepted_and_recorded(
+     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+@@ -514,11 +542,11 @@ def test_guard_metadata_does_not_gate_protocol_evidence(
+     assert reparsed.protocol_evidence_valid is True
+ 
+ 
+-@pytest.mark.parametrize("value", [-1, 2, True, 1.5, "1"])
++@pytest.mark.parametrize("value", [-1, 4, True, 1.5, "1"])
+ def test_experimental_text_only_guard_rejects_invalid_limits(
+     tmp_path: Path, value: object
+ ) -> None:
+-    with pytest.raises(ValueError, match="must be 0 or 1"):
++    with pytest.raises(ValueError, match="must be an integer from 0 to 3"):
+         BenchmarkExecutor(
+             tasks_root=_task_root(tmp_path),
+             jobs_root=tmp_path / "jobs",
