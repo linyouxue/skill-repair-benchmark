@@ -28,9 +28,10 @@ def main():
     assert w.name=='guard3-results-20261008'
     def git(*args):return subprocess.check_output(['git',*args],cwd=w)
     def load(rel):return json.loads(git('show',':'+rel))
-    def old(rel):return json.loads(git('show','HEAD:'+rel))
-    changes=git('diff','--cached','--name-only','--diff-filter=ACM','-z').decode('utf-8').strip('\0').split('\0')
-    all_changes=git('diff','--cached','--name-only','-z').decode('utf-8').strip('\0').split('\0')
+    publication_base=load('evaluation/results/SkillTTA-GPT52-Gold31-Local30-20260924/reruns/completion-guard3-20261008/replacement-index.json')['base_commit']
+    def old(rel):return json.loads(git('show',publication_base+':'+rel))
+    changes=git('diff','--cached',publication_base,'--name-only','--diff-filter=ACM','-z').decode('utf-8').strip('\0').split('\0')
+    all_changes=git('diff','--cached',publication_base,'--name-only','-z').decode('utf-8').strip('\0').split('\0')
     for rel in all_changes:
         parts=Path(rel).parts
         assert parts[:2]==('evaluation','results') and parts[2] in SCOPE, rel
