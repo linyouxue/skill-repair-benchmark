@@ -1,0 +1,25 @@
+Repository: /home/github/build/failed/AgentOps-AI/agentops
+
+Observed failure (local pytest run):
+- Test collection fails on `import agentops`.
+- Root error:
+  - `agentops/__init__.py` unconditionally imports `LangchainCallbackHandler` from `agentops/langchain_callback_handler.py`.
+  - `langchain_callback_handler.py` imports `BaseCallbackHandler` from `langchain.callbacks.base`.
+  - With current LangChain releases (installed `langchain==1.4.3`), `langchain.callbacks` no longer exists.
+  - This raises `ModuleNotFoundError: No module named 'langchain.callbacks'` during import, which prevents all tests from running.
+
+Diagnosis:
+- This is primarily a code issue (eager import of an optional integration) plus a dependency-compatibility issue (LangChain import path changed).
+- The LangChain integration should be optional, because base `agentops` dependencies do not include `langchain`/`langchain-core`.
+
+Plan:
+1) Make LangChain integration import lazy/optional:
+   - Wrap the import of `LangchainCallbackHandler` / `AsyncLangchainCallbackHandler` in `agentops/__init__.py` with a try/except.
+   - Expose the names when the integration deps are installed; otherwise keep `agentops` importable.
+
+2) Update LangChain callback handler imports for compatibility:
+   - In `agentops/langchain_callback_handler.py`, import callback base classes from `langchain_core.callbacks.base` (new location).
+   - Optionally keep a fallback to the old `langchain.callbacks.base` import for older LangChain versions.
+
+After applying changes:
+- Re-run `pytest` to confirm tests pass and `import agentops` works without LangChain.
