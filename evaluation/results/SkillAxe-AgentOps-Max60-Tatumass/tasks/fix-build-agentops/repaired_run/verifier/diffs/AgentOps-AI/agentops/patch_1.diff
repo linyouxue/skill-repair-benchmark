@@ -1,0 +1,66 @@
+diff --git a/agentops/__init__.py b/agentops/__init__.py
+index 1c2d4df..2ec41cd 100755
+--- a/agentops/__init__.py
++++ b/agentops/__init__.py
+@@ -9,7 +9,16 @@ from .enums import Models
+ from .decorators import record_function
+ from .agent import track_agent
+ from .log_config import set_logging_level_info, set_logging_level_critial
+-from .langchain_callback_handler import LangchainCallbackHandler, AsyncLangchainCallbackHandler
++
++# LangChain integration is optional. Import it only when dependencies exist.
++try:
++    from .langchain_callback_handler import (
++        LangchainCallbackHandler,
++        AsyncLangchainCallbackHandler,
++    )
++except ImportError:  # pragma: no cover
++    LangchainCallbackHandler = None  # type: ignore[assignment]
++    AsyncLangchainCallbackHandler = None  # type: ignore[assignment]
+ 
+ 
+ def init(api_key: Optional[str] = None,
+diff --git a/agentops/langchain_callback_handler.py b/agentops/langchain_callback_handler.py
+index 65ee9e1..4ac6bd2 100644
+--- a/agentops/langchain_callback_handler.py
++++ b/agentops/langchain_callback_handler.py
+@@ -10,11 +10,9 @@ from langchain_core.messages import BaseMessage
+ 
+ from tenacity import RetryCallState
+ 
+-from agentops import Client as AOClient
+-from agentops import ActionEvent, LLMEvent, ToolEvent, ErrorEvent
+-from agentops.helpers import get_ISO_time
+-
+-from .helpers import debug_print_function_params
++from .client import Client as AOClient
++from .event import ActionEvent, LLMEvent, ToolEvent, ErrorEvent
++from .helpers import get_ISO_time, debug_print_function_params
+ 
+ 
+ class Events:
+diff --git a/pyproject.toml b/pyproject.toml
+index b0af035..a8b0120 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -22,7 +22,7 @@ classifiers = [
+ dependencies = [
+     "requests==2.31.0",
+     "psutil==5.9.8",
+-    "packaging==23.2"
++    "packaging>=23.2"
+ ]
+ [project.optional-dependencies]
+ dev = [
+diff --git a/tox.ini b/tox.ini
+index dd33922..637247e 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -5,6 +5,7 @@
+ 
+ [tox]
+ envlist = py37,py38,py39,py310,py311,py312
++skip_missing_interpreters = true
+ 
+ [testenv]
+ deps = 

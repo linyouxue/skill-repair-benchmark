@@ -1,0 +1,24 @@
+Repository: /home/github/build/failed/AgentOps-AI/agentops
+
+Observed failure (local pytest):
+- `pytest` fails during test collection with `ModuleNotFoundError: No module named 'langchain_core'`.
+- Root cause: `agentops/__init__.py` unconditionally imports `LangchainCallbackHandler` / `AsyncLangchainCallbackHandler` from `agentops/langchain_callback_handler.py`, which requires optional LangChain dependencies (`langchain_core`, `langchain`, etc.). Base installs (and the test suite) do not install these extras, so importing `agentops` fails.
+
+Additional build/config issues found:
+- `pyproject.toml` pins `packaging==23.2`. This conflicts with modern tooling used in CI/dev (e.g., tox/virtualenv) which requires `packaging>=26`, causing resolver conflicts when installing both tox and this project.
+- `tox.ini` envlist includes py37..py312. In environments where not all interpreters are present (e.g., this runner only has Python 3.10), `tox` fails immediately with “could not find python interpreter … py311”.
+
+Plan to fix:
+1) Make LangChain integration optional at import time:
+   - In `agentops/__init__.py`, wrap the `langchain_callback_handler` import in a try/except so `import agentops` works without LangChain installed.
+   - Keep LangChain handler still importable via `agentops.langchain_callback_handler` when extras are installed.
+
+2) Fix dependency pinning:
+   - In `pyproject.toml`, relax `packaging==23.2` to `packaging>=23.2` (or similar) so it can coexist with tox/virtualenv.
+
+3) Make tox resilient to missing Python versions:
+   - In `tox.ini`, add `skip_missing_interpreters = true` so tox runs available envs instead of failing when some interpreters are absent.
+
+Verification:
+- Re-run `pytest` and ensure tests pass.
+- Optionally run `tox` (it should no longer error just because interpreters are missing).
