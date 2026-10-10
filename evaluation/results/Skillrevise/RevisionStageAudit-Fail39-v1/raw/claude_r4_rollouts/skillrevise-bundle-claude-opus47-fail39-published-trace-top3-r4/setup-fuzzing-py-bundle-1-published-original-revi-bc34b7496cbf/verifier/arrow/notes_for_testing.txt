@@ -1,0 +1,48 @@
+Fuzzing Target Note — arrow
+============================
+
+Library: arrow (datetime library). Install name: `arrow`. Import name: `arrow`.
+
+Important files (ranked):
+  1. arrow/parser.py        — DateTimeParser + TzinfoParser; pure-Python format/ISO parsers; regex-heavy, lots of branching. HIGH VALUE.
+  2. arrow/arrow.py         — Arrow class (public API, orchestrator over parser/formatter).
+  3. arrow/factory.py       — ArrowFactory.get(): main user entry point, dispatches to parser.
+  4. arrow/formatter.py     — Token-based output formatter.
+  5. arrow/locales.py       — Static locale tables; low fuzz value.
+
+Function under test (FUT): `arrow.parser.DateTimeParser.parse_iso`
+  * File / location: arrow/parser.py:252 (approx).
+  * Why: ISO-8601 is a complex grammar; parse_iso tokenizes, applies regex, raises ParserError/ParserMatchError on malformed input. Lots of nested branches and format-tag dispatch. No native code — pure Python.
+  * Input surface: single str (user-controlled).
+  * Boundary / native considerations: pure Python; no FFI.
+  * Current test gaps: tests cover canonical/valid inputs well; untested combinations of malformed separators, extra time components, mixed Z/offsets, ambiguous timezones, and weird unicode digits are not thoroughly exercised.
+
+Secondary FUT: `arrow.parser.DateTimeParser.parse`
+  * Takes (string, fmt). Expands format tokens via `_generate_pattern_re` then matches. Different path from parse_iso.
+
+Secondary FUT: `arrow.factory.ArrowFactory.get`
+  * User-facing dispatcher; handles ints/floats/str/tuples; good for broad coverage.
+
+Callable contract:
+  * Required imports: `import arrow` then use `arrow.get(...)` or `arrow.parser.DateTimeParser().parse_iso(s)`.
+  * Preconditions: input must be `str` for parse_iso.
+  * Determinism: deterministic for a given tz database.
+  * External deps: python-dateutil, tzdata. No network, no filesystem.
+
+Input model:
+  * Primary payload: str (UTF-8 safe).
+  * Edge classes: empty str, extreme-length, mixed digits, surrogates, timezone offsets like "+99:99", trailing junk, embedded nulls.
+
+Oracles:
+  * Must hold: no uncaught exception other than ValueError/TypeError/arrow.parser.ParserError.
+  * Suspicious: AssertionError, UnicodeDecodeError in Python layer, IndexError.
+  * Crash-only check for this driver.
+
+Harness plan:
+  * Use atheris.FuzzedDataProvider to generate a Python `str`.
+  * Call `DateTimeParser().parse_iso(s)` (fallback to parse with a few canned formats).
+  * Catch arrow.parser.ParserError and ValueError. Let other exceptions bubble up.
+
+Risk flags:
+  * Pure Python, no native extension, no I/O.
+  * Possible DoS via extreme regex backtracking (interesting signal).

@@ -1,0 +1,30 @@
+Notes for testing / fuzzing: black
+
+High-value modules / boundaries
+- black/__init__.py -> format_str(), format_file_contents(): primary public formatting APIs
+- black/parsing.py -> lib2to3_parse(): parser boundary (TokenError/SyntaxError/InvalidInput)
+- black/linegen.py, black/nodes.py: complex formatting logic, lots of corner cases
+
+Suggested functions-under-test (FUTs)
+1) black.format_str(src: str, mode: black.Mode)
+2) black.format_file_contents(src: str, fast: bool, mode: black.Mode)
+3) black.parsing.lib2to3_parse(src: str, target_versions=...)
+
+Input ideas
+- Arbitrary Python source text (including partial/incomplete code, weird whitespace, long lines)
+- F-string edge cases, backslashes, type comments, match/case, async, decorators
+
+Inferred oracles / properties
+- No crash / no hang
+- Idempotence: format_str(format_str(src)) == format_str(src) when formatting succeeds
+- Determinism across repeated runs with same Mode
+
+Expected/acceptable exceptions
+- black.parsing.InvalidInput
+- SyntaxError, tokenize.TokenError, IndentationError
+- AssertionError from internal invariants (potentially interesting, but for smoke fuzzing we may ignore)
+
+Seed corpus ideas
+- Minimal valid Python: "pass\n"
+- Common tricky snippets: "def f(x:int=1, y: str=''):\n    return x\n"
+- Unclosed strings / brackets to hit parser errors

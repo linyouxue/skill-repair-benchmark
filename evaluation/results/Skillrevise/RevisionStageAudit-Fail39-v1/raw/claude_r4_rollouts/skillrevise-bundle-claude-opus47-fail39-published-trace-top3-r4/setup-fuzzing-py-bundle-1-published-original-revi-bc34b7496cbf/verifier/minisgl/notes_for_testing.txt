@@ -1,0 +1,47 @@
+Fuzzing Target Note — minisgl
+=============================
+
+Library: minisgl (an LLM serving framework). Install name: `minisgl` (local source install).
+Import name: `minisgl`.
+
+Important files (ranked):
+  1. python/minisgl/utils/misc.py       — pure-Python integer arithmetic helpers; branches on assertions. ZERO heavy deps.
+  2. python/minisgl/utils/registry.py   — Registry class; dispatch & lookup; branches on type/name. No heavy deps.
+  3. python/minisgl/message/utils.py    — recursive type-dispatched serializer/deserializer. Heavy deps (torch, numpy) — skip for fuzzing to keep env light.
+  4. python/minisgl/server/args.py      — argparse driver. Light dep (torch imports gate it).
+  5. python/minisgl/core.py             — SamplingParams dataclass; branches on temperature/top_k/top_p. Depends on torch.
+
+Reasoning: The project pins many GPU-only wheels (torch<2.10, flashinfer-python, triton...) which are impractical to install in a fuzz environment. We therefore target the pure-Python, dependency-free modules `utils/misc.py` and `utils/registry.py` by importing them directly from the source tree (not through the top-level `minisgl` package, which transitively imports torch).
+
+Function under test (FUT): `minisgl.utils.misc` module — `div_even`, `div_ceil`, `align_ceil`, `align_down`
+  * File / location: python/minisgl/utils/misc.py:21–47.
+  * Why: multiple branches (allow_replicate path, divisibility assertion, zero-divisor path), triggered by integer input. Reachable with no deps.
+  * Input surface: int `a`, int `b`, bool flag.
+  * Boundary considerations: pure Python; raises AssertionError / ZeroDivisionError on bad inputs.
+  * Current test gaps: no unit tests for these helpers in the shipped `tests/`.
+
+Secondary FUT: `minisgl.utils.registry.Registry` (register/get)
+  * Checks branches on duplicate-register, missing-key lookup.
+
+Callable contract:
+  * Required imports: add `/app/minisgl/python` to sys.path, then `import importlib.util` to load `misc.py` directly (avoids triggering the top-level package `__init__` imports which pull torch).
+  * Preconditions: `a`, `b` are Python ints.
+  * Determinism: deterministic.
+  * External deps: NONE for the chosen targets.
+
+Input model:
+  * Primary payload: two ints and one bool, extracted from FDP.
+  * Edge classes: a=0, b=0 (ZeroDivisionError expected), b>a with allow_replicate True/False, b that doesn't divide a.
+
+Oracles:
+  * Must hold: no uncaught exception other than AssertionError, ZeroDivisionError, ValueError.
+  * Suspicious: TypeError inside the function, OverflowError.
+  * Crash-only check.
+
+Harness plan:
+  * Load `/app/minisgl/python/minisgl/utils/misc.py` via importlib.util.spec_from_file_location to sidestep the heavy top-level package.
+  * In TestOneInput, draw a=int, b=int, flag=bool from FDP, call each helper; swallow AssertionError/ZeroDivisionError.
+
+Risk flags:
+  * No native extension involved by this driver.
+  * Does NOT exercise the GPU/torch surface of minisgl — that is out of scope for the fuzz environment.

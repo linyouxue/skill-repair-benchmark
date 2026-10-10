@@ -1,0 +1,47 @@
+Fuzzing Target Note — ujson
+===========================
+
+Library: ujson (ultrajson). Install name: `ujson`. Import name: `ujson`.
+
+Important files (ranked):
+  1. src/ujson/*.c                — C extension; `_ujson` module exposes `loads`, `dumps`, `encode`, `decode`.
+  2. Python-level wrapper          — tiny; main surface is C code.
+
+Function under test (FUT): `ujson.loads` (JSON decoder, C extension)
+  * File / location: C source in src/ujson. Python entry: `ujson.loads(s)`.
+  * Why: Classic high-value fuzz target. The C decoder handles numbers, strings, escapes, UTF-8, nested arrays/objects, duplicate keys, extreme ints. Memory-safety-sensitive; known historically to have had crash/overflow bugs. Although Atheris cannot cover C with libFuzzer semantics unless the extension is built with sanitizers, we can still:
+      - exercise the Python-level wrapper
+      - stress-test the C decoder for Python-visible exceptions / crashes
+  * Input surface: bytes/str (JSON payload).
+  * Boundary considerations: NATIVE boundary — primary interest.
+  * Current test gaps: hand-written tests cover canonical valid/invalid JSON; the full malformed-input space is impractical to enumerate by hand.
+
+Secondary FUT: `ujson.dumps`
+  * Encodes nested Python objects to JSON; stresses escape, float repr, surrogate handling. Needs a structured generator — use FDP to build nested dict/list/str/int payloads.
+
+Callable contract:
+  * Required imports: `import ujson`.
+  * Preconditions: `loads` accepts bytes or str.
+  * Determinism: deterministic.
+  * External deps: none at runtime.
+
+Input model:
+  * Primary payload for loads: bytes (FDP.ConsumeBytes).
+  * Primary payload for dumps: structured Python object synthesized from FDP.
+  * Edge classes: deeply nested arrays/objects, long strings, surrogate pairs, extreme floats, bare literals, trailing garbage, zero-length.
+
+Oracles:
+  * Must hold: no uncaught exception from `loads` other than ValueError / TypeError / UnicodeDecodeError.
+  * Must hold for `dumps`: no uncaught exception other than TypeError / ValueError / OverflowError / RecursionError.
+  * Suspicious: SystemError, segfault (observed as the process dying with no Python traceback) — the primary signal we care about for a C extension.
+  * Crash-only check.
+
+Harness plan:
+  * Build/install ujson from the local source directory into a venv (`uv pip install .`).
+  * In TestOneInput, draw bytes from FDP, call `ujson.loads(buf)` wrapped in try/except for the expected exceptions.
+  * Secondary code path (every N iterations): build a small nested Python object via FDP and round-trip through dumps/loads.
+  * Timeouts: let libFuzzer manage; recursion/stack issues already protected.
+
+Risk flags:
+  * NATIVE EXTENSION — primary rationale for fuzzing this library.
+  * Potential DoS via recursion / huge int conversion.

@@ -1,0 +1,26 @@
+Library: black (Python code formatter)
+======================================
+
+Important files:
+- src/black/__init__.py  - public API; format_str, format_file_contents
+- src/black/parsing.py   - lib2to3-based parser wrapper
+- src/black/mode.py      - Mode / TargetVersion dataclasses
+- src/blib2to3/*         - vendored lib2to3 fork
+
+Fuzz-worthy function under test:
+- black.format_str(src_contents: str, *, mode: Mode) -> str
+  The main pure-string entry point: takes arbitrary Python-like source,
+  runs the lexer/parser, and emits reformatted output. Rich input surface,
+  regex and parser heavy.
+
+Oracles:
+- Must not crash on arbitrary strings.
+- Library-expected exceptions: black.InvalidInput, black.parsing.InvalidInput,
+  SyntaxError, IndentationError, TokenError, ValueError, AssertionError,
+  UnicodeDecodeError, UnicodeEncodeError, OverflowError, RecursionError.
+- Equivalence check (format(format(x)) == format(x)) is already covered by
+  tests; we only use the crash-only oracle here for speed.
+
+Harness plan:
+- Treat fuzzer bytes as UTF-8 Python source.
+- Call black.format_str(src, mode=black.Mode()). Swallow expected exceptions.

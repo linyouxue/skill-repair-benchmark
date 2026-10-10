@@ -1,0 +1,33 @@
+Notes for testing / fuzzing: ipython
+
+High-value modules / boundaries
+- IPython/core/splitinput.py -> split_user_input(): regex-based command/magic parsing
+- IPython/core/inputtransformer2.py -> TransformerManager.transform_cell(), check_complete(): tokenization + transformation loop
+- IPython/core/magic_arguments.py -> parse_argstring(): argparse-ish parsing for magics
+
+Suggested functions-under-test (FUTs)
+1) IPython.core.splitinput.split_user_input(line: str)
+2) IPython.core.inputtransformer2.TransformerManager.transform_cell(cell: str)
+3) IPython.core.inputtransformer2.TransformerManager.check_complete(cell: str)
+
+Input ideas
+- Single-line commands starting with escape chars: ", ; / % ! !! ? ??" and combinations with whitespace
+- Lines with trailing ? or ??, nested quotes, backslashes
+- Multi-line cells with magics ("%%bash"), prompts ("In [1]:"), indentation, incomplete blocks
+
+Inferred oracles / properties
+- No crash / no hang
+- transform_cell output is a string; when it succeeds it should end with a newline
+- check_complete returns status in {"complete","incomplete","invalid"}
+
+Expected/acceptable exceptions
+- SyntaxError
+- RuntimeError("Input transformation still changing...") (loop limit)
+- AssertionError (e.g., non-str input; fuzzer should avoid)
+
+Seed corpus ideas
+- "%timeit 1+1\n"
+- "!ls\n"
+- "a = ?\n"
+- "%%bash\necho hi\n\n"
+- "for i in range(3):\n    print(i)\n"

@@ -1,0 +1,27 @@
+Important functions / APIs to test (minisgl)
+
+Context / constraint
+- minisgl declares very heavy runtime dependencies (torch, transformers, accelerate, flashinfer-python, etc.).
+- For a quick fuzzing smoke-run, target lightweight pure-Python utility modules by loading them directly from file paths.
+  This avoids importing minisgl.utils (which imports torch/transformers in __init__).
+
+High-value fuzz targets (lightweight + input validation)
+
+1) python/minisgl/utils/registry.py :: Registry
+   - Registry.register(name)
+   - Registry.__getitem__(name)
+   - Registry.assert_supported(names)
+   - Why: input validation logic and error handling; easy to fuzz without GPU/torch.
+   - Expected failures: KeyError, argparse.ArgumentTypeError.
+
+2) python/minisgl/utils/misc.py :: div_even/div_ceil/align_ceil/align_down
+   - Why: arithmetic invariants + asserts; good for crash-only fuzzing (assertions).
+   - Expected failures: AssertionError, ZeroDivisionError.
+
+Existing tests
+- tests/ cover serialization and scheduler/kernel pieces (likely require heavy deps/hardware).
+
+Fuzz harness note
+- Use importlib.util.spec_from_file_location to load these modules by path.
+- Treat expected exceptions (KeyError/ArgumentTypeError/AssertionError/ZeroDivisionError) as acceptable rejects.
+- Keep sizes bounded; avoid allocating large buffers.

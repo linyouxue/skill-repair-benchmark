@@ -1,0 +1,45 @@
+Fuzzing Target Note — ipython
+=============================
+
+Library: IPython. Install name: `ipython`. Import name: `IPython`.
+
+Important files (ranked):
+  1. IPython/core/inputtransformer2.py — TransformerManager: raw-cell → valid-Python transformer pipeline. Pure-Python, token-based, lots of branching.
+  2. IPython/core/inputsplitter.py / inputtransformer2.py — input preprocessing (magics, %magic, !shell escapes, help-end "?", etc.).
+  3. IPython/core/guarded_eval.py — safe-eval of expressions; parse boundary.
+  4. IPython/utils/text.py, IPython/utils/strdispatch.py — utility string handling.
+
+Function under test (FUT): `IPython.core.inputtransformer2.TransformerManager.transform_cell`
+  * File / location: IPython/core/inputtransformer2.py (class TransformerManager, line 571 approx; method transform_cell is the public API).
+  * Why: Converts a raw IPython-style cell (which may include %magic, !shell, ?, continuation lines, autocall, etc.) into valid Python. Internally runs multiple regex passes, tokenizes with `tokenize`, applies escape-command rewriting, and reassembles lines. High branching, often the first attacker-reachable surface in a Jupyter-like deployment.
+  * Input surface: single `str` (cell contents).
+  * Boundary considerations: pure Python; uses tokenize module.
+  * Current test gaps: existing unit tests cover canonical magic/shell escapes; malformed/weird inputs (mixed indentation, broken continuations, exotic unicode, bracket mismatches combined with magic) are undertested.
+
+Secondary FUT: `TransformerManager.check_complete`
+  * Returns ("complete"|"incomplete"|"invalid", indent). Lightweight oracle (no exception expected for most inputs).
+
+Callable contract:
+  * Required imports: `from IPython.core.inputtransformer2 import TransformerManager`.
+  * Preconditions: input is `str`.
+  * Determinism: deterministic.
+  * External deps: traitlets, prompt_toolkit, jedi, pygments, decorator, stack_data, matplotlib-inline, ipython-pygments-lexers (standard IPython deps).
+
+Input model:
+  * Primary payload: str containing arbitrary mix of Python, IPython magics (%foo), shell escapes (!foo), help queries (foo?), continuation lines.
+  * Edge classes: deeply nested brackets, mixed indentation, embedded nulls, surrogates, long lines, no trailing newline.
+
+Oracles:
+  * Must hold: no uncaught exception other than SyntaxError and tokenize.TokenError and ValueError (bad continuation).
+  * Suspicious: AssertionError, RecursionError, IndexError.
+  * Crash-only check.
+
+Harness plan:
+  * FDP → str.
+  * Instantiate TransformerManager once at module level.
+  * Call .transform_cell(src) inside TestOneInput.
+  * Catch SyntaxError, IndentationError, tokenize.TokenError, ValueError.
+
+Risk flags:
+  * Pure Python, no I/O.
+  * Potential DoS via recursive bracket pathologies.
