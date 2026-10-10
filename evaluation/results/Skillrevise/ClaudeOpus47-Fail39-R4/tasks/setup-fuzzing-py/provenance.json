@@ -1,0 +1,39 @@
+{
+  "task_id": "setup-fuzzing-py",
+  "initial_run_id": "setup-fuzzing-py-original-skill-v11x-20260903-r001",
+  "selected_run_id": "setup-fuzzing-py-bundle-2-published-original-revi-6aed5a5a7919",
+  "selected_reward": 0.66,
+  "selected_success": false,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/setup-fuzzing-py/bundle-2-published-original-revised-eac1bb1d09c81b47/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/skillrevise-bundle-claude-opus47-fail39-published-trace-top3-r4-replay27-resume13/setup-fuzzing-py-bundle-2-published-original-revi-6aed5a5a7919",
+  "selected_overrides": {
+    "discover-important-function/SKILL.md": "# Fuzz Pipeline Setup For Python Libraries\n\n## Purpose\nGiven one or more Python libraries, produce the full artifact set a fuzzing pipeline needs: a libraries listing, per-library target notes, Atheris LibFuzzer harnesses, an isolated virtual environment with installed dependencies, a bounded fuzz run, and a captured log. Target selection is one phase inside this pipeline, not the whole skill.\n\n## When to Use\nUse when the task asks you to set up or extend a fuzzing workflow for Python packages, including choosing fuzz targets, writing harnesses, installing dependencies, running Atheris for a bounded time, and emitting named output artifacts at task-specified paths.\n\n## Procedure\n- Parse the task contract first. Extract from the instruction: (a) the list of target libraries, (b) each required output artifact name and path (for example a libraries listing, a notes file, one or more harness scripts, a fuzz log), (c) the required fuzz runtime budget, and (d) any venv or tool conventions. Do not assume filenames like `APIs.txt`; use only paths the task supplies. If a path is unspecified, discover a sensible location by inspecting the repo root and record the choice in the notes artifact.\n- Discover the environment. Check availability of `python3`, `pip`, `venv`/`virtualenv`, `atheris`, and a directory lister (`tree` if present, else `find . -maxdepth N -type f`). Record which tools exist; use the first available option in each category rather than a fixed command.\n- Create and populate the virtual environment at the task-specified location (default `.venv` if unspecified). Install `atheris` plus each target library. If `pip install <lib>` fails due to heavy or unresolved dependencies: (a) retry with `--no-deps`, (b) install only the minimal submodule dependencies needed by the chosen fuzz target, (c) if still blocked, pick a different FUT whose import graph avoids the missing dependency. Record every fallback in the notes artifact.\n- Localize fuzz-worthy code per library. For each library, build a short ranked shortlist (1-5 FUTs) using boundary-code heuristics: parsers, decoders, deserializers, validators, format handlers (json/yaml/xml/toml/pickle/protobuf), regex-heavy code, native bindings, and public API re-exports. Use AST header+docstring scanning first; read full bodies only for finalists. Cross-reference existing tests to down-rank well-covered functions unless they are high-risk boundaries, and to extract seed inputs and oracles.\n- Write the notes artifact. For each selected FUT include only: qualname, file:line, import path reachable in the venv, input type, invalid-input exceptions to treat as early-exit, suspicious exceptions to treat as real crashes, oracle (crash-only or property), and seed sources. Keep each note compact.\n- Write one Atheris harness per selected FUT at the task-specified path. Harness shape:\n- `import atheris` and `with atheris.instrument_imports(): import <target_module>`\n- Define `INVALID_INPUT_EXCEPTIONS = (<documented invalid-input exceptions>)`\n- `def TestOneInput(data):` build the typed input via `atheris.FuzzedDataProvider` or direct `bytes`/`str` decoding, call the FUT inside `try/except INVALID_INPUT_EXCEPTIONS: return`, let other exceptions propagate.\n- `atheris.Setup(sys.argv, TestOneInput); atheris.Fuzz()` Verify each harness imports cleanly inside the venv before running.\n- Run each harness for the task-specified bounded duration (default 10 seconds if unspecified) using Atheris's `-max_total_time=<N>` or an external timeout, and redirect combined stdout+stderr to the task-specified log path (for example `fuzz.log`). Do not run unbounded.\n- Final verification anchor. For every required artifact path, confirm the file exists and is non-empty; confirm the log contains the Atheris banner and at least one iteration count line; confirm no crash in the log corresponds to a documented invalid-input exception. If any check fails, repair the responsible step (not the artifact in isolation) before declaring completion.\n\n## Constraints / Pitfalls\n- Never hard-code output filenames; always read them from the task instruction and fall back to discovery only when the task is silent.\n- Keep the FUT shortlist to 1-5 per library; prefer targets reachable without heavy optional dependencies.\n- Distinguish invalid-input exceptions (caught, early-return) from real crashes (propagate). Enumerate the invalid set in both the notes and the harness, and keep them in sync.\n- All installs and runs must occur inside the isolated venv; do not pollute the system interpreter.\n- Fuzz runs must be time-bounded and log-redirected; do not stream unbounded output.\n- Do not modify library source code; analysis and harness code only.\n- Keep the notes artifact short and action-oriented; omit template fields that have no evidence rather than filling them with speculation.\n- If a tool literal (`tree`, specific pip flag) is unavailable, substitute the closest supported alternative discovered in step 2 instead of failing."
+  },
+  "selection": {
+    "targets": [
+      "fuzzing-python/SKILL.md",
+      "discover-important-function/SKILL.md"
+    ],
+    "rationale": "Reward 0.66 with successful env setup suggests fuzz driver quality/target selection issues (e.g., Black KeyError handling, exceptions treated as crashes). The fuzzing-python skill governs harness construction and exception semantics; discover-important-function governs FUT selection and notes_for_testing content. setup-env appears to have worked (venvs created, deps installed).",
+    "raw_response": "{\"targets\":[\"fuzzing-python/SKILL.md\",\"discover-important-function/SKILL.md\"],\"rationale\":\"Reward 0.66 with successful env setup suggests fuzz driver quality/target selection issues (e.g., Black KeyError handling, exceptions treated as crashes). The fuzzing-python skill governs harness construction and exception semantics; discover-important-function governs FUT selection and notes_for_testing content. setup-env appears to have worked (venvs created, deps installed).\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "fuzzing-python/SKILL.md",
+      "accepted": false,
+      "accepted_revision": false,
+      "decision": "rejected_revision_not_better",
+      "score_before": 0.66,
+      "score_after": 0.5
+    },
+    {
+      "target_skill": "discover-important-function/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.66,
+      "score_after": 0.66
+    }
+  ]
+}

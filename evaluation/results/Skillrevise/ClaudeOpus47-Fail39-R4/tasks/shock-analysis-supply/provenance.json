@@ -1,0 +1,30 @@
+{
+  "task_id": "shock-analysis-supply",
+  "initial_run_id": "shock-analysis-supply-original-skill-v11x-20260908-guarddiag-infra-r003",
+  "selected_run_id": "shock-analysis-supply-bundle-1-published-original-revi-8756fdb89379",
+  "selected_reward": 0.0,
+  "selected_success": false,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/shock-analysis-supply/bundle-1-published-original-revised-0b2dba7bee782d2a/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/skillrevise-bundle-claude-opus47-fail39-published-trace-top3-r4-replay27-resume13/shock-analysis-supply-bundle-1-published-original-revi-8756fdb89379",
+  "selected_overrides": {
+    "xlsx/SKILL.md": "# xlsx-template-fill\n\n## Purpose\nReusable workflow for filling an existing .xlsx template with values and formulas sourced from external datasets (e.g., macro series) and for computing derived quantities inside the workbook using Excel formulas, then recalculating and verifying with headless LibreOffice.\n\n## When to Use\nUse when the task supplies an existing target .xlsx and asks you to populate specific cells or ranges from named external data sources (PWT, IMF WEO, ECB SDMX, World Bank, etc.) and/or to compute transforms (growth rates, filters, smoothers) that must live as formulas in the workbook. Do not use for free-form spreadsheet creation, pure data analysis, or tasks requiring interactive Excel Solver.\n\n## Procedure\n- Discover: locate the task-specified workbook path; open with `openpyxl.load_workbook(path)`; print `wb.sheetnames` and inspect existing headers, year rows, and any pre-filled formulas. Record the exact cells, ranges, and units the task names. Never create new sheets or overwrite existing formulas unless the task says so.\n- Acquire data: for each required series, use discovery not hard-coded URLs. Try the documented primary route, bound retries to <=3 attempts, then switch to a fallback. Examples of route families (verify current endpoints at run time):\n- PWT: Dataverse datafile endpoint referenced from the GGDC PWT page; fallback to the GGDC page's current download link.\n- IMF WEO: bulk `WEO<Mon><Year>all.ashx` under the WEO Database release path; fallback to DataMapper API or per-indicator CSV.\n- ECB: SDMX REST `data-api.ecb.europa.eu/service/data/{flow}/{key}?format=csvdata`; fallback to the dataset's bulk CSV. Cache responses locally; align on country code and year before any write.\n- Write: with openpyxl, write raw inputs as values at the exact cells the task specifies, matching units and year columns. Prefer cross-sheet references (`='Inputs'!B5`) over duplicating data. Use formulas for every derived quantity (sums, ratios, growth, logs). Do not hardcode computed numbers.\n- Derived transforms without Solver: implement filters and smoothers as closed-form matrix formulas. For HP filter, build the (I + lambda * K'K)^{-1} y expression using `MMULT`, `MINVERSE`, and `TRANSPOSE` over a helper range holding the second-difference matrix K; lambda lives in a single labeled input cell. If a task strictly requires Solver, flag it as interactive-only and still provide the closed-form formula result as the delivered value.\n- Recalc and verify: save, then run `python recalc.py <path>` and parse its JSON. Require `status == \"success\"` and `total_errors == 0`. If errors are reported, fix the referenced cells and recalc again. Finally re-open the saved file and assert the target path exists, the named cells are non-empty, and spot-check 2-3 formula outputs against an independent computation.\n\n## Constraints / Pitfalls\n- Write only to cells the task specifies; preserve all existing formulas, formatting, named ranges, and sheet order.\n- No hardcoded calculated values in cells: every derived number must be an Excel formula referencing inputs.\n- Bound each external fetch to <=3 attempts before switching to a fallback route; stop URL enumeration once any supported route returns data.\n- Headless LibreOffice cannot execute Solver or VBA; replace optimization steps with closed-form formulas or precomputed weights expressed as formulas.\n- Verify year and country-code alignment before bulk-filling a range; off-by-one on the year axis is the most common silent failure.\n- Final acceptance requires: file exists at the task-specified path, `recalc.py` reports zero formula errors, and target cells are populated."
+  },
+  "selection": {
+    "targets": [
+      "xlsx/SKILL.md"
+    ],
+    "rationale": "Task mandates Excel-only workflow with formulas (no hardcoded values); the only available skill governs xlsx creation/editing with formulas, formatting, and recalculation. Trace shows the agent stuck parsing PWT via Python and hitting max_iterations without producing the required Excel model with formulas, indicating the xlsx skill guidance (data ingestion into sheets, formula construction, recalc) is the relevant repair target.",
+    "raw_response": "{\"targets\":[\"xlsx/SKILL.md\"],\"rationale\":\"Task mandates Excel-only workflow with formulas (no hardcoded values); the only available skill governs xlsx creation/editing with formulas, formatting, and recalculation. Trace shows the agent stuck parsing PWT via Python and hitting max_iterations without producing the required Excel model with formulas, indicating the xlsx skill guidance (data ingestion into sheets, formula construction, recalc) is the relevant repair target.\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "xlsx/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.0,
+      "score_after": 0.0
+    }
+  ]
+}

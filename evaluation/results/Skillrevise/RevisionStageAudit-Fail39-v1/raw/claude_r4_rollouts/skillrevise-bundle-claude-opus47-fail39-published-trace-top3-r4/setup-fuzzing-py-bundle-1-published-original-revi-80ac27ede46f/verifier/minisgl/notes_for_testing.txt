@@ -1,0 +1,33 @@
+Library: minisgl (small SGL-style LLM runtime)
+==============================================
+
+Important files:
+- python/minisgl/utils/misc.py       - pure-Python integer helpers
+    (div_even, div_ceil, align_ceil, align_down, call_if_main)
+- python/minisgl/message/utils.py    - serialize_type / deserialize_type;
+    requires numpy + torch (very heavy install, skipped as fuzz target).
+- python/minisgl/tokenizer/*         - requires transformers, modelscope.
+- python/minisgl/engine/*            - requires torch, flashinfer.
+
+Dependency situation:
+- The project pins torch, flashinfer-python, sgl_kernel, quack-kernels, which
+  are large GPU-only wheels and will not install in a generic CPU container.
+- To fuzz anything inside this repo we isolate on a *leaf* pure-Python module
+  that imports no third-party packages: minisgl.utils.misc.
+
+Fuzz-worthy function under test:
+- minisgl.utils.misc.div_even(a: int, b: int, allow_replicate: bool) -> int
+  along with div_ceil, align_ceil, align_down. These assert on preconditions
+  (b != 0, divisibility). Fuzzing them exercises assertion/exception paths
+  and arithmetic overflow boundaries with no setup cost.
+
+Oracles:
+- Must not crash the interpreter.
+- Library-expected exceptions: AssertionError, ZeroDivisionError, ValueError,
+  OverflowError.
+
+Harness plan:
+- Install the package without heavy deps (`pip install --no-deps -e .`) so the
+  import `minisgl.utils.misc` works.
+- Pull two ints and a bool from FuzzedDataProvider, call the four helpers,
+  catch expected exceptions.

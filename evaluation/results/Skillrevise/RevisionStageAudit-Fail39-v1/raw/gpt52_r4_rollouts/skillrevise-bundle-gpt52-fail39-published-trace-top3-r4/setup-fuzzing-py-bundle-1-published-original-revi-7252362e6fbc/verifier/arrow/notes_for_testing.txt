@@ -1,0 +1,35 @@
+Notes for testing / fuzzing: arrow
+
+High-value modules / boundaries
+- arrow/api.py -> arrow.get() (public API wrapper)
+- arrow/factory.py -> ArrowFactory.get(): accepts many user-controlled types, especially str + format lists
+- arrow/parser.py -> DateTimeParser.parse(), DateTimeParser.parse_iso(), TzinfoParser.parse(): regex/date parsing boundary
+- arrow/formatter.py + arrow/arrow.py -> Arrow.format(): formatting tokens and locale handling
+
+Suggested functions-under-test (FUTs)
+1) arrow.get(str)
+   - Parses ISO-like strings via DateTimeParser.parse_iso
+2) arrow.get(str, fmt_or_list)
+   - Parses according to explicit format(s) via DateTimeParser.parse / _parse_multiformat
+3) arrow.parser.DateTimeParser(locale).parse(string, fmt)
+4) arrow.parser.TzinfoParser.parse(tzinfo_string)
+5) arrow.Arrow.format(fmt)
+
+Input ideas
+- Datetime strings (ASCII + unicode, embedded whitespace/newlines, extremely long)
+- Format strings: include known tokens: YYYY, YY, MM, DD, HH, hh, mm, ss, S, Z, ZZZ, X, ZZ
+- Timezone expressions: "UTC", "local", "US/Pacific", "+02:00", "-00:00", "Etc/GMT+1", garbage strings
+
+Inferred oracles / properties
+- No crash / no hang on any input
+- If parsing succeeds: formatting output should be deterministic (format called twice yields same string)
+- If parse succeeds and we format to ISO (e.g., "YYYY-MM-DDTHH:mm:ssZZ"), re-parsing the output should either succeed or raise a well-defined ParserError (not crash)
+
+Expected/acceptable exceptions (treat as non-crash)
+- arrow.parser.ParserError, ParserMatchError
+- ValueError, TypeError, OverflowError
+
+Seed corpus ideas (from tests/docs)
+- "2013-09-29T01:26:43.830580"
+- "20160413T133656.456289"
+- "2013-05-05 12:30:45 America/Chicago" with fmt "YYYY-MM-DD HH:mm:ss ZZZ"

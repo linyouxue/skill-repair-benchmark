@@ -1,0 +1,31 @@
+Fuzzing notes (ipython)
+
+High-value inputs / boundaries
+- User-input parsing and transformation (string-heavy, tokenizer-heavy):
+  - IPython.core.inputtransformer2.TransformerManager.transform_cell()
+  - IPython.core.inputtransformer2.TransformerManager.check_complete()
+  - IPython.core.splitinput.split_user_input()
+
+Suggested functions-under-test (FUTs)
+1) TransformerManager.transform_cell(cell: str) -> str
+   - Runs multiple cleanup + line + token transforms.
+   - Potential edge cases with prompts, magics, escapes, bracket depth, tokenization.
+
+2) TransformerManager.check_complete(cell: str) -> (status, indent)
+   - Determines whether code is complete/incomplete/invalid.
+   - Has multiple tokenization and transformation passes.
+
+3) split_user_input(line: str) -> (pre, esc, ifun, the_rest)
+   - Regex-based splitting; useful smaller target.
+
+Acceptable exceptions (treat as non-findings)
+- SyntaxError / tokenize.TokenError
+- ValueError / TypeError for clearly-invalid input shapes
+
+Suspicious exceptions (let them surface)
+- RuntimeError (e.g., TRANSFORM_LOOP_LIMIT reached)
+- AssertionError
+
+Performance / DoS notes
+- Cap cell length (e.g., <= 2KB) to reduce worst-case tokenization time.
+- Avoid unbounded loops; check_complete/transform_cell already have some guardrails.
