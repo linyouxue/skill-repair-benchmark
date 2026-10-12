@@ -1,0 +1,128 @@
+diff --git a/image-ocr/SKILL.md b/image-ocr/SKILL.md
+--- a/image-ocr/SKILL.md
++++ b/image-ocr/SKILL.md
+@@ -216,6 +216,33 @@ def process_image_directory(directory_path, output_file):
+     return results
+ ```
+ 
++### Checkpointed Batch OCR
++
++For a batch whose OCR text feeds later parsing or file generation, use a
++checkpointed pipeline with observable completion criteria:
++
++1. **Inventory** - Create one deterministic, sorted list of inputs and a status
++   record for every filename before OCR starts.
++2. **Acquire and checkpoint** - Run one baseline OCR pass per image. Immediately
++   append its raw text, OCR configuration, warnings, and terminal status to a
++   durable JSON/JSONL cache. A resumed run processes only records without a
++   terminal status.
++3. **Parse the cache** - Treat cached OCR observations as the input to field
++   extraction. Parser, regular-expression, priority, and formatting changes rerun
++   against the cache rather than triggering another full OCR batch.
++4. **Escalate selectively** - Send only images with missing, conflicting, or
++   structurally invalid required fields to a bounded multi-pass retry. Append every
++   retry observation and its provenance to the same cache.
++5. **Measure progress** - After each image, report the completed count and current
++   filename. Repeated polls with no new output and no increase in completed records
++   trigger termination of that attempt followed by resume from the checkpoint.
++6. **Materialize separately** - Build the requested artifact from normalized cached
++   records in a short, deterministic command. Represent unresolved fields using the
++   task's required null or error value so one image cannot block batch delivery.
++7. **Gate completion** - Finish only after every inventoried input has a terminal
++   status and the exact requested artifact exists, reopens successfully, and meets
++   its required schema and ordering.
++
+ 
+ ## Tesseract Configuration Options
+ 
+@@ -297,45 +324,62 @@ For difficult images (low contrast, faded text, dark backgrounds), try multiple
+ 
+ ## Multi-Pass OCR Strategy
+ 
+-For challenging images, a single OCR pass may miss text. Use multiple passes with different configurations:
+-
+-1. **Try multiple PSM modes** - Different page segmentation modes work better for different layouts (e.g., `--psm 6` for blocks, `--psm 4` for columns, `--psm 11` for sparse text)
+-
+-2. **Try multiple preprocessing variants** - Run OCR on several preprocessed versions of the same image
+-
+-3. **Combine results** - Aggregate text from all passes to maximize extraction coverage
++Use multi-pass OCR only for images whose baseline observation leaves a required
++field missing, conflicting, or structurally invalid. Preserve each pass as a
++separate observation so downstream extraction can resolve fields independently:
++
++1. **Try a bounded set of PSM modes** - Different page segmentation modes work
++   better for different layouts (for example, `--psm 6` for blocks, `--psm 4`
++   for columns, and `--psm 11` for sparse text).
++2. **Try a bounded set of preprocessing variants** - Run OCR on selected
++   preprocessed versions of the difficult image.
++3. **Keep provenance** - Store the text together with its preprocessing variant
++   and PSM mode. Preserve line or bounding-box context when it is available.
++4. **Resolve per field** - Select each target field using field-local evidence:
++   label proximity, required keyword priority, valid format and range, layout
++   context, and agreement across passes. Whole-page average confidence is a broad
++   quality signal; it is not a valid reason to select one pass for every field.
++5. **Expose unresolved conflicts** - When evidence cannot distinguish competing
++   candidates, use the task's specified null/error representation and record the
++   conflict instead of inventing a value or concatenating unrelated pass text.
+ 
+ ```python
+ def multi_pass_ocr(image_path):
+-    """Run OCR with multiple strategies and combine results."""
++    """Return bounded OCR observations with their provenance."""
+     img = Image.open(image_path)
+     gray = ImageOps.grayscale(img)
+ 
+     # Generate preprocessing variants
+     variants = [
+-        ImageOps.autocontrast(gray),
+-        ImageOps.invert(ImageOps.autocontrast(gray)),
+-        gray.filter(ImageFilter.SHARPEN),
++        ("autocontrast", ImageOps.autocontrast(gray)),
++        ("inverted", ImageOps.invert(ImageOps.autocontrast(gray))),
++        ("sharpened", gray.filter(ImageFilter.SHARPEN)),
+     ]
+ 
+     # PSM modes to try
+     psm_modes = ['--psm 6', '--psm 4', '--psm 11']
+ 
+-    all_text = []
+-    for variant in variants:
++    observations = []
++    for variant_name, variant in variants:
+         for psm in psm_modes:
+             try:
+                 text = pytesseract.image_to_string(variant, config=psm)
+                 if text.strip():
+-                    all_text.append(text)
++                    observations.append({
++                        "variant": variant_name,
++                        "psm": psm,
++                        "text": text,
++                    })
+             except Exception:
+                 pass
+ 
+-    # Combine all extracted text
+-    return "\n".join(all_text)
++    return observations
+ ```
+ 
+-This approach improves extraction for receipts, faded documents, and images with varying quality.
++Parse these observations into per-field candidates and retain the winning
++candidate's provenance. This approach improves extraction for receipts, faded
++documents, and images with varying quality without allowing a high-confidence
++region elsewhere on the page to override the evidence for a target field.
+ 
+ 
+ ## Error Handling
+@@ -375,6 +419,10 @@ Before returning results, verify:
+ - [ ] Confidence level reflects actual OCR quality
+ - [ ] Warnings array includes all detected issues
+ - [ ] Special characters are properly escaped in JSON
++- [ ] Every batch input has a terminal status in the checkpoint
++- [ ] Required fields were resolved independently with candidate provenance
++- [ ] Missing or conflicting fields use the task's specified null/error value
++- [ ] The exact requested final artifact exists, reopens, and has the required schema
+ 
+ 
+ ## Limitations

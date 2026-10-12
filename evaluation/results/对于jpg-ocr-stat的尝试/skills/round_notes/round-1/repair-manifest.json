@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "task_id": "jpg-ocr-stat",
+  "round": 1,
+  "status": "prepared-awaiting-agent-validation",
+  "classification": "checkpointed batch OCR and field-level multi-pass adjudication repair",
+  "source_rollouts": [
+    "jpg-ocr-stat-original-skill-v11x-20260903-r001-recovery001"
+  ],
+  "source_evidence": {
+    "observed_failure": "The agent repeatedly extracted and printed records for all 22 receipt images, but the fifth complete OCR pass never reached workbook save. Four consecutive polls showed no new progress; the rollout terminated as stuck and /app/workspace/stat_ocr.xlsx was absent. Offline comparison of the final printed records with the oracle also found three field mismatches, so eventual file creation alone would not have passed.",
+    "earliest_functional_error": "At trajectory event 9, the agent launched an uncheckpointed full-batch multi-pass OCR procedure and selected one whole-page OCR result by average confidence. Parser revisions then repeated the entire batch instead of reusing observations, and field-specific evidence found during targeted inspection was not carried into final candidate selection.",
+    "non_failure_boundaries": [
+      "the rollout has execution_ok=true and complete protocol evidence",
+      "persistent full-body preload of the official Skill bundle is verified",
+      "pytesseract and openpyxl were available and working",
+      "the agent demonstrated successful OCR over all 22 inputs before the final stuck command",
+      "the official verifier stopped at the missing-file assertion; an offline oracle comparison was used only to diagnose the already printed fields and no oracle value is included in the repair"
+    ]
+  },
+  "repair_type": [
+    "skill_missing_guidance",
+    "skill_ambiguous_guidance"
+  ],
+  "targets": [
+    {
+      "repair_item": "RI-001",
+      "tag": "skill_missing_guidance",
+      "skill": "image-ocr",
+      "file": "image-ocr/SKILL.md",
+      "section": "Batch Processing Multiple Images / Checkpointed Batch OCR",
+      "description_skill_error": "The official batch example saves results only after the loop and does not separate OCR acquisition from downstream parsing. It gives no resume cache, selective-retry boundary, or no-progress handling for a long batch.",
+      "gold_repair": "Inventory inputs deterministically; persist each baseline OCR observation incrementally; revise parsers against cached text; rerun OCR only for evidence-backed difficult images with bounded alternatives; expose completed-file progress; resume from cache after no progress; materialize the requested artifact in a separate short step; require every input and the final artifact to pass explicit completion gates."
+    },
+    {
+      "repair_item": "RI-002",
+      "tag": "skill_ambiguous_guidance",
+      "skill": "image-ocr",
+      "file": "image-ocr/SKILL.md",
+      "section": "Multi-Pass OCR Strategy / Quality Self-Check",
+      "description_skill_error": "The official multi-pass guidance says to combine results but does not require pass provenance or define field-level conflict resolution. This permits selection of one entire OCR pass by whole-page average confidence even when another pass contains stronger evidence for a target field.",
+      "gold_repair": "Preserve every bounded retry as a separate provenance-bearing observation; resolve each required field independently using label proximity, task keyword priority, format and range validity, layout context, and cross-pass agreement; use the required null/error representation for unresolved conflicts; verify terminal batch status and the final artifact before completion."
+    }
+  ],
+  "validation": {
+    "rollout_id": "jpg-ocr-stat-round-1-r003",
+    "policy": "one-valid-fresh-rollout-pass",
+    "model": "openrouter/openai/gpt-5.2",
+    "agent": "openhands",
+    "max_parent_iterations_per_step": 60,
+    "rollouts": 1,
+    "status": "pending-after-infrastructure-void-r001-r002",
+    "acceptance_boundary": "One valid reward-1 fresh rollout with the current completion guard is required before either repair item is accepted as Gold. File creation alone is insufficient; the official verifier must validate all OCR-derived cells."
+  }
+}
