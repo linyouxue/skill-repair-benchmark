@@ -131,8 +131,8 @@ for col in numeric_cols:
 
 Hard constraints:
 - Load the provided per-feature reference table and mechanically derive `ref_ranges` and `ref_conversions` from it.
-- **Hard stop (operational gate)**: before any conversion loop runs, you must (a) call the reference-loading routine and (b) pass `verify_reference(ref_ranges, ref_conversions, numeric_cols)` with **non-empty** `ref_ranges`; otherwise abort and fix reference loading/coverage.
-- Do **not** hard-code per-analyte “physiological ranges”, thresholds, or conversion factors in code (except as a direct parse of the reference).
+- **Hard stop (operational gate)**: before *any* conversion logic runs, you must (a) load/parse the reference via the reference-loading procedure and (b) pass `verify_reference(ref_ranges, ref_conversions, numeric_cols)` with **non-empty** `ref_ranges`; otherwise abort and fix reference loading/coverage.
+- Do **not** create fallback dictionaries (e.g., `ranges`, `conversions`, `factors`, `physiologic_ranges`) unless they are direct outputs of the reference parser (prefer the canonical names `ref_ranges/ref_conversions`).
 - If conversion is ambiguous (multiple candidates fit) or unresolved (none fit), keep the original value and emit an explicit status (and an audit artifact when required).
 
 Algorithm (per cell):
@@ -142,6 +142,16 @@ Algorithm (per cell):
 4. If multiple candidates land in-range or none do → **do not force**; leave unchanged and flag as ambiguous
 
 ```python
+# Operational gate: make reference-derived inputs mandatory *before* defining conversion logic.
+# (Parsing itself lives in references/reference-loading.md.)
+ref_ranges, ref_conversions = load_reference_markdown(reference_path)
+assert isinstance(ref_ranges, dict) and len(ref_ranges) > 0, "ref_ranges must be parsed from the authoritative reference"
+
+ok, report = verify_reference(ref_ranges, ref_conversions, numeric_cols)
+if not ok:
+    raise ValueError(f"Reference not usable; refusing conversion: {report}")
+
+
 def convert_range_triggered(value, feature, ref_ranges, ref_conversions, tol=0.0):
     """Range-triggered unit conversion using per-feature candidates only."""
     if pd.isna(value) or feature not in ref_ranges:
@@ -166,15 +176,9 @@ def convert_range_triggered(value, feature, ref_ranges, ref_conversions, tol=0.0
     if len(hits) == 1:
         return hits[0], 'converted'
 
-    # Rule 3: ambiguity -> do not force a blanket conversion
+    # Rule 3: ambiguity -> do not force
     return value, 'ambiguous_or_no_match'
 
-# Operational gate: refuse heuristic conversion unless the reference is parsed + verified.
-# (Parsing itself lives in references/reference-loading.md.)
-assert isinstance(ref_ranges, dict) and len(ref_ranges) > 0, "ref_ranges must be parsed from the authoritative reference"
-ok, report = verify_reference(ref_ranges, ref_conversions, numeric_cols)
-if not ok:
-    raise ValueError(f"Reference not usable; refusing conversion: {report}")
 
 for col in numeric_cols:
     df[col], df[col + '_status'] = zip(*df[col].apply(
@@ -186,7 +190,7 @@ Decision rule: When the reference cannot be parsed/verified, stop and fix parsin
 
 Read references/reference-loading.md when the task provides a per-feature reference file (or path) and you must mechanically derive `ref_ranges`/`ref_conversions` and verify coverage before converting. Skip when the task already provides verified `ref_ranges` and `ref_conversions` as in-memory objects.
 
-Read references/ambiguity-and-flagging.md when any feature yields multiple in-range candidates or no in-range candidate and you need an audit artifact + a verification check that prescribes next actions. Skip when the dataset is guaranteed single-unit-per-feature and the reference candidates are non-overlapping.
+Read references/ambiguity-and-flagging.md when any cell yields `len(hits) != 1` (i.e., ambiguous multi-hit or no in-range candidate) and you need an audit artifact + a verification check that prescribes next actions. Skip when the dataset is guaranteed single-unit-per-feature and the reference candidates are non-overlapping.
 
 ### Step 3: Format Output (2 Decimal Places)
 
