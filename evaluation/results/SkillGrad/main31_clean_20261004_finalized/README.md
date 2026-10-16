@@ -36,3 +36,7 @@ Only publication-allowlisted run evidence is included: `executor_request.json`,
 Verifier, Gold, oracle, private evaluator, secret, discarded, debug, timeout, and
 polluted historical-chain artifacts are excluded. The effective task set is
 defined by `submission.json` and the generated trajectory timeline index.
+
+## Canonical syzkaller S2 addition (2026-10-16)
+
+Effective task count: 28 (LOCAL25 + SERVER3). The original 27 task directories and submission entries are preserved. `syzkaller-ppdev-syzlang` is finalized PASS at S2 under protocol v2 and `vllm/gpt-5.2`. Its raw S0 and S2 ACP/LLM trajectories, training rows, scoring metadata and exact repaired Skill are included; verifier implementation and private configuration are excluded. No model or formal execution was rerun. Azure BGP, energy-market and Druid remain excluded.
