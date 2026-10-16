@@ -1,42 +1,56 @@
-# SkillGrad MAIN31 combined finalized publication
+# SkillGrad MAIN31 finalized publication
 
-This directory contains the effective SkillGrad MAIN31 finalized publication after combining trusted LOCAL and accepted SERVER results.
+The effective submission contains **28 finalized tasks: LOCAL25 + SERVER3**.
+The three SERVER additions are `lab-unit-harmonization`,
+`dynamic-object-aware-egomotion`, and `syzkaller-ppdev-syzlang`.
+The original 27 task results and submission entries are preserved.
 
-- Method: SkillGrad
-- Effective submission task count: 27
-- LOCAL finalized tasks: 25
-- SERVER finalized tasks: 2
-- LOCAL verifier outcomes: PASS = 8, FAIL = 17
-- SERVER additions preserved: lab-unit-harmonization, dynamic-object-aware-egomotion
-- Ownership conflict retained but excluded: paper-anonymizer-server-ownership-conflict.json
-- fix-druid-loophole-cve is not included; it is server-owned and has no finalized result in this publication.
+Syzkaller is finalized PASS at S2 under frozen protocol v2 and
+`vllm/gpt-5.2`. Its original D0 diagnosis is preserved verbatim. S2 PASS does
+not establish that the original diagnosis or final-turn lint repair was correct;
+the independent audit's diagnostic-quality limitations remain in force.
 
-The eight tasks added by this publication gate are:
+The three remaining non-finalized tasks are Azure BGP, energy-market pricing,
+and Druid. They are not included. The server paper-anonymizer ownership conflict
+is also excluded; its trusted LOCAL result remains effective.
 
-- reserves-at-risk-calc: FAIL @ S5
-- software-dependency-audit: PASS @ S2
-- bike-rebalance: FAIL @ S5
-- video-silence-remover: FAIL @ S5
-- fix-build-agentops: FAIL @ S5
-- fix-build-google-auto: FAIL @ S5
-- multilingual-video-dubbing: PASS @ S1
-- seismic-phase-picking: PASS @ S1
+## Publication allowlist
 
-Each effective task directory contains:
+Each task contains its exact repaired Skill and original/repaired run evidence.
+For each run, only the original publication-allowlisted files are distributed:
 
-```text
-tasks/<task>/
-|-- repaired_skill/
-|-- original_run/
-`-- repaired_run/
-```
+- `executor_request.json`
+- `result.json`
+- `benchmark_result.json`
+- `trajectory/acp_trajectory.jsonl`
 
-Only publication-allowlisted run evidence is included: `executor_request.json`,
-`result.json`, `benchmark_result.json`, and `trajectory/acp_trajectory.jsonl`.
-Verifier, Gold, oracle, private evaluator, secret, discarded, debug, timeout, and
-polluted historical-chain artifacts are excluded. The effective task set is
-defined by `submission.json` and the generated trajectory timeline index.
+Official Markdown timelines and the index provide 28 before/28 after pairs.
+LLM trajectories, training `results.jsonl`, rewards/timing sidecars, scoring/CTRF,
+verifier stdout, verifier implementation, Gold/oracle, private configuration,
+caches and discarded histories are excluded from the current publication tree.
+Full canonical evidence is retained privately on the server and in the recovery
+export. The private complete S0/S2 artifact gate passed 2/2; the allowlisted public
+package is not a self-contained training release.
 
-## Canonical syzkaller S2 addition (2026-10-16)
+Earlier PR commits included files outside this allowlist, including hidden test
+identifiers in scoring output. They have been removed from the current tree;
+earlier GitHub commits may remain accessible. No obvious credentials were found
+by the recorded scan; this is not a guarantee that all historical disclosures
+have been erased.
 
-Effective task count: 28 (LOCAL25 + SERVER3). The original 27 task directories and submission entries are preserved. `syzkaller-ppdev-syzlang` is finalized PASS at S2 under protocol v2 and `vllm/gpt-5.2`. Its raw S0 and S2 ACP/LLM trajectories, training rows, scoring metadata and exact repaired Skill are included; verifier implementation and private configuration are excluded. No model or formal execution was rerun. Azure BGP, energy-market and Druid remain excluded.
+## Gold/version mapping pending human review
+
+The existing complete Gold is `evaluation/data/skillsbench87/gold.json`, version
+`manual-gold-defects-20260917-v25`, containing 31 tasks and 57 defects.
+All 28 submitted task IDs are within that Gold. The inherited submission label
+`core25-gold-defects-20260909-v1` instead refers to the Core25 Gold with 7 tasks
+and 14 defects, so it must not be presented as a complete MAIN31 scoring target.
+
+This PR preserves the inherited `benchmark_version`, frozen Gold, protocol and
+formal results. Proposed correction only: after explicit review, align publication
+metadata and the documented evaluation target with the existing complete Gold,
+using its explicit path/version. Do not change frozen scoring contents or infer
+new scores from this metadata correction.
+
+Human review is required before merging. Current-tree allowlist compliance is
+restored, but Gold metadata alignment and historical disclosure remain review items.
