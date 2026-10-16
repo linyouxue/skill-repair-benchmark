@@ -1,0 +1,164 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.3.4, pluggy-1.6.0 -- /usr/bin/python3
+rootdir: /root
+configfile: ../dev/null
+plugins: json-ctrf-0.3.6
+collecting ... collected 7 items
+
+::TestFilesAndIncludes::test_files_exist_and_have_includes FAILED        [ 14%]
+::TestCompilation::test_compilation_and_const_validation FAILED          [ 28%]
+::TestResourceAndOpen::test_fd_ppdev_resource_and_open FAILED            [ 42%]
+::TestCoreIoctls::test_all_ioctls_with_correct_signatures FAILED         [ 57%]
+::TestStructsAndFlags::test_structs_and_flags_defined FAILED             [ 71%]
+::TestConstantValues::test_ioctl_and_mode_constant_values FAILED         [ 85%]
+::TestSyzkallerBuild::test_build_syzkaller FAILED                        [100%]
+
+=================================== FAILURES ===================================
+___________ TestFilesAndIncludes.test_files_exist_and_have_includes ____________
+
+self = <test_outputs.TestFilesAndIncludes object at 0x7c7cb3ea6ba0>
+
+    def test_files_exist_and_have_includes(self):
+        """Check that both files exist and syzlang has required includes."""
+        # Check files exist
+        assert os.path.exists(SYZLANG_FILE), f"File {SYZLANG_FILE} does not exist"
+>       assert os.path.exists(CONST_FILE), f"File {CONST_FILE} does not exist"
+E       AssertionError: File /opt/syzkaller/sys/linux/dev_ppdev.txt.const does not exist
+E       assert False
+E        +  where False = <function exists at 0x7c7cb46afd80>('/opt/syzkaller/sys/linux/dev_ppdev.txt.const')
+E        +    where <function exists at 0x7c7cb46afd80> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+
+/verifier/test_outputs.py:60: AssertionError
+____________ TestCompilation.test_compilation_and_const_validation _____________
+
+self = <test_outputs.TestCompilation object at 0x7c7cb3d47d70>
+
+    def test_compilation_and_const_validation(self):
+        """Check make descriptions succeeds and const file is valid."""
+        # Run make descriptions
+        result = subprocess.run(["make", "descriptions"], cwd="/opt/syzkaller", capture_output=True, text=True, timeout=300)
+>       assert result.returncode == 0, f"make descriptions failed:\n{result.stderr}\n{result.stdout}"
+E       AssertionError: make descriptions failed:
+E         tput: No value for $TERM and no -T specified
+E         tput: No value for $TERM and no -T specified
+E         go: downloading go1.24.4 (linux/amd64)
+E         go: download go1.24.4: golang.org/toolchain@v0.0.1-go1.24.4.linux-amd64: Get "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.24.4.linux-amd64.zip": dial tcp 142.251.34.209:443: connect: connection refused
+E         Makefile:74: *** syz-make failed.  Stop.
+E         
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['make', 'descriptions'], returncode=2, stdout='', stderr='tput: No value for $TERM and no -T specified\ntput: No value for $TERM and no -T specified\ngo: downloading go1.24.4 (linux/amd64)\ngo: download go1.24.4: golang.org/toolchain@v0.0.1-go1.24.4.linux-amd64: Get "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.24.4.linux-amd64.zip": dial tcp 142.251.34.209:443: connect: connection refused\nMakefile:74: *** syz-make failed.  Stop.\n').returncode
+
+/verifier/test_outputs.py:75: AssertionError
+_____________ TestResourceAndOpen.test_fd_ppdev_resource_and_open ______________
+
+self = <test_outputs.TestResourceAndOpen object at 0x7c7cb3d47fb0>
+
+    def test_fd_ppdev_resource_and_open(self):
+        """Check fd_ppdev resource and syz_open_dev are correctly defined."""
+        content = read_syzlang_file()
+        # Resource must be fd type
+>       assert re.search(r"resource\s+fd_ppdev\s*\[\s*fd\s*\]", content), "Missing resource fd_ppdev[fd] definition"
+E       AssertionError: Missing resource fd_ppdev[fd] definition
+E       assert None
+E        +  where None = <function search at 0x7c7cb43d8720>('resource\\s+fd_ppdev\\s*\\[\\s*fd\\s*\\]', '')
+E        +    where <function search at 0x7c7cb43d8720> = re.search
+
+/verifier/test_outputs.py:98: AssertionError
+____________ TestCoreIoctls.test_all_ioctls_with_correct_signatures ____________
+
+self = <test_outputs.TestCoreIoctls object at 0x7c7cb3d47950>
+
+    def test_all_ioctls_with_correct_signatures(self):
+        """Check all ppdev ioctls are defined with correct signatures."""
+        content = read_syzlang_file()
+    
+        # Check claim ioctls have no data argument (these are _IO() ioctls)
+        for ioctl in ["PPCLAIM", "PPRELEASE", "PPYIELD", "PPEXCL"]:
+>           assert re.search(
+                rf"ioctl\${ioctl}\s*\(\s*fd\s+fd_ppdev\s*,\s*cmd\s+const\[{ioctl}\]\s*\)", content
+            ), f"ioctl${ioctl} should have signature: (fd fd_ppdev, cmd const[{ioctl}])"
+E           AssertionError: ioctl$PPCLAIM should have signature: (fd fd_ppdev, cmd const[PPCLAIM])
+E           assert None
+E            +  where None = <function search at 0x7c7cb43d8720>('ioctl\\$PPCLAIM\\s*\\(\\s*fd\\s+fd_ppdev\\s*,\\s*cmd\\s+const\\[PPCLAIM\\]\\s*\\)', '')
+E            +    where <function search at 0x7c7cb43d8720> = re.search
+
+/verifier/test_outputs.py:113: AssertionError
+______________ TestStructsAndFlags.test_structs_and_flags_defined ______________
+
+self = <test_outputs.TestStructsAndFlags object at 0x7c7cb3d472f0>
+
+    def test_structs_and_flags_defined(self):
+        """Check ppdev_frob_struct and IEEE1284/ppdev flags are defined."""
+        content = read_syzlang_file()
+    
+        # Check ppdev_frob_struct
+        struct_match = re.search(r"ppdev_frob_struct\s*\{([^}]+)\}", content)
+>       assert struct_match, "Missing ppdev_frob_struct definition"
+E       AssertionError: Missing ppdev_frob_struct definition
+E       assert None
+
+/verifier/test_outputs.py:160: AssertionError
+____________ TestConstantValues.test_ioctl_and_mode_constant_values ____________
+
+self = <test_outputs.TestConstantValues object at 0x7c7cb3d47290>
+
+    def test_ioctl_and_mode_constant_values(self):
+        """Check ioctl and IEEE1284 mode constants have correct values."""
+>       consts = parse_const_file()
+
+/verifier/test_outputs.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/verifier/test_outputs.py:36: in parse_const_file
+    content = read_const_file()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def read_const_file():
+        """Read the constants file."""
+>       assert os.path.exists(CONST_FILE), f"const file not found at {CONST_FILE}"
+E       AssertionError: const file not found at /opt/syzkaller/sys/linux/dev_ppdev.txt.const
+E       assert False
+E        +  where False = <function exists at 0x7c7cb46afd80>('/opt/syzkaller/sys/linux/dev_ppdev.txt.const')
+E        +    where <function exists at 0x7c7cb46afd80> = <module 'posixpath' (frozen)>.exists
+E        +      where <module 'posixpath' (frozen)> = os.path
+
+/verifier/test_outputs.py:29: AssertionError
+___________________ TestSyzkallerBuild.test_build_syzkaller ____________________
+
+self = <test_outputs.TestSyzkallerBuild object at 0x7c7cb3d47020>
+
+    def test_build_syzkaller(self):
+        """Build syzkaller binaries to verify descriptions are valid."""
+        result = subprocess.run(
+            ["make", "all"],
+            cwd="/opt/syzkaller",
+            capture_output=True,
+            text=True,
+            timeout=600,
+            env={**os.environ, "TARGETOS": "linux", "TARGETARCH": "amd64"},
+        )
+>       assert result.returncode == 0, f"make all failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+E       AssertionError: make all failed:
+E         STDOUT:
+E         
+E         STDERR:
+E         tput: No value for $TERM and no -T specified
+E         tput: No value for $TERM and no -T specified
+E         go: downloading go1.24.4 (linux/amd64)
+E         go: download go1.24.4: golang.org/toolchain@v0.0.1-go1.24.4.linux-amd64: Get "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.24.4.linux-amd64.zip": dial tcp 142.251.34.209:443: connect: connection refused
+E         Makefile:74: *** syz-make failed.  Stop.
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['make', 'all'], returncode=2, stdout='', stderr='tput: No value for $TERM and no -T specified\ntput: No value for $TERM and no -T specified\ngo: downloading go1.24.4 (linux/amd64)\ngo: download go1.24.4: golang.org/toolchain@v0.0.1-go1.24.4.linux-amd64: Get "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.24.4.linux-amd64.zip": dial tcp 142.251.34.209:443: connect: connection refused\nMakefile:74: *** syz-make failed.  Stop.\n').returncode
+
+/verifier/test_outputs.py:212: AssertionError
+=========================== short test summary info ============================
+FAILED ::TestFilesAndIncludes::test_files_exist_and_have_includes - Assertion...
+FAILED ::TestCompilation::test_compilation_and_const_validation - AssertionEr...
+FAILED ::TestResourceAndOpen::test_fd_ppdev_resource_and_open - AssertionErro...
+FAILED ::TestCoreIoctls::test_all_ioctls_with_correct_signatures - AssertionE...
+FAILED ::TestStructsAndFlags::test_structs_and_flags_defined - AssertionError...
+FAILED ::TestConstantValues::test_ioctl_and_mode_constant_values - AssertionE...
+FAILED ::TestSyzkallerBuild::test_build_syzkaller - AssertionError: make all ...
+============================== 7 failed in 44.30s ==============================

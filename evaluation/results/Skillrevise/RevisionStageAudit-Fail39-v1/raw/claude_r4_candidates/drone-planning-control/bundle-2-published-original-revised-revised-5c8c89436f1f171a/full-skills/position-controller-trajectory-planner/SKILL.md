@@ -1,0 +1,27 @@
+# Quadrotor Closed-Loop Pipeline and Artifact Contract
+
+## Purpose
+Guide implementation of a complete quadrotor task-family pipeline: parse flight plans, plan position and attitude trajectories, run cascaded PID control through a motor model and rigid-body dynamics, compute metrics, generate plots, and emit a verifier-aligned artifact set per command. The skill specifies contract-level rules (schemas, continuity, thrust physics, verification) rather than fixed implementations, so sibling tasks with different waypoints, gains, or file layouts remain in scope.
+
+## When to Use
+Apply when a task supplies one or more flight-plan command files (waypoints plus segment modes such as takeoff, hover, fly, land), a system parameters file (mass, gravity, thrust limits, sample rate), and expects per-command artifacts describing planned and actual trajectories, tracking metrics, tuned PID gains, and plots. Use the full pipeline unless the task explicitly scopes you to a single module.
+
+## Procedure
+- Discover the environment. Locate the system parameters file (search for a yaml or json with mass, gravity, thrust_min, thrust_max, sample_rate), the commands directory, and the task-declared results root. Do not hardcode paths; read them from the task prompt or by directory listing. Derive dt = 1.0 / sample_rate and the three acceleration limits from thrust and mass: upward_max = (T_max - m*g)/m, downward_min = -(m*g - T_min)/m, horizontal_max = sqrt(T_max^2 - (m*g)^2)/m.
+- Parse each command file into waypoints, waypoint_times, modes, yaw targets, and max_iter. For hover segments hold position with zero velocity and acceleration. For takeoff, fly, and land segments produce a trajectory that is at least C2-continuous in position with bounded jerk; prefer quintic or minimum-jerk time scaling. Do not assume cubic splines are sufficient; verify that the resulting acceleration respects the derived limits at every sample.
+- Build the planned state matrix of shape (15, max_iter) with rows pos[0:3], vel[3:6], orientation[6:9], angular_velocity[9:12], acceleration[12:15]. Interpolate yaw smoothly across non-hover segments.
+- Implement the position controller as PID on position and velocity errors with an explicit integral state created fresh per run (no mutable default argument). Output a desired acceleration vector a_des.
+- Compute thrust using tilt-compensated magnitude: F = m * norm(a_des + g * e_z), where e_z = [0,0,1]. Do not use F = m*(g + a_z); that form ignores tilt and causes tracking failure when roll or pitch is nonzero.
+- Implement an attitude planner that maps a_des and desired yaw to a desired orientation, and an attitude controller (PID on orientation and angular-velocity errors) that outputs body torques. Combine thrust and torques through a motor model into rotor commands, then integrate rigid-body dynamics at dt to produce the actual trajectory.
+- After simulation, compute metrics (RiseTime, SettlingTime, Overshoot_pct, SteadyStateError) and verify: per-timestep norm(p_actual - p_des) below the task tolerance (default 0.05 m if unspecified), overshoot below the task bound, planned acceleration within all three limits. If any check fails, retune gains or replan; do not emit artifacts from a failing run without recording the failure.
+- Write per-command artifacts under the task-declared results root in a subdirectory keyed by the command label (filename stem). Required files: planned_trajectory.npy (15 by max_iter), actual_trajectory.npy (same row layout), metrics_3d.json with the four metric keys, tuning_results.json containing position gains (kp_pos, ki_pos, kd_pos) AND attitude gains (kp_att, ki_att, kd_att), and a plots subdirectory with desired-vs-actual, errors, and cumulative-error figures.
+- Execution anchor: after writing, reload every required file, assert array shapes and JSON keys match the schema above, and print a single PASS line per command listing each verified path. If any assertion fails, raise and stop before continuing to the next command. Also log max tracking error and acceleration-limit margins so a reviewer can confirm the numeric thresholds without rerunning.
+
+## Constraints / Pitfalls
+- Treat the pipeline as a whole: parser, position loop, attitude loop, motor model, dynamics, metrics, plots, and orchestration are all in scope. Do not emit partial artifact sets.
+- Use contract-level rules, not literal implementations: C2-continuous bounded-jerk planning, tilt-compensated thrust magnitude, and PID with explicit integral state. Replace any instance-specific formula if it conflicts with these rules.
+- Never hardcode dt, time_final, results root, or acceleration limits; derive each from parsed inputs. If sample_rate or thrust limits are missing, stop and report rather than guessing.
+- The tuning_results.json schema must include attitude gains alongside position gains; omission is a verifier failure even when tracking is accurate.
+- Keep the integral state local to each run; a mutable default will leak state across commands.
+- Do not switch output paths silently if a write fails; inspect permissions and the task-declared root, fix the route, and re-verify at the exact declared path.
+- If a chosen planner (for example cubic) produces acceleration spikes beyond the derived limits, escalate to a higher-order time scaling rather than clipping, since clipping breaks C2 continuity.

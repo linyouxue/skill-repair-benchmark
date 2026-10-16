@@ -1,0 +1,43 @@
+arrow — notes for fuzz testing
+================================
+
+Library: /app/arrow (installable as `arrow`)
+Package deps (runtime): python-dateutil, tzdata, (backports.zoneinfo on py<3.9)
+
+Primary FUT (fuzz target):
+  qualname: arrow.api.get   (module-level `arrow.get`)
+  file:line: arrow/factory.py (ArrowFactory.get) via arrow/api.py
+  import: `import arrow; arrow.get(<arg>)`
+  input type: str (datetime string, optionally with a format pattern)
+  rationale: user-input parser boundary that accepts arbitrary datetime
+    strings; wraps DateTimeParser.parse / parse_iso which include regex and
+    format-string handling — a classic coverage-guided fuzz target.
+
+Secondary FUT (also exercised through api.get):
+  qualname: arrow.parser.DateTimeParser.parse_iso
+  file:line: arrow/parser.py:252 (parse_iso), parser.py:373 (parse)
+
+Invalid-input exceptions (CAUGHT, early return in harness):
+  - arrow.parser.ParserError                 (subclass of ValueError)
+  - arrow.parser.ParserMatchError            (subclass of ParserError)
+  - ValueError                               (dateutil/zoneinfo validation)
+  - TypeError                                (bad arg types from FDP)
+  - OverflowError                            (huge timestamps)
+  - zoneinfo.ZoneInfoNotFoundError           (unknown tz string)
+
+Real-crash exceptions (PROPAGATE):
+  - any uncaught exception (AssertionError, IndexError, RecursionError,
+    AttributeError, KeyError, SystemError, MemoryError, UnicodeError
+    paths that are not documented invalid-input).
+
+Oracle: crash-only (no uncaught exception for user-supplied strings).
+
+Seeds (fed by FuzzedDataProvider as a string):
+  "2024-01-01", "2024-01-01T12:34:56Z", "15/01/2020 10:00",
+  "now", "yesterday", "P1DT2H", "1577836800", "invalid".
+
+Fuzz entry (pseudocode):
+  fdp = FuzzedDataProvider(data)
+  s = fdp.ConsumeUnicodeNoSurrogates(fdp.remaining_bytes())
+  try: arrow.get(s)
+  except INVALID_INPUT_EXCEPTIONS: return

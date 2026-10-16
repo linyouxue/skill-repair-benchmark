@@ -1,0 +1,59 @@
+diff --git a/agentops/__init__.py b/agentops/__init__.py
+index 1c2d4df..81f1ea6 100755
+--- a/agentops/__init__.py
++++ b/agentops/__init__.py
+@@ -9,7 +9,15 @@ from .enums import Models
+ from .decorators import record_function
+ from .agent import track_agent
+ from .log_config import set_logging_level_info, set_logging_level_critial
+-from .langchain_callback_handler import LangchainCallbackHandler, AsyncLangchainCallbackHandler
++
++try:
++    from .langchain_callback_handler import (
++        LangchainCallbackHandler,
++        AsyncLangchainCallbackHandler,
++    )
++except ImportError:
++    # LangChain is an optional dependency; allow `import agentops` without it.
++    pass
+ 
+ 
+ def init(api_key: Optional[str] = None,
+@@ -58,6 +66,9 @@ def init(api_key: Optional[str] = None,
+                inherited_session_id=inherited_session_id
+                )
+ 
++    if auto_start_session and getattr(c, "config", None) is not None and c.current_session_id is None:
++        c.start_session(tags, c.config, inherited_session_id)
++
+     return inherited_session_id or c.current_session_id
+ 
+ 
+diff --git a/agentops/langchain_callback_handler.py b/agentops/langchain_callback_handler.py
+index 65ee9e1..a49a390 100644
+--- a/agentops/langchain_callback_handler.py
++++ b/agentops/langchain_callback_handler.py
+@@ -5,7 +5,10 @@ from uuid import UUID
+ from langchain_core.agents import AgentFinish, AgentAction
+ from langchain_core.documents import Document
+ from langchain_core.outputs import ChatGenerationChunk, GenerationChunk, LLMResult
+-from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
++try:
++    from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
++except ImportError:
++    from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+ from langchain_core.messages import BaseMessage
+ 
+ from tenacity import RetryCallState
+diff --git a/tox.ini b/tox.ini
+index dd33922..637247e 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -5,6 +5,7 @@
+ 
+ [tox]
+ envlist = py37,py38,py39,py310,py311,py312
++skip_missing_interpreters = true
+ 
+ [testenv]
+ deps = 
