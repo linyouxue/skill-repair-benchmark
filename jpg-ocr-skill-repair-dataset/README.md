@@ -2,6 +2,40 @@
 
 2026-10-18发布版本。包含200张冻结小票、既有官方Skill baseline及多模态adapter输入契约，用于研究可复用Skill的人工与自动修复差异；比较结论以实际执行结果为准。
 
+## 目录结构
+
+```text
+jpg-ocr-skill-repair-dataset/
+├── README.md                         # 数据集说明、获取与使用入口
+├── ADAPTER_GUIDE.md                  # 各修复方法的多模态适配与交付要求
+├── DIAGNOSER_INPUT_SPEC.md           # 诊断输入、权限边界与六阶段修复规则
+├── SOURCE_PROVENANCE.md              # 数据和Skill的来源、引用及许可记录
+├── train/                           # 仅供人工与模型修复使用的训练材料
+│   ├── images/                      # 120张冻结训练原图
+│   ├── batches/                     # 固定六组、每组20图及三遍运行映射
+│   ├── runs/                        # 18次选定运行、允许反馈和真实产物
+│   ├── archives/                    # 完整ACP、LLM及ATIF轨迹的无损归档
+│   ├── skills/                      # 原始5个官方Skill及支持文件
+│   ├── baseline_merged/             # 第二遍真实完整的120行合并Excel
+│   ├── task_prompt.md               # 字节不变的原任务正文
+│   ├── baseline_report_original.md  # 既有训练正确率、交付情况与费用报告
+│   └── baseline_summary_original.json # 既有训练结果的机器可读汇总
+├── evaluation_only/                 # 最终冻结后评测使用，禁止进入修复上下文
+│   ├── test1/                       # 原测试集40图及既有三遍baseline
+│   ├── test2/                       # 原验证集40图，现仅作最终评测
+│   ├── runtime/                     # GT、原评分实现及配套免费评分工具
+│   └── README.md                    # 评测材料的使用边界
+├── tools/                           # 不调用模型的本地辅助检查
+│   └── check_adapter_record.py      # 检查adapter输入记录的结构与范围
+├── adapter_input_record.example.json # 未执行的adapter记录模板
+├── MANIFEST.json                    # 数据划分、选定运行与产物路径总清单
+├── protocol.json                    # 固定指标、可编辑范围与发布状态
+├── split_aliases.json               # test1/test2与原split名称的映射
+├── trajectory_inventory.json        # 30份轨迹归档的路径、成员与大小
+├── validation_report.json           # 免费整理与发布副本检查结果
+└── .gitattributes                   # 保持冻结文件字节，禁用换行转换
+```
+
 ## 数据与使用边界
 
 | 目录 | 独立票数 | 既有baseline | 用途 |
