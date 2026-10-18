@@ -1,0 +1,58 @@
+--- before/xlsx/SKILL.md
++++ after/xlsx/SKILL.md
+@@ -145,6 +145,42 @@
+      - `#VALUE!`: Wrong data type in formula
+      - `#NAME?`: Unrecognized formula name
+ 
++
++
++## Model Build-and-Verify Checklist (MANDATORY for multi-sheet economic/financial models)
++When a task involves a template workbook with multiple sheets (e.g., macro/production-function models), complete **all** steps below before delivery.
++
++### 1) Populate required source tables/ranges (coverage checks)
++- Fill every required source sheet/range called out by the instructions/template (e.g., PWT tables, WEO_Data, CFC data).
++- Confirm non-empty coverage across the expected rows/years/countries (spot-check multiple rows near the top/middle/bottom of the expected range).
++- Do not leave required columns blank just because downstream formulas exist.
++
++### 2) Implement projections/extensions using formulas (never pasted values)
++- Any extension/projection (e.g., years beyond last observed year) MUST be done with formulas that can be filled down/right.
++- Ensure required Excel function families are present where instructed/expected:
++  - **LN** for log transforms (e.g., LnK/LnY)
++  - **EXP** for back-transforming log trends into levels (e.g., Y* calculations)
++  - **TREND** for extending trends (e.g., log TFP trend beyond sample)
++  - **AVERAGE** for anchors/assumptions (e.g., average depreciation rate, average K/Y)
++  - Ratio/division formulas where model requires scaling (e.g., K/Y)
++- Sentinel requirement: if the template calls for a specific key formula cell (e.g., depreciation average), that cell MUST contain a formula, not a blank and not a hardcoded constant.
++
++### 3) Preserve and create cross-sheet links
++- All downstream sheets must reference the correct upstream sheets (e.g., Investment -> Production, PWT/CFC/WEO_Data -> Production).
++- Use correct sheet reference syntax (`SheetName!A1`) and consistent absolute/relative references for fill operations.
++- After filling, re-check a few cells to confirm references didn’t drift (common when inserting rows/cols).
++
++### 4) Recalculate + error scan (must be clean)
++- Run recalc.py on the final workbook.
++- Fix any Excel errors anywhere in the workbook: **#REF!, #DIV/0!, #VALUE!, #NAME?, #N/A**.
++- If denominators can be zero/blank, use defensive formulas (e.g., `IFERROR`, `IF(den=0,"",num/den)`) as appropriate to keep the model error-free.
++
++### 5) Post-save persistence check (re-open verification)
++- Re-open the saved/exported workbook and confirm:
++  - Key ranges still contain formulas (not blanks)
++  - Cross-sheet links remain intact
++  - Expected projection ranges still show formulas for extended years
++  - Key sentinel cells still contain formulas
+ ### Creating new Excel files
+ 
+ ```python
+@@ -272,6 +308,12 @@
+ - For large files: Use `read_only=True` for reading or `write_only=True` for writing
+ - Formulas are preserved but not evaluated - use recalc.py to update values
+ 
++
++
++#### Template-model safety rules (do not break formulas)
++- Never "round-trip" a template by opening with `data_only=True` and then saving.
++- When editing, verify that any required formula cells/ranges remain formulas (strings beginning with `=`) after save.
++- For multi-sheet models, explicitly validate that at least one formula referencing each critical sheet still exists (e.g., a `...!` reference to Investment/WEO/PWT/CFC in dependent sheets).
+ ### Working with pandas
+ - Specify data types to avoid inference issues: `pd.read_excel('file.xlsx', dtype={'id': str})`
+ - For large files, read specific columns: `pd.read_excel('file.xlsx', usecols=['A', 'C', 'E'])`

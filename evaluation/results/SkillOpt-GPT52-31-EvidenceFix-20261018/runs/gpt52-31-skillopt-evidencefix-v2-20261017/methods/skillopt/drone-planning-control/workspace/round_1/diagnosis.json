@@ -1,0 +1,44 @@
+{
+  "task_id": "drone-planning-control",
+  "fallback_used": false,
+  "overall_diagnosis": "All required artifacts are generated and structural tests pass, but only 16/30 commands satisfy strict per-timestep tracking and step-response constraints. This points to underspecified/insufficiently robust guidance for the trajectory planner and the position/attitude control loops under acceleration limits and actuator saturation, rather than I/O, plotting, or parsing issues. Several skill excerpts are truncated/incomplete, increasing the chance of ambiguous sign/frame conventions and missing anti-windup/saturation patterns that become critical on worst-case commands.",
+  "diagnosed_skills": [
+    {
+      "path": "position-controller-trajectory-planner/SKILL.md",
+      "confidence": "0.86",
+      "diagnosis": "Most failures are consistent with infeasible or overly aggressive desired trajectories (spline second-derivative exceeding accel_limit_up/down/horiz) and an outer-loop controller that lacks prescriptive guidance for gravity compensation, acceleration feedforward, thrust saturation, and anti-windup/reset. The current guidance does not clearly define boundary conditions per mode (takeoff/land/hover/fly), how to time-scale segments to satisfy acceleration constraints at every sample, nor a tuning workflow targeted at the <0.05 m per-timestep error requirement.",
+      "repair_instruction": "Extend the skill to be test-aligned and implementation-ready: (1) specify a concrete acceleration-limiting strategy in the planner (e.g., iterative time-scaling per segment until sampled |ax,ay|<=accel_limit_horiz and az within up/down limits; or clamp spline-derived acceleration with a continuity-preserving time-stretch fallback); (2) explicitly define desired-state construction for all 15 rows per timestep (pos/vel/acc, yaw/yaw-rate) and mode-specific boundary conditions (typically zero end vel/acc for takeoff/land/fly unless commanded; hover constant); (3) provide the full position-controller equations including desired-acceleration feedforward, gravity compensation, thrust computation and saturation, and a clear anti-windup pattern (integrator clamping/back-calculation + reset on mode changes or saturation); (4) add a practical tuning workflow (initial gain ranges, axis-wise scaling, derivative filtering, and an objective tied to verifier constraints: max per-step error, overshoot, steady-state error)."
+    },
+    {
+      "path": "attitude-controller-planner/SKILL.md",
+      "confidence": "0.74",
+      "diagnosis": "Inner-loop tracking quality likely limits worst-case commands. The attitude planner mapping from desired acceleration to roll/pitch is presented ambiguously (signs/frames, small-angle vs full mapping) and the skill excerpt appears truncated mid 'Critical Design Rules', omitting key pitfalls (yaw wrapping, saturation, anti-windup). These gaps can cause oscillation/overshoot and insufficient attitude tracking, degrading position tracking even when the outer loop is correct.",
+      "repair_instruction": "Complete and disambiguate the skill: (1) state exact coordinate-frame conventions (world vs body, gravity direction) and provide unambiguous formulas (with signs) for mapping desired world-frame horizontal acceleration and yaw into desired φ/θ; include whether small-angle approximation is assumed and how g is incorporated; (2) specify yaw error handling with angle wrapping and define desired yaw-rate usage; (3) add saturation limits for desired angles and commanded moments plus an integral reset/clamping (anti-windup) recipe; (4) clarify derivative term source (use measured body rates vs finite-diff Euler angles) and inertia scaling; (5) restore/finish the truncated 'Critical Design Rules' section and include recommended starter gain ranges + a tuning procedure aimed at meeting tight per-timestep tracking without overshoot."
+    },
+    {
+      "path": "motor-model-dynamics/SKILL.md",
+      "confidence": "0.56",
+      "diagnosis": "Mixed pass/fail across commands can come from edge cases in allocation and dynamics: negative rpm_sq handling, RPM clipping leading to infeasible requested [F,M] and mismatch between commanded vs achieved moments, or unclear frame/unit conventions. The excerpt is truncated, risking ambiguity about state ordering and force/moment application that can subtly destabilize some trajectories.",
+      "repair_instruction": "Harden and fully specify the physics layer: (1) explicitly require clamping rpm_sq to nonnegative before sqrt, then clipping RPMs, and recomputing the actually achieved [F,M] after clipping to feed into dynamics; (2) document motor ordering and yaw-torque sign conventions in the allocation matrix, and ensure moment axes match the dynamics Euler/body-rate conventions; (3) complete the dynamics section with the full 16-state layout, world↔body rotation usage, Euler-rate mapping, and gravity term; (4) add numeric-stability notes (conditioning/solve method for allocation, unit consistency RPM vs rad/s, and guidance for motor lag constant ranges and integration step sizing aligned with sample_rate)."
+    },
+    {
+      "path": "stepinfo-3d/SKILL.md",
+      "confidence": "0.42",
+      "diagnosis": "Not the main driver of 16/30 successes, but ambiguous metric computation (settling-band definition, overshoot window, entry detection) can mislead tuning loops and mask why certain commands fail. Tight thresholds make small definition mismatches costly during optimization.",
+      "repair_instruction": "Clarify the metric implementation to match verifier expectations: (1) define settling band precisely using settling_threshold=0.02 relative to initial 3D distance; (2) specify how to detect first entry into the band and how overshoot is measured afterward; (3) define behavior for non-monotone trajectories and cases where the band is never entered; (4) provide reference pseudocode and explicitly state when to use 1D z stepinfo vs 3D stepinfo_3d so tuning aligns with evaluation."
+    }
+  ],
+  "unselected_skills": [
+    "flight-plan-parser/SKILL.md",
+    "plot-quadrotor/SKILL.md"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": false,
+  "shared_diagnosis_source": null,
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true
+}

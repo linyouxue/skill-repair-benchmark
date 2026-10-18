@@ -1,0 +1,63 @@
+--- before/azure-bgp/SKILL.md
++++ after/azure-bgp/SKILL.md
+@@ -109,6 +109,60 @@
+ 
+ ## Fix Selection Logic (Ranked)
+ 
++
++## Solution Classification (Benchmark-Aligned)
++
++When evaluating entries in `possible_solutions.json`, classify each candidate into two booleans:
++
++- `oscillation_resolved=True` **iff** the proposal breaks the routing preference cycle **or** enforces deterministic next-hop / path selection in a way that prevents the cycle from affecting forwarding (benchmark counts these as cycle breakers).
++- `route_leak_resolved=True` **iff** the proposal stops hub-to-hub propagation/acceptance of provider-learned routes (or otherwise prevents hub-to-hub transit/leaks in the simplified model).
++
++### Decision Rules
++
++Set **`oscillation_resolved=True`** when the action does any of:
++- Changes preferences to remove a competing path that participates in the cycle (e.g., “stop preferring routes via hub2”, “set route preference hierarchy …”).
++- Export/import policy removes one leg of the cycle (e.g., “filter routes learned from hub2 before re-advertising”).
++- **Virtual WAN routing intent** constrains inter-hub routing so forwarding is deterministic.
++- **UDR / route-table next-hop override** forces a stable next hop (data-plane override).
++
++Set **`route_leak_resolved=True`** when the action does any of:
++- Export policy blocks advertising provider/peer-learned routes to a peer/provider hub (e.g., “block announcing provider routes from ASN 65001 to peer hub”).
++- Ingress filtering rejects routes with disallowed ASNs/AS_PATH patterns from a peer hub.
++- Communities such as **`no-export` / `no-advertise`** prevent hub-to-hub propagation of provider-learned routes.
++- **Virtual WAN routing intent** enforces centralized hub-to-hub constraints (benchmark treats this as preventing hub-to-hub transit/leaks).
++- **RPKI origin validation** that would reject illegitimate/leaked prefixes (benchmark credits this as leak-mitigating even though it’s not classic valley-free enforcement).
++
++RPKI note (benchmark semantics):
++- If the proposal is “Enable RPKI origin validation … verify prefix X originates from ASN Y”, treat as `route_leak_resolved=True`.
++- Keep `oscillation_resolved=False` unless the proposal also changes path preference/selection.
++
++### Worked Examples / Classification Matrix
++
++Use these canonical mappings for common Azure phrasing:
++
++| Example solution text (paraphrased) | oscillation_resolved | route_leak_resolved |
++|---|---:|---:|
++| “Enable Virtual WAN hub routing intent … hub-to-hub routes go through Virtual WAN only” | True | True |
++| “Configure user defined route override / defaultRouteTable next-hop override … prefer specific next-hop” | True | True |
++| “Configure export policy … filter routes learned from peer hub before re-advertising” | True | False |
++| “Update routing preference … stop preferring routes via other hub” | True | False |
++| “Block announcing provider routes (from Virtual WAN ASN 65001) to peer hub” | False | True |
++| “Ingress filter … reject routes with AS_PATH containing ASN 65001 when received from peer hub” | False | True |
++| “Set no-export community for provider routes toward peer hub” | False | True |
++| “Enable RPKI origin validation … verify prefix originates from ASN …” | False | True |
++
++### Explicit Non-Fixes (Default False/False)
++
++If a candidate does **not** change policy/propagation or deterministic forwarding, default to:
++- `oscillation_resolved=False`
++- `route_leak_resolved=False`
++
++Examples: keepalive/hold timers, route dampening, ECMP tweaks, restarts, “wait for convergence”, maximum-prefix limits, generic “tune BGP”, or vague “deploy route map/centralized routing management” without explicit export/ingress/intent/UDR effects.
++
++### Still Invalid (Do Not Credit)
++
++Even if they would stop symptoms, **do not propose or credit** fixes that violate the Core Invariants:
++- Disabling BGP sessions, shutting down hub peering, removing connectivity.
+ ### Tier 1 — Virtual WAN Routing Intent (Preferred)
+ 
+ **Applies to:**

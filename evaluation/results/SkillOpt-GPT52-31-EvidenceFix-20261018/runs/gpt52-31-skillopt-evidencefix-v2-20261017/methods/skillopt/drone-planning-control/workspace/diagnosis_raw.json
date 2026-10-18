@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "raw_text": "{\n  \"overall_diagnosis\": \"The dominant failure signature (verifier only counting successes in 'land' after changes, despite outputs being generated) points to incorrect or inconsistent mode handling across the pipeline: parsing commands into exact mode tags, generating mode-specific trajectories that respect acceleration limits, and emitting verifier-compatible metrics (including correct mode labels). A secondary contributor to broad takeoff/hover/fly failures is likely trajectory/controller difficulty (e.g., splines violating accel limits or being hard to track) and, less frequently, attitude mapping/frame-sign mistakes that degrade lateral tracking.\",\n  \"diagnosed_skills\": [\n    {\n      \"path\": \"flight-plan-parser/SKILL.md\",\n      \"confidence\": \"high\",\n      \"diagnosis\": \"Non-land commands appear to be misclassified or their mode metadata is not propagated consistently, causing the verifier’s per-mode aggregation to only recognize 'land'. The parser guidance likely under-specifies strict normalization/robust regex (floats, signs, whitespace) and the requirement that each command yields exactly one correctly named mode segment with strictly increasing cumulative times.\",\n      \"repair_instruction\": \"Require exact lowercase mode strings ('takeoff','hover','fly','land') and mandate propagating them unchanged downstream (trajectory generation and metrics output). Strengthen parsing rules: regex must accept signed floats/ints and variable whitespace; normalize input to lowercase; ensure waypoint_times are cumulative and strictly increasing; never overwrite prior modes when auto-inserting the initial waypoint. Add explicit examples for each command type showing: start waypoint initialization at t=0, end waypoint appended per command, duration handling, and default yaw handling.\"\n    },\n    {\n      \"path\": \"position-controller-trajectory-planner/SKILL.md\",\n      \"confidence\": \"high\",\n      \"diagnosis\": \"Broad failures in takeoff/hover/fly are consistent with planned trajectories that violate accel_limit_up/down/horiz or produce splines that are difficult to track within the <0.05 m error constraint. Current guidance mentions cubic splines but does not make accel-limit enforcement and mode-specific semantics explicit enough for verifier alignment.\",\n      \"repair_instruction\": \"Add explicit accel-limit enforcement in the planned 15×N desired state: at every timestep enforce sqrt(ax^2+ay^2) ≤ accel_limit_horiz and -accel_limit_down ≤ az ≤ accel_limit_up. Recommend time-stretching/rescaling segment durations until limits are met (preferred) rather than naive clamping that breaks spline consistency. Clarify per-mode trajectory semantics: hover => constant pos with zero vel/acc; takeoff/land => vertical spline with zero lateral motion; fly => spline between 3D endpoints with smooth yaw interpolation. Also specify outer-loop controller structure with feedforward from planned acceleration + PD/PID feedback, anti-windup, and saturation consistent with thrust bounds.\"\n    },\n    {\n      \"path\": \"stepinfo-3d/SKILL.md\",\n      \"confidence\": \"medium\",\n      \"diagnosis\": \"Even with correct trajectories, commands can be marked unsuccessful if metrics_3d.json is computed with the wrong schema, wrong metric definitions, or missing/incorrect 'mode' fields. The skill likely under-emphasizes schema fidelity and mode annotation as required by the verifier.\",\n      \"repair_instruction\": \"Add an explicit metrics_3d.json schema example that includes a required 'mode' field populated with exactly the segment mode string. Reiterate when to use 3D metrics vs 1D and require consistent computation of rise time, settling time, overshoot %, and steady-state error based on Euclidean distance to the final 3D target for non-pure-vertical moves. Warn that incorrect/missing mode labels can cause the verifier to report only one mode succeeding even if the flight is correct.\"\n    },\n    {\n      \"path\": \"attitude-controller-planner/SKILL.md\",\n      \"confidence\": \"medium\",\n      \"diagnosis\": \"Poor tracking in fly/takeoff/hover can stem from incorrect acceleration→attitude mapping (frame/sign/Euler-convention mismatch) or incomplete thrust-direction construction, especially when yaw is nonzero. This would disproportionately hurt lateral segments and could contribute to non-land failures.\",\n      \"repair_instruction\": \"Make the mapping fully explicit and convention-locked: specify the project’s Euler rotation order and handedness; provide the complete b3_des construction using a_total = a_des - g_vec and the b1_yaw/cross-product method to form R_des; include the exact formulas to extract (φ_des, θ_des, ψ_des) from R_des under that convention. Clarify thrust computation consistency (e.g., F = m * dot(a_total, b3_current or b3_des) with correct sign for z-up), include near-zero-norm fallback for a_total, and recommend limiting φ/θ to feasible bounds to avoid destabilizing commands.\"\n    }\n  ],\n  \"unselected_skills\": [\n    \"motor-model-dynamics/SKILL.md\",\n    \"plot-quadrotor/SKILL.md\"\n  ]\n}",
+  "usage": {
+    "prompt_tokens": 5645,
+    "completion_tokens": 1035,
+    "total_tokens": 6680
+  },
+  "duration_sec": 12.17,
+  "parsed_keys": [
+    "consumer_method",
+    "diagnosed_skills",
+    "diagnosis_n",
+    "diagnosis_sample_count",
+    "edit_budget_l",
+    "fallback_used",
+    "merge_samples",
+    "merged_from_samples",
+    "overall_diagnosis",
+    "repair_round",
+    "shared_diagnosis",
+    "shared_diagnosis_source",
+    "task_id",
+    "unselected_skills"
+  ],
+  "shared": false,
+  "shared_source": null
+}

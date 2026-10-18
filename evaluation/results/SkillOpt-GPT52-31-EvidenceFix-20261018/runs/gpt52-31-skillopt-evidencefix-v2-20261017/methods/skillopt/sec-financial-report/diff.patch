@@ -1,0 +1,205 @@
+--- before/13f-analyzer/SKILL.md
++++ after/13f-analyzer/SKILL.md
+@@ -5,6 +5,36 @@
+ 
+ ## Overview
+ 
++
++
++### Verifier-compatible / Offline execution
++
++Run all commands from the repository root that contains the `scripts/` directory.
++
++Requirements:
++- Python 3.10+ with required dependencies already available in the evaluation environment.
++- Do not rely on `uv` or `uvx`; network-restricted environments may not be able to download tooling.
++- Prefer `python3` for all examples.
++
++Dataset layout used by the benchmark:
++- `/root/2025-q2`
++- `/root/2025-q3`
++
++Scripts read quarter data by quarter name (for example `2025-q2` or `2025-q3`). If the dataset is not under the default location, point scripts at the dataset root with either:
++- `DATA_ROOT=/root python3 ...`
++- `--data_dir /root/2025-q3` (or `/root/2025-q2` for baseline comparisons if supported by the script)
++
++Example environment check:
++
++```bash
++python3 --version
++ls /root/2025-q2 /root/2025-q3
++```
++
++Troubleshooting:
++- If `uv`, `uvx`, or package installation commands fail because of restricted network access, use the system Python environment already provisioned by the evaluator.
++- If a script cannot find quarter data, verify the quarter folder exists and explicitly set `DATA_ROOT=/root` or pass `--data_dir`.
++- If `python` points to Python 2 or is unavailable, use `python3` explicitly.
+ ### Analyze the holding summary of a particular fund in one quarter:
+ 
+ ```bash
+@@ -19,7 +49,7 @@
+ ### Analyze the change of holdings of a particular fund in between two quarters:
+ 
+ ```bash
+-python scripts/one_fund_analysis.py \
++DATA_ROOT=/root python3 scripts/one_fund_analysis.py \
+     --quarter 2025-q3 \
+     --accession_number <accession number assigned in q3> \
+     --baseline_quarter 2025-q2 \
+@@ -32,10 +62,39 @@
+ ### Analyze which funds hold a stock to the most extent
+ 
+ ```bash
+-python scripts/holding_analysis.py \
++DATA_ROOT=/root python3 scripts/holding_analysis.py \
+     --cusip <stock cusip> \
+     --quarter 2025-q3 \
+     --topk 10
+ ```
+ 
+ This script will print out the top 10 hedge funds who hold a particular stock with highest notional value.
++
++
++## End-to-end example: Q2 → Q3 Berkshire Hathaway change analysis
++
++1. Identify Berkshire Hathaway accession numbers for each quarter using the COVERPAGE search utilities or repository search workflow.
++2. Run the comparison from the repository root:
++
++```bash
++DATA_ROOT=/root python3 scripts/one_fund_analysis.py \
++    --quarter 2025-q3 \
++    --accession_number <berkshire_q3_accession> \
++    --baseline_quarter 2025-q2 \
++    --baseline_accession_number <berkshire_q2_accession>
++```
++
++Expected outputs include:
++- AUM summary for the Q3 filing.
++- Total holdings / stock holdings counts.
++- Largest increased positions between Q2 and Q3.
++- Largest reduced or sold positions between Q2 and Q3.
++- Ranked buy/sell tables using stock names and CUSIPs.
++
++You can apply the same workflow to Renaissance Technologies by first locating the correct accession number for `2025-q3`, then running:
++
++```bash
++DATA_ROOT=/root python3 scripts/one_fund_analysis.py \
++    --quarter 2025-q3 \
++    --accession_number <renaissance_q3_accession>
++```
+--- before/fuzzy-name-search/SKILL.md
++++ after/fuzzy-name-search/SKILL.md
+@@ -8,7 +8,35 @@
+ This tool is essentially a search engine that provides you the ability to search a fund or stock meta information with a name. Note that you don't have to provide the accurate name since this tool has built-in fuzzy string search algorithms based on Levinsteins.
+ 
+ 
+-## Usage
++
++## Offline / Local Dataset Setup
++
++### Where the scripts read data from (quarters on disk)
++These search scripts are designed to run **offline** against the already-downloaded quarter folders on disk (e.g. `/root/2025-q2`, `/root/2025-q3`). They should **not** require any network access at runtime.
++
++**Expected layout**
++- A quarter directory exists on disk, typically named like `YYYY-qN` (example: `/root/2025-q3`).
++- The scripts load quarter-specific fund/filing metadata from that directory to perform fuzzy matching and return identifiers such as `ACCESSION_NUMBER`.
++
++**Overriding the data root / quarter path**
++- If your environment stores quarters somewhere other than `/root`, set a data root override before running searches:
++  - `SEC_DATA_ROOT=/path/to/data`
++- If the script supports a direct CLI override, prefer it when available:
++  - `--data_root /path/to/data`
++
++If you are unsure which option is implemented in this repo, run `python3 scripts/search_fund.py -h` and look for `--data_root`/`--base_dir`/`--root` options. Otherwise, use `SEC_DATA_ROOT`.
++
++### Indexing / preprocessing
++By default, fuzzy searching should work directly from the quarter’s local metadata files and **does not require external downloads**.
++- If you see errors about a missing index/cache, look for a companion script under `scripts/` named like `build_index*.py` or `prepare*.py` and run it **offline** against the target quarter directory.
++
++### No-uv / no-uvx execution
++Run all examples using the system Python:
++- `python3 scripts/search_fund.py ...`
++- `python3 scripts/search_stock_cusip.py ...`
++
++This avoids `uv/uvx` and prevents failures in network-restricted environments.
++## Usage (offline-friendly; no `uv/uvx`)
+ 
+ ### Fuzzy search a fund using its name
+ 
+@@ -16,6 +44,14 @@
+ python3 scripts/search_fund.py --keywords "bridgewater" --quarter 2025-q2 --topk 10
+ ```
+ 
++
++Tip: if the quarter folder is located at `/root/2025-q2`, this should work as-is. If your data lives elsewhere:
++
++```bash
++SEC_DATA_ROOT=/root python3 scripts/search_fund.py --keywords "bridgewater" --quarter 2025-q2 --topk 10
++# or, if supported:
++python3 scripts/search_fund.py --data_root /root --keywords "bridgewater" --quarter 2025-q2 --topk 10
++```
+ And the results will include top-10 funds with name most similar to "bridgewater" search term:
+ ```
+ ** Rank 1 (score = 81.818) **
+@@ -80,3 +116,61 @@
+   CUSIP: 69608A108
+ ...
+ ```
++
++
++## Task-aligned examples (sec-financial-report)
++
++### 1) Find Renaissance Technologies in Q3 and use the accession number downstream
++
++```bash
++# Fuzzy match the fund manager name in Q3
++python3 scripts/search_fund.py --keywords "renaissance technologies" --quarter 2025-q3 --topk 5
++```
++
++From the best match, copy `ACCESSION_NUMBER` (example format: `000xxxxxxx-25-xxxxxx`). Then use exact search to confirm you have the right filing:
++
++```bash
++python3 scripts/search_fund.py --accession_number <ACCESSION_NUMBER> --quarter 2025-q3
++```
++
++That accession number is the key you will pass to downstream 13F loaders/analysis to compute AUM and holdings counts.
++
++### 2) Get Berkshire Hathaway accession numbers for Q2 vs Q3
++
++```bash
++python3 scripts/search_fund.py --keywords "berkshire hathaway" --quarter 2025-q2 --topk 5
++python3 scripts/search_fund.py --keywords "berkshire hathaway" --quarter 2025-q3 --topk 5
++```
++
++Use the returned `ACCESSION_NUMBER` values (one per quarter) for quarter-over-quarter holdings comparisons.
++
++### 3) Find Palantir’s CUSIP, then use it for Q3 holder ranking
++
++```bash
++python3 scripts/search_stock_cusip.py --keywords "palantir" --topk 10
++```
++
++Copy the best-match `CUSIP` and use it in your Q3 holdings scan to rank managers by share value.
++
++## Troubleshooting (offline / restricted network)
++
++### `uvx: command not found` or uv download failures
++Do not use `uv`/`uvx` for this benchmark. Use `python3 ...` directly as shown above.
++
++### Quarter not found / empty results
++- Confirm the quarter directory exists locally: `ls -lah /root/2025-q2 /root/2025-q3`
++- Ensure `--quarter` matches the folder naming convention (e.g. `2025-q3`).
++- If data is not under `/root`, set `SEC_DATA_ROOT` (or pass `--data_root` if supported).
++
++### Missing Python dependencies
++If the script errors with `ModuleNotFoundError`, install dependencies from the repo’s local requirement specification (no external downloads required at runtime, but installing packages may require a pre-provisioned environment):
++- Look for `requirements.txt` / `pyproject.toml` in the repo root.
++- Prefer system install already present in the environment when possible.
++
++### Verifying script options
++Run help to discover supported path override flags:
++
++```bash
++python3 scripts/search_fund.py -h
++python3 scripts/search_stock_cusip.py -h
++```

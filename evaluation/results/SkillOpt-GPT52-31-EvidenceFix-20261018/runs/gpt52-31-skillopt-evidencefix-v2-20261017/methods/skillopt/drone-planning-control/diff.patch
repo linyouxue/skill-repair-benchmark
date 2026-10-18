@@ -1,0 +1,432 @@
+--- before/attitude-controller-planner/SKILL.md
++++ after/attitude-controller-planner/SKILL.md
+@@ -14,36 +14,114 @@
+ 
+ ## Attitude Planner
+ 
+-### Implementation Logic
++### Implementation Logic (frames + unambiguous mapping)
+ 
+-Given desired acceleration `[ax, ay]` and current yaw `ψ`, compute desired roll/pitch via inverse kinematics:
++**Frame conventions (assumed throughout):**
++- World/inertial frame **W**: x-forward, y-left, z-up.
++- Body frame **B**: x-forward, y-left, z-up (thrust along +z_body).
++- Gravity in world: `g_vec = [0, 0, -g]` with `g = 9.81`.
++- Desired linear acceleration `a_des = [ax, ay, az]` is expressed in **world**.
++- Yaw `ψ` is world heading (rotation about +z_world). Roll `φ` about +x_body, pitch `θ` about +y_body.
+ 
+-- `φ_des` is proportional to `(ax·sin(ψ) − ay·cos(ψ)) / g`
+-- `θ_des` is proportional to `(ax·cos(ψ) + ay·sin(ψ)) / g`
++#### Full (robust) mapping via desired thrust direction
++1. Form the desired total acceleration including gravity compensation:
++   - `a_total = a_des - g_vec = [ax, ay, az + g]`
++2. Desired body z-axis in world:
++   - `b3_des = a_total / ||a_total||`  (if `||a_total||` is very small, fall back to `[0,0,1]`)
++3. Set desired yaw by defining a world-frame heading direction:
++   - `b1_yaw = [cos(ψ_des), sin(ψ_des), 0]`
++4. Construct remaining axes:
++   - `b2_des = normalize(cross(b3_des, b1_yaw))`
++   - `b1_des = cross(b2_des, b3_des)`
++5. Convert the rotation matrix `R_des = [b1_des b2_des b3_des]` to Euler angles `(φ_des, θ_des, ψ_des)` using your project’s Euler convention.
+ 
+-Return `rot = [φ_des, θ_des, ψ]` and `omega = [0, 0, desired_yaw_rate]`.
++This avoids small-angle sign mistakes and works for larger tilts.
++
++#### Small-angle horizontal approximation (only if tilts are small)
++When `|φ|,|θ|` are small and `az` is near 0, you can approximate using the yaw-rotated horizontal acceleration:
++- Rotate desired horizontal accel into a “yaw-aligned” frame:
++  - `a_x' =  ax*cos(ψ) + ay*sin(ψ)`
++  - `a_y' = -ax*sin(ψ) + ay*cos(ψ)`
++- Then (with +z up and thrust +z_body):
++  - `θ_des ≈  a_x' / g`
++  - `φ_des ≈ -a_y' / g`
++
++#### Yaw and yaw-rate outputs
++- Return `rot_des = [φ_des, θ_des, ψ_des]`.
++- If a desired yaw rate `r_des` is provided, return `omega_des = [0, 0, r_des]`.
++- If no yaw-rate is planned, set `r_des = 0` and let the attitude controller track `ψ_des` (with angle wrapping).
+ 
+ ## Attitude Controller
+ 
+-### Implementation Logic
++### Implementation Logic (yaw wrapping, body-rate D-term, saturation, anti-windup)
+ 
+-PID control on Euler angle errors, scaled by the inertia matrix:
++Attitude control should be implemented in a way that **does not** differentiate Euler angles and **does** handle yaw discontinuities.
+ 
+-1. Compute angle error: `e = desired_rot − current_rot` (element-wise, 3D vector).
+-2. Accumulate integral: `integral_e += e * dt`.
+-3. Compute moment: `M = I @ (kp * e + ki * integral_e + kd * (desired_omega − current_omega))`.
++1. **Angle error (with yaw wrapping):**
++   - `e = desired_rot - current_rot`
++   - Wrap yaw error into `[-π, π]`:
++     - `e[2] = wrap_to_pi(e[2])`
++
++2. **Derivative term source:**
++   - Use **measured body rates** `ω = [p, q, r]` from the state (gyroscope / simulator), not finite-differenced Euler angles.
++   - Use the planned desired body rates `ω_des` (often `[0,0,r_des]`).
++   - Rate error: `e_ω = ω_des - ω`
++
++3. **Integral update + anti-windup (clamp or conditional integration):**
++   - Candidate integral: `integral_e += e * dt`
++   - Clamp per-axis: `integral_e = clip(integral_e, -i_lim, +i_lim)`
++   - Recommended: integrate only when the corresponding moment is **not** saturated (see step 5), or back-calculate.
++
++4. **Compute raw moments (element-wise gains, then inertia scaling):**
++   - `u = kp * e + ki * integral_e + kd * e_ω`
++   - `M_raw = I @ u`
++   Notes:
++   - `kp,ki,kd` are vectors `[φ, θ, ψ]` applied element-wise.
++   - `I` is the 3×3 inertia matrix in body coordinates.
++
++5. **Saturation (required for stability in worst-case commands):**
++   - Angle command saturation at the planner output:
++     - `|φ_des| ≤ φ_max`, `|θ_des| ≤ θ_max` (typical 20–35°; pick per platform)
++   - Moment saturation in controller:
++     - `M = clip(M_raw, -M_max, +M_max)` (per-axis)
++
++6. **Integral reset pattern:**
++   - Reset or decay integrator when switching modes (takeoff/hover/land/fly) or when commanded attitude changes abruptly.
+ 
+ Use `make_attitude_integral()` to create a fresh `{"e": zeros(3)}` dict before the simulation loop. Never use a mutable default argument for this state.
+ 
+-## Gain Tuning
+-No tuning range is provided — choose PID gains freely to best satisfy the success criteria. Start with small values (e.g. `kp_att = [100, 100, 50]`, `ki_att = [0.0, 0.0, 0.0]`, `kd_att = [0.0, 0.0, 0.0]`) and increase gradually.
++## Gain Tuning (starter ranges + procedure)
++
++These gains are **platform-dependent**, but you should start from a conservative, stable set and tune to meet **per-timestep error < 0.05 m** (which requires very tight attitude tracking).
++
++### Recommended starter ranges (simulation, normalized moments)
++- Start with `ki_att = [0, 0, 0]` until P/D are stable.
++- Typical starting points:
++  - `kp_att`: roll/pitch larger than yaw, e.g. `[80..200, 80..200, 30..120]`
++  - `kd_att`: add damping using body-rate error, e.g. `[5..40, 5..40, 1..20]`
++  - `ki_att`: small, e.g. `[0..1.0, 0..1.0, 0..0.5]` with strict integral clamping
++
++### Practical tuning procedure (inner-loop first)
++1. **Freeze outer loop** (or command a small fixed tilt / yaw step). Tune attitude only.
++2. Increase `kp_att[0:2]` until roll/pitch are fast but not oscillatory.
++3. Increase `kd_att[0:2]` until overshoot is minimal and oscillations are critically damped.
++4. Tune yaw similarly (`kp_att[2]`, then `kd_att[2]`), ensuring yaw error is wrapped to `[-π,π]`.
++5. Add small `ki_att` only to remove steady bias; clamp integrator and verify no oscillation.
++6. Re-enable the position controller and retune outer-loop gains if needed (but do **not** compensate for a weak attitude loop by inflating position gains).
+ 
+ ## Critical Design Rules
+ 
+-- **Never use a mutable default for the integral** — this causes wind-up across simulation runs. Always pass `integral` explicitly and create it with `make_attitude_integral()` before the loop.
+-- **Ki should be small** (≤ 0.5 for attitude) — attitude integral wind-up causes x/y oscillations during z-only maneuvers.
+-- `dt = 1.0 / params['sample_rate']` — never hardcode `0.005`.
+-- Gains are arrays `[phi, theta, psi]`; multiply element-wise, not matrix multiply, before the inertia `@`.
++- **Statefulness:** Never use a mutable default for the integral — this causes wind-up across simulation runs. Always pass `integral` explicitly and create it with `make_attitude_integral()` before the loop.
++- **Yaw wrapping (mandatory):** Always compute yaw error with angle wrapping: `wrap_to_pi(ψ_des - ψ)`; otherwise you will command large, wrong-way yaw steps at ±π.
++- **Derivative term source:** Do **not** finite-difference Euler angles for D; use measured body rates `[p,q,r]` (and desired `[p_des,q_des,r_des]`). Euler-angle differentiation is noisy and frame-coupled.
++- **Saturation + anti-windup:**
++  - Saturate desired angles: `φ_des, θ_des` to safe bounds.
++  - Saturate moments `M` to actuator limits.
++  - Clamp the integrator (`i_lim`) and/or freeze integration while saturated (or use back-calculation). This is required to prevent overshoot and oscillation.
++- **Gravity/sign consistency:** Ensure your accel→attitude mapping matches your world/body conventions (+z up, thrust +z_body, `g_vec=[0,0,-g]`). If you change conventions, change the planner formulas accordingly.
++- **Time step:** `dt = 1.0 / params['sample_rate']` — never hardcode `0.005`.
++- **Element-wise gains:** Gains are arrays `[φ, θ, ψ]`; multiply element-wise (Hadamard), not matrix multiply, before the inertia `I @` scaling.
++- **Mode changes:** Reset/decay the attitude integrator on mode transitions (takeoff→hover→land) to avoid carrying bias into a new regime.
+ 
+ ## Tuning Guidelines
+ 
+--- before/motor-model-dynamics/SKILL.md
++++ after/motor-model-dynamics/SKILL.md
+@@ -18,6 +18,16 @@
+ 
+ The 4×4 allocation matrix maps `[F, Mx, My, Mz]` to squared motor RPMs. For an X-frame with arm length `d`, thrust coefficient `cT`, and torque coefficient `cQ`:
+ 
++
++
++**Conventions (must be consistent everywhere):**
++
++- **Body frame:** x forward, y left, z up (right-handed). Moments `[Mx, My, Mz]` are about body x/y/z.
++- **Motor ordering (1..4):** front-left (CCW), front-right (CW), rear-right (CCW), rear-left (CW) for an X-frame.
++- **Yaw sign:** `+Mz` corresponds to CCW yaw acceleration about +z. With the above spin directions, CCW rotors contribute `+cQ·rpm^2` to `Mz` and CW rotors contribute `−cQ·rpm^2` (or equivalently use the row shown below).
++
++If your code uses a different axis convention (e.g., z down or y right), you must flip the appropriate signs in the allocation matrix *and* in the dynamics rotation/moment equations.
++
+ ```
+          motor:  1      2      3      4
+ Thrust:         +cT    +cT    +cT    +cT
+@@ -28,11 +38,22 @@
+ 
+ ### Implementation Logic
+ 
+-1. Build the 4×4 `prop_matrix` from `cT`, `cQ`, and `d`.
+-2. Solve `prop_matrix @ rpm_sq = [F, Mx, My, Mz]` for `rpm_sq` (desired squared RPMs).
+-3. Take `sqrt` of each element (clamp negatives to 0 first), then clip to `[rpm_min, rpm_max]`.
+-4. Apply first-order motor lag: `rpm_dot = km * (rpm_desired - rpm_current)`.
+-5. Compute actual force/moment using `prop_matrix @ (motor_rpm ** 2)` and return `(F_actual, M_actual, rpm_dot)`.
++1. Build the 4×4 `prop_matrix` from `cT`, `cQ`, and `d` using the motor ordering and sign conventions above.
++2. Solve `prop_matrix @ rpm_sq_cmd = [F_cmd, Mx_cmd, My_cmd, Mz_cmd]` for `rpm_sq_cmd`.
++   - Prefer a numerically stable solve: `np.linalg.solve` if well-conditioned; otherwise use least-squares/pseudoinverse (`np.linalg.lstsq` / `np.linalg.pinv`) and document it.
++3. **Physics hardening:** clamp squared speeds to be nonnegative **before** taking square roots:
++   - `rpm_sq_cmd = np.maximum(rpm_sq_cmd, 0.0)`
++   - `rpm_cmd = np.sqrt(rpm_sq_cmd)`
++4. Clip commanded RPM to physical limits:
++   - `rpm_cmd = np.clip(rpm_cmd, rpm_min, rpm_max)`
++5. Apply first-order motor lag on RPM state:
++   - `rpm_dot = km * (rpm_cmd - rpm_current)`
++   - Integrate RPM as part of the full state (or consistently inside the motor model).
++6. **After clipping/lag, recompute achieved wrench** from the *actual* RPM used by dynamics:
++   - `wrench_actual = prop_matrix @ (rpm_actual ** 2)`
++   - Return `F_actual = wrench_actual[0]`, `M_actual = wrench_actual[1:4]`.
++
++Note: Controllers may request infeasible `[F,M]`; after clipping, `wrench_actual` can differ significantly from the command. Always feed the recomputed achieved `F_actual, M_actual` into the dynamics for consistency.
+ 
+ ## Dynamics (Equations of Motion)
+ 
+@@ -48,13 +69,30 @@
+ 
+ ### Implementation Logic
+ 
+-Compute `state_dot` (16,) from current state and applied forces/moments:
++Compute `state_dot` (16,) from current state and applied forces/moments (all expressed in **body** unless stated):
+ 
+-1. **Position derivative** = current velocity (`state[3:6]`).
+-2. **Velocity derivative** = gravity + thrust projected into world frame via ZYX Euler rotation. The x/y accelerations depend on `F/m`, `sin`/`cos` of all three Euler angles. The z acceleration is `−g + (F/m)·cos(φ)·cos(θ)`.
+-3. **Euler angle derivative** = current angular velocity (`state[9:12]`).
+-4. **Angular velocity derivative** = `I⁻¹ M` (solve inertia matrix against moment vector).
+-5. **Motor RPM derivative** = `rpm_motor_dot` from the motor model.
++1. **Position derivative (world frame)**
++   - `pos_dot = vel_world = state[3:6]`.
++2. **Translational acceleration (world frame)**
++   - Form rotation `R_wb` from ZYX Euler angles `[φ, θ, ψ]` that maps body vectors → world vectors.
++   - Thrust acts along body +z: `f_body = [0, 0, F_actual]`.
++   - `acc_world = (R_wb @ f_body) / m + [0, 0, -g]`.
++   - Set `vel_dot = acc_world`.
++3. **Euler angle rates (do NOT set equal to body rates)**
++   - Let body rates be `ω = [p, q, r] = state[9:12]`.
++   - Use the standard ZYX mapping: `[φ_dot, θ_dot, ψ_dot]^T = E(φ,θ) @ ω`, where
++     ```
++     E(φ,θ) = [[1, sinφ*tanθ,  cosφ*tanθ],
++              [0, cosφ,      -sinφ     ],
++              [0, sinφ/secθ,  cosφ/secθ]]
++     ```
++   - Guard against `cos(θ) → 0` singularity (limit pitch in planners/controllers or clamp `θ`).
++4. **Rotational dynamics (body frame)**
++   - Rigid-body equation: `ω_dot = I^{-1} ( M_actual - ω × (I ω) )`.
++5. **Motor RPM derivative**
++   - `rpm_dot = km * (rpm_cmd_clipped - rpm_current)` from the motor model.
++
++The moments `M_actual` must match the body axes used by `ω` and `I`.
+ 
+ ## RK45 Integration
+ 
+@@ -76,3 +114,15 @@
+ - Thrust-to-weight ratio: `twr = T_max / (mass * gravity)`
+ - Max upward acceleration: `(T_max − mass·g) / mass`
+ - Max downward acceleration: `(mass·g − T_min) / mass`
++
++
++
++## Numerical Stability and Unit Notes
++
++- **Units:** Be explicit whether motor speed is stored as RPM or rad/s.
++  - If using RPM in state, ensure `cT`/`cQ` are calibrated for RPM-based formulas (`T = cT·rpm^2`, `Q = cQ·rpm^2`).
++  - If converting to rad/s, use `ω_rad = rpm * 2π/60` and adjust coefficients accordingly.
++- **Allocation conditioning:** Near-hover and aggressive maneuvers can make the solve sensitive. Prefer `np.linalg.solve` when the matrix is well-conditioned; otherwise use least-squares and consider regularization.
++- **Clipping consistency:** Always recompute achieved `[F,M]` from clipped/lagged RPM before applying to dynamics.
++- **Motor lag constant:** Typical quad motor time constants are on the order of 20–80 ms (km ≈ 12–50 s⁻¹). Too small `km` makes the system sluggish; too large makes it stiff.
++- **Integration step sizing:** Keep the integration step aligned with `sample_rate` (e.g., `dt = 1/sample_rate`). If RK45 shows stiffness due to high `km`, consider reducing `dt` or using a stiff solver (Radau/BDF) for the physics layer.
+--- before/position-controller-trajectory-planner/SKILL.md
++++ after/position-controller-trajectory-planner/SKILL.md
+@@ -40,23 +40,104 @@
+     # rows 0:3  pos, 3:6 vel, 6:9 orientation, 9:12 ang_vel, 12:15 acc
+ ```
+ 
++
++Populate every timestep column of the `(15, max_iter)` matrix explicitly:
++
++- rows `0:3` → desired position `[x, y, z]`
++- rows `3:6` → desired linear velocity `[vx, vy, vz]`
++- rows `6:9` → desired orientation `[phi, theta, psi]`; for position-only planning set `phi=theta=0` and use spline yaw for `psi`
++- rows `9:12` → desired angular velocity `[p, q, r]`; use zeros unless a yaw-rate profile is commanded
++- rows `12:15` → desired linear acceleration `[ax, ay, az]` from the spline second derivative after limit enforcement
++
++Mode boundary conditions should be deterministic:
++
++- `hover`: constant position, zero velocity/acceleration/yaw-rate for the entire segment
++- `takeoff`: start from current state, end at target altitude with terminal velocity and acceleration equal to zero
++- `fly`: connect start/end waypoints with continuous position/velocity/acceleration; default terminal velocity and acceleration to zero unless explicitly commanded
++- `land`: end at ground height with zero terminal velocity and acceleration
++
++Acceleration feasibility must be checked after generating spline samples. A robust strategy is iterative segment time-scaling:
++
++1. Sample spline position/velocity/acceleration at `dt = 1/sample_rate`
++2. Compute `a_horiz = sqrt(ax**2 + ay**2)` for every sample
++3. If any sample violates `accel_limit_horiz`, `accel_limit_up`, or `accel_limit_down`, stretch that segment duration by a factor such as `1.1-1.3`
++4. Refit/re-evaluate the spline and repeat until all samples satisfy limits
++
++Do not simply clip acceleration samples without retiming the segment, because clipping breaks derivative consistency and often increases tracking error.
+ ## Position Controller
+ 
+ ### Implementation Logic
+ 
+-PID control on position and velocity errors:
+-
+-1. Compute `pos_err = current_pos − desired_pos` and `vel_err = current_vel − desired_vel`.
+-2. Accumulate integral: `integral_e += pos_err * dt`.
+-3. Compute desired acceleration: `acc = desired_acc − kp * pos_err − ki * integral_e − kd * vel_err`.
+-4. Compute thrust: `F = mass * (gravity + acc[2])`.
+-5. Return `(F, acc)`.
++Use desired-acceleration feedforward plus PID feedback:
++
++1. Compute errors using desired minus current state:
++   ```python
++   pos_err = desired_pos - current_pos
++   vel_err = desired_vel - current_vel
++   ```
++2. Update the integral only when the controller is not saturated, or use back-calculation:
++   ```python
++   integral_e += pos_err * dt
++   integral_e = np.clip(integral_e, -i_limit, i_limit)
++   ```
++3. Compute commanded acceleration:
++   ```python
++   acc_cmd = (
++       desired_acc
++       + kp * pos_err
++       + ki * integral_e
++       + kd * vel_err
++   )
++   ```
++4. Enforce physical acceleration limits before converting to thrust:
++   ```python
++   a_xy = np.linalg.norm(acc_cmd[:2])
++   if a_xy > accel_limit_horiz:
++       acc_cmd[:2] *= accel_limit_horiz / max(a_xy, 1e-9)
++
++   acc_cmd[2] = np.clip(
++       acc_cmd[2],
++       -accel_limit_down,
++       accel_limit_up,
++   )
++   ```
++5. Add gravity compensation and compute thrust:
++   ```python
++   thrust = mass * (gravity + acc_cmd[2])
++   thrust = np.clip(thrust, thrust_min, thrust_max)
++   ```
++6. If thrust or acceleration saturates, freeze/reduce the integrator to avoid windup. Reset the integrator on major mode transitions (`takeoff↔hover↔fly↔land`) or after prolonged saturation.
++7. Return `(thrust, acc_cmd)`.
+ 
+ Use `make_position_integral()` to create a fresh `{"e": zeros(3)}` dict before the loop. Never use a mutable default for this state.
+ 
+ ## Gain Tuning
+ 
+-No tuning range is provided — choose PID gains freely to best satisfy the success criteria. Start with small values (e.g. `kp_pos = [0.1, 0.1, 0.1]`, `ki_pos = [0.0, 0.0, 0.0]`, `kd_pos = [0.0, 0.0, 0.0]`) and increase gradually.
++Tune against the verifier requirements directly: per-timestep position error `< 0.05 m`, overshoot `< 5%`, and steady-state error `< 0.05 m`.
++
++Practical workflow:
++
++1. Tune altitude (`z`) first with `x/y` gains near zero
++2. Increase `kp_pos[2]` until rise time is acceptable but oscillation is still limited
++3. Increase `kd_pos[2]` to reduce overshoot and improve settling
++4. Add a small `ki_pos[2]` only if a steady-state offset remains
++5. Repeat for horizontal axes using symmetric gains for `x/y`
++6. Tune attitude gains after the position loop is stable; attitude dynamics should be faster than the position loop
++
++Reasonable starting ranges for many simulations:
++
++```python
++kp_pos = [1.0, 1.0, 2.0]
++ki_pos = [0.01, 0.01, 0.05]
++kd_pos = [1.5, 1.5, 2.5]
++```
++
++Additional recommendations:
++
++- Filter noisy velocity estimates or derivative terms with a first-order low-pass filter
++- Reduce `ki` if oscillation or slow drift appears during hover
++- If motors saturate frequently, reduce aggressiveness by lowering gains or increasing trajectory duration
++- Validate tuning on takeoff, hover, fly, and land separately because each mode stresses different dynamics
+ 
+ ## Required Output File Locations
+ 
+--- before/stepinfo-3d/SKILL.md
++++ after/stepinfo-3d/SKILL.md
+@@ -6,6 +6,12 @@
+ # 3D Step-Response Metrics (stepinfo_3d)
+ 
+ ## When to Use
++
++
++**Verifier alignment / choosing 1D vs 3D:**
++- Use **1D `stepinfo` on `z`** only when the command is a pure vertical motion (target x,y unchanged and you evaluate altitude response).
++- Use **`stepinfo_3d`** whenever the commanded final position differs in more than one axis *or* whenever the verifier expects `metrics_3d.json` based on Euclidean distance to the final 3D target.
++- Do **not** mix: computing 1D metrics for a diagonal move will generally disagree with the verifier’s 3D-distance-based thresholds and can mislead PID tuning.
+ 
+ | Scenario | Metric to use |
+ |---|---|
+@@ -20,20 +26,63 @@
+ | Metric | Definition |
+ |---|---|
+ | **Rise time** | First time 3D distance to target ≤ 10% of initial distance |
+-| **Settling time** | Last time 3D distance exceeds `settling_threshold × initial_distance` |
+-| **Overshoot %** | Max distance from target after first entering the settling band, as % of initial distance |
++| **Settling time** | Let `d0 = dist[0]` and `band = settling_threshold * d0` (with `settling_threshold=0.02`). Settling time is the earliest time `t[k_enter]` such that for **all** `j ≥ k_enter`, `dist[j] ≤ band`. If no such `k_enter` exists, settling time is `t[-1]` (never settled within the horizon). |
++| **Overshoot %** | Define `k_enter` as the **first** index where `dist[k] ≤ band` (first entry into the settling band). If the band is never entered, `Overshoot_pct = 0.0`. Otherwise overshoot is the maximum distance observed **after first entry** (including the entry sample): `max(dist[k_enter:])`. Report `Overshoot_pct = 100 * max(dist[k_enter:]) / d0`. (This captures leaving/re-entering the band for non-monotone trajectories.) |
+ | **Steady-state error** | Final 3D Euclidean distance from target [metres] |
+ 
+ ## Implementation Logic
++
++
++### Reference Pseudocode (single source of truth)
++
++```python
++def stepinfo_3d(pos_actual, pos_target, t, settling_threshold=0.02):
++    dist = np.linalg.norm(pos_actual - pos_target.reshape(3, 1), axis=0)
++    d0 = float(dist[0])
++    if d0 < 1e-6:
++        return dict(RiseTime=0.0, SettlingTime=0.0, Overshoot_pct=0.0, SteadyStateError=0.0)
++
++    # Rise time: first time within 10% of initial distance
++    rise_idx = next((k for k in range(len(t)) if dist[k] <= 0.1 * d0), None)
++    RiseTime = float(t[rise_idx]) if rise_idx is not None else float(t[-1])
++
++    band = settling_threshold * d0
++
++    # First entry into settling band
++    k_enter = next((k for k in range(len(t)) if dist[k] <= band), None)
++
++    if k_enter is None:
++        Overshoot_pct = 0.0
++        SettlingTime = float(t[-1])
++    else:
++        # Overshoot measured after first entry (captures leaving/re-entering)
++        Overshoot_pct = float(100.0 * np.max(dist[k_enter:]) / d0)
++
++        # Settling time: earliest index from which we stay within band forever
++        k_settle = None
++        for k in range(len(t)):
++            if np.all(dist[k:] <= band):
++                k_settle = k
++                break
++        SettlingTime = float(t[k_settle]) if k_settle is not None else float(t[-1])
++
++    SteadyStateError = float(dist[-1])
++    return dict(RiseTime=RiseTime, SettlingTime=SettlingTime,
++                Overshoot_pct=Overshoot_pct, SteadyStateError=SteadyStateError)
++```
+ 
+ Given `pos_actual (3, n)`, `pos_target (3,)`, and time vector `t (n,)`:
+ 
+ 1. Compute `dist[k] = ||pos_actual[:, k] − pos_target||₂` for each timestep.
+ 2. If `dist[0] < 1e-6` (already at target), return all zeros.
+ 3. **Rise time**: scan forward and record the first `t[k]` where `dist[k] ≤ 0.1 * dist[0]`.
+-4. **Settling time**: scan backward and record the last `t[k]` where `dist[k] > settling_threshold * dist[0]` (default threshold = 0.02).
+-5. **Overshoot**: after the drone first enters the settling band, track the maximum `dist[k]` seen. Express as `max_post_entry / dist[0] * 100`. If the settling band is never entered, return 0.
+-6. **Steady-state error**: `dist[-1]`.
++4. Define `d0 = dist[0]` and `band = settling_threshold * d0` (use `settling_threshold=0.02` unless explicitly overridden).
++5. **First band entry (`k_enter`)**: find the smallest index `k` such that `dist[k] ≤ band`. If none exists, then:
++   - `SettlingTime = t[-1]` (never settled within the recorded horizon)
++   - `Overshoot_pct = 0.0`
++6. **Settling time** (verifier-aligned): find the earliest index `k_settle` such that `dist[j] ≤ band` for all `j ≥ k_settle`. If such a `k_settle` exists, `SettlingTime = t[k_settle]`; otherwise `SettlingTime = t[-1]`.
++7. **Overshoot**: if `k_enter` exists, compute `max_post_entry = max(dist[k_enter:])` (includes any departures and re-entries for non-monotone trajectories). Set `Overshoot_pct = 100.0 * max_post_entry / d0`.
++8. **Steady-state error**: `dist[-1]`.
+ 
+ Return a dict with keys `RiseTime`, `SettlingTime`, `Overshoot_pct`, `SteadyStateError`.
+ 

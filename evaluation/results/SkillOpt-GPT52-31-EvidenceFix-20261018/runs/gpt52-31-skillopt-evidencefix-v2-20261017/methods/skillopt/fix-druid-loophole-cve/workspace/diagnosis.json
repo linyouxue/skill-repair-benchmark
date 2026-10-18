@@ -1,0 +1,29 @@
+{
+  "task_id": "fix-druid-loophole-cve",
+  "fallback_used": false,
+  "overall_diagnosis": "The task failures consistently indicate an incomplete, not-actionable mapping from the empty-string JSON key (\"\") attack concept to a reliable mitigation in a real Druid/Jackson request path. The initial fix did not block the exploit at all (suggesting the mitigation wasn’t applied on the actual deserialization entrypoint or was too late/post-binding), while a later attempt moved toward parser/factory interception but introduced service instability (Druid startup failure) and still didn’t consistently force the vulnerable endpoint to reject the payload. The primary gap is in Jackson security guidance: where/how to reject empty field names before any binding/merge/convert steps, and how to ensure the guard is wired into the specific ObjectMapper/JsonFactory used by the HTTP endpoint(s). A secondary gap is enterprise Java integration practice: tracing Jersey/Guice wiring, scoping changes to avoid global breakage, and verifying the built artifacts and runtime mapper instances.",
+  "diagnosed_skills": [
+    {
+      "path": "jackson-security/SKILL.md",
+      "confidence": "high",
+      "diagnosis": "This task is directly about an empty-key (\"\") deserialization loophole where post-deserialization validation or annotation tweaks are ineffective. The exploit still succeeded, implying the mitigation either didn’t run on the true parsing/binding path (e.g., readTree/Map/convertValue flows) or wasn’t enforced early enough. A later parser-wrapper approach aligns with correct timing, but the skill lacks concrete, integration-safe patterns for rejecting empty field names during tokenization and for ensuring the custom JsonFactory/JsonParser is actually used by all relevant ObjectMappers in a framework like Druid.",
+      "repair_instruction": "Add a task-oriented section on CVE-style empty-field-name bypasses with actionable remediation patterns: (1) enforce fail-fast rejection of empty FIELD_NAME tokens at the earliest possible layer (streaming pre-parse over raw request bytes/stream, or a JsonFactory/JsonParserDelegate that throws JsonParseException when currentName() is empty, at any nesting depth); (2) explicitly cover common binding paths that bypass annotation/unknown-property checks (JsonNode/ObjectNode, Map binding, @JsonAnySetter, treeToValue/convertValue), and state which defenses do/do not cover each; (3) provide safe wiring examples for global vs endpoint-scoped enforcement (ObjectMapper setFactory, provider-level JsonFactory, per-endpoint pre-parse guard) with notes on preserving codec/configuration delegation to avoid runtime breakage; (4) include verification checklist: how to prove the guard is invoked and that exploit payloads yield 4xx (not 200), plus regression tests for normal payloads."
+    },
+    {
+      "path": "senior-java/SKILL.md",
+      "confidence": "medium",
+      "diagnosis": "A repair attempt destabilized Druid startup (connection refused), and evidence suggests fixes may have been applied to the wrong mapper/provider or not deployed on the runtime classpath actually serving requests. The skill package is broad but under-emphasizes practical procedures for tracing the real HTTP deserialization pipeline in large Jersey/Guice services, scoping Jackson changes to reduce blast radius, and performing build/deploy/runtime sanity checks to ensure the patched code is the one executed.",
+      "repair_instruction": "Add focused guidance for patching and verifying low-level Jackson changes in enterprise Java services: (1) trace endpoint→provider→ObjectMapper wiring in Jersey/Guice (identify the handler method signature, the Jackson provider, and the exact injected mapper/factory used); (2) prefer endpoint-scoped hardening (per-endpoint ObjectReader/ObjectMapper.copy() or raw-byte pre-parse validation) before global changes; (3) integration safety: preserve ObjectMapper defaults, avoid replacing shared JsonFactory without delegation compatibility, and add startup smoke checks; (4) runtime verification steps (logging mapper identity/module IDs, confirming jar/classpath precedence, restart/port checks) and a minimal curl/JUnit black-box test loop proving exploit=4xx and baseline=200."
+    }
+  ],
+  "unselected_skills": [],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": false,
+  "shared_diagnosis_source": null,
+  "consumer_method": "skillopt",
+  "repair_round": 2,
+  "diagnosis_n": 3,
+  "merge_samples": true
+}

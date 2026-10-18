@@ -1,0 +1,37 @@
+{
+  "task_id": "dynamic-object-aware-egomotion",
+  "fallback_used": false,
+  "overall_diagnosis": "Egomotion labels, sampling/indexing, and output formatting passed, but the dynamic-object masks narrowly failed quality metrics: Mean IoU was slightly below threshold, boundary IoU was extremely low, and temporal flicker was high. The recurring failure pattern points to weaknesses in the motion-compensated foreground extraction pipeline itself rather than indexing or labeling logic. The current masking guidance appears under-specified for robust global motion compensation, threshold calibration, border/parallax suppression, temporal stabilization, and boundary refinement. Validation guidance also lacks lightweight quality heuristics that could detect unstable or noisy masks before submission.",
+  "diagnosed_skills": [
+    {
+      "path": "dyn-object-masks/SKILL.md",
+      "confidence": "0.92",
+      "diagnosis": "The mask workflow is too fragile under imperfect alignment, parallax, illumination changes, and 5fps sampling. Using simple affine warping plus single-frame differencing and basic morphology can produce noisy, unstable masks with poor boundary localization and high flicker, matching the observed metrics. The skill under-specifies when to use homography versus affine transforms, how to suppress residual background motion and warp-border artifacts, how to calibrate adaptive thresholds robustly, and how to stabilize masks temporally across sampled frames.",
+      "repair_instruction": "Expand the workflow to include: (1) explicit guidance for choosing homography versus affine transforms with RANSAC quality checks and fallback behavior; (2) robust global compensation with warped validity masks, erosion of invalid borders, and optional residual/confidence maps to suppress parallax artifacts; (3) photometric normalization before differencing (blur/CLAHE) and adaptive thresholding using robust statistics or percentile-based thresholds with image-size/fps-aware minimums; (4) temporal stabilization such as EMA smoothing, majority vote across adjacent sampled frames, or persistence filtering to reduce flicker; (5) stronger morphology and connected-component filtering using area ratios plus optional shape/solidity filtering and hole filling; (6) edge-aware or distance-transform-based boundary refinement; and (7) self-check heuristics for sparsity, border activation, and flicker before final export."
+    },
+    {
+      "path": "output-validation/SKILL.md",
+      "confidence": "0.74",
+      "diagnosis": "Validation currently checks structural correctness only, so poor-quality masks can pass despite severe instability and weak boundaries. The observed failure mode would not be caught by existing checks because there are no non-GT diagnostics for flicker, excessive coverage, noisy components, or warp-border contamination.",
+      "repair_instruction": "Extend validation with lightweight mask-quality heuristics: monitor mask area ratios per frame, temporal XOR flicker between adjacent masks, connected-component counts and size distributions, boundary roughness/coherence, and border-band activation after warping. Add guidance to iteratively retune thresholds, morphology, and minimum component area when masks are overly sparse, overly dense, or highly unstable."
+    },
+    {
+      "path": "egomotion-estimation/SKILL.md",
+      "confidence": "0.57",
+      "diagnosis": "Although camera-motion labels were correct, the transform estimation guidance is oriented toward classification rather than producing stable frame warps for downstream dynamic-object masking. Weak or poorly distributed feature tracks and insufficient transform robustness can directly degrade compensated differencing and amplify flicker.",
+      "repair_instruction": "Add guidance for producing high-quality transforms usable for global alignment: encourage well-distributed feature sampling, outlier rejection, transform smoothing, and homography estimation when scenes contain perspective effects or strong rotation. Clarify that the estimated transform should support both motion labeling and robust frame warping for dynamic-object extraction."
+    }
+  ],
+  "unselected_skills": [
+    "sampling-and-indexing/SKILL.md"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": false,
+  "shared_diagnosis_source": null,
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true
+}

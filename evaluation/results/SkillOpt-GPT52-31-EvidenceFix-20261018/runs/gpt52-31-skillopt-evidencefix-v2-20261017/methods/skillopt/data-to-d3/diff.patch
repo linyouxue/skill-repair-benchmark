@@ -1,0 +1,128 @@
+--- before/d3-visualization/SKILL.md
++++ after/d3-visualization/SKILL.md
+@@ -70,6 +70,48 @@
+   - fix initial positions deterministically (e.g., sorted nodes placed on a grid),
+   - run exactly N ticks and stop.
+ 
++
++
++### Deterministic force-layout recipe (important for automated verification)
++
++Force-directed charts must expose stable rendered geometry by the time tests or screenshots run.
++
++Recommended pattern:
++```javascript
++const width = 960;
++const height = 640;
++
++const svg = d3.select('#chart')
++  .attr('width', width)
++  .attr('height', height)
++  .attr('viewBox', [0, 0, width, height]);
++
++nodes.forEach((d, i) => {
++  // deterministic initial positions
++  d.x = 120 + (i % 10) * 70;
++  d.y = 120 + Math.floor(i / 10) * 70;
++});
++
++const simulation = d3.forceSimulation(nodes)
++  .force('x', d3.forceX(d => centers[d.group].x).strength(0.2))
++  .force('y', d3.forceY(d => centers[d.group].y).strength(0.2))
++  .force('collide', d3.forceCollide(d => d.r + 2));
++
++for (let i = 0; i < 300; i++) {
++  simulation.tick();
++}
++
++node.attr('transform', d => `translate(${d.x},${d.y})`);
++simulation.stop();
++```
++
++Guidelines:
++- Set explicit SVG `width` and `height` attributes (not CSS-only sizing).
++- Initialize node positions deterministically before starting the simulation.
++- Run a fixed number of `simulation.tick()` calls (or until a fixed alpha threshold) after nodes exist in the DOM.
++- Update positions on the same rendered element automation tools measure (`transform`, `cx/cy`, or equivalent).
++- Stop the simulation only after final rendered positions are written.
++- Validate that node positions are not collapsed: x/y spread should be non-zero and nodes should not all share the same `transform`, `cx`, or `cy` values.
+ ### Offline + dependency determinism
+ - Do **not** load D3 from a CDN.
+ - Pin D3 to a specific version (default: **d3@7.9.0**).
+@@ -105,6 +147,46 @@
+ 
+ ### Tooltip pattern (recommended)
+ 
++
++
++### Automation-proof interactivity & layering
++
++Interactive SVG charts often fail automated click/hover tests because labels or overlays intercept pointer events.
++
++Recommended node structure:
++```javascript
++const node = svg.selectAll('g.node')
++  .data(data)
++  .join('g')
++  .attr('class', 'node')
++  .attr('data-ticker', d => d.ticker);
++
++node.append('circle')
++  .attr('class', 'bubble');
++
++node.append('text')
++  .attr('class', 'bubble-label')
++  .style('pointer-events', 'none')
++  .text(d => d.ticker);
++
++node.on('click', handleClick);
++node.on('mouseenter', handleEnter);
++```
++
++Equivalent CSS:
++```css
++svg text,
++svg .bubble-label,
++svg .annotation {
++  pointer-events: none;
++}
++```
++
++Guidelines:
++- Apply `pointer-events: none` to non-interactive overlay labels, annotations, and decorative layers.
++- Attach click/hover handlers to the intended hit target (`circle`) or a wrapping `g.node`, not to labels.
++- Keep interactive marks unobstructed by transparent overlays or neighboring panels.
++- Use stable selectors/classes/data attributes (`.node`, `.bubble`, `[data-ticker]`) for browser automation and linked-view interactions.
+ 1. **Create a tooltip element** in HTML:
+ ```html
+ <div id="tooltip" class="tooltip"></div>
+@@ -150,6 +232,14 @@
+ - `pointer-events: none` prevents tooltip from blocking mouse events
+ - Position tooltip relative to mouse with `event.pageX/pageY`
+ 
++
++
++Additional tooltip robustness guidance:
++- Prefer `mouseenter`, `mousemove`, and `mouseleave` (or pointer-event equivalents) on the interactive node container (`g.node`).
++- Standardize tooltip positioning on `event.pageX/pageY` or `clientX/clientY` plus scroll offsets. Avoid coordinate systems tied to nested SVG transforms unless necessary.
++- Keep tooltip visibility controlled via explicit classes or opacity state so tests can verify visible/hidden status.
++- Ensure the tooltip has a sufficiently high `z-index` and `pointer-events: none` so it never blocks hover/click behavior.
++- When conditionally suppressing tooltips (for excluded categories or ETFs), verify the filtering logic does not accidentally disable all tooltips.
+ ### Click handlers for selection/highlighting
+ 
+ ```javascript
+@@ -186,3 +276,14 @@
+ ```
+ 
+ ---
++
++
++## Playwright-oriented interaction checklist
++
++Before finalizing an interactive D3 visualization, verify:
++- Bubbles/nodes are directly clickable and not occluded by labels or overlays.
++- Non-interactive SVG text and annotations use `pointer-events: none`.
++- Tooltip appears on hover for intended nodes and hides cleanly on mouse leave.
++- Interactive elements expose stable selectors/classes/data attributes.
++- Linked selections are reflected via deterministic classes or attributes such as `.selected`, `.active`, or `aria-selected`.
++- Force-layout charts show non-zero spatial spread and stable rendered positions before screenshots or assertions run.

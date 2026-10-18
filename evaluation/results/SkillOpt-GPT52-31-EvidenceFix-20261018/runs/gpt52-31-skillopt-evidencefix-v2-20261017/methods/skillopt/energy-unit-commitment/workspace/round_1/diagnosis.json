@@ -1,0 +1,35 @@
+{
+  "task_id": "energy-unit-commitment",
+  "fallback_used": false,
+  "overall_diagnosis": "The submission produced a schema-correct, operationally feasible unit commitment schedule but with objective value roughly ~2x the benchmark, indicating the main failure is not feasibility or basic parsing but cost/optimization quality. The most likely causes are (a) incorrect or incomplete cost/objective modeling (piecewise energy costs, no-load, startup/shutdown, pmin vs above-min conventions, renewables/curtailment treatment), and/or (b) MILP workflow gaps where the solved MILP is not equivalent to the benchmark problem despite reporting optimality (missing coefficients, wrong scaling, weak formulation, or lack of objective recomputation/equivalence checks). A secondary contributor could be mis-parsing of cost curve/startup fields or unit scaling that still permits feasibility but distorts economics.",
+  "diagnosed_skills": [
+    {
+      "path": "milp-solver-workflow/SKILL.md",
+      "confidence": "high",
+      "diagnosis": "The workflow guidance was enough to build/solve a feasible MILP, but did not adequately force objective/model-equivalence validation, solver-quality diagnostics, or competitive-solution practices. The agent can return a mathematically ‘optimal’ solution to the wrong/weak objective (or with mis-linearized costs), yielding a large benchmark gap.",
+      "repair_instruction": "Add an explicit ‘Objective & Benchmark Equivalence Debug Loop’ to the workflow: (1) print and sanity-check objective coefficient summaries by variable family (startup, no-load, energy segments, reserves, curtailment penalties) before solve; (2) recompute total cost from extracted variables (using the same accounting as the benchmark) and assert it matches solver objective within tolerance; (3) include spot-checks for piecewise segments (activation, slopes, intercepts) and pmin-related terms; (4) require post-solve economic sanity checks (merit-order consistency, overcommitment detection, renewable utilization) and comparison against a lower bound (e.g., LP relaxation or ED without min-up/down) to detect gross suboptimality; (5) solver settings guidance for quality (time limit, target mip gap, presolve/cuts/heuristics) plus warnings against stopping at the first feasible incumbent."
+    },
+    {
+      "path": "unit-commitment-operating-rules/SKILL.md",
+      "confidence": "high",
+      "diagnosis": "The skill emphasizes feasibility and operating constraints but underemphasizes economically correct UC execution and, critically, cost-model consistency with reporting conventions. Common failure modes include omitting/incorrectly applying piecewise variable costs, double-counting or missing pmin energy, mishandling no-load and startup/shutdown costs, or overly conservative reserve/commitment choices that remain feasible but very expensive.",
+      "repair_instruction": "Add a dedicated ‘Cost Modeling & Economic UC Sanity’ section: (1) explicit formulas for total cost components (no-load, startup/shutdown, variable energy cost via piecewise segments) tied to a clearly defined actual MW output; (2) a worked example showing conversion between actual_output and above-minimum variables and where each must be used in ramping, capacity, reserves, and costs (to avoid double-counting pmin energy); (3) guidance on co-optimizing energy and reserves without forcing unnecessary commitment; (4) a checklist of economic red flags (too many units online, excessive starts, renewable curtailment when thermal marginal cost is higher) and how to diagnose them from schedules; (5) require recomputing and reconciling reported cost from the final schedule before submission."
+    },
+    {
+      "path": "unit-commitment-data-modeling/SKILL.md",
+      "confidence": "medium",
+      "diagnosis": "Even with feasibility passing, a large cost gap can arise from subtle mis-parsing/normalization of economic inputs: piecewise cost blocks interpreted incorrectly (total vs incremental), $/MWh scaling, breakpoints not aligned with pmin/pmax convention, or startup tiers/initial conditions mapped wrong in a way that inflates cost or distorts decisions.",
+      "repair_instruction": "Extend parsing guidance with cost-structure validation: (1) normalize piecewise cost curves into consistent breakpoints and marginal slopes (convert (MW,total_cost) blocks into incremental slopes if needed); (2) validate units and per-interval scaling (e.g., $/MWh * duration); (3) ensure curve endpoints and breakpoints align with whether production variables represent actual MW or above-minimum; (4) verify startup cost tiers and initial on/off time mapping; (5) emit a per-generator audit table (pmin/pmax, no-load, startup, first/last segment slopes, implied total cost at pmax) to catch misreads early."
+    }
+  ],
+  "unselected_skills": [],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": false,
+  "shared_diagnosis_source": null,
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true
+}
