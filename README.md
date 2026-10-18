@@ -15,6 +15,7 @@ Skill 暴露方式、60 次 iteration 限制、Docker 环境、官方 verifier �
 |---|---|
 | 同学在本地生成诊断、修复与 Verified Fix Rate 全部指标 | [细粒度评测说明](./evaluation/README.md) |
 | 获取当前发布的 Core-25 Gold 子集与提交模板 | [7 任务、14 缺陷的数据说明](./evaluation/data/core25/README.md) |
+| 获取 JPG 小票修复数据、三遍 baseline 和多模态 adapter 契约 | [200 张小票数据集](./jpg-ocr-skill-repair-dataset/README.md) |
 | 第一次安装并跑通一条任务 | [DELIVERY_GUIDE.md：第一次使用](./DELIVERY_GUIDE.md#0-第一次使用从解压到一条有效-rollout) |
 | 手动运行 no-skill / original-skill / method-skill | [DELIVERY_GUIDE.md：人工或调试运行](./DELIVERY_GUIDE.md#4-入口-a人工或调试运行) |
 | 在 SkillRevise、SkillHone 等算法中调用 rollout | [DELIVERY_GUIDE.md：修复算法自动调用](./DELIVERY_GUIDE.md#5-入口-b修复算法自动调用) |
@@ -52,6 +53,12 @@ P/R/F1、定位、regression、Verified Fix Rate 和有效验证覆盖率。原�
 
 这些内容必须由实验协调者或各方法负责人另行提供。正式比较时，所有同学必须使用
 同一 SkillsBench commit、Core-25 清单、模型路由和 reasoning effort。
+
+JPG 小票修复研究的材料单独放在
+[`jpg-ocr-skill-repair-dataset/`](./jpg-ocr-skill-repair-dataset/README.md)：
+固定 120 张训练、40 张测试1和40张测试2，提供既有三遍 baseline、真实产物、
+逐字段训练反馈和多模态 adapter 输入约定。测试2沿用原验证集成员，仅作最终评测。
+该数据集的指标与输入边界见其独立说明，不改变上述 Core-25 内容评测或执行器接口。
 
 ## 第一次使用的最短路径
 
@@ -119,3 +126,6 @@ SkillsBench 官方仓库为
 ## License
 
 BenchFlow 上游及本交付代码遵循仓库中的 Apache-2.0 License。
+JPG 图片、第三方 Skill 及其他来源材料的条款分别见
+[数据来源与许可记录](./jpg-ocr-skill-repair-dataset/SOURCE_PROVENANCE.md)，
+不因位于本仓库而统一改为 Apache-2.0。
