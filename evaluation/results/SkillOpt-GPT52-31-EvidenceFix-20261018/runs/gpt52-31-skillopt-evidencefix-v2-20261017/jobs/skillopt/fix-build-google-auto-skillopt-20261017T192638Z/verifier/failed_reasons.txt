@@ -1,0 +1,26 @@
+Repository: /home/travis/build/failed/google/auto
+
+Build failure reproduction
+- Running: mvn -f build.pom.xml test
+- Fails in module: com.google.auto:auto-common:jar:1.0-SNAPSHOT
+
+Observed error
+- DependencyResolutionException:
+  Could not resolve dependencies for project com.google.auto:auto-common:jar:1.0-SNAPSHOT:
+  Could not find artifact com.sun:tools:jar:11.0.27 at specified path
+  /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause
+- This is a build configuration / environment mismatch.
+- The project’s parent POM (com.google.auto:auto-parent:3 from Maven Central) expects a JDK layout with tools.jar (JDK 8 and earlier).
+- On JDK 9+, tools.jar does not exist. The required compiler APIs are in the JDK modules.
+- The local repo’s root pom.xml defines profiles that try to set a toolsjar property by checking for tools.jar/classes.jar, but auto-common is inheriting from auto-parent:3, not from this repo’s root pom (auto-parent:4-SNAPSHOT).
+- Therefore, building with build.pom.xml pulls the old parent and activates a tools.jar system dependency that fails on JDK 11.
+
+Plan
+1) Make all modules in this checkout inherit from the repo’s local parent (auto-parent:4-SNAPSHOT) instead of com.google.auto:auto-parent:3.
+   - Update common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml to use parent version 4-SNAPSHOT.
+2) Ensure the local parent works on JDK 9+ by removing tools.jar assumptions.
+   - Remove the toolsjar profiles (tools.jar/classes.jar) from root pom.xml.
+   - If any module needs compiler APIs, add dependency on javax.tools (already in JDK) or use maven-compiler-plugin with annotation processing; no tools.jar system dependency.
+3) Re-run mvn -f build.pom.xml test to confirm the reactor build passes.
