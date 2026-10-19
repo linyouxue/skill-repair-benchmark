@@ -1,13 +1,13 @@
 # SkillGrad MAIN31 combined finalized publication
 
-This directory contains the effective SkillGrad MAIN31 finalized publication after combining trusted LOCAL and accepted SERVER results.
+This directory contains the effective SkillGrad MAIN31 finalized publication after preserving the 25 trusted LOCAL results.
 
 - Method: SkillGrad
-- Effective submission task count: 27
+- Effective submission task count: 25
 - LOCAL finalized tasks: 25
-- SERVER finalized tasks: 2
+- SERVER finalized tasks: 0
 - LOCAL verifier outcomes: PASS = 8, FAIL = 17
-- SERVER additions preserved: lab-unit-harmonization, dynamic-object-aware-egomotion
+- Superseded SERVER additions removed; canonical replacements are in `../main31_local_recovery_four_20261019_v1/`.
 - Ownership conflict retained but excluded: paper-anonymizer-server-ownership-conflict.json
 - fix-druid-loophole-cve is not included; it is server-owned and has no finalized result in this publication.
 
