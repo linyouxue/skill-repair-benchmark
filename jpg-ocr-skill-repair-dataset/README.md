@@ -71,6 +71,8 @@ python -c "import json; from pathlib import Path; m=json.loads(Path('MANIFEST.js
 
 ## 从哪里开始
 
+交给同学时，请保留完整的`train/`目录结构、`tools/`及本目录的说明文档，并从`train/diagnosis/index.json`进入。**不要只拷贝`train/diagnosis/`**：窗口仍引用`train/images/`、原Task、完整Skill bundle和`train/runs/`中的真实预测、反馈及元数据。诊断工作区只挂载训练材料和这些工具，不挂载`evaluation_only/`。
+
 1. 阅读[Diagnoser输入契约](DIAGNOSER_INPUT_SPEC.md)。
 2. 按[已完成的预处理与读取说明](DIAGNOSIS_PREPROCESSING.md)，从`train/diagnosis/index.json`进入六组索引，直接读取已生成窗口，无需自己全扫重复API历史。
 3. 按[adapter适配说明](ADAPTER_GUIDE.md)把窗口接入各方法原有诊断/修订机制。每组20张图、三个独立baseline运行，固定顺序处理六组；方法内部实现和正式模型调用由方法负责人完成。

@@ -2,6 +2,8 @@
 
 数据集侧的预处理、索引、图像负载提取和分窗已完成，产物位于`train/diagnosis/`。它们从当前18条选定训练轨迹离线生成，没有调用诊断模型、重跑baseline或重演verifier。方法的Analyzer/Refiner、检索、干预、修订和模型调用仍由方法负责人实现。
 
+`train/diagnosis/index.json`是读取入口，`train/diagnosis/`不是独立自包含包。首次交接须保留完整`train/`和`tools/`的相对目录结构，以及本说明和`ADAPTER_GUIDE.md`、`DIAGNOSER_INPUT_SPEC.md`；不要单独复制诊断子目录。读取器仍需访问训练原图、Task、完整原始Skill bundle和各源run的实际产物及允许反馈。仅准备请求时无需把`evaluation_only/`放入诊断工作区。
+
 ## 五条要求落实在哪里
 
 | 要求 | 已交付的数据集侧实现 | 方法侧仍需做什么 |

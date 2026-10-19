@@ -10,7 +10,7 @@
 
 数据集侧已完成ACP/LLM索引、消息去重、视觉资产关联、完整分窗、真实图像块请求组装和阶段文件保存工具。直接按[预处理读取入口](DIAGNOSIS_PREPROCESSING.md)使用`train/diagnosis/`，不要求同学重新处理巨型重复日志。下列步骤中，方法内部诊断/修订及模型调用仍由各方法负责人接入，尚无正式运行或送达收据。
 
-1. 将`train/`挂载到诊断工作区，把方法输出放在独立可写目录。不要挂载`evaluation_only/`或`_organizer/`。共享评测资料的同学也须遵守该隔离。
+1. 保留完整`train/`目录结构和配套`tools/`，从`train/diagnosis/index.json`开始；不要只复制`train/diagnosis/`，它仍引用外部训练原图、Task、Skill和运行产物。将训练材料及这些工具挂载到诊断工作区，把方法输出放在独立可写目录。不要挂载`evaluation_only/`或`_organizer/`。共享评测资料的同学也须遵守该隔离。
 2. 用`train/batches/batch_XX/manifest.json`定位20张唯一原图和三遍源运行。读取原Task、原完整bundle及本方法当前草稿。
 3. 读取本组已生成的`timeline.jsonl`与`windows/`；按`exact_llm_message_ids`补查精确参数，按消息`first_source`回溯原日志。完整窗口和续接范围已准备好，不得无记录地只留首尾。
 4. 用`diagnosis_io.py packet`或库函数`load_window`取得文本和实际`image_url`图像内容块；也可等价接入原生看图工具。源图片、历史观察和三次输出分别可追溯。请求准备不等于已发送，正式请求由本方法客户端执行并记录。
