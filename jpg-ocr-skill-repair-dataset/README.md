@@ -1,6 +1,6 @@
 # JPG小票Skill修复数据集
 
-2026-10-18发布版本。包含200张冻结小票、既有官方Skill baseline及多模态adapter输入契约，用于研究可复用Skill的人工与自动修复差异；比较结论以实际执行结果为准。
+2026-10-19补交更新。包含200张冻结小票、原始官方Skill运行证据及多模态adapter输入契约，用于研究可复用Skill的人工与自动修复差异；比较结论以实际执行结果为准。训练两槽和测试2两槽按用户要求采用补交尝试，当前结果不是未重跑的首次baseline。
 
 ## 目录结构
 
@@ -16,10 +16,10 @@ jpg-ocr-skill-repair-dataset/
 │   ├── runs/                        # 18次选定运行、允许反馈和真实产物
 │   ├── archives/                    # 完整ACP、LLM及ATIF轨迹的无损归档
 │   ├── skills/                      # 原始5个官方Skill及支持文件
-│   ├── baseline_merged/             # 第二遍真实完整的120行合并Excel
+│   ├── baseline_merged/             # 三遍各120行的真实预测合并Excel
 │   ├── task_prompt.md               # 字节不变的原任务正文
-│   ├── baseline_report_original.md  # 既有训练正确率、交付情况与费用报告
-│   └── baseline_summary_original.json # 既有训练结果的机器可读汇总
+│   ├── baseline_report.md           # 当前选定训练结果、补交说明与累计费用
+│   └── baseline_summary.json        # 当前训练结果的机器可读汇总
 ├── evaluation_only/                 # 最终冻结后评测使用，禁止进入修复上下文
 │   ├── test1/                       # 原测试集40图及既有三遍baseline
 │   ├── test2/                       # 原验证集40图，现仅作最终评测
@@ -42,7 +42,7 @@ jpg-ocr-skill-repair-dataset/
 |---|---:|---|---|
 | `train/` | 120 | 三遍、18个选定有效批次 | 诊断、修订Skill |
 | `evaluation_only/test1/` | 40 | 原测试baseline，保留 | 最终冻结后评测 |
-| `evaluation_only/test2/` | 40 | 原验证baseline，保留 | 最终冻结后评测，不再选版本 |
+| `evaluation_only/test2/` | 40 | 原验证集三遍，两个槽位采用补交产物 | 最终冻结后评测，不再选版本 |
 
 120/40/40成员不变。`split_aliases.json`保留test1→原test、test2→原validation的映射，未改动原实验目录。两个评测集曾有baseline及汇总成绩，不能宣称从未有人接触的盲测。
 
@@ -60,7 +60,7 @@ cd jpg-ocr-skill-repair-dataset
 python -c "import json; from pathlib import Path; m=json.loads(Path('MANIFEST.json').read_text(encoding='utf-8')); print({s: {'images': x['unique_receipts'], 'runs': len(x['runs'])} for s,x in m['splits'].items()})"
 ```
 
-清单输出应为训练120图/18次运行、测试1和测试2各40图/6次运行。此命令只读清单，不调用模型或verifier。首次合入`main`前，请先在本PR分支查看材料；正式使用时固定经审核的commit。完整轨迹解压后约32.7GiB，可按`archive_index.json`逐份读取，避免一次展开全部。
+清单输出应为训练120图/18次运行、测试1和测试2各40图/6次运行。此命令只读清单，不调用模型或verifier。正式使用时固定经审核的commit。完整轨迹较大，精确成员大小见`trajectory_inventory.json`，可按`archive_index.json`逐份读取，避免一次展开全部。
 
 ## 从哪里开始
 
@@ -73,14 +73,15 @@ python -c "import json; from pathlib import Path; m=json.loads(Path('MANIFEST.js
 
 ## 运行记录和完整轨迹
 
-沿用GitHub代表运行的`run_selection.json`、`selected_run/`、`trajectory/`风格；每个选定训练槽位单独归档，不按高分重新选尝试。历史传输/402/启动失败和被替换尝试不被当作额外的Skill失败训练样本。
+沿用GitHub代表运行的`run_selection.json`、`selected_run/`、`trajectory/`风格；每个槽位只公开当前选定运行，不按最高分选尝试。训练`train-r01-b01/a02`、`train-r03-b01/a02`，测试2`validation-r02-b02/a04`、`validation-r03-b01/a03`是用户为补齐真实Excel指定的新选择。历史失败及被替换尝试保留在原实验和累计费用账本中，不作为额外训练样本，也不在本发布目录保留旧版文件。
 
 - `selected_run/trajectory/acp_trajectory.jsonl`：完整ACP时间线的直接副本。
 - `selected_run/trajectory/archive_index.json`：完整轨迹归档位置、成员名及大小。
 - `archives/<run_id>.tar.xz`：无损保留ACP、完整LLM轨迹及存在的ATIF，不裁剪模型交换。解压可用`tar -xf <archive>.tar.xz`或Python标准库`tarfile`。
-- `selected_run/artifacts/stat_ocr.xlsx`：仅在原来真实交付时存在。训练共有16份原Excel；两批正常未交付只标缺失，不补造。
+- `selected_run/artifacts/stat_ocr.xlsx`：逐字节保存实际导出的原表。当前训练18份、测试1六份、测试2六份，共30份；没有从GT填值或从轨迹重构表格。
 - `allowed_feedback.json`：训练字段对错和汇总，不含正确答案值。
-- `train/baseline_report_original.md`及`baseline_summary_original.json`：沿用既有训练汇总、正确率和费用，未重新计分；报告中的产物链接适配为包内路径，未随包交付的历史源文件仅保留文字说明。仅第二遍有真实完整的120行合并表，放在`train/baseline_merged/`，未生成其余两遍合并表。机器汇总中的历史绝对路径只表达来源，实际定位以`MANIFEST.json`为准。
+- [训练结果](train/baseline_report.md)及[机器汇总](train/baseline_summary.json)：补交后当前18槽的结果。三份120行真合并表位于`train/baseline_merged/`。
+- [测试2结果](evaluation_only/test2/baseline_report.md)及[机器汇总](evaluation_only/test2/baseline_summary.json)：补交后当前六槽的结果。三份40行真合并表位于`evaluation_only/test2/baseline_merged/`。测试1原轨迹、原表和原结果未修改。
 
 这些原始LLM日志包含反复发送的历史上下文，不能把每行都当成独立新动作。先按ACP建立索引，再按需追溯LLM中的精确工具参数和视觉内容。完整档案可用不等于需要一次全部塞进模型。
 
@@ -90,6 +91,14 @@ python -c "import json; from pathlib import Path; m=json.loads(Path('MANIFEST.js
 
 主指标为日期与金额等权的字段正确率；每遍训练分母240字段，三遍720字段。缺交付保留分母。原官方整批reward另报，不能用整批FAIL替代字段正确率。
 
-本次发布只整理既有材料、计算允许的训练对错标记和校验复制文件，没有模型调用、baseline重跑或原verifier重演。本数据集不授权启动付费实验；诊断模型、调用预算和正式运行安排仍需另定。
+| 划分 | 三遍字段正确率 | 三遍均值 | 累计确认provider费用 |
+|---|---|---:|---:|
+| 训练，补交版 | 71.67% / 65.00% / 65.83% | 67.50%（486/720） | $171.47141450 |
+| 测试1，原结果 | 68.75% / 66.25% / 47.50% | 60.83%（146/240） | $48.732565 |
+| 测试2，补交版 | 77.50% / 61.25% / 65.00% | 67.92%（163/240） | $72.90073975 |
+
+各集合分别计分、计费，累计费用包括各自全部历史失败、中断和补交尝试，未知费用估计单独报告，不当作实际扣款。四个替换槽都在60轮耗尽后交付真实Excel，原生评分为FAIL，不能说成自然生成完成或Skill修复效果。补交版增加了生成机会，不能当成未重跑首次baseline。
+
+本次发布操作只复制归档、计算允许反馈及聚合现有预测，没有调用模型或重演原verifier。此前指定槽位的付费补交由独立用户授权执行。本数据集不授权新的付费实验；诊断模型、调用预算和正式运行安排仍需另定。
 
 来源为已冻结的`jpg-ocr-skill-repair-200-v1`和已有官方Skill baseline。图片及第三方Skill的来源、许可声明与限制见[SOURCE_PROVENANCE.md](SOURCE_PROVENANCE.md)。其中`pdf`和`xlsx`是Anthropic的source-available材料，原许可限制再分发及衍生作品；本发布保留原许可，不宣称获得了额外授权，也不将它们重新许可为Apache-2.0。
