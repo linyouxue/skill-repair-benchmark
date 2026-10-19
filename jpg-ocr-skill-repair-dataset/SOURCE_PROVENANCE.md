@@ -10,4 +10,6 @@
 
 `pdf`和`xlsx`的原`LICENSE.txt`为Anthropic自定义条款，含再分发、复制及衍生作品限制。官方[Skills说明](https://github.com/anthropics/skills#about-this-repository)将这些文档Skill列为source-available而非开源；具体条款见包内[pdf/LICENSE.txt](train/skills/original/pdf/LICENSE.txt)和[xlsx/LICENSE.txt](train/skills/original/xlsx/LICENSE.txt)。完整LLM归档包含当时实际预载的Skill正文，也涉及相同来源材料。本发布保留这些条款，不声称取得额外的公开分发或修改授权；仓库公开可读不替代相应权利。其他Skill同样不因被收录而重新许可。
 
-训练输入目录不提供策展转录、来源答案、GT值或verifier断言。GT和原评分实现随`evaluation_only/runtime/`公开；按实验协议，它们不得进入修复上下文。已有三遍baseline原始文件和账本保持原样；本次仅复制材料、无损归档并导出允许反馈，没有重新生成模型回答。
+训练输入目录不提供策展转录、来源答案、GT值或verifier断言。GT和原评分实现随`evaluation_only/runtime/`公开；按实验协议，它们不得进入修复上下文。原实验文件和账本保持原样；发布操作仅复制材料、无损归档并导出允许反馈，不调用模型或原verifier。
+
+2026-10-19补交更新按用户明确授权替换四个公开槽位：训练第1遍第1批和第3遍第1批各采用attempt02；测试2第2遍第2批采用attempt04，第3遍第1批采用attempt03。它们使用相同Task、原始Skill、图片、GT、评分器及60轮预算，属于为补齐实际Excel而增加的生成尝试，不是Skill修复，也不是未经重跑的首次baseline。发布目录仅保留当前30个选择；被替换尝试的原始证据及费用在原实验中保留，累计费用包括所有历史尝试一次。
