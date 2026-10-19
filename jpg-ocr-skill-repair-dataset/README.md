@@ -1,6 +1,6 @@
 # JPG小票Skill修复数据集
 
-2026-10-19补交更新。包含200张冻结小票、原始官方Skill运行证据及多模态adapter输入契约，用于研究可复用Skill的人工与自动修复差异；比较结论以实际执行结果为准。训练两槽和测试2两槽按用户要求采用补交尝试，当前结果不是未重跑的首次baseline。
+2026-10-19更新。包含200张冻结小票、原始官方Skill运行证据、已生成的诊断索引/多模态窗口及Excel离线评测入口，用于研究可复用Skill的人工与自动修复差异；比较结论以实际执行结果为准。训练两槽和测试2两槽按用户要求采用补交尝试，当前结果不是未重跑的首次baseline。数据集侧预处理与离线验收已完成，各方法内部适配和正式诊断/修复尚未执行。
 
 ## 目录结构
 
@@ -9,12 +9,14 @@ jpg-ocr-skill-repair-dataset/
 ├── README.md                         # 数据集说明、获取与使用入口
 ├── ADAPTER_GUIDE.md                  # 各修复方法的多模态适配与交付要求
 ├── DIAGNOSER_INPUT_SPEC.md           # 诊断输入、权限边界与六阶段修复规则
+├── DIAGNOSIS_PREPROCESSING.md        # 已完成的预处理、分窗读取及阶段保存方法
 ├── SOURCE_PROVENANCE.md              # 数据和Skill的来源、引用及许可记录
 ├── train/                           # 仅供人工与模型修复使用的训练材料
 │   ├── images/                      # 120张冻结训练原图
 │   ├── batches/                     # 固定六组、每组20图及三遍运行映射
 │   ├── runs/                        # 18次选定运行、允许反馈和真实产物
 │   ├── archives/                    # 完整ACP、LLM及ATIF轨迹的无损归档
+│   ├── diagnosis/                   # 六组已生成的动作索引、视觉证据与完整窗口
 │   ├── skills/                      # 原始5个官方Skill及支持文件
 │   ├── baseline_merged/             # 三遍各120行的真实预测合并Excel
 │   ├── task_prompt.md               # 字节不变的原任务正文
@@ -25,7 +27,12 @@ jpg-ocr-skill-repair-dataset/
 │   ├── test2/                       # 原验证集40图，现仅作最终评测
 │   ├── runtime/                     # GT、原评分实现及配套免费评分工具
 │   └── README.md                    # 评测材料的使用边界
-├── tools/                           # 不调用模型的本地辅助检查
+├── evaluation/                      # 接收同学Excel，独立报告各集合准确率
+│   ├── evaluate.py                  # 分批表/合并表的逐批、逐遍与总体评分入口
+│   └── README.md                    # 提交目录、命令、固定分母与输出说明
+├── tools/                           # 不调用模型的预处理与本地辅助检查
+│   ├── prepare_diagnosis.py         # 从原轨迹生成索引、视觉资产及有序窗口
+│   ├── diagnosis_io.py              # 组装真实图像内容块，保存方法自己的阶段产物
 │   └── check_adapter_record.py      # 检查adapter输入记录的结构与范围
 ├── adapter_input_record.example.json # 未执行的adapter记录模板
 ├── MANIFEST.json                    # 数据划分、选定运行与产物路径总清单
@@ -64,12 +71,33 @@ python -c "import json; from pathlib import Path; m=json.loads(Path('MANIFEST.js
 
 ## 从哪里开始
 
+交给同学时，请保留完整的`train/`目录结构、`tools/`及本目录的说明文档，并从`train/diagnosis/index.json`进入。**不要只拷贝`train/diagnosis/`**：窗口仍引用`train/images/`、原Task、完整Skill bundle和`train/runs/`中的真实预测、反馈及元数据。诊断工作区只挂载训练材料和这些工具，不挂载`evaluation_only/`。
+
 1. 阅读[Diagnoser输入契约](DIAGNOSER_INPUT_SPEC.md)。
-2. 按[adapter适配说明](ADAPTER_GUIDE.md)接入现有方法，保留原方法机制。
-3. 查看`train/batches/batch_01/manifest.json`至`batch_06/manifest.json`。每组20张图、三次baseline执行记录，固定顺序处理六组。
+2. 按[已完成的预处理与读取说明](DIAGNOSIS_PREPROCESSING.md)，从`train/diagnosis/index.json`进入六组索引，直接读取已生成窗口，无需自己全扫重复API历史。
+3. 按[adapter适配说明](ADAPTER_GUIDE.md)把窗口接入各方法原有诊断/修订机制。每组20张图、三个独立baseline运行，固定顺序处理六组；方法内部实现和正式模型调用由方法负责人完成。
 4. 归档和真实文件以`MANIFEST.json`及`trajectory_inventory.json`为准，离线核查结果见`validation_report.json`。
 
 主比较只允许修改原有5份`SKILL.md`；其他支持文件保留。每种方法独立从官方V0开始，六阶段后冻结最后版本。中间不新增整套训练评测，不使用测试集选版。需要新增Skill/helper或改变原机制的方法应单独披露适配变体。
+
+### 免费准备第一份诊断输入
+
+```bash
+python tools/diagnosis_io.py packet --batch 1 --window w0001 --out ../my-method-inputs/batch01-w0001.json
+python tools/prepare_diagnosis.py --validate-only
+```
+
+第一条命令生成含真正`image_url`图像内容块的请求JSON，不发送模型请求。完整窗口、步骤/消息来源和覆盖范围已提供；预算单位、实际送达证据与阶段保存方式见[预处理说明](DIAGNOSIS_PREPROCESSING.md)。默认窗口不是供应商token上限，方法须结合实际模型检查预算；超限明确报错，不静默截断。
+
+### 用同学交回的Excel评测
+
+```bash
+python evaluation/evaluate.py --split test2 --predictions-dir ../my-results-test2 --method MyMethod --out ../scores/MyMethod-test2
+```
+
+每个集合分别运行；训练18份原表、测试1/2各六份，或各自三份完整合并表。提交目录与合并表命令见[evaluation/README.md](evaluation/README.md)。输出逐批CSV、逐字段对错、逐遍与分层JSON及Markdown汇总；缺交付保留固定分母，不混入其他集合或费用，不执行模型/原生verifier。复用既有openpyxl评测栈，没有新增依赖。
+
+本次离线检查已核对30份原Excel和9份合并表，训练/测试1/测试2的逐遍字段正确数分别为172/156/158、55/53/38、62/49/52，与既有结果一致。预处理覆盖检查见`train/diagnosis/validation.json`，评测一致性检查见`evaluation/validation.json`。这些检查不代表人工或自动修复实验已经运行。
 
 ## 运行记录和完整轨迹
 
