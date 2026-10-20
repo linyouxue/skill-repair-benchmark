@@ -2,7 +2,7 @@
 
 本包整理的是 [Opus47原始Skill的79任务结果](https://github.com/linyouxue/skill-repair-benchmark/tree/70f97e72aeee8c85f77e8304cbec579e486f7de2/evaluation/results/Opus47-OriginalSkill-79Tasks-20260920) 中最终选用的JPG运行：`jpg-ocr-stat-opus47-original-skill-r003-infra-recovery`。它对应原任务的22张小票和一条真实轨迹，可直接交给参评同学接入各自的诊断方法。
 
-最终修复结果的上传要求见 [结果提交说明](../result/README.md)。最终提交仅需完整 `skills/`、简短 `README.md` 和 `evidence/`；证据可复用已有原格式日志或压缩归档，无需转换为新schema。
+最终修复结果的上传要求见 [结果提交说明](../result/README.md)。最终提交的顶层仍为完整 `skills/`、简短 `README.md` 和 `evidence/`；证据必须包含真实修复过程、最终冻结Skill在原22票任务上的执行轨迹，以及该次执行实际生成并导出的 `stat_ocr.xlsx` 原文件。最终任务执行上限为65次父迭代，方法内部的诊断与修复迭代不受这个65次限制；接入端落实与留证要求统一见结果提交说明。日志可保留原格式或压缩归档，无需转换为新schema。
 
 ```text
 diagnosis/

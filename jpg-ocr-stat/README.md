@@ -6,7 +6,7 @@
 
 需要用已有Opus轨迹修复Skill的同学，从 [diagnosis/README.md](diagnosis/README.md) 开始：这里提供79任务结果中JPG最终选用运行的索引、无损分窗、22张原图、原Excel和允许的逐字段反馈，以及不会调用模型的读取入口。
 
-修复完成后，按 [result/README.md](result/README.md) 上传一个最终冻结版本：完整`skills/`、简短`README.md`及真实`evidence/`。本轮提交不要求新增Excel或泛化成绩；方法需要的原任务内迭代执行照常保留并记录。
+修复完成后，按 [result/README.md](result/README.md) 上传一个最终冻结版本：顶层仍为完整`skills/`、简短`README.md`及`evidence/`。证据必须包含真实修复过程、最终冻结Skill在原22张小票任务上的执行轨迹，以及该次执行实际生成并导出的`stat_ocr.xlsx`原文件。最终任务执行上限为65次父迭代，方法内部的诊断与修复迭代不受这个65次限制；接入端落实与留证要求见结果提交说明。本轮不要求泛化成绩。
 
 ```text
 jpg-ocr-stat/
@@ -30,7 +30,7 @@ jpg-ocr-stat/
 │   ├── windows/             # 无损连续分片，每窗附齐22张原图
 │   └── outputs/             # 原Excel、实际预测及离线派生反馈
 ├── result/
-│   └── README.md            # 最终Skill、简短说明和真实证据的上传要求及示例
+│   └── README.md            # 最终Skill、说明、真实Excel与修复/执行轨迹的上传要求
 ├── tools/
 │   ├── prepare_diagnosis.py # 从指定原运行离线构建诊断包
 │   └── diagnosis_io.py      # 构造图文输入、按ID回溯、保存方法结果
@@ -61,7 +61,7 @@ receipt_joint_accuracy = 日期和金额都正确的票数 / 22
 
 ## 在 SkillsBench / BenchFlow 中使用
 
-将本目录作为原生任务目录交给现有执行器，或者将本目录内容复制到你自己的 SkillsBench checkout 的 `tasks/jpg-ocr-stat/` 后使用原运行命令。无需修改执行器代码。
+将本目录作为原生任务目录交给现有执行器，或者将本目录内容复制到你自己的 SkillsBench checkout 的 `tasks/jpg-ocr-stat/` 后使用原运行命令。接入本字段评分器无需修改执行器代码；最终提交采用的65次父迭代规范及执行端适配状态另见[result/README.md](result/README.md)。
 
 - `task.md` 的原 `verifier.type=test-script`、`timeout_sec=600`、hardening设置保留。
 - verifier仍由框架部署到 `/verifier/`；入口为 `/verifier/test.sh`，实际产物路径不变。
