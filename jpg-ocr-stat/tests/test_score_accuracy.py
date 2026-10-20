@@ -1,4 +1,4 @@
-"""Synthetic offline checks for data/jpg-ocr-stat-accuracy-20261020.
+"""Guards the exact-field scoring introduced in commit 2e1a410.
 
 No real oracle values or past model predictions are embedded in these tests.
 """

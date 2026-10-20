@@ -1,4 +1,4 @@
-"""Guards data/jpg-ocr-stat-accuracy-20261020 native reward publication."""
+"""Guards commit 2e1a410 native fractional reward and complete CTRF evidence."""
 
 import copy
 import json

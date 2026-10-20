@@ -16,7 +16,7 @@ REPORT_PATH.write_text(json.dumps(REPORT, ensure_ascii=False, indent=2) + "\n", 
 
 def _field_test(row, field, name):
     def check():
-        """Guards data/jpg-ocr-stat-accuracy-20261020 field accuracy."""
+        """Guards the field-accuracy contract introduced in commit 2e1a410."""
         assert row[f"{field}_correct"], f"{row['filename']}: {field} incorrect or missing"
 
     check.__name__ = name
