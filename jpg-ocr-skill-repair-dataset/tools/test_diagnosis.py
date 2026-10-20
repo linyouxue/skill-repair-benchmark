@@ -89,7 +89,8 @@ class DiagnosisContracts(unittest.TestCase):
                  "common": {"task": "train/task_prompt.md", "feedback_and_outputs": runs}}
         write(root / prefix / "index.json", group)
 
-    def test_packet_has_real_image_block_and_budget_failure_does_not_truncate(self):
+    def test_packet_has_real_image_block_and_no_artificial_text_quota(self):
+        """Guards the user's 2026-10-20 no-budget correction to JPG PR #32."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.fixture(root)
@@ -98,8 +99,48 @@ class DiagnosisContracts(unittest.TestCase):
             self.assertEqual(parts[1]["type"], "image_url")
             self.assertEqual(base64.b64decode(parts[1]["image_url"]["url"].split(",", 1)[1]), PNG)
             self.assertFalse(packet["actual_model_delivery_verified"])
-            with self.assertRaisesRegex(ValueError, "no text was truncated"):
-                load_window(root, 1, "w0001", max_text_chars=10)
+            (root / "train/task_prompt.md").write_text("large task " * 30000, encoding="utf-8")
+            unlimited = load_window(root, 1, "w0001")
+            self.assertGreater(unlimited["text_chars"], 200000)
+            self.assertFalse(unlimited["model_usage_limits_set_by_helper"])
+            self.assertIn("large task " * 30000, unlimited["messages"][0]["content"][0]["text"])
+
+    def test_independent_request_keeps_every_group_image_and_safe_api_context(self):
+        """Guards the independent-request image gap found after JPG PR #32."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            prefix = root / "train/diagnosis/batch_01"
+            group = json.loads((prefix / "index.json").read_text())
+            group["image_delivery_policy"] = "all_group_images_per_independent_window"
+            group["runs"][0].update(directory="train/diagnosis/batch_01/runs/r0", api_contexts=1)
+            context = {"context_id": "r0:c0001", "request_parameters": {"tools": [{"type": "function", "function": {"name": "terminal"}}]}}
+            cp = prefix / "runs/r0/api_contexts.jsonl"
+            cp.parent.mkdir(parents=True)
+            cp.write_text(json.dumps(context) + "\n", encoding="utf-8")
+            write(prefix / "index.json", group)
+            window = json.loads((prefix / "windows/w0001.json").read_text())
+            window["run_id"] = "r0"
+            write(prefix / "windows/w0001.json", window)
+            packet = load_window(root, 1, "w0001")
+            self.assertIn('"source_run_api_contexts": [{"context_id": "r0:c0001"', packet["messages"][0]["content"][0]["text"])
+            self.assertEqual(packet["image_delivery_policy"], group["image_delivery_policy"])
+            images = json.loads((prefix / "images.json").read_text())
+            images["assets"].append({**images["assets"][0], "asset_id": "b"})
+            write(prefix / "images.json", images)
+            with self.assertRaisesRegex(ValueError, "all group images"):
+                load_window(root, 1, "w0001")
+            window["attachments"] = ["a", "b"]
+            write(prefix / "windows/w0001.json", window)
+            self.assertEqual(len(load_window(root, 1, "w0001")["messages"][0]["content"]), 3)
+            for i in range(2, 31):
+                images["assets"].append({**images["assets"][0], "asset_id": f"asset-{i}"})
+            window["attachments"] = [a["asset_id"] for a in images["assets"]]
+            write(prefix / "images.json", images)
+            write(prefix / "windows/w0001.json", window)
+            unlimited = load_window(root, 1, "w0001")
+            self.assertEqual(len(unlimited["messages"][0]["content"]) - 1, 31)
+            self.assertFalse(unlimited["model_usage_limits_set_by_helper"])
 
     def test_evaluation_inputs_cannot_enter_window_reader(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,7 +171,7 @@ class DiagnosisContracts(unittest.TestCase):
             diagnosis = Path(tmp) / "diagnosis.md"
             history = Path(tmp) / "history.md"
             diagnosis.write_text("Synthetic test diagnosis, not an executed model.", encoding="utf-8")
-            history.write_text("Synthetic cumulative record.", encoding="utf-8")
+            history.write_text("Synthetic cumulative record.\n" * 400, encoding="utf-8")
             coverage = Path(tmp) / "coverage.json"
             write(coverage, [{"window_id": "w0001", "status": "skipped"}])
             state = Path(tmp) / "method"
@@ -141,6 +182,13 @@ class DiagnosisContracts(unittest.TestCase):
             self.assertEqual(result["changed_skill_documents"], ["image-ocr/SKILL.md"])
             self.assertEqual(result["model_calls_by_helper"], 0)
             self.assertEqual((state / "stage_01/skills/image-ocr/SKILL.md").read_text(), "Fixture method revision")
+            next_group = json.loads((root / "train/diagnosis/batch_01/index.json").read_text())
+            next_group["batch_id"] = "batch_02"
+            write(root / "train/diagnosis/batch_02/index.json", next_group)
+            next_packet = load_window(root, 2, "w0001", state_dir=state)
+            self.assertIn("Synthetic cumulative record.", next_packet["messages"][0]["content"][0]["text"])
+            self.assertGreater(len(history.read_text()), 8000)
+            self.assertEqual(next_packet["current_candidate_version"], "method-stage-1")
             with self.assertRaisesRegex(ValueError, "already saved"):
                 save_stage(root, 1, state, diagnosis, candidate, history, coverage)
 

@@ -1,6 +1,6 @@
 # 诊断与修复方法输入契约
 
-版本：`jpg-multimodal-repair-handoff-20261018-v1`。
+版本：`jpg-multimodal-repair-handoff-20261020-v2`。
 
 “方法可获得”指整个诊断/修复流程的允许访问范围，不要求每个子阶段使用完全相同的prompt。例如MMG Analyzer原本只看轨迹，Skill对齐属于Refiner；应保留这种阶段设计，并记录各阶段实际使用的材料。
 
@@ -20,7 +20,7 @@
 
 ## 完整证据与模型输入
 
-本版本已按以下契约生成`train/diagnosis/`：ACP动作索引、唯一LLM消息、交换来源、视觉资产与完整连续窗口。读取和免费请求组装入口见[DIAGNOSIS_PREPROCESSING.md](DIAGNOSIS_PREPROCESSING.md)。当前完成的是数据集侧准备和离线检查，不包含各方法真实诊断、修订或实际模型送达验收。
+本版本按以下契约生成`train/diagnosis/`：ACP动作索引、唯一LLM消息、安全API上下文、包含失败响应和结束原因的实际交换、视觉资产与连续窗口。API消息去重不删除交换顺序；动作数以ACP为准。每个独立窗口引用本组全部原图，图片文件本身不重复存储，真实多次发送的视觉成本另记。读取和免费请求组装入口见[DIAGNOSIS_PREPROCESSING.md](DIAGNOSIS_PREPROCESSING.md)。数据集侧准备不包含各方法真实诊断、修订或实际模型送达验收。
 
 完整档案不能被静默截成首尾。输入超限时按步骤开多个窗口，保留先后顺序、精确来源和未发送范围。整套API历史包含大量重复前缀，不需要重复注入。合并三遍时，每次行为仍保留自己的run ID与步骤编号，不拼成一条虚构执行。
 
