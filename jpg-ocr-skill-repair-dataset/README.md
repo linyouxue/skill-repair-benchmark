@@ -1,6 +1,6 @@
 # JPG小票Skill修复数据集
 
-2026-10-19更新。包含200张冻结小票、原始官方Skill运行证据、已生成的诊断索引/多模态窗口及Excel离线评测入口，用于研究可复用Skill的人工与自动修复差异；比较结论以实际执行结果为准。训练两槽和测试2两槽按用户要求采用补交尝试，当前结果不是未重跑的首次baseline。数据集侧预处理与离线验收已完成，各方法内部适配和正式诊断/修复尚未执行。
+2026-10-20诊断包v2更新。包含200张冻结小票、原始官方Skill运行证据、诊断索引/多模态窗口及Excel离线评测入口。v2补齐API交换、失败响应、工具定义和结束原因，并为每个独立窗口附本组全部原图；完整说明见[预处理入口](DIAGNOSIS_PREPROCESSING.md)。训练两槽和测试2两槽按用户要求采用补交尝试，当前结果不是未重跑的首次baseline。各方法内部适配和正式诊断/修复尚未执行。
 
 ## 目录结构
 
@@ -10,6 +10,7 @@ jpg-ocr-skill-repair-dataset/
 ├── ADAPTER_GUIDE.md                  # 各修复方法的多模态适配与交付要求
 ├── DIAGNOSER_INPUT_SPEC.md           # 诊断输入、权限边界与六阶段修复规则
 ├── DIAGNOSIS_PREPROCESSING.md        # 已完成的预处理、分窗读取及阶段保存方法
+├── TRAIN_HANDOFF.md                 # 只交付训练材料时的最短使用说明
 ├── SOURCE_PROVENANCE.md              # 数据和Skill的来源、引用及许可记录
 ├── train/                           # 仅供人工与模型修复使用的训练材料
 │   ├── images/                      # 120张冻结训练原图
@@ -57,7 +58,7 @@ jpg-ocr-skill-repair-dataset/
 
 ## 获取与免费查看
 
-只获取本目录，可在有Git和Python 3的环境执行：
+只获取本目录，可在有Git和Python 3的环境执行。以下示例读取main；若使用尚未合并的PR版本，先检出该PR头分支，避免混用旧版材料：
 
 ```bash
 git clone --filter=blob:none --sparse https://github.com/linyouxue/skill-repair-benchmark.git
@@ -87,7 +88,7 @@ python tools/diagnosis_io.py packet --batch 1 --window w0001 --out ../my-method-
 python tools/prepare_diagnosis.py --validate-only
 ```
 
-第一条命令生成含真正`image_url`图像内容块的请求JSON，不发送模型请求。完整窗口、步骤/消息来源和覆盖范围已提供；预算单位、实际送达证据与阶段保存方式见[预处理说明](DIAGNOSIS_PREPROCESSING.md)。默认窗口不是供应商token上限，方法须结合实际模型检查预算；超限明确报错，不静默截断。
+第一条命令生成含本组全部20张原图的真正`image_url`内容块，不发送模型请求；API交换、失败响应和安全参数也纳入默认证据窗口。原图磁盘只存一份，逐窗独立发送仍会重复计视觉成本。工具不设置总token、输出token、调用次数、费用、文本、图片数量或历史长度上限，不截断材料；分窗只整理证据，模型服务的上下文容量由供应商决定。用法见[预处理说明](DIAGNOSIS_PREPROCESSING.md)，独立交接方式见[TRAIN_HANDOFF.md](TRAIN_HANDOFF.md)。
 
 ### 用同学交回的Excel评测
 
@@ -98,6 +99,8 @@ python evaluation/evaluate.py --split test2 --predictions-dir ../my-results-test
 每个集合分别运行；训练18份原表、测试1/2各六份，或各自三份完整合并表。提交目录与合并表命令见[evaluation/README.md](evaluation/README.md)。输出逐批CSV、逐字段对错、逐遍与分层JSON及Markdown汇总；缺交付保留固定分母，不混入其他集合或费用，不执行模型/原生verifier。复用既有openpyxl评测栈，没有新增依赖。
 
 本次离线检查已核对30份原Excel和9份合并表，训练/测试1/测试2的逐遍字段正确数分别为172/156/158、55/53/38、62/49/52，与既有结果一致。预处理覆盖检查见`train/diagnosis/validation.json`，评测一致性检查见`evaluation/validation.json`。这些检查不代表人工或自动修复实验已经运行。
+
+v2诊断包另已验收463个窗口、5966条派生记录、18份安全API上下文和1080次源交换（含32条失败响应）。每窗20张原图的9260个图像块均已核对，14项相关回归测试通过；工具不设模型用量限制。原始实验、轨迹归档、Skill、图片、Excel、评分与费用结果不变。
 
 ## 运行记录和完整轨迹
 
@@ -127,6 +130,6 @@ python evaluation/evaluate.py --split test2 --predictions-dir ../my-results-test
 
 各集合分别计分、计费，累计费用包括各自全部历史失败、中断和补交尝试，未知费用估计单独报告，不当作实际扣款。四个替换槽都在60轮耗尽后交付真实Excel，原生评分为FAIL，不能说成自然生成完成或Skill修复效果。补交版增加了生成机会，不能当成未重跑首次baseline。
 
-本次发布操作只复制归档、计算允许反馈及聚合现有预测，没有调用模型或重演原verifier。此前指定槽位的付费补交由独立用户授权执行。本数据集不授权新的付费实验；诊断模型、调用预算和正式运行安排仍需另定。
+本次材料准备只复制归档、计算允许反馈及聚合现有预测，没有调用模型或重演原verifier。此前指定槽位的付费补交由独立用户授权执行。本包不设置调用预算，也不自动启动新的付费实验；正式运行由方法负责人执行并记录实际用量。
 
 来源为已冻结的`jpg-ocr-skill-repair-200-v1`和已有官方Skill baseline。图片及第三方Skill的来源、许可声明与限制见[SOURCE_PROVENANCE.md](SOURCE_PROVENANCE.md)。其中`pdf`和`xlsx`是Anthropic的source-available材料，原许可限制再分发及衍生作品；本发布保留原许可，不宣称获得了额外授权，也不将它们重新许可为Apache-2.0。
