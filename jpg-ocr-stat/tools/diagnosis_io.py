@@ -206,8 +206,11 @@ def save_result(package, state_dir, diagnosis_file, candidate_dir, history_file,
     """Save a method's real files and explicit window coverage, not a model claim."""
     package = Path(package).resolve()
     state_dir = Path(state_dir).resolve()
+    candidate_dir = Path(candidate_dir).resolve()
     if state_dir.is_relative_to(package):
         raise ValueError("Save method outputs outside the published task package")
+    if state_dir.is_relative_to(candidate_dir):
+        raise ValueError("Save method outputs outside the candidate Skill directory")
     if state_dir.exists():
         raise ValueError("Refusing to overwrite an existing method result")
     index = _read(package, "diagnosis/index.json")
@@ -228,7 +231,7 @@ def save_result(package, state_dir, diagnosis_file, candidate_dir, history_file,
     for source in (Path(diagnosis_file), Path(history_file)):
         if not source.is_file() or not source.read_bytes().strip():
             raise ValueError("Diagnosis and history must be real nonempty files")
-    changed = _validate_bundle(package / "environment/skills", Path(candidate_dir))
+    changed = _validate_bundle(package / "environment/skills", candidate_dir)
     state_dir.mkdir(parents=True)
     shutil.copyfile(diagnosis_file, state_dir / "diagnosis.md")
     shutil.copyfile(history_file, state_dir / "history.md")

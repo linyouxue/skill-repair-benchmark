@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -268,6 +269,29 @@ class DiagnosisIO(unittest.TestCase):
         (self.candidate / "xlsx/LICENSE.txt").unlink()
         with self.assertRaises(ValueError):
             self.save()
+
+    def test_result_directory_inside_candidate_is_rejected_before_writes(self):
+        """PR #34: direct and normalized candidate descendants cannot be save targets."""
+        self.coverage()
+        before_files = {p.relative_to(self.candidate): p.read_bytes()
+                        for p in self.candidate.rglob("*") if p.is_file()}
+        before_directories = {p.relative_to(self.candidate)
+                              for p in self.candidate.rglob("*") if p.is_dir()}
+        targets = (self.candidate / "result-direct",
+                   self.candidate / "image-ocr" / ".." / "result-normalized")
+        for target in targets:
+            with self.subTest(target=target):
+                self.assertTrue(target.resolve().is_relative_to(self.candidate.resolve()))
+                with patch.object(diagnosis_io.shutil, "copytree",
+                                  side_effect=AssertionError("Saving inside candidate reached copytree")) as copytree:
+                    with self.assertRaises(ValueError):
+                        self.save(target)
+                    copytree.assert_not_called()
+                self.assertFalse(target.resolve().exists())
+                self.assertEqual(before_files, {p.relative_to(self.candidate): p.read_bytes()
+                                                for p in self.candidate.rglob("*") if p.is_file()})
+                self.assertEqual(before_directories, {p.relative_to(self.candidate)
+                                                      for p in self.candidate.rglob("*") if p.is_dir()})
 
     def test_results_stay_outside_package_and_saved_results_are_not_overwritten(self):
         """PR #34: save is package-external and immutable after first write."""

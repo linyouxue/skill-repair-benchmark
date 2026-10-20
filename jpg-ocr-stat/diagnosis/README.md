@@ -103,7 +103,7 @@ python jpg-ocr-stat/tools/diagnosis_io.py save-result \
   --coverage /path/to/coverage.json
 ```
 
-结果保存到包外的新目录，包括诊断、草稿、历史、覆盖记录和收据；不会覆盖原包或既有方法结果。`consumed`由方法提供真实请求/工具记录引用，辅助脚本不把这个自报状态认证成模型理解证据。这里是一个任务的处理过程，没有强制六阶段或六轮修订。
+结果保存到包外、候选Skill目录之外的新目录，包括诊断、草稿、历史、覆盖记录和收据；不会覆盖原包或既有方法结果。`consumed`由方法提供真实请求/工具记录引用，辅助脚本不把这个自报状态认证成模型理解证据。这里是一个任务的处理过程，没有强制六阶段或六轮修订。
 
 ## 离线重建与验证
 
@@ -117,7 +117,7 @@ python jpg-ocr-stat/tools/prepare_diagnosis.py \
 
 来源可为本地未压缩日志，也可为完整checkout中的公开gzip日志。输出固定在本任务的 `diagnosis/`；上例带 `--refresh` 是因为已发布本包含生成结果，只刷新索引登记的本次派生文件，不改README或原始材料。`--window-chars`可调整无损分段大小，不是模型token预算。
 
-已实际核验全部37个窗口可构造图文输入、每窗22图字节一致、全部65交换可从索引还原、末次响应可检索、原Excel字节一致；另有12项合成回归测试覆盖读取和结果保存边界。这些检查没有调用Diagnoser，也没有重放原native verifier。可免费复查：
+已实际核验全部37个窗口可构造图文输入、每窗22图字节一致、全部65交换可从索引还原、末次响应可检索、原Excel字节一致；另有13项合成回归测试覆盖读取和结果保存边界。这些检查没有调用Diagnoser，也没有重放原native verifier。可免费复查：
 
 ```bash
 python jpg-ocr-stat/tools/prepare_diagnosis.py --validate-only
