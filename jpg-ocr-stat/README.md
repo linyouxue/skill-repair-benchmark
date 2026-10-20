@@ -6,6 +6,8 @@
 
 需要用已有Opus轨迹修复Skill的同学，从 [diagnosis/README.md](diagnosis/README.md) 开始：这里提供79任务结果中JPG最终选用运行的索引、无损分窗、22张原图、原Excel和允许的逐字段反馈，以及不会调用模型的读取入口。
 
+修复完成后，按 [result/README.md](result/README.md) 上传一个最终冻结版本：完整`skills/`、简短`README.md`及真实`evidence/`。本轮提交不要求新增Excel或泛化成绩；方法需要的原任务内迭代执行照常保留并记录。
+
 ```text
 jpg-ocr-stat/
 ├── task.md                  # 原任务提示与原生执行配置
@@ -27,6 +29,8 @@ jpg-ocr-stat/
 │   ├── records/             # 动作、唯一消息、API交换及ATIF关联
 │   ├── windows/             # 无损连续分片，每窗附齐22张原图
 │   └── outputs/             # 原Excel、实际预测及离线派生反馈
+├── result/
+│   └── README.md            # 最终Skill、简短说明和真实证据的上传要求及示例
 ├── tools/
 │   ├── prepare_diagnosis.py # 从指定原运行离线构建诊断包
 │   └── diagnosis_io.py      # 构造图文输入、按ID回溯、保存方法结果

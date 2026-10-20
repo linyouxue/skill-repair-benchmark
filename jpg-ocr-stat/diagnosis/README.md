@@ -2,6 +2,8 @@
 
 本包整理的是 [Opus47原始Skill的79任务结果](https://github.com/linyouxue/skill-repair-benchmark/tree/70f97e72aeee8c85f77e8304cbec579e486f7de2/evaluation/results/Opus47-OriginalSkill-79Tasks-20260920) 中最终选用的JPG运行：`jpg-ocr-stat-opus47-original-skill-r003-infra-recovery`。它对应原任务的22张小票和一条真实轨迹，可直接交给参评同学接入各自的诊断方法。
 
+最终修复结果的上传要求见 [结果提交说明](../result/README.md)。最终提交仅需完整 `skills/`、简短 `README.md` 和 `evidence/`；证据可复用已有原格式日志或压缩归档，无需转换为新schema。
+
 ```text
 diagnosis/
 ├── index.json                 # 权威运行、各证据流与全部窗口的入口
@@ -81,11 +83,13 @@ python jpg-ocr-stat/tools/diagnosis_io.py record \
 
 本原Excel的离线派生结果为：日期21/22、金额19/22，字段正确率40/44＝90.91%，整票正确率18/22＝81.82%，交付格式检查无问题。原native的0分表示原先的整表严格测试未通过，不能解释为所有字段都错了。
 
-## 保存方法自己的结果
+## 可选：使用 save-result 归档过程
+
+`save-result` 是可选的过程归档工具，供方法保存诊断、草稿、历史和窗口覆盖。它生成的 `diagnosis.md`、`history.md`、`coverage.json`、`result.json` 不要求作为最终上传的独立文件；最终提交以 [结果提交说明](../result/README.md) 为准。
 
 当前Skill草稿和累计历史可通过 `packet --draft-dir /path/to/current-skills --history /path/to/history.md` 带入。草稿目录直接包含5个Skill子目录；只有这5份现有 `SKILL.md` 正文允许修改，支持文件和许可应保留。
 
-完成后，准备真实的诊断文档、完整候选Skill目录、累计历史，以及每窗的覆盖记录。覆盖记录格式如下，正式文件须列出全部窗口且每窗一次：
+如需使用此工具，准备真实的诊断文档、完整候选Skill目录、累计历史，以及每窗的覆盖记录。覆盖记录格式如下；调用此工具时，文件须列出全部窗口且每窗一次：
 
 ```json
 [
@@ -103,7 +107,7 @@ python jpg-ocr-stat/tools/diagnosis_io.py save-result \
   --coverage /path/to/coverage.json
 ```
 
-结果保存到包外、候选Skill目录之外的新目录，包括诊断、草稿、历史、覆盖记录和收据；不会覆盖原包或既有方法结果。`consumed`由方法提供真实请求/工具记录引用，辅助脚本不把这个自报状态认证成模型理解证据。这里是一个任务的处理过程，没有强制六阶段或六轮修订。
+工具输出保存到包外、候选Skill目录之外的新目录，包括诊断、草稿、历史、覆盖记录和收据；不会覆盖原包或既有方法结果。`consumed`由方法提供真实请求/工具记录引用，辅助脚本不把这个自报状态认证成模型理解证据。这里是一个任务的处理过程，没有强制六阶段或六轮修订。
 
 ## 离线重建与验证
 
