@@ -4,6 +4,8 @@
 
 它使用原 SkillsBench 的22张图片，和本仓库另一个目录里的120/40/40划分数据集分别使用、分别报告。
 
+需要用已有Opus轨迹修复Skill的同学，从 [diagnosis/README.md](diagnosis/README.md) 开始：这里提供79任务结果中JPG最终选用运行的索引、无损分窗、22张原图、原Excel和允许的逐字段反馈，以及不会调用模型的读取入口。
+
 ```text
 jpg-ocr-stat/
 ├── task.md                  # 原任务提示与原生执行配置
@@ -19,9 +21,19 @@ jpg-ocr-stat/
 │   ├── score_accuracy.py    # 正确率计算，也可单独评测Excel
 │   ├── write_reward.py      # 验证评分完成后写reward
 │   └── stat_oracle.xlsx     # 原22票参考表，未修改
+├── diagnosis/
+│   ├── README.md            # 同学接入Diagnoser的使用说明
+│   ├── index.json           # Opus原始运行的证据、产物与分窗索引
+│   ├── records/             # 动作、唯一消息、API交换及ATIF关联
+│   ├── windows/             # 无损连续分片，每窗附齐22张原图
+│   └── outputs/             # 原Excel、实际预测及离线派生反馈
+├── tools/
+│   ├── prepare_diagnosis.py # 从指定原运行离线构建诊断包
+│   └── diagnosis_io.py      # 构造图文输入、按ID回溯、保存方法结果
 └── tests/
     ├── test_score_accuracy.py # 合成Excel与评分边界测试
-    └── test_native_reward.py  # pytest→CTRF→reward链路测试
+    ├── test_native_reward.py  # pytest→CTRF→reward链路测试
+    └── test_diagnosis_io.py   # 诊断输入、图像、来源及结果保存边界
 ```
 
 ## 评分口径
@@ -80,4 +92,4 @@ python -m unittest discover -s jpg-ocr-stat/tests -v
 
 来源固定为 SkillsBench 提交 [`9a1f4dd5f7659f75707435da3ce854b6e48321d1`](https://github.com/benchflow-ai/skillsbench/commit/9a1f4dd5f7659f75707435da3ce854b6e48321d1) 的 `tasks/jpg-ocr-stat/`。原 `task.md`、`environment/`、`oracle/`、`verifier/stat_oracle.xlsx` 逐文件保留；`pdf`、`xlsx` 等Skill各自附带的许可文件也保留，遵循原许可。
 
-有意替换 `verifier/test.sh` 和 `verifier/test_outputs.py`；新增评分核心、reward写入器、离线测试及本说明。原题仍保留原来的输出要求和措辞，**评分语义以本README的逐字段正确率为准**。这次是新任务评分版本，已有训练集/测试集实验、历史轨迹、Excel和成绩均未重跑或回填。
+有意替换 `verifier/test.sh` 和 `verifier/test_outputs.py`；新增评分核心、reward写入器、离线测试及本说明。诊断包另从已有Opus运行派生，原reward与新正确率分别标注。原题仍保留原来的输出要求和措辞，**评分语义以本README的逐字段正确率为准**。已有训练集/测试集实验、历史轨迹、Excel和成绩均未重跑或回填。
