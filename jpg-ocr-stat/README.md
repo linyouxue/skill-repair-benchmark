@@ -8,6 +8,8 @@
 
 修复完成后，按 [result/README.md](result/README.md) 上传一个最终冻结版本：顶层仍为完整`skills/`、简短`README.md`及`evidence/`。证据必须包含真实修复过程、最终冻结Skill在原22张小票任务上的执行轨迹，以及该次执行实际生成并导出的`stat_ocr.xlsx`原文件。最终任务执行上限为65次父迭代，方法内部的诊断与修复迭代不受这个65次限制；接入端落实与留证要求见结果提交说明。本轮不要求泛化成绩。
 
+后续泛化评测材料见 [evaluation/README.md](evaluation/README.md)：3组各20张SROIE小票，配套冻结参考表、隔离任务导出和三份真实Excel的免费评分入口。材料现已公开，仅供最终冻结Skill评测，不用于修复或选版；本次未启动泛化实验。商户/地址允许保留非英文拉丁字母，业务正文要求英文。
+
 ```text
 jpg-ocr-stat/
 ├── task.md                  # 原任务提示与原生执行配置
@@ -31,12 +33,20 @@ jpg-ocr-stat/
 │   └── outputs/             # 原Excel、实际预测及离线派生反馈
 ├── result/
 │   └── README.md            # 最终Skill、说明、真实Excel与修复/执行轨迹的上传要求
+├── evaluation/
+│   ├── README.md            # 3组各20票的泛化任务与评分说明
+│   ├── manifest.json        # 冻结成员、来源、裁剪和质量记录
+│   ├── group_01/            # 第一组图片与评分侧参考表，另有02/03组
+│   ├── prepare_task.py      # 隔离导出20票原生任务，不调用模型
+│   ├── score_results.py     # 三组真实Excel的免费评分
+│   └── source/              # 来源、许可与署名
 ├── tools/
 │   ├── prepare_diagnosis.py # 从指定原运行离线构建诊断包
 │   └── diagnosis_io.py      # 构造图文输入、按ID回溯、保存方法结果
 └── tests/
     ├── test_score_accuracy.py # 合成Excel与评分边界测试
     ├── test_native_reward.py  # pytest→CTRF→reward链路测试
+    ├── test_generalization.py # 20票导出、120字段聚合与40项CTRF回归
     └── test_diagnosis_io.py   # 诊断输入、图像、来源及结果保存边界
 ```
 

@@ -1,4 +1,4 @@
-"""Report the original task's 44 date/amount checks individually."""
+"""Report each frozen receipt's two date/amount checks individually."""
 
 import json
 import os
@@ -25,7 +25,7 @@ def _field_test(row, field, name):
 
 
 # pytest-json-ctrf 0.3.5 treats parametrizations as retries and merges their
-# results. Distinct function names preserve all 44 original field outcomes.
+# results. Distinct function names preserve every frozen field outcome.
 for index, row in enumerate(REPORT["field_feedback"]):
     for field in ("date", "amount"):
         name = f"test_receipt_{index:02d}_{field}"
