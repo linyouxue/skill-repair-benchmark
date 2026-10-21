@@ -16,6 +16,31 @@ HEADER = ["filename", "date", "total_amount"]
 EXPECTED_RECEIPTS = 22
 DEFAULT_ACTUAL = Path("/app/workspace/stat_ocr.xlsx")
 DEFAULT_ORACLE = Path(__file__).with_name("stat_oracle.xlsx")
+DEFAULT_SPEC = Path(__file__).with_name("receipt_spec.json")
+
+
+def load_spec(spec=None):
+    """Use a verifier-side frozen member list, never the submitted row count.
+
+    The original task has no spec file and retains its 22-receipt contract.
+    Exported generalization tasks install their fixed 20-member specification.
+    """
+    if spec is None and not DEFAULT_SPEC.exists():
+        return {"expected_receipts": EXPECTED_RECEIPTS, "filenames": None}
+    try:
+        value = spec if isinstance(spec, dict) else json.loads(
+            Path(spec if spec is not None else DEFAULT_SPEC).read_text(encoding="utf-8"))
+        count, names = value["expected_receipts"], value["filenames"]
+        if type(count) is not int or count <= 0 or not isinstance(names, list) or len(names) != count:
+            raise ValueError
+        if any(not isinstance(name, str) or not name or Path(name).name != name
+               or "/" in name or "\\" in name or name in (".", "..") for name in names):
+            raise ValueError
+        if len(set(names)) != count or names != sorted(names):
+            raise ValueError
+        return {"expected_receipts": count, "filenames": names}
+    except Exception:
+        raise RuntimeError("Frozen receipt specification unavailable or invalid") from None
 
 
 def cell_string(value):
@@ -77,25 +102,29 @@ def summarize(group):
             "receipt_joint_accuracy": joint / count if count else None}
 
 
-def read_oracle(path):
+def read_oracle(path, spec=None):
     """Load frozen expected values in memory; reject broken grading fixtures.
 
     No exception includes cell contents, so an infrastructure failure does not
     disclose the oracle. The original workbook has 22 nonempty string fields
     in each of the two scored columns.
     """
+    specification = load_spec(spec)
+    expected_count = specification["expected_receipts"]
     workbook = None
     try:
         workbook = load_workbook(path, data_only=True)
         if workbook.sheetnames != ["results"]:
             raise ValueError
         rows = list(workbook["results"].values)
-        if not rows or list(rows[0]) != HEADER or len(rows) != EXPECTED_RECEIPTS + 1:
+        if not rows or list(rows[0]) != HEADER or len(rows) != expected_count + 1:
             raise ValueError
         if any(len(row) != 3 or not all(isinstance(value, str) and value for value in row) for row in rows[1:]):
             raise ValueError
         names = [row[0] for row in rows[1:]]
-        if len(set(names)) != EXPECTED_RECEIPTS:
+        if len(set(names)) != expected_count:
+            raise ValueError
+        if specification["filenames"] is not None and sorted(names) != specification["filenames"]:
             raise ValueError
         return [(row[0], row[1], row[2]) for row in rows[1:]]
     except Exception:
@@ -105,9 +134,9 @@ def read_oracle(path):
             workbook.close()
 
 
-def score(actual, oracle=DEFAULT_ORACLE):
+def score(actual, oracle=DEFAULT_ORACLE, spec=None):
     """Return accuracy and boolean feedback; never export expected/actual values."""
-    expected_rows = read_oracle(Path(oracle))
+    expected_rows = read_oracle(Path(oracle), spec)
     actual = Path(actual)
     predictions, issues, _ = read_predictions(actual, [row[0] for row in expected_rows])
     observations = []
@@ -136,9 +165,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--actual", type=Path, default=DEFAULT_ACTUAL)
     parser.add_argument("--oracle", type=Path, default=DEFAULT_ORACLE)
+    parser.add_argument("--spec", type=Path, help="Frozen receipt membership; omitted for the original 22-image task")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    result = score(args.actual, args.oracle)
+    result = score(args.actual, args.oracle, args.spec)
     text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
