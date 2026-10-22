@@ -1,0 +1,28 @@
+Repository: /home/travis/build/failed/google/auto
+
+Build command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure (first/primary):
+- Maven fails during dependency resolution for modules auto-common, auto-factory, auto-service:
+  "Could not find artifact com.sun:tools:jar:11.0.27 at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar"
+- Root cause: the module POMs (common/, factory/, service/, value/) inherit from com.google.auto:auto-parent:3,
+  which comes from Maven Central and expects a JDK <= 8 layout with tools.jar. On this environment (Java 11), tools.jar
+  no longer exists, so the inherited system-scoped dependency com.sun:tools with systemPath=.../lib/tools.jar breaks the build.
+
+Secondary risks likely after fixing tools.jar:
+- If the local parent (./pom.xml) is used instead, it currently sets <java.version>1.6</java.version>. JDK 11 cannot
+  compile with -source/-target 1.6 ("Source option 6 is no longer supported"), so the build may require bumping the
+  compiler level to at least 1.7.
+- Maven Surefire default versions in old parent setups may not support Java 11; we may need to pin a modern surefire
+  version (e.g., 3.x) in the parent build plugins.
+
+Plan:
+1) Stop inheriting from the external parent POM (auto-parent:3) by updating each module pom.xml to use the local parent
+   com.google.auto:auto-parent:4-SNAPSHOT.
+2) Update the local parent pom.xml to build on Java 11:
+   - set java.version to 1.7
+   - add an explicit modern maven-surefire-plugin version (3.2.x) in <build><plugins>
+   - keep compiler plugin but ensure it uses the updated java.version.
+3) Re-run: mvn -B -U -f build-pom.xml verify -Dsource.skip=true -Dmaven.javadoc.skip=true and address any follow-up
+   compilation/test failures if they arise.

@@ -1,0 +1,46 @@
+ujson — notes for fuzz testing
+==============================
+
+Library: /app/ujson  (C-extension, installable as `ujson`)
+Build deps: C compiler (handled by PEP-517 build backend). Runtime deps:
+  none beyond CPython.
+
+Primary FUT (fuzz target):
+  qualname: ujson.loads
+  file:line: src/ujson/decode.c (reached from src/ujson/ujson.c `loads`)
+  signature: loads(s) -> object (accepts str OR bytes/bytearray)
+  input type: bytes (raw JSON text; ujson accepts both bytes and str)
+  rationale: `ujson.loads` is the fastest and most-used JSON decoder
+    entry point. It is a C parser over untrusted input — the canonical
+    fuzz target. We complement with a round-trip via `ujson.dumps` on
+    successful decodes to also stress the encoder path.
+
+Invalid-input exceptions (CAUGHT, early return in harness):
+  - ValueError           (ujson raises plain ValueError on malformed JSON;
+                          json.JSONDecodeError is also a ValueError)
+  - TypeError            (non-string/bytes input, dumps of a non-encodable
+                          Python object produced by a decode trick)
+  - UnicodeDecodeError   (bytes that are not valid UTF-8 in some paths)
+  - OverflowError        (numbers that overflow C int / double)
+  - RecursionError       (very deeply nested JSON; benign stress)
+
+Real-crash exceptions (PROPAGATE):
+  - any other uncaught exception. For a C extension the big risk is a
+    hard crash (segfault / abort), not a Python exception — LibFuzzer
+    reports those as SIGSEGV / SIGABRT, which is what we want.
+
+Oracle: crash-only.
+
+Seeds (via FDP as raw bytes):
+  b'0', b'"a"', b'[]', b'{}', b'{"a":1}', b'[1,2,3]',
+  b'true', b'false', b'null', b'"\\u0041"', b'1e308'.
+
+Fuzz entry (pseudocode):
+  try:
+      obj = ujson.loads(data)
+  except INVALID_INPUT_EXCEPTIONS:
+      return
+  try:
+      ujson.dumps(obj)
+  except INVALID_INPUT_EXCEPTIONS:
+      return

@@ -1,0 +1,39 @@
+{
+  "task_id": "sec-financial-report",
+  "initial_run_id": "sec-financial-report-original-skill-server-r003",
+  "selected_run_id": "sec-financial-report-bundle-1-published-original-revi-167c591d1ed1",
+  "selected_reward": 0.0,
+  "selected_success": false,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-claude-opus47-fail39-published-trace-r4-replay27/sec-financial-report/bundle-1-published-original-revised-41ec957626c4e7fb/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-claude-opus47-fail39-published-trace-r4-replay27/skillrevise-bundle-claude-opus47-fail39-published-trace-top3-r4-replay27/sec-financial-report-bundle-1-published-original-revi-167c591d1ed1",
+  "selected_overrides": {
+    "13f-analyzer/SKILL.md": "# 13f-analyzer\n\n## Purpose\nPerform reusable analyses over SEC Form 13F filings laid out as TSV tables per quarter: single-fund quarterly summary (AUM, holding counts), two-quarter holding deltas (buys and sells by notional), and ranking funds by exposure to a given stock. The skill operates directly on the raw 13F TSVs (COVERPAGE, SUMMARYPAGE, INFOTABLE) rather than any bespoke helper script.\n\n## When to Use\nTrigger when the task asks for quantitative insights about 13F filers for a specific quarter or across two quarters, including: fund-level AUM or holding counts, newly bought or sold positions between quarters, or which funds hold a particular stock (by CUSIP or issuer name). Do not trigger for non-13F SEC data or for narrative filings (10-K, 10-Q, 8-K).\n\n## Procedure\n- Discover the environment first. List the quarter directory supplied by the task (e.g. a path shaped like `<root>/<YYYY>-q<N>`) and confirm that `COVERPAGE.tsv`, `SUMMARYPAGE.tsv`, and `INFOTABLE.tsv` exist. Run `head -1` on each to record the exact column names; do not assume column names from memory. If files are missing or named differently, search the provided workspace (`find <root> -name 'INFOTABLE*'`) and adapt. Do not invoke any script that has not been verified to exist.\n- Resolve the fund (ACCESSION_NUMBER). If the task gives an accession number, use it directly. Otherwise, read `COVERPAGE.tsv` and fuzzy-match on `FILINGMANAGER_NAME` (lowercased, punctuation-stripped); inspect the top-k candidates and their `CIK`, `ISAMENDMENT`, and `AMENDMENTTYPE`. Resolution rule: for a given (CIK, PERIODOFREPORT), prefer the latest `AMENDMENTTYPE = RESTATEMENT` filing if present; otherwise use the original (`ISAMENDMENT = false`) filing. Never silently pick the first match.\n- Define metrics explicitly before computing:\n- AUM for a filing: `SUMMARYPAGE.TABLEVALUETOTAL` for that ACCESSION_NUMBER (verify units from the column header; 13F values are typically reported in whole dollars for post-2022 filings and in thousands before).\n- Number of entries: `SUMMARYPAGE.TABLEENTRYTOTAL` or `COUNT(*)` on INFOTABLE for the accession.\n- Number of stock holdings: count of DISTINCT `CUSIP` in INFOTABLE for the accession where `PUTCALL` is NULL or empty (exclude options). Report both the entry count and the unique-CUSIP count when they differ.\n- For two-quarter deltas, resolve both accessions using the rule above, load INFOTABLE rows for each (equity-only: `PUTCALL` blank), aggregate `VALUE` per CUSIP, then compute set differences: new buys = CUSIPs in later quarter not in earlier; full sells = CUSIPs in earlier not in later; rank each by the aggregated `VALUE` in the quarter where they appear.\n- For top-holders-of-a-stock, first disambiguate the stock. If given an issuer name, enumerate all CUSIPs in INFOTABLE whose associated `NAMEOFISSUER` matches (case-insensitive) and list the share classes (`TITLEOFCLASS`) and CUSIPs found; if multiple classes exist (e.g., Class A vs Class B), either sum across them or restrict to the class specified by the task, and state the choice explicitly. Filter to `PUTCALL` blank. Aggregate `VALUE` per ACCESSION_NUMBER, join to COVERPAGE on ACCESSION_NUMBER to get `FILINGMANAGER_NAME`, and return the top-k by aggregated value.\n- Validate before reporting. Reload the final frames and assert: non-empty result, numeric columns are numeric, no NaN in ranking key, and that the row counts after PUTCALL filter are strictly less than or equal to raw row counts. Print the raw-vs-filtered counts as a sanity log.\n\n## Constraints / Pitfalls\n- Do not reference or invoke scripts that have not been verified to exist in the current environment. Treat `scripts/*.py` paths as examples only; always fall back to direct TSV reads (pandas with `sep='\\t'`, `dtype=str` initially, then cast numeric columns).\n- Do not sum `VALUE` across rows where `PUTCALL` is `Put` or `Call` when measuring stock ownership; options exposure is not equivalent to share ownership.\n- Do not pick the first fuzzy name match without inspecting amendment status. Always apply the original-vs-restatement rule and record which was chosen.\n- Do not conflate \"number of entries\" (INFOTABLE rows or `TABLEENTRYTOTAL`) with \"number of stock holdings\" (unique equity CUSIPs). State which definition is used.\n- Do not assume a single CUSIP per issuer. For issuers with multiple share classes, enumerate CUSIPs from INFOTABLE, decide aggregation vs selection explicitly, and document the choice in the output.\n- Do not hard-code quarter paths, column indices, or value-unit assumptions. Derive them from the discovery step for the specific run.\n- If the task specifies an output file or format, write to the exact path given and re-read it to confirm existence and schema before declaring completion."
+  },
+  "selection": {
+    "targets": [
+      "13f-analyzer/SKILL.md",
+      "fuzzy-name-search/SKILL.md"
+    ],
+    "rationale": "Agent manually scanned TSVs with pandas chunking instead of using the provided skill scripts (search_fund.py for fuzzy fund lookup, one_fund_analysis.py for AUM/holdings, holding_analysis.py for top holders by CUSIP). The task explicitly requires fuzzy COVERPAGE search and per-fund analysis, matching both skills; failure likely stems from these skills not being discovered/followed.",
+    "raw_response": "{\"targets\":[\"13f-analyzer/SKILL.md\",\"fuzzy-name-search/SKILL.md\"],\"rationale\":\"Agent manually scanned TSVs with pandas chunking instead of using the provided skill scripts (search_fund.py for fuzzy fund lookup, one_fund_analysis.py for AUM/holdings, holding_analysis.py for top holders by CUSIP). The task explicitly requires fuzzy COVERPAGE search and per-fund analysis, matching both skills; failure likely stems from these skills not being discovered/followed.\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "13f-analyzer/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.0,
+      "score_after": 0.0
+    },
+    {
+      "target_skill": "fuzzy-name-search/SKILL.md",
+      "accepted": false,
+      "accepted_revision": false,
+      "decision": "rejected_unmodified_v0",
+      "score_before": 0.0,
+      "score_after": 0.0
+    }
+  ]
+}

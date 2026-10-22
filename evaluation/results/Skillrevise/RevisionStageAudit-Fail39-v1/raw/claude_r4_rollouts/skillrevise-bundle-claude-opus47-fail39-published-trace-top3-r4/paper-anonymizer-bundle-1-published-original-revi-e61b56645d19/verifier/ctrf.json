@@ -1,0 +1,80 @@
+{
+    "results": {
+        "tool": {
+            "name": "pytest",
+            "version": "8.4.1"
+        },
+        "summary": {
+            "tests": 6,
+            "passed": 4,
+            "failed": 2,
+            "skipped": 0,
+            "pending": 0,
+            "other": 0,
+            "start": 1791060153.0570378,
+            "stop": 1791060154.2269464
+        },
+        "tests": [
+            {
+                "name": "::test_structural_integrity",
+                "status": "passed",
+                "duration": 0.1923198769945884,
+                "start": 1791060153.0668395,
+                "stop": 1791060153.2595377,
+                "retries": 0,
+                "file_path": "../verifier/test_outputs.py"
+            },
+            {
+                "name": "::test_authors_redacted",
+                "status": "passed",
+                "duration": 0.16704861499601975,
+                "start": 1791060153.259765,
+                "stop": 1791060153.4270782,
+                "retries": 0,
+                "file_path": "../verifier/test_outputs.py"
+            },
+            {
+                "name": "::test_affiliations_redacted",
+                "status": "passed",
+                "duration": 0.1851332850055769,
+                "start": 1791060153.4272752,
+                "stop": 1791060153.612669,
+                "retries": 0,
+                "file_path": "../verifier/test_outputs.py"
+            },
+            {
+                "name": "::test_identifiers_redacted",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.1602380889817141,
+                "start": 1791060153.612915,
+                "stop": 1791060153.7872782,
+                "retries": 0,
+                "file_path": "../verifier/test_outputs.py",
+                "trace": "def test_identifiers_redacted():\n        \"\"\"All identifiers (arXiv IDs, DOIs, acknowledgement names) should be redacted.\"\"\"\n        errors = []\n    \n        papers = [\n            (\"paper1.pdf\", OUTPUT_FILES[0], PAPER1_IDENTIFIERS),\n            (\"paper2.pdf\", OUTPUT_FILES[1], PAPER2_IDENTIFIERS),\n            (\"paper3.pdf\", OUTPUT_FILES[2], PAPER3_IDENTIFIERS),\n        ]\n    \n        for filename, output_file, identifiers in papers:\n            text = extract_pdf_text(output_file).lower()\n            found = [i for i in identifiers if i.lower() in text]\n            if found:\n                errors.append(f\"{filename}: identifiers not redacted: {found}\")\n    \n>       assert not errors, \"\\n\".join(errors)\nE       AssertionError: paper2.pdf: identifiers not redacted: ['Shengyuan Xu', 'Pengcheng Zhu']\nE       assert not [\"paper2.pdf: identifiers not redacted: ['Shengyuan Xu', 'Pengcheng Zhu']\"]\n\n/verifier/test_outputs.py:234: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "::test_content_preserved",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.32106514800398145,
+                "start": 1791060153.7874599,
+                "stop": 1791060154.1124387,
+                "retries": 0,
+                "file_path": "../verifier/test_outputs.py",
+                "trace": "def test_content_preserved():\n        \"\"\"Verify only intended items were redacted by comparing original and redacted PDFs.\"\"\"\n        errors = []\n    \n        papers = [\n            (\"paper1.pdf\", INPUT_FILES[0], OUTPUT_FILES[0]),\n            (\"paper2.pdf\", INPUT_FILES[1], OUTPUT_FILES[1]),\n            (\"paper3.pdf\", INPUT_FILES[2], OUTPUT_FILES[2]),\n        ]\n    \n        for filename, input_file, output_file in papers:\n            original_text = extract_pdf_text(input_file)\n            redacted_text = extract_pdf_text(output_file)\n    \n            # Exclude acknowledgement sections from diff (may be fully redacted)\n            if filename == \"paper2.pdf\":\n                # Paper2: Acknowledgements section before References\n                original_text = exclude_section(original_text, \"Acknowledgements\", \"References\")\n                redacted_text = exclude_section(redacted_text, \"Acknowledgements\", \"References\")\n            elif filename == \"paper3.pdf\":\n                # Paper3: Footnote area with affiliations and venue\n                original_text = exclude_section(original_text, \"Equal contribution\", \"Despite\")\n                redacted_text = exclude_section(redacted_text, \"Equal contribution\", \"Despite\")\n    \n            # Find words in original but not in redacted\n            original_words = set(original_text.lower().split())\n            redacted_words = set(redacted_text.lower().split())\n            missing_words = original_words - redacted_words\n    \n            # Get allowed redaction items for this paper\n            allowed_items = [item.lower() for item in ALL_REDACTION_ITEMS[filename]]\n            allowed_words = set()\n            for item in allowed_items:\n                allowed_words.update(item.lower().split())\n    \n            # Check if any non-allowed content was removed\n            unexpected_removals = []\n            for word in missing_words:\n                if len(word) <= 2:\n                    continue\n                is_allowed = any(word in item.lower() for item in allowed_items)\n                if not is_allowed and word not in allowed_words:\n                    unexpected_removals.append(word)\n    \n            # Allow some tolerance for PDF extraction differences\n            if len(unexpected_removals) > 50:\n                errors.append(\n                    f\"{filename}: too many unexpected changes ({len(unexpected_removals)} words). \"\n                    f\"Sample: {unexpected_removals[:10]}\"\n                )\n    \n>       assert not errors, \"Content may be over-redacted:\\n\" + \"\\n\".join(errors)\nE       AssertionError: Content may be over-redacted:\nE         paper1.pdf: too many unexpected changes (75 words). Sample: ['arxiv:2311.12022,', 'arxiv:2410.17196,', '\u201chelen\u201d', '//arxiv.org/abs/2410.19168.', 'arxiv:2411.04368,', 'arxiv:2509.26542v1', 'arxiv:2505.13032,', 'chen\u2660', 'arxiv:2407.10759,', '10.21437/interspeech.2018-1714.']\nE       assert not [\"paper1.pdf: too many unexpected changes (75 words). Sample: ['arxiv:2311.12022,', 'arxiv:2410.17196,', '\u201chelen\u201d', '//arxiv.org/abs/2410.19168.', 'arxiv:2411.04368,', 'arxiv:2509.26542v1', 'arxiv:2505.13032,', 'chen\u2660', 'arxiv:2407.10759,', '10.21437/interspeech.2018-1714.']\"]\n\n/verifier/test_outputs.py:314: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "::test_self_citations_preserved",
+                "status": "passed",
+                "duration": 0.11396538400731515,
+                "start": 1791060154.1125898,
+                "stop": 1791060154.226835,
+                "retries": 0,
+                "file_path": "../verifier/test_outputs.py"
+            }
+        ]
+    }
+}

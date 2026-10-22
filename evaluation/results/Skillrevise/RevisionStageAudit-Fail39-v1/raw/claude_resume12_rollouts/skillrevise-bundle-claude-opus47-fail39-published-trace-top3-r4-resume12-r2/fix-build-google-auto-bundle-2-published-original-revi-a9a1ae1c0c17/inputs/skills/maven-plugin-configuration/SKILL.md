@@ -1,0 +1,24 @@
+# Maven Build Repair Workflow
+
+## Purpose
+Diagnose a failing Maven build by first reconciling the execution environment with the project's declared build contract, and only then authoring minimal unified-diff patches. Produce the task-mandated artifacts (failed_reasons.txt and patch_{i}.diff) at the paths the task names, and verify the fix by re-running the exact original CI command.
+
+## When to Use
+Use when a task supplies a broken Maven project plus a specific CI invocation and requires a root-cause note and one or more unified-diff patches that make the build and its tests pass. Do not use for green-field plugin advice or generic Maven tutorials.
+
+## Procedure
+- Ground the task. Record `java -version`, `mvn -v`, `echo $JAVA_HOME`, the exact CI invocation (phase, `-f` pom, profiles, env), and the task-specified output paths for `failed_reasons.txt` and `patch_{i}.diff`. Locate any provided CI log and treat it as the ground-truth failure signature. Reproduce once with the exact CI command and capture the first failing goal and first error block verbatim.
+- Reconcile the environment before patching. Discover the project's declared JDK and build contract by inspecting, in order: CI config files (e.g., `.travis.yml` `jdk:`, `.github/workflows/*.yml`, `Jenkinsfile`), `.mvn/jvm.config`, `toolchains.xml`, `maven.compiler.source`/`target`/`release` properties, `maven-compiler-plugin` config, and `maven-enforcer-plugin` rules. Enumerate installed JDKs via available discovery (e.g., `ls /usr/lib/jvm`, `update-alternatives --list java`, `/Library/Java/JavaVirtualMachines`, `$JAVA_HOME` candidates). Decision point:
+- If the project pins a JDK and a matching JDK is installed, export `JAVA_HOME` and `PATH` to it (or configure a Maven toolchain) and re-run the exact CI command once. If this clears the failure, skip to the verify step; otherwise proceed with the new first-failure signature.
+- If no matching JDK is installed but a close one is, consider aligning the project's `source`/`target`/`release` with an available JDK via a minimal pom patch, documenting the deviation in `failed_reasons.txt`.
+- If neither lever applies, fall back to dependency- or plugin-level patches.
+- Author a minimal patch for the current first-failure signature. Choose the smallest lever that neutralizes the observed root cause (environment reconciliation, plugin/dep version pin via `pluginManagement`/`dependencyManagement`, encoding property, scope/exclusion). Write it as `patch_{i}.diff` in standard unified-diff format (`diff --git` or `--- a/ +++ b/` headers with correct hunk offsets) at the task-specified path. One patch per logically distinct fix; never emit full-file rewrites or inline XML snippets outside a diff.
+- Apply, verify, and loop with bounded progress. Run the task's apply step, then re-run the exact original CI command. Record the new first-failure signature. Continue the loop only while all of the following hold: (a) the signature is strictly new (monotonic progress), (b) an unused lever (environment, config, dependency, plugin) is still available, and (c) the task's overall step/time budget is not exhausted. Stop when tests and the previously failing phase pass, when the signature repeats, or when no lever remains; in the latter cases, write the residual signature and the levers tried into `failed_reasons.txt`. Before declaring done, confirm existence and non-emptiness of `failed_reasons.txt` and every `patch_{i}.diff` at the task-specified paths, and confirm the CI re-run reaches at least the previously failing phase.
+
+## Constraints / Pitfalls
+- Do not treat JDK version mismatch as a dependency problem. If the repo pins a JDK (CI config, toolchains, enforcer) and a matching JDK is installed, reconcile the environment first; patch poms only when environment alignment is impossible.
+- Write artifacts only at the paths the task names; never silently relocate them. Perform an existence and readability check at those exact paths before finalizing.
+- Patches must be valid unified diffs against the current tree. No full-file rewrites, no bare XML snippets, no unrelated reformatting.
+- Do not hard-code JDK paths, Maven versions, or symptom-to-patch rules from memory. Discover them from the actual environment and the project's declared contract.
+- Do not stop at an arbitrary iteration count. Stop on repeated signatures, exhausted levers, or verified success. Do not continue once the first-failure signature stops changing.
+- Keep the loop bounded: one reproduction, then patch-apply-rerun cycles that must show monotonic progress; otherwise record residuals and finalize.

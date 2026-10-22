@@ -1,0 +1,33 @@
+Repository: /home/travis/build/failed/google/auto
+Build command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure (JDK 11):
+  Failed to execute goal on project auto-common/auto-factory/auto-service:
+    Could not find artifact com.sun:tools:jar:11.0.27 at specified path
+    /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause:
+- The submodules (common, factory, service, value) declare:
+    <parent>
+      <groupId>com.google.auto</groupId>
+      <artifactId>auto-parent</artifactId>
+      <version>3</version>
+    </parent>
+  This pulls the published parent POM com.google.auto:auto-parent:3 from Maven Central.
+- auto-parent:3 declares a system-scoped dependency on com.sun:tools with systemPath
+  pointing at ${java.home}/../lib/tools.jar (JDK 8 layout).
+- On JDK 9+, tools.jar no longer exists, so Maven fails dependency resolution before
+  compilation.
+
+Secondary issue likely after fixing the above:
+- The repo root parent POM (./pom.xml, auto-parent 4-SNAPSHOT) sets <java.version>1.6</java.version>.
+  JDK 11 does not support compiling with -source/-target 1.6.
+
+Plan:
+1) Update module POMs (common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml)
+   to inherit from the in-repo parent (com.google.auto:auto-parent:4-SNAPSHOT).
+   This avoids the external auto-parent:3 and removes the tools.jar dependency.
+2) Update the root parent property <java.version> from 1.6 to 1.7 so the build works
+   on JDK 11 while staying close to the original compatibility intent.
+3) Re-run the Travis build command to verify the reactor builds successfully.
