@@ -1,0 +1,341 @@
+--- before/image-ocr/SKILL.md
++++ after/image-ocr/SKILL.md
+@@ -14,6 +14,274 @@
+ - Processing batch image files that contain textual information
+ - Converting visual documents to machine-readable text
+ - Extracting structured data from forms, receipts, or tables in images
++
++
++
++## Receipt Field Extraction (Date + Total)
++
++This section is a domain-specific recipe for extracting `date` (ISO `YYYY-MM-DD`) and `total_amount` (two-decimal string) from scanned receipt images (Malaysian/SEA style). Use this recipe when the task asks for receipt totals and dates; the generic OCR sections below are inadequate on their own.
++
++### Priority Tiers and Exclusions
++
++```python
++TIERS = [
++    ['GRAND TOTAL'],
++    ['TOTAL RM', 'TOTAL: RM'],
++    ['TOTAL AMOUNT'],
++    ['TOTAL', 'AMOUNT', 'TOTAL DUE', 'AMOUNT DUE', 'BALANCE DUE',
++     'NETT TOTAL', 'NET TOTAL', 'ROUNDED TOTAL', 'TOTAL ROUNDED',
++     'TOTAL AFTER ROUNDING', 'TOTAL INCL GST', 'TOTAL RM INCLUDING GST'],
++]
++
++EXCLUSIONS = [
++    'SUBTOTAL', 'SUB TOTAL', 'SUB-TOTAL',
++    'TAX', 'GST', 'SST',
++    'DISCOUNT', 'CHANGE',
++    'CASH TENDERED', 'CASH RECEIVED', 'CASH PAYMENT',
++    'VISA', 'MASTERCARD', 'DEBIT', 'CREDIT', 'CARD', 'PAYMENT',
++    'ROUNDING ADJ', 'ROUNDING ADJUSTMENT',
++    'TOTAL GST', 'TOTAL TAX', 'TOTAL SST', 'GST TOTAL', 'TAX TOTAL',
++    'TOTAL ITEMS', 'TOTAL ITEM(S)', 'ITEM COUNT', 'TOTAL QTY',
++    'TOTAL QUANTITY', 'TOTAL SAVINGS',
++    'EXCLUDING', 'EXCL GST', 'AMT EXCL',
++    'DESCRIPTION', 'QTY PRICE AMOUNT', 'PRICE AMOUNT',
++    'AVERAGE', 'PAX',
++]
++```
++
++IMPORTANT nuances:
++- Distinguish `TOTAL GST` / `GST TOTAL` (EXCLUDE) from `TOTAL INCL GST` / `TOTAL (INCLUSIVE OF GST)` (INCLUDE). Check INCLUDE patterns before applying EXCLUSIONS.
++- Once any line contains `GST SUMMARY`, `TAX SUMMARY`, or `TAX CODE`, mark all subsequent lines as excluded for total selection (summary tables often repeat a 'Total' row).
++
++### Amount Regex and Normalization
++
++```python
++import re
++AMOUNT_RE = re.compile(r'(?<![\w.])(\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2})(?![\w.\d])')
++
++def to_float(tok):
++    return float(tok.replace(',', ''))
++
++def fmt_amount(v):
++    return f'{v:.2f}'
++
++def normalize_numeric_tokens(line):
++    # Apply only inside tokens that look numeric-ish (contain a digit).
++    def fix_token(tok):
++        if not re.search(r'\d', tok):
++            return tok
++        t = tok
++        t = t.replace('O', '0').replace('o', '0').replace('Q', '0').replace('u', '0')
++        t = t.replace('l', '1').replace('I', '1').replace('|', '1')
++        t = t.replace('S', '5').replace('B', '8')
++        t = t.replace(':', '.')
++        return t
++    line = re.sub(r'\bRN\b', 'RM', line)
++    # Collapse 'NN NN' at end of a keyword line into 'NN.NN'
++    line = re.sub(r'(\d{1,4})\s+(\d{2})\s*$', r'\1.\2', line)
++    return ' '.join(fix_token(t) for t in line.split(' '))
++```
++
++### Multi-Variant OCR
++
++Generate at least four variants and collect text from each:
++1. Original, `--psm 6`
++2. Grayscale + autocontrast, `--psm 6`
++3. 2x LANCZOS upscale of #2, `--psm 6`
++4. 3x LANCZOS upscale of #2, `--psm 4`
++5. (optional) Binarized/inverted for faded scans, `--psm 11`
++
++```python
++from PIL import Image, ImageOps
++import pytesseract
++
++def ocr_variants(image_path):
++    img = Image.open(image_path)
++    gray = ImageOps.autocontrast(ImageOps.grayscale(img))
++    w, h = gray.size
++    up2 = gray.resize((w*2, h*2), Image.LANCZOS)
++    up3 = gray.resize((w*3, h*3), Image.LANCZOS)
++    specs = [(img, '--psm 6'), (gray, '--psm 6'),
++             (up2, '--psm 6'), (up3, '--psm 4')]
++    texts = []
++    for im, cfg in specs:
++        try:
++            texts.append(pytesseract.image_to_string(im, config=cfg))
++        except Exception:
++            pass
++    return texts
++```
++
++### Selection Algorithm (Total)
++
++For each OCR variant text, split into lines; for each line:
++1. Apply `normalize_numeric_tokens`.
++2. If a prior line matched `GST SUMMARY`/`TAX SUMMARY`/`TAX CODE`, treat this line as excluded.
++3. If the uppercased line contains any EXCLUSION keyword (and NOT an INCLUDE pattern like `TOTAL INCL GST` / `INCLUSIVE OF GST`), skip.
++4. For each tier (lowest index wins), if the line contains a tier keyword, extract 2-decimal amounts via `AMOUNT_RE`.
++   - If amounts found: record `(tier_index, value, line_index, variant_index)` for the LAST amount on that line.
++   - If no amounts AND the line contains no digits at all: look ahead up to 2 non-empty, non-excluded lines; take the LAST 2-decimal number found. Record as candidate.
++   - If the keyword line has partial digits but no valid 2-decimal match: do NOT fall through (prevents Visa/Cash leakage).
++
++Final pick across all variants:
++1. Choose the lowest `tier_index` that has any candidate.
++2. Within that tier, prefer values corroborated by (a) appearing on Subtotal/Payment/Cash/Rounded lines on the same receipt, or (b) appearing in multiple variants.
++3. Tiebreak by cross-variant frequency, then by LAST line_index (so a final `TOTAL: 23.25` beats an earlier `Total (Inclusive of GST): 23.26` when a `Rounding Adj: -0.01` sits between them).
++4. Output `fmt_amount(value)`.
++
++Worked example:
++```
++Total (Inclusive of GST):   23.26
++Rounding Adj:               -0.01
++TOTAL:                      23.25
++```
++Both `23.26` and `23.25` are tier-3 candidates. The later line wins → `total_amount = '23.25'`.
++
++### Date Extraction
++
++```python
++import re
++from datetime import date
++
++DATE_PATTERNS = [
++    (re.compile(r'(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})'), 'dmy4'),
++    (re.compile(r'(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})'), 'ymd'),
++    (re.compile(r'(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2})\b'), 'dmy2'),
++    (re.compile(r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})', re.I), 'dmony'),
++]
++MONTHS = {m:i+1 for i,m in enumerate(['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'])}
++
++def _valid(y, mo, d):
++    try:
++        date(y, mo, d); return 2000 <= y <= 2099
++    except Exception:
++        return False
++
++def _try_swaps(y, mo, d):
++    swaps = [('6','0'),('0','6'),('8','3'),('3','8'),('1','7'),('7','1'),('5','6'),('6','5')]
++    for field in ('mo','d'):
++        s = str(mo if field=='mo' else d)
++        for a,b in swaps:
++            if a in s:
++                cand = int(s.replace(a,b,1))
++                nm, nd = (cand, d) if field=='mo' else (mo, cand)
++                if _valid(y, nm, nd):
++                    return y, nm, nd
++    return None
++
++def extract_date(text):
++    lines = text.splitlines()
++    # Prefer lines near Date/Tarikh/INV labels first
++    scored = []
++    for i, ln in enumerate(lines):
++        boost = 1 if re.search(r'date|tarikh|inv', ln, re.I) else 0
++        scored.append((boost, i, ln))
++    scored.sort(key=lambda x: (-x[0], x[1]))
++    for _, _, ln in scored:
++        for rx, kind in DATE_PATTERNS:
++            m = rx.search(ln)
++            if not m: continue
++            if kind == 'dmy4':
++                d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
++                if mo > 12 and d <= 12:  # fallback to MM/DD
++                    d, mo = mo, d
++            elif kind == 'ymd':
++                y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
++            elif kind == 'dmy2':
++                d, mo, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
++                y = 2000 + yy if yy <= 49 else 1900 + yy
++            elif kind == 'dmony':
++                d = int(m.group(1)); mo = MONTHS[m.group(2).lower()[:3]]; y = int(m.group(3))
++            if _valid(y, mo, d):
++                return f'{y:04d}-{mo:02d}-{d:02d}'
++            fix = _try_swaps(y, mo, d)
++            if fix:
++                y, mo, d = fix
++                return f'{y:04d}-{mo:02d}-{d:02d}'
++    return None
++```
++
++For ambiguous `DD/MM` vs `MM/DD`, default to `DD/MM/YYYY` (Malaysian/SEA convention). Example: `09/03/2018` → `2018-03-09` (NOT `2018-08-09`).
++
++### Reference Function and Batch Driver
++
++```python
++def extract_receipt_fields(image_path):
++    variant_texts = ocr_variants(image_path)
++    # --- total selection ---
++    include_pat = re.compile(r'TOTAL\s*(\(?\s*INCL(?:USIVE)?(?:\s*OF)?\s*GST|INCL\s*GST)', re.I)
++    candidates = []  # (tier, value, line_idx, variant_idx, line_text)
++    corroborators = set()
++    for vi, raw in enumerate(variant_texts):
++        in_summary = False
++        lines = [normalize_numeric_tokens(l) for l in raw.splitlines()]
++        for li, line in enumerate(lines):
++            U = line.upper()
++            if any(k in U for k in ('GST SUMMARY','TAX SUMMARY','TAX CODE')):
++                in_summary = True
++            # Corroborators
++            if any(k in U for k in ('SUBTOTAL','SUB TOTAL','CASH','PAYMENT','ROUNDED','TENDERED','CHANGE')):
++                for m in AMOUNT_RE.finditer(line):
++                    corroborators.add(to_float(m.group(1)))
++            is_include = bool(include_pat.search(U))
++            is_excluded = in_summary or (not is_include and any(k in U for k in EXCLUSIONS))
++            if is_excluded:
++                continue
++            for ti, kws in enumerate(TIERS):
++                if any(k in U for k in kws):
++                    amounts = [to_float(m.group(1)) for m in AMOUNT_RE.finditer(line)]
++                    if amounts:
++                        candidates.append((ti, amounts[-1], li, vi, line))
++                    elif not re.search(r'\d', line):
++                        # split-line fallback: look ahead up to 2 non-excluded lines
++                        for look in range(li+1, min(li+3, len(lines))):
++                            nxt = lines[look]
++                            if not nxt.strip(): continue
++                            NU = nxt.upper()
++                            if any(k in NU for k in EXCLUSIONS): continue
++                            nx = [to_float(m.group(1)) for m in AMOUNT_RE.finditer(nxt)]
++                            if nx:
++                                candidates.append((ti, nx[-1], look, vi, nxt))
++                                break
++                    break  # only match the strongest tier per line
++    total_str = None
++    if candidates:
++        best_tier = min(c[0] for c in candidates)
++        pool = [c for c in candidates if c[0] == best_tier]
++        from collections import Counter
++        freq = Counter(round(c[1], 2) for c in pool)
++        def score(c):
++            v = round(c[1], 2)
++            return (freq[v], 1 if v in {round(x,2) for x in corroborators} else 0, c[2])
++        pool.sort(key=score, reverse=True)
++        total_str = fmt_amount(pool[0][1])
++    # --- date ---
++    date_iso = None
++    for raw in variant_texts:
++        date_iso = extract_date(raw)
++        if date_iso: break
++    return {'date': date_iso, 'total_amount': total_str}
++
++# Batch driver → xlsx
++def build_xlsx(img_dir, out_path):
++    import os, openpyxl
++    from pathlib import Path
++    wb = openpyxl.Workbook()
++    ws = wb.active
++    ws.title = 'results'
++    ws.append(['filename', 'date', 'total_amount'])
++    files = sorted(p.name for p in Path(img_dir).iterdir()
++                   if p.suffix.lower() in {'.jpg','.jpeg','.png','.webp'})
++    for name in files:
++        res = extract_receipt_fields(os.path.join(img_dir, name))
++        ws.append([name, res['date'], res['total_amount']])
++    wb.save(out_path)
++```
++
++### Output Contract
++- `total_amount`: two-decimal string (e.g., `'47.70'`), or `None` on failure.
++- `date`: ISO `YYYY-MM-DD` string, or `None` on failure.
++- xlsx contains exactly one sheet `results`, header row + sorted-by-filename data rows, no extra columns/sheets.
+ 
+ ## Required Libraries
+ 
+--- before/xlsx/SKILL.md
++++ after/xlsx/SKILL.md
+@@ -287,3 +287,61 @@
+ - Add comments to cells with complex formulas or important assumptions
+ - Document data sources for hardcoded values
+ - Include notes for key calculations and model sections
++
++
++
++## Strict Tabular Output Contracts
++
++When a task specifies an exact output schema (sheet name, column names, row order, cell types), follow these rules to avoid schema drift that strict verifiers will catch:
++
++### 1. Exact sheet name
++If the task requires a specific sheet name (e.g., `results`), set it explicitly and ensure no default `Sheet` remains:
++```python
++from openpyxl import Workbook
++wb = Workbook()
++ws = wb.active
++ws.title = 'results'  # rename default sheet; do not create a second one
++```
++With pandas:
++```python
++with pd.ExcelWriter('out.xlsx', engine='openpyxl') as w:
++    df.to_excel(w, sheet_name='results', index=False)
++```
++Verify `wb.sheetnames == ['results']` before saving.
++
++### 2. Null values must be truly empty cells
++Write `None` (not `''`, `'nan'`, `'None'`, or `float('nan')`) for missing values. Verifiers often distinguish empty cells from empty strings.
++```python
++ws.cell(row=r, column=c, value=None)  # truly empty
++```
++With pandas, convert sentinels before writing: `df = df.where(pd.notna(df), None)`.
++
++### 3. Preserve numeric-looking strings exactly (e.g., `47.70`, `09.00`)
++Do NOT let Excel/pandas coerce these to floats — trailing zeros and leading zeros will be lost. Write them as Python `str` and set the cell number format to text:
++```python
++cell = ws.cell(row=r, column=c, value='47.70')  # keep as str
++cell.number_format = '@'  # text format, prevents Excel from reformatting
++```
++With pandas: force the column dtype to `str` (`df['total_amount'] = df['total_amount'].astype('string')`) and use `index=False`. Validate values match `^\d+\.\d{2}$` before writing.
++
++### 4. Deterministic row ordering
++Never rely on `os.listdir()` order (filesystem-dependent). Sort explicitly in Python:
++```python
++rows.sort(key=lambda r: r['filename'])
++```
++
++### 5. Verification snippet (run before declaring done)
++```python
++from openpyxl import load_workbook
++import re
++wb = load_workbook('out.xlsx')
++assert wb.sheetnames == ['results'], wb.sheetnames
++ws = wb['results']
++header = [c.value for c in ws[1]]
++assert header == ['filename', 'date', 'total_amount'], header
++assert ws.max_row - 1 == expected_n
++for row in ws.iter_rows(min_row=2, values_only=True):
++    amt = row[2]
++    assert amt is None or (isinstance(amt, str) and re.fullmatch(r'\d+\.\d{2}', amt)), amt
++```
++Fix any mismatch before returning.

@@ -1,0 +1,29 @@
+{
+  "task_id": "jpg-ocr-stat",
+  "fallback_used": false,
+  "overall_diagnosis": "The task is an OCR-to-XLSX receipt extraction pipeline. All three diagnosis samples agree the baseline agent (using pytesseract via the image-ocr skill) succeeded on most receipts but failed to extract the total_amount '92.80' from 078.jpg, exhausting iterations tuning preprocessing. The text was recoverable with aggressive preprocessing (3x LANCZOS upscale + PSM 4) but the parser's keyword matching missed it. The image-ocr skill is the sole repair target: it lacks concrete guidance for robust multi-variant OCR on low-quality receipts, a keyword-priority total extraction algorithm with exclusion keywords, comma-separator handling, next-line fallback, and date normalization. The xlsx, pdf, openai-vision, and video-frame-extraction skills are not implicated.",
+  "diagnosed_skills": [
+    {
+      "path": "image-ocr/SKILL.md",
+      "confidence": "high",
+      "diagnosis": "The image-ocr skill only documents basic pytesseract usage and provides no recipe for noisy scanned receipts. The baseline agent spent most iterations experimenting with preprocessing (grayscale, autocontrast, upscaling, PSM modes) and still failed on 078.jpg because: (1) no documented multi-variant OCR + voting strategy, (2) no keyword-priority receipt-total parser with exclusion keywords, (3) no handling for comma thousand-separators or amounts split onto the next line, (4) no date normalization guidance. The 'Grand Total 92.80' text was recoverable (e.g., via 3x LANCZOS upscale + --psm 4) but was not reliably parsed.",
+      "repair_instruction": "Add a 'Robust Receipt/Low-Quality OCR Recipe' section to image-ocr/SKILL.md containing: (1) A reusable `ocr_variants(image)` helper that yields text from multiple preprocessing variants — original, grayscale+ImageOps.autocontrast, 2x and 3x LANCZOS upscales (combined with grayscale+autocontrast), Otsu binarization, and unsharp-masked — each run with Tesseract configs `--psm 4`, `--psm 6`, and `--psm 11`. Collect all outputs. (2) A consolidation/voting strategy: gather candidate totals across variants and pick the most frequent (majority vote), breaking ties by highest-priority keyword match. (3) An `extract_total(text)` helper implementing keyword priority: scan lines in order GRAND TOTAL → TOTAL RM / TOTAL: RM → TOTAL AMOUNT → TOTAL / AMOUNT / TOTAL DUE / AMOUNT DUE / BALANCE DUE / NETT TOTAL / NET TOTAL, skipping any line containing exclusion keywords SUBTOTAL, SUB TOTAL, TAX, GST, SST, DISCOUNT, CHANGE, CASH TENDERED. Use regex `r'(?<![\\d.])\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})(?!\\d)'` (or `r'\\d+(?:,\\d{3})*\\.\\d{2}'`), strip commas, and format with `'{:.2f}'`. (4) Fallback rule: if the keyword line has no numeric match, take the last decimal number on the next 1-2 non-empty lines. (5) Date extraction helper supporting DD/MM/YYYY, DD-MM-YY, DD MMM YYYY, YYYY-MM-DD, normalized to ISO YYYY-MM-DD. (6) Guidance: always try at least 4-6 preprocessing variants before emitting null; prefer null (empty cell) only when no variant yields any candidate. (7) A complete worked example iterating a directory of jpg files, running variants, consolidating, and writing results to a single-sheet .xlsx with a header row sorted by filename, matching the task's expected schema."
+    }
+  ],
+  "unselected_skills": [
+    "openai-vision/SKILL.md",
+    "pdf/SKILL.md",
+    "video-frame-extraction/SKILL.md",
+    "xlsx/SKILL.md"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": true,
+  "shared_diagnosis_source": "cache",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true,
+  "producer_backend": "skillopt",
+  "consumer_method": "skillopt"
+}

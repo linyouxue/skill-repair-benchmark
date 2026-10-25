@@ -1,0 +1,162 @@
+{
+  "schema_version": "skillopt-eva-diagnosis-v1",
+  "run_id": "opus47-gold15-jpg-refresh-20261025",
+  "method_id": "skillopt",
+  "task_id": "jpg-ocr-stat",
+  "questions": {
+    "diagnosis_pre_repair_trajectory": {
+      "baseline_result": null,
+      "baseline_task_passed": null,
+      "baseline_comparable": null,
+      "baseline_error_category": null,
+      "trajectory": {
+        "rollout_dir": null,
+        "trajectory_files": [],
+        "first_user_message": "",
+        "notable_errors": []
+      }
+    },
+    "diagnosed_skill_and_repair": {
+      "diagnosis_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-20261025/methods/skillopt/jpg-ocr-stat/workspace/diagnosis.json",
+      "manifest_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-20261025/methods/skillopt/jpg-ocr-stat/workspace/optimization_manifest.json",
+      "diff_file": null,
+      "overall_diagnosis": "Across 37 diagnoses the task is receipt OCR extraction (date + total_amount) into an xlsx. The source agent consistently scored ~0.909 field accuracy using Tesseract, failing on the same handful of fields: 034.jpg date (DD/MM vs MM/DD ambiguity on Malaysian receipts and 03↔08 digit confusion), 074.jpg amount (OCR digit confusion 1↔7 producing 702.00 vs correct 102.00), 077.jpg amount (picked pre-rounding 'Total (Inclusive of GST): 23.26' instead of final 'TOTAL: 23.25' after rounding adjustment), and 078.jpg amount (missed 'Grand Total 92.80' due to faded/mangled OCR of the keyword line and no next-line fallback). All failures trace overwhelmingly to the image-ocr skill, which gives only generic Tesseract guidance and lacks concrete receipt-domain extraction logic: priority keyword tiers with exclusions, final-rounded-total preference, split-line fallback, OCR digit/letter confusion repair, multi-variant OCR with cross-variant voting corroborated by Subtotal/Payment lines, aggressive upscaling for faded receipts, and DD/MM-first date disambiguation. The xlsx skill is a minor secondary contributor (schema contract and null/string handling could be tightened) but is not the root cause. openai-vision is a plausible fallback for the hardest receipts but is tangential. Primary repair target: image-ocr; secondary: xlsx output contract.",
+      "skills": [
+        {
+          "path": "image-ocr/SKILL.md",
+          "name": "image-ocr",
+          "heading": "Image OCR Skill",
+          "diagnosed_for_repair": true,
+          "diagnosis": "The skill covers only generic Tesseract usage, PSM modes, and a basic multi-pass template. It has no receipt-domain extraction guidance, forcing agents to re-invent (and get wrong) the exact logic this task needs. Specifically it lacks: (1) a priority-tiered keyword ladder for totals (GRAND TOTAL > TOTAL RM/TOTAL: RM > TOTAL AMOUNT > TOTAL/AMOUNT/TOTAL DUE/AMOUNT DUE/BALANCE DUE/NETT TOTAL/NET TOTAL) and a comprehensive exclusion list (SUBTOTAL, SUB TOTAL, TAX, GST, SST, DISCOUNT, CHANGE, CASH TENDERED, CASH RECEIVED, VISA, MASTERCARD, PAYMENT, ROUNDING ADJ, TOTAL GST/TAX/SST, GST/TAX SUMMARY, TOTAL ITEMS/QTY/SAVINGS, EXCLUDING, and column-header lines like 'Description Qty Price Amount'); (2) a 'final rounded total wins' rule: when both 'Total (Inclusive of GST)' and a later 'TOTAL:'/'Rounded Total' appear with a Rounding Adj between, prefer the later rounded value (fixes 077); (3) 'GST SUMMARY' / 'TAX SUMMARY' section cutoff so later 'Total' lines in that block are ignored; (4) split-line fallback: when the keyword line has no digits, take the last two-decimal number on the next non-empty, non-excluded line (fixes 078); but refuse the fallback when the keyword line already contains partial/garbled digits (prevents Visa/Cash leakage); (5) a strict two-decimal numeric regex with thousands-separator support ((?<![\\w.])(\\d{1,3}(?:,\\d{3})+\\.\\d{2}|\\d+\\.\\d{2})(?![\\w.\\d])) and amount formatting to exactly two decimals via f'{v:.2f}'; (6) multi-variant OCR with explicit upscaling (2x and 3x LANCZOS, grayscale+autocontrast, binarize/invert) and PSMs 6/4/11, aggregating candidates and voting: prefer the lowest tier that any variant matched, then within that tier prefer the value corroborated by Subtotal/Payment/Cash/Rounded lines on the same receipt (fixes 074's 702→102 digit confusion), with naive majority voting as a last resort; (7) OCR digit/letter confusion repair inside numeric tokens (O/o/Q→0, l/I/|→1, S→5, B→8, u→0, RN→RM, ':'→'.' only inside amount tokens, collapse 'NN NN'→'NN.NN'), and for implausible dates (month>12) try single-digit swaps (6↔0, 8↔3, 1↔7) before giving up (fixes 071-style and 034); (8) date extraction with regexes for DD/MM/YYYY, DD-MM-YYYY, DD/MM/YY (2-digit year → 2000+yy), YYYY-MM-DD, 'DD Mon YYYY', preferring dates near 'Date:'/'Tarikh' labels, defaulting ambiguous day/month to DD/MM/YYYY for Malaysian/SEA receipts (fixes 034: 09/03/2018 → 2018-03-09, not 2018-08-09), validating 1≤d≤31, 1≤mo≤12, and emitting ISO YYYY-MM-DD; (9) a reusable Python reference implementation and a worked example on a receipt where 'Total (Inclusive of GST): 23.26' + 'Rounding Adj: -0.01' + 'TOTAL: 23.25' correctly returns 23.25. Agents also hit max_iterations re-deriving this logic ad hoc, so providing a ready-to-use recipe directly reduces iteration cost.",
+          "repair_instruction": "Add a new top-level section 'Receipt Field Extraction (Date + Total)' to image-ocr/SKILL.md containing a complete, drop-in Python recipe plus prose: (A) Preprocessing pipeline tuned for receipts: convert to grayscale, apply ImageOps.autocontrast, generate at least four variants — original PSM 6, grayscale+autocontrast PSM 6, 2x LANCZOS upscale PSM 6, 3x LANCZOS upscale PSM 4 — and optionally a binarized/inverted variant for faded scans. Collect text from all variants. (B) Define TIERS = [['GRAND TOTAL'],['TOTAL RM','TOTAL: RM'],['TOTAL AMOUNT'],['TOTAL','AMOUNT','TOTAL DUE','AMOUNT DUE','BALANCE DUE','NETT TOTAL','NET TOTAL','ROUNDED TOTAL','TOTAL ROUNDED','TOTAL AFTER ROUNDING','TOTAL INCL GST','TOTAL RM INCLUDING GST']] and EXCLUSIONS = ['SUBTOTAL','SUB TOTAL','SUB-TOTAL','TAX','GST','SST','DISCOUNT','CHANGE','CASH TENDERED','CASH RECEIVED','CASH PAYMENT','VISA','MASTERCARD','DEBIT','CREDIT','CARD','PAYMENT','ROUNDING ADJ','ROUNDING ADJUSTMENT','TOTAL GST','TOTAL TAX','TOTAL SST','GST TOTAL','TAX TOTAL','TOTAL ITEMS','TOTAL ITEM(S)','ITEM COUNT','TOTAL QTY','TOTAL QUANTITY','TOTAL SAVINGS','EXCLUDING','EXCL GST','AMT EXCL','DESCRIPTION','QTY PRICE AMOUNT','PRICE AMOUNT','AVERAGE','PAX'] and distinguish 'Total GST' (exclude) from 'Total Incl GST' (include). (C) Section cutoff: once a line matches 'GST SUMMARY'/'TAX SUMMARY'/'TAX CODE', mark all subsequent lines as excluded for total selection. (D) Amount regex: r'(?<![\\w.])(\\d{1,3}(?:,\\d{3})+\\.\\d{2}|\\d+\\.\\d{2})(?![\\w.\\d])' requiring exactly two decimals; strip commas before float; format output as f'{v:.2f}'. (E) Pre-matching OCR normalization applied only inside numeric-looking tokens: O/o/Q→0, l/I/|→1, S→5, B→8, u→0; replace standalone 'RN'→'RM'; convert ':'→'.' inside amount tokens; collapse 'NN NN' between a keyword and end-of-line into 'NN.NN'. (F) Selection algorithm: for each variant, scan lines; skip EXCLUSIONS; collect (tier_index, value, line) candidates for every TIER match; if a tier keyword line has no 2-decimal number AND the line has no digits at all, fall back to the last 2-decimal number on the next non-empty, non-excluded line (max 2 lines ahead); if a tier line has partial digits, do NOT fall through. (G) Final selection across all variants: pick the lowest tier_index that has any candidate; within that tier prefer the value that is corroborated by another line on the same receipt (Subtotal, Payment, Cash, Rounded Total, or appears in multiple variants); break ties by cross-variant frequency, then by LAST occurrence in the receipt (final rounded total wins over earlier 'Total (Inclusive of GST)'). Include the worked example: 'Total (Inclusive of GST): 23.26' + 'Rounding Adj: -0.01' + 'TOTAL: 23.25' → 23.25. (H) Date extraction: try regexes for DD[/-.]MM[/-.]YYYY, DD[/-.]MM[/-.]YY, YYYY[/-.]MM[/-.]DD, 'DD Mon YYYY'; prefer dates on lines containing 'Date'/'DATE'/'Tarikh'/'INV'; for ambiguous DD/MM vs MM/DD default to DD/MM/YYYY (Malaysian/SEA convention) unless the first field >12 forces MM/DD; expand 2-digit years as 2000+yy (or <=49→20xx, >=50→19xx); validate 1≤d≤31, 1≤mo≤12, 2000≤y≤2099; on validation failure, try single-digit confusion swaps (6↔0, 8↔3, 1↔7, 5↔6) in month then day and revalidate; emit ISO 'YYYY-MM-DD' or None. (I) Provide a complete reference function `extract_receipt_fields(image_path) -> {'date': str|None, 'total_amount': str|None}` implementing all of the above, plus a batch driver that iterates sorted *.jpg files and writes to xlsx. (J) Output contract: amount as two-decimal string (e.g., '47.70'), date as ISO string, None for extraction failure. Keep existing generic OCR content below this new section.",
+          "confidence": "0.95",
+          "change_summary": [
+            "append:applied_append"
+          ],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {
+            "mentioned_in_trajectory": false,
+            "searched_terms": [
+              "image-ocr/SKILL.md",
+              "image-ocr"
+            ]
+          }
+        },
+        {
+          "path": "openai-vision/SKILL.md",
+          "name": "openai-vision",
+          "heading": "OpenAI Vision Analysis Skill",
+          "diagnosed_for_repair": false,
+          "diagnosis": "",
+          "repair_instruction": "",
+          "confidence": "",
+          "change_summary": [],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {}
+        },
+        {
+          "path": "pdf/SKILL.md",
+          "name": "pdf",
+          "heading": "PDF Processing Guide",
+          "diagnosed_for_repair": false,
+          "diagnosis": "",
+          "repair_instruction": "",
+          "confidence": "",
+          "change_summary": [],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {}
+        },
+        {
+          "path": "video-frame-extraction/SKILL.md",
+          "name": "video-frame-extraction",
+          "heading": "Video Frame Extraction Skill",
+          "diagnosed_for_repair": false,
+          "diagnosis": "",
+          "repair_instruction": "",
+          "confidence": "",
+          "change_summary": [],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {}
+        },
+        {
+          "path": "xlsx/SKILL.md",
+          "name": "xlsx",
+          "heading": "Requirements for Outputs",
+          "diagnosed_for_repair": true,
+          "diagnosis": "The xlsx skill was used correctly in all samples (valid 3-column single-sheet output), so it is not the root cause of field errors. However, several samples flagged latent risks that could trip strict verifiers: null values written as empty string '' instead of None/empty cell, numeric-looking strings like '47.70' being auto-coerced to floats and losing trailing zeros, and no explicit guidance on the exact output contract (single sheet named 'results', columns [filename, date, total_amount], rows sorted by filename, no index column from pandas). Reinforcing the contract reduces schema-drift risk for OCR-stat-style tasks.",
+          "repair_instruction": "Add a short 'Strict tabular output contracts' section to xlsx/SKILL.md covering: (1) When a sheet name is required (e.g., 'results'), set ws.title = 'results' and remove any default 'Sheet'. (2) Write None (not '' or 'nan' or 'None') for missing values so cells are truly empty — verifiers often distinguish empty cells from empty strings. (3) To preserve numeric-looking strings exactly (e.g., '47.70', '09.00'), write them as Python str via openpyxl and optionally set cell.number_format = '@' (text) so Excel does not strip trailing zeros; with pandas.to_excel, pass dtype=str on the column and use index=False. (4) Sort rows deterministically in Python before appending (do not rely on os.listdir order). (5) Include a verification snippet that reopens the file and asserts sheet names == ['results'], header == ['filename','date','total_amount'], row count matches input count, and amount cells match ^\\d+\\.\\d{2}$ or are None. Keep as a short additive section; do not alter existing content.",
+          "confidence": "0.35",
+          "change_summary": [
+            "insert_after:applied_insert_after"
+          ],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {
+            "mentioned_in_trajectory": false,
+            "searched_terms": [
+              "xlsx/SKILL.md",
+              "xlsx"
+            ]
+          }
+        }
+      ]
+    },
+    "repair_outcome": {
+      "task_passed": false,
+      "comparable": false,
+      "skill_exposure_verified": null,
+      "outcome_category": "method_generation_failed",
+      "analysis": "The optimizer failed before producing a complete repaired skill bundle.",
+      "method_error_category": "method_generation_failed",
+      "method_error": "RuntimeError('candidate gate remained infrastructure-invalid after 2 attempts: termination_reason:infrastructure_error')",
+      "method_trajectory": {
+        "rollout_dir": null,
+        "trajectory_files": [],
+        "first_user_message": "",
+        "notable_errors": []
+      }
+    },
+    "repair_time_and_cost": {
+      "optimizer": {
+        "diagnosis_usage": {
+          "prompt_tokens": 74830,
+          "completion_tokens": 4487,
+          "total_tokens": 79317
+        },
+        "diagnosis_duration_sec": 59.109,
+        "rewrite_by_skill": [],
+        "total_optimizer_tokens": 79317,
+        "total_optimizer_duration_sec": 59.109
+      },
+      "baseline_evaluation": {
+        "wall_time_sec": null,
+        "cost_usd": null,
+        "provider_requests": null,
+        "agent_iterations": null,
+        "termination_reason": null
+      },
+      "method_evaluation": {
+        "wall_time_sec": null,
+        "cost_usd": null,
+        "provider_requests": null,
+        "agent_iterations": null,
+        "termination_reason": null
+      },
+      "known_total_cost_usd": 0
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "task_id": "enterprise-information-search",
+  "fallback_used": false,
+  "overall_diagnosis": "Across all three samples, Q1 (authors + key reviewers of CoachForce Market Research Report) expected 11 contributors but the agent returned 8. The agent conflated 'key reviewers' with participants of a single meeting (plus the document author) and failed to aggregate reviewer/contributor evidence from other artifact types (PR reviewers, document co-authors/metadata reviewer fields, chat/Slack review threads, additional review meetings). The enterprise-artifact-search skill's existing 'key reviewer extraction rules' prevented the naive participants==reviewers trap but did not force a UNION across all product-grounded artifacts, nor did it mandate a two-pass search by official name AND codename alias (CoachForce ↔ CoFoAIX).",
+  "diagnosed_skills": [
+    {
+      "path": "enterprise-artifact-search/SKILL.md",
+      "confidence": "0.9",
+      "diagnosis": "The 'key reviewer extraction rules' section is too permissive: it allowed the agent to stop after finding one review/planning meeting and treat its participants (plus the document author) as the full 'authors and key reviewers' set, producing 8 instead of 11. The skill lacks an explicit aggregation protocol that (a) unions authors from all document metadata fields, (b) unions reviewers across every artifact type referencing the target document, (c) requires a two-pass search using both the official product name and all codename aliases, and (d) provides a pre-finalization checklist to catch under-counting.",
+      "repair_instruction": "Add an explicit 'Authors + Reviewers Aggregation Protocol' subsection under the key reviewer rules with the following enumerated steps:\n\n1) **Resolve product aliases first**: Before searching, resolve all codenames/aliases (e.g., CoachForce ↔ CoFoAIX) and build an artifact set filtered strictly to that product. Perform a two-pass search: once by official name, once by codename.\n\n2) **Authors = UNION** of document.author, document.authors, document.co_authors, document.contributors fields across ALL versions/drafts of the target document — not just the final file.\n\n3) **Key reviewers = UNION across ALL artifacts** referencing the target document (matched by title AND codename/alias):\n   - document.reviewers / document.approvers metadata fields\n   - PR.reviewers and PR.approvers for every PR linked to the document or its codebase\n   - Participants of EVERY meeting (not just one) whose title/agenda references the document, filtered to those who gave substantive content-level feedback in the transcript\n   - Chat/Slack message authors in threads or channels whose topic references the document, who posted review-style feedback (comments, suggested edits, approvals)\n\n4) **Final answer for 'authors and key reviewers' questions** = UNION of authors set + reviewers set, deduplicated by employee_id. Do NOT exclude the author from the combined set, and do NOT restrict to any single artifact's participant list.\n\n5) **Pre-finalization checklist** (require subagent to confirm each):\n   - Did you search by both official name AND codename/alias?\n   - Did you consult >1 meeting?\n   - Did you check PR reviewers/approvers?\n   - Did you check chat/Slack threads referencing the document?\n   - Did you check document.co_authors and document.reviewers metadata fields?\n   - List every artifact ID consulted.\n\n6) **Warning**: Returning only (author + one meeting's participants) is a common under-count failure mode and typically misses 2–5 additional reviewer IDs. If the result feels small, re-sweep PR reviewers, document co-authors, and chat-based reviewer mentions before finalizing.\n\n7) **Evidence pointers**: Require the subagent to return per-person evidence pointers (doc_id/pr_id/meeting_id/message_id) so the main agent can verify coverage before writing final JSON."
+    }
+  ],
+  "unselected_skills": [],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": true,
+  "shared_diagnosis_source": "fresh",
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true,
+  "producer_backend": "skillopt"
+}

@@ -1,0 +1,187 @@
+{
+  "schema_version": "skillopt-eva-diagnosis-v1",
+  "run_id": "opus47-15-skillopt-opus47-tatu-20261008",
+  "method_id": "skillopt",
+  "task_id": "jpg-ocr-stat",
+  "questions": {
+    "diagnosis_pre_repair_trajectory": {
+      "baseline_result": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/baseline/original-skill/jpg-ocr-stat/benchmark_result.json",
+      "baseline_task_passed": false,
+      "baseline_comparable": true,
+      "baseline_error_category": null,
+      "trajectory": {
+        "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/jpg-ocr-stat-opus47-original-skill-r003-infra-recovery",
+        "trajectory_files": [
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/jpg-ocr-stat-opus47-original-skill-r003-infra-recovery/trajectory/acp_trajectory.jsonl",
+            "lines": 74,
+            "bytes": 366037
+          },
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/jpg-ocr-stat-opus47-original-skill-r003-infra-recovery/trajectory/llm_trajectory.jsonl",
+            "lines": 65,
+            "bytes": 28785985
+          }
+        ],
+        "first_user_message": "## Task description\n\nIn `/app/workspace/dataset/img`, I provide a set of scanned receipt images. Each receipt image contains text such as date, product name, unit price, total amount cost, etc. The text mainly consists of digits and English characters.\n\nRead all image files under the given path, extract their data and total amount, and write them into an excel file `/app/workspace/stat_ocr.xlsx`.\n\nThe output file should only contain one sheet called \"results\". It should have 3 columns:\n- `filename`: source filename (e.g., \"000.jpg\").\n- `date`: the extracted date in ISO format (YYYY-MM-DD).\n- `total_amount`: the monetary value as a string with exactly two decimal places (e.g., \"47.70\"). If extraction fails for either field, the value is set to null.\n\nThe first row of the excel file should b\n[truncated to 800 chars]",
+        "notable_errors": []
+      }
+    },
+    "diagnosed_skill_and_repair": {
+      "diagnosis_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/jpg-ocr-stat/workspace/diagnosis.json",
+      "manifest_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/jpg-ocr-stat/workspace/optimization_manifest.json",
+      "diff_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/jpg-ocr-stat/diff.patch",
+      "overall_diagnosis": "The task requires OCR extraction of date and total_amount from receipt images and writing results to a single-sheet XLSX. All three samples agree the baseline failed on 078.jpg because the Grand Total '92.80' could not be reliably extracted. The image-ocr skill is the primary gap: it lacks a documented multi-variant preprocessing + voting strategy (notably 3x LANCZOS upscale with --psm 4), keyword-priority total extraction with exclusion keywords and comma/thousand-separator handling, two-line fallback for split keyword/value layouts, and ISO date normalization. The xlsx skill is a minor secondary concern around preserving '92.80'/'47.70' as exact strings (not float-coerced) and writing true blank cells for nulls on a single 'results' sheet. A prior patch adding a detailed Receipt OCR recipe + voting + extractors was rejected under gate_no_improve, so the new repair should take a different angle: rather than re-adding the same large code recipe verbatim, provide a more concise decision-oriented guidance block emphasizing when to escalate to 3x+PSM4, how to validate extracted totals via cross-variant agreement, and when to emit null — plus a short, targeted xlsx note on strict output typing.",
+      "skills": [
+        {
+          "path": "image-ocr/SKILL.md",
+          "name": "image-ocr",
+          "heading": "Image OCR Skill",
+          "diagnosed_for_repair": true,
+          "diagnosis": "The skill documents only basic pytesseract usage. It lacks: (1) decision guidance on when to escalate from default OCR to aggressive preprocessing (3x LANCZOS upscale + grayscale + autocontrast + --psm 4) specifically for faint/compressed receipt totals like 'Grand Total 92.80' that other variants miss; (2) a lightweight cross-variant agreement check to validate monetary extractions before accepting them (reduces false positives from a single noisy pass); (3) a prioritized keyword/exclusion list for receipt total extraction (GRAND TOTAL > TOTAL RM > TOTAL AMOUNT > TOTAL/AMOUNT/BALANCE DUE/NETT TOTAL; exclude SUBTOTAL, TAX, GST, SST, DISCOUNT, CHANGE, CASH TENDERED); (4) handling for two-line keyword/value layouts (amount on the next non-empty line); (5) numeric normalization — comma thousand separators, OCR confusions (O/0, l/1, S/5), stripping spaces inside numbers like '92 80'; (6) ISO date normalization across DD/MM/YYYY, DD-MM-YY, DD.MM.YYYY, DD MMM YYYY, YYYY-MM-DD. The previous round's large verbatim recipe patch did not improve results, so this round should favor concise decision guidance plus a compact, explicit escalation checklist rather than one monolithic code block.",
+          "repair_instruction": "Rewrite the receipt-OCR guidance as a concise, decision-oriented checklist (not a single long code dump). Specifically: (a) Add an 'Escalation ladder' subsection listing OCR passes in strict order to try and clearly state that pass 4 (3x LANCZOS upscale on grayscale+autocontrast image with --psm 4) MUST be attempted before emitting null for a total — call out that this is the pass that recovers faint Grand Total lines such as '92.80' on 078.jpg-style receipts. The ladder: (1) default pytesseract, (2) grayscale+autocontrast PSM 6, (3) 2x LANCZOS upscale grayscale+autocontrast PSM 6, (4) 3x LANCZOS upscale grayscale+autocontrast PSM 4, (5) sharpened/unsharp-mask variant PSM 11. (b) Add a 'Cross-variant validation' note: run >=3 passes, collect candidate totals via the keyword parser, and prefer the value that appears in >=2 passes; only fall back to the pass-4 value alone if nothing else matched. (c) Provide ONE small, focused code snippet (<~30 lines) for the keyword-priority total parser with priority groups, exclusion keywords, a regex r'(?<![\\d.])\\d{1,3}(?:,\\d{3})*\\.\\d{2}(?!\\d)', two-line fallback (take last decimal number on the next non-empty line), comma stripping, and '{:.2f}' formatting. (d) Add a compact date-normalization helper covering the five common formats and returning ISO YYYY-MM-DD. (e) Explicitly state the null policy: emit None only when ALL five escalation passes yield no candidate from the keyword parser. (f) Avoid repeating the exact monolithic 'Robust Receipt / Low-Quality OCR Recipe' structure from the rejected patch; frame as guidance + minimal snippets so the agent internalizes the escalation decision rather than copy-pasting one large function.",
+          "confidence": "high",
+          "change_summary": [
+            "replace:applied_replace",
+            "insert_after:applied_insert_after"
+          ],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {
+            "mentioned_in_trajectory": true,
+            "searched_terms": [
+              "image-ocr/SKILL.md",
+              "image-ocr"
+            ]
+          }
+        },
+        {
+          "path": "openai-vision/SKILL.md",
+          "name": "openai-vision",
+          "heading": "OpenAI Vision Analysis Skill",
+          "diagnosed_for_repair": false,
+          "diagnosis": "",
+          "repair_instruction": "",
+          "confidence": "",
+          "change_summary": [],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {}
+        },
+        {
+          "path": "pdf/SKILL.md",
+          "name": "pdf",
+          "heading": "PDF Processing Guide",
+          "diagnosed_for_repair": false,
+          "diagnosis": "",
+          "repair_instruction": "",
+          "confidence": "",
+          "change_summary": [],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {}
+        },
+        {
+          "path": "video-frame-extraction/SKILL.md",
+          "name": "video-frame-extraction",
+          "heading": "Video Frame Extraction Skill",
+          "diagnosed_for_repair": false,
+          "diagnosis": "",
+          "repair_instruction": "",
+          "confidence": "",
+          "change_summary": [],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {}
+        },
+        {
+          "path": "xlsx/SKILL.md",
+          "name": "xlsx",
+          "heading": "Requirements for Outputs",
+          "diagnosed_for_repair": true,
+          "diagnosis": "The xlsx skill is used to emit the final workbook. Baseline structure (single 'results' sheet, header, 3 columns, filename ordering) was already correct, so this is secondary. However, the skill does not explicitly document how to preserve formatted monetary strings like '92.80' or '47.70' as exact text (openpyxl will otherwise coerce to float and drop trailing zeros), nor how to write true blank cells (None) rather than empty strings for missing extractions — both can matter for oracle comparisons.",
+          "repair_instruction": "Add a short 'Strict single-sheet output' subsection with ~10 lines of openpyxl showing: create Workbook, rename default sheet to the exact required name (e.g., 'results'), append the header row, append data rows writing formatted decimals as Python str (e.g., '92.80') and missing values as Python None (not '' or 'None'), optionally set column number_format='@' to force text format, verify wb.sheetnames == ['results'] before saving so no extra sheets are present, and sort rows by the key column (filename) prior to writing.",
+          "confidence": "low",
+          "change_summary": [
+            "insert_after:applied_insert_after",
+            "insert_after:applied_insert_after",
+            "insert_after:applied_insert_after"
+          ],
+          "diff_stats": {
+            "added_lines": 0,
+            "removed_lines": 0
+          },
+          "usage_evidence": {
+            "mentioned_in_trajectory": true,
+            "searched_terms": [
+              "xlsx/SKILL.md",
+              "xlsx"
+            ]
+          }
+        }
+      ]
+    },
+    "repair_outcome": {
+      "task_passed": false,
+      "comparable": true,
+      "skill_exposure_verified": true,
+      "outcome_category": "located_but_not_fixed",
+      "analysis": "A skill was localized and rewritten, but the comparable method-skill run still failed; likely causes are insufficient repair content or downstream model execution limits.",
+      "method_error_category": null,
+      "method_error": "",
+      "method_trajectory": {
+        "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/jpg-ocr-stat-opus47-original-skill-r003-infra-recovery",
+        "trajectory_files": [
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/jpg-ocr-stat-opus47-original-skill-r003-infra-recovery/trajectory/acp_trajectory.jsonl",
+            "lines": 74,
+            "bytes": 366037
+          },
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/jpg-ocr-stat-opus47-original-skill-r003-infra-recovery/trajectory/llm_trajectory.jsonl",
+            "lines": 65,
+            "bytes": 28785985
+          }
+        ],
+        "first_user_message": "## Task description\n\nIn `/app/workspace/dataset/img`, I provide a set of scanned receipt images. Each receipt image contains text such as date, product name, unit price, total amount cost, etc. The text mainly consists of digits and English characters.\n\nRead all image files under the given path, extract their data and total amount, and write them into an excel file `/app/workspace/stat_ocr.xlsx`.\n\nThe output file should only contain one sheet called \"results\". It should have 3 columns:\n- `filename`: source filename (e.g., \"000.jpg\").\n- `date`: the extracted date in ISO format (YYYY-MM-DD).\n- `total_amount`: the monetary value as a string with exactly two decimal places (e.g., \"47.70\"). If extraction fails for either field, the value is set to null.\n\nThe first row of the excel file should b\n[truncated to 800 chars]",
+        "notable_errors": []
+      }
+    },
+    "repair_time_and_cost": {
+      "optimizer": {
+        "diagnosis_usage": {
+          "prompt_tokens": 12568,
+          "completion_tokens": 2111,
+          "total_tokens": 14679
+        },
+        "diagnosis_duration_sec": 26.896,
+        "rewrite_by_skill": [],
+        "total_optimizer_tokens": 14679,
+        "total_optimizer_duration_sec": 26.896
+      },
+      "baseline_evaluation": {
+        "wall_time_sec": 1436.7,
+        "cost_usd": null,
+        "provider_requests": 65,
+        "agent_iterations": 65,
+        "termination_reason": "max_iterations"
+      },
+      "method_evaluation": {
+        "wall_time_sec": 1436.7,
+        "cost_usd": null,
+        "provider_requests": 65,
+        "agent_iterations": 65,
+        "termination_reason": "max_iterations"
+      },
+      "known_total_cost_usd": 0
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "ok": true,
+  "update_mode": "patch",
+  "edits": [
+    {
+      "op": "replace",
+      "target": "| `Optional[T]` | `Option[T]` |",
+      "content": ""
+    },
+    {
+      "op": "replace",
+      "target": "# Default arguments\ndef greet(name: str, greeting: str = \"Hello\") -> str:\n    return f\"{greeting}, {name}!\"\n```",
+      "content": ""
+    },
+    {
+      "op": "replace",
+      "target": "// Default arguments\ndef greet(name: String, greeting: String = \"Hello\"): String =\n  s\"$greeting, $name!\"\n```",
+      "content": ""
+    },
+    {
+      "op": "append",
+      "target": "",
+      "content": ""
+    }
+  ],
+  "edit_reports": [
+    {
+      "index": 1,
+      "op": "replace",
+      "target": "| `Optional[T]` | `Option[T]` |",
+      "content_preview": "",
+      "status": "applied_replace"
+    },
+    {
+      "index": 2,
+      "op": "replace",
+      "target": "# Default arguments\ndef greet(name: str, greeting: str = \"Hello\") -> str:\n    return f\"{greeting}, {name}!\"\n```",
+      "content_preview": "",
+      "status": "applied_replace"
+    },
+    {
+      "index": 3,
+      "op": "replace",
+      "target": "// Default arguments\ndef greet(name: String, greeting: String = \"Hello\"): String =\n  s\"$greeting, $name!\"\n```",
+      "content_preview": "",
+      "status": "applied_replace"
+    },
+    {
+      "index": 4,
+      "op": "append",
+      "target": "",
+      "content_preview": "",
+      "status": "applied_append"
+    }
+  ],
+  "applied_count": 4,
+  "usage": {
+    "prompt_tokens": 7253,
+    "completion_tokens": 1743,
+    "total_tokens": 8996
+  },
+  "raw_text_prefix": "{\"reasoning\":\"The skill needs expansion in function signatures (kwargs, args, mutable defaults) and type mappings (unions, Temporal). I'll add a strftime mini-table and extend the Functions and Type Mappings sections with targeted inserts.\",\"edits\":[{\"op\":\"replace\",\"target\":\"| `Optional[T]` | `Option[T]` |\",\"replacement\":\"| `Optional[T]` | `Option[T]` |\\n| `Union[A, B]` / `A \\\\| B` (two types) | `Either[A, B]` |\\n| `Union[A, B, ...]` (open-ended) | `Any` + pattern matching |\\n| `datetime \\\\| date` | `java.time.temporal.Temporal` (common supertype) |\\n| `str \\\\| bytes` | `Any` + pattern match on `String` / `Array[Byte]` |\\n\\n### Union Type Guidance\\n\\n- Prefer the **simplest** mapping that the verifier can call naturally. Do NOT invent a sealed ADT unless the Python source itself defines one (e.g., via `class X(Enum)` or an explicit base class hierarchy).\\n- Two concrete types with disjoint handling: `Either[A, B]`.\\n- Open-ended / `isinstance`-chain dispatch in Python: use `Any` as the parameter type and pattern match (`value match { case s: String => ...; case b: Array[Byte] => ... }`).\\n- `datetime | date`: use `java.time.temporal.Temporal` as the parameter type; match on `LocalDateTime` / `LocalDate`.\\n\\n### strftime -> DateTimeFormatter\\n\\n| Python `strftime` | `DateTimeFormatter` pattern |\\n|-------------------|-----------------------------|\\n| `%Y` | `yyyy` |\\n| `%m` | `MM` |\\n| `%d` | `dd` |\\n| `%H` | `HH` |\\n| `%M` | `mm` |\\n| `%S` | `ss` |\\n\\nUse `java.time.format.DateTimeFormatter.ofPattern(\\\"yyyy-MM-dd HH:mm:ss\\\")`.\"},{\"op\":\"replace\",\"target\":\"# Default arguments\\ndef greet(name: str, greeting: str = \\\"Hello\\\") -> str:\\n    return f\\\"{greeting}, {name}!\\\"\\n```\",\"replacement\":\"# Default arguments\\ndef greet(name: str, greeting: str = \\\"Hello\\\") -> str:\\n    return f\\\"{greeting}, {name}!\\\"\\n\\n# *args and **kwargs\\ndef build(*args: int, **kwargs: Any) -> None:\\n    ...\\n\\n# Mutable default argument (Python footgun)\\ndef add_opt(opts: dict = {}) -> dict:\\n    return opts\\n```\"},{\"op\":\"replace\",\"target\":\"// Default arguments\\ndef greet(name: String, greeting: String = \\\"Hello\\\"): String =\\n  s\\\"$greeting, $name!\\\"\\n```\",\"replacement\":\"// Default arguments\\ndef greet(name: String, greeting: String = \\\"Hello\\\"): String =\\n  s\\\"$greeting, $name!\\\"\\n\\n// *args  -> varargs\\ndef build(args: Int*): Unit = ???\\n\\n// **kwargs -> varargs of tuples, collected into a Map\\ndef withMetadata(entries: (String, Any)*): Map[String, Any] =\\n  entries.toMap\\n// Call site: withMetadata(\\\"k1\\\" -> 1, \\\"k2\\\" -> \\\"v\\\")\\n\\n// Mutable-default-argument pitfall: use IMMUTABLE empty collection as default.\\n// Preserve the Python parameter name/position; do NOT drop or rename it.\\ndef addOpt(opts: Map[String, Any] = Map.empty): Map[String, Any] = opts\\ndef addItems(xs: List[Int] = List.empty): List[Int] = xs\\n```\"},{\"op\":\"append\",\"text\":\"\\n## Common Translation Pitfalls\\n\\n1. **Do not over-engineer union types.** Python `str | bytes` is NOT a sealed ADT in the source; translating it as `sealed trait StringOrBytes` forces callers (and verifiers) to wrap plain `String`/`Array[Byte]` values. Prefer `Any` + pattern matching, or `Either`, unless the Python source defines an explicit class hierarchy.\\n2. **Preserve public call surface.** Keep parameter names, positions, and defaults aligned with the Python signature so black-box tests that pass positional or named arguments still work.\\n3. **Mutable defaults.** Translate `def f(x={})` to `def f(x: Map[K,V] = Map.empty)` — never share a mutable singleton.\\n4. **`**kwargs` metadata.** The idiomatic Scala form is `(entries: (String, Any)*)` collected via `.toMap`, used in builders like `withMetadata`.\\n5. **Temporal unions.** For `datetime | date`, use `java.time.temporal.Temporal` and pattern match; do not require callers to wrap values in a custom ADT.\\n\"}]}",
+  "reasoning": "The skill needs expansion in function signatures (kwargs, args, mutable defaults) and type mappings (unions, Temporal). I'll add a strftime mini-table and extend the Functions and Type Mappings sections with targeted inserts."
+}

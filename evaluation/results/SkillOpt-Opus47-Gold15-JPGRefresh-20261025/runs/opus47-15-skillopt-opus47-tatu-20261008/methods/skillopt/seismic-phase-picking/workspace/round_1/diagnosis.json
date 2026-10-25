@@ -1,0 +1,33 @@
+{
+  "task_id": "seismic-phase-picking",
+  "fallback_used": false,
+  "overall_diagnosis": "Across all three samples, the agent passed P-wave F1 (~0.77) but narrowly missed S-wave F1 (0.593 vs 0.6 threshold), with S-wave MAE ~100 samples. The consistent failure mode is suboptimal S-wave picking: likely using default or symmetric P/S thresholds, a single pretrained weight set, and/or incorrect channel ordering or sample-index conversion. The two skills most responsible are seisbench-model-api/SKILL.md (which lacks concrete, task-ready guidance on pretrained picker selection, P/S threshold tuning, channel ordering, and converting pick times to sample indices) and seismic-picker-selection/SKILL.md (which does not strongly prescribe deep learning via SeisBench as the default for F1-threshold benchmarks nor warn about S-wave difficulty). Repairing these to include a concrete phase-picking recipe with lower S_threshold, proper preprocessing, and ensembling guidance should push S-wave F1 above threshold.",
+  "diagnosed_skills": [
+    {
+      "path": "seisbench-model-api/SKILL.md",
+      "confidence": "0.85",
+      "diagnosis": "The skill describes the general annotate/classify API but lacks a concrete, end-to-end phase-picking recipe. Specifically it is missing: (1) which pretrained picker + weights to use (PhaseNet or EQTransformer with weights like 'instance', 'stead', 'scedc', 'ethz', 'original'); (2) separate recommended P and S thresholds in classify() — S should be lower since S-wave picks are systematically weaker; (3) correct channel ordering (Z,N,E vs E,N,Z) which strongly affects S-wave accuracy on horizontals; (4) preprocessing (detrend, demean, bandpass ~1–20 Hz, resample to the model's native 100 Hz); (5) correct conversion of pick peak_time (UTCDateTime) back to a sample index using stream starttime and sampling_rate (a likely source of the ~100-sample / ~1s MAE); (6) ensembling across pretrained weights or models to boost recall while preserving precision.",
+      "repair_instruction": "Add a 'Phase Picking Recipe' section with a copy-pasteable example that: (a) wraps numpy arrays into an obspy Stream with correct stats (sampling_rate, channel names Z/N/E); (b) preprocesses — detrend('demean'), detrend('linear'), bandpass 1–20 Hz, resample to 100 Hz; (c) ensures channel order matches model.component_order via stream.select() / reordering; (d) loads a pretrained model, e.g. `sbm.PhaseNet.from_pretrained('instance')` or `sbm.EQTransformer.from_pretrained('original')`, and lists alternative weights ('stead','scedc','ethz'); (e) calls `model.classify(stream, P_threshold=0.3, S_threshold=0.2)` — explicitly recommend a LOWER S_threshold than P_threshold since S picks are weaker; (f) converts each pick to a sample index via `int(round((pick.peak_time - stream[0].stats.starttime) * stream[0].stats.sampling_rate))`, warning that if the model internally resamples, the index must be in the ORIGINAL sampling rate; (g) shows an ensembling pattern: run multiple pretrained weights (and optionally PhaseNet + EQTransformer), merge picks within a small time window, keeping the highest-probability pick per phase per event to boost F1."
+    },
+    {
+      "path": "seismic-picker-selection/SKILL.md",
+      "confidence": "0.5",
+      "diagnosis": "The skill summarizes method tradeoffs qualitatively but does not prescribe a default for F1-threshold benchmark tasks nor warn that S-wave picking is systematically harder than P. Agents may select a non-DL method or apply symmetric thresholds, causing marginal S-wave failures.",
+      "repair_instruction": "Add a 'Recommended Default for F1-Scored Phase Picking Tasks' section stating: for benchmarks requiring high F1 on both P and S with tight tolerance (e.g., ±0.1 s / 10 samples at 100 Hz), the default should be a SeisBench pretrained deep-learning picker (PhaseNet or EQTransformer). Explicitly warn that S-wave F1 is typically ~5–10% lower than P at the same threshold, so one should (a) lower S_threshold relative to P_threshold, (b) ensure horizontal components (N, E) are present and correctly ordered, (c) consider ensembling multiple pretrained weights, and (d) verify sample-index conversion accounts for any internal resampling. Point readers to seisbench-model-api/SKILL.md for the concrete recipe."
+    }
+  ],
+  "unselected_skills": [
+    "obspy-data-api/SKILL.md",
+    "obspy-datacenter-client/SKILL.md"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": true,
+  "shared_diagnosis_source": "fresh",
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true,
+  "producer_backend": "skillopt"
+}

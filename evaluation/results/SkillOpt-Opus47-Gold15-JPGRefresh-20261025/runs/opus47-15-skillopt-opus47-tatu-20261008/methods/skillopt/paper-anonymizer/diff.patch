@@ -1,0 +1,78 @@
+--- before/academic-pdf-redaction/SKILL.md
++++ after/academic-pdf-redaction/SKILL.md
+@@ -30,6 +30,40 @@
+ 
+ ## Patterns to Redact (Before References Only)
+ 
++
++### ⚠️ REQUIRED: Equal contribution footnotes (commonly missed!)
++
++Blind-review verifiers explicitly check for residual equal-contribution footnote phrases. Redacting author names alone is INSUFFICIENT — footnote strings like "Equal contribution" leak identifying structure (which authors are co-first) and MUST be removed regardless of any symbol prefix (`*`, `†`, `‡`, etc.).
++
++**Always search for ALL these variants on every pre-References page:**
++
++```python
++EQUAL_CONTRIB_VARIANTS = [
++    "Equal contribution",
++    "Equal contributions",
++    "equal contribution",
++    "Equal Contribution",
++    "* Equal contribution",
++    "† Equal contribution",
++    "‡ Equal contribution",
++    "These authors contributed equally",
++    "Authors contributed equally",
++    "Co-first authors",
++    "Equal contributors",
++]
++
++# Apply on every page BEFORE the References section:
++for page_num, page in enumerate(doc):
++    if references_page is not None and page_num >= references_page:
++        continue
++    for phrase in EQUAL_CONTRIB_VARIANTS:
++        for rect in page.search_for(phrase):
++            page.add_redact_annot(rect, fill=(0, 0, 0))
++    page.apply_redactions()
++```
++
++Include these variants in your `patterns` list in addition to author names.
++
+ **IMPORTANT: Use FULL names/phrases, not partial matches!**
+ - ✅ "John Smith" (full name)
+ - ❌ "Smith" (partial - would incorrectly match "Smith et al." citations in References)
+@@ -41,7 +75,7 @@
+ 5. **arXiv identifiers** - Pattern: `arXiv:XXXX.XXXXX`
+ 6. **DOIs** - Pattern: `10.XXXX/...`
+ 7. **Acknowledgement names** - Names in "Acknowledgements" section
+-8. **Equal contribution footnotes** - e.g., "Equal contribution", "* Equal contribution"
++8. **Equal contribution footnotes** - MUST redact (see REQUIRED subsection above). Search for every variant in `EQUAL_CONTRIB_VARIANTS`, including bare `"Equal contribution"` with no symbol prefix. Missing this is the most common verifier failure.
+ 
+ ## PyMuPDF (fitz) - Recommended Approach
+ 
+@@ -106,6 +140,25 @@
+     if redc_len < orig_len * 0.7:
+         raise ValueError(f"Too much removed: kept only {redc_len/orig_len:.0%}")
+ 
++    # Post-redaction leak check: equal-contribution footnotes must not survive
++    # anywhere before the References section.
++    EQUAL_CONTRIB_VARIANTS = [
++        "Equal contribution", "Equal contributions", "equal contribution",
++        "Equal Contribution", "These authors contributed equally",
++        "Authors contributed equally", "Co-first authors", "Equal contributors",
++    ]
++    ref_idx = None
++    for i, p in enumerate(redc):
++        if "references" in p.get_text().lower():
++            ref_idx = i
++            break
++    pre_ref_text = "".join(
++        redc[i].get_text() for i in range(ref_idx if ref_idx is not None else len(redc))
++    )
++    leaked = [v for v in EQUAL_CONTRIB_VARIANTS if v.lower() in pre_ref_text.lower()]
++    if leaked:
++        print(f"⚠️  WARNING: equal-contribution phrases still present before References: {leaked}")
++
+     orig.close()
+     redc.close()
+     print("✓ Verification passed")

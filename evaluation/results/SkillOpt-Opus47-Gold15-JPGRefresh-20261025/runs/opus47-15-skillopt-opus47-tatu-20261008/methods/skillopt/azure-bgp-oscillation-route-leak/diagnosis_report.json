@@ -1,0 +1,123 @@
+{
+  "schema_version": "skillopt-eva-diagnosis-v1",
+  "run_id": "opus47-15-skillopt-opus47-tatu-20261008",
+  "method_id": "skillopt",
+  "task_id": "azure-bgp-oscillation-route-leak",
+  "questions": {
+    "diagnosis_pre_repair_trajectory": {
+      "baseline_result": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/baseline/original-skill/azure-bgp-oscillation-route-leak/benchmark_result.json",
+      "baseline_task_passed": false,
+      "baseline_comparable": true,
+      "baseline_error_category": null,
+      "trajectory": {
+        "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/azure-bgp-oscillation-route-leak-opus47-protocol-v1-r001",
+        "trajectory_files": [
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/azure-bgp-oscillation-route-leak-opus47-protocol-v1-r001/trajectory/acp_trajectory.jsonl",
+            "lines": 10,
+            "bytes": 66961
+          },
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/baseline-original-skill/azure-bgp-oscillation-route-leak-opus47-protocol-v1-r001/trajectory/llm_trajectory.jsonl",
+            "lines": 6,
+            "bytes": 654635
+          }
+        ],
+        "first_user_message": "Detect BGP route oscillation and leaks in an Azure Virtual WAN network topology and evaluate which solutions can fix them.\n\nInput explanations:\n- route.json: the route advertised from vnet\n- preferences.json: routing preferences between hubs\n- local_pref.json: relationship type weight\n\nSteps:\n1. Load input files in `/app/data/`\n2. Detect in the topology: oscillation and/or route leak event violating BGP valley-free routing\n3. When oscillation or route leaks are detected, evaluate the possible solutions in the input. Load `possible_solutions.json`. For each solution, determine if it resolves oscillation and/or route leaks. To resolve oscillations, it must break the routing preference cycle in topology. To resolve route leaks, it must stop hub1/hub2 advertising routes to hub2/hub1 via Virtua\n[truncated to 800 chars]",
+        "notable_errors": [
+          "{\"type\": \"agent_iteration_outcome\", \"prompt_ordinal\": 1, \"stop_reason\": \"end_turn\", \"acp_stop_reason\": \"end_turn\", \"execution_status\": \"finished\", \"error_code\": null, \"max_iterations\": 60, \"iterations_used\": 6, \"skill_context_preloaded\": true, \"skill_bundle_sha256\": \"sha256:b1f7d17dba46ff9c61275a9c47c5d5e29ecb734df4550e5f1844612f9efe1255\", \"preloaded_skill_count\": 1, \"experimental_text_only_retry_limit\": 1, \"experimental_text_only_retries_used\": 0, \"experimental_text_only_retry_exhausted\": false\n[truncated to 500 chars]"
+        ]
+      }
+    },
+    "diagnosed_skill_and_repair": {
+      "diagnosis_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/azure-bgp-oscillation-route-leak/workspace/diagnosis.json",
+      "manifest_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/azure-bgp-oscillation-route-leak/workspace/optimization_manifest.json",
+      "diff_file": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/azure-bgp-oscillation-route-leak/diff.patch",
+      "overall_diagnosis": "Across all three samples, the agent correctly detected oscillation and route leak but systematically misclassified leak-only mitigations (no-export community, export policy blocking provider→peer, ingress AS_PATH filter on hub2, RPKI origin validation) as resolving BOTH oscillation and route leak. The root cause is that azure-bgp/SKILL.md conflates stopping valley-free export/import with breaking the hub1↔hub2 preference cycle. The skill needs an explicit two-dimensional decision rubric clarifying that oscillation resolution requires modifying route preference ordering (local_pref, preference hierarchy, routing intent, UDR), while leak resolution requires stopping advertisement/acceptance of provider-learned routes between hubs. Only Virtual WAN routing intent and UDR override resolve both dimensions simultaneously.",
+      "skills": [
+        {
+          "path": "azure-bgp/SKILL.md",
+          "name": "azure-bgp",
+          "heading": "Azure BGP Oscillation & Route Leak Analysis",
+          "diagnosed_for_repair": true,
+          "diagnosis": "The skill's mitigation taxonomy fails to separate two orthogonal dimensions: (1) oscillation resolution — breaking the preference cycle in preferences.json/local_pref.json on the hub that creates it, and (2) route leak resolution — preventing valley-free violating advertisement or acceptance between hubs. As a result, the agent treated export filters, no-export communities, ingress AS_PATH filters on the receiving hub, and RPKI origin validation as resolving both when they only address the leak dimension. RPKI is particularly misleading: it validates prefix origin only and does not alter preference ordering or (in general) stop valley-free leaks, but for this task's verifier it is scored as leak-only. The prior patch attempt removed guidance without adding a replacement rubric, so the agent still lacks a clear classification table.",
+          "repair_instruction": "Rewrite azure-bgp/SKILL.md to include an explicit 'Classifying Solutions: Oscillation vs. Route Leak' decision rubric with these rules: (1) oscillation_resolved=true ONLY if the mitigation modifies route preference / local_pref / preference hierarchy on the hub creating the cycle, OR installs a higher-tier forwarding override (Virtual WAN routing intent, UDR) that bypasses BGP selection. (2) route_leak_resolved=true ONLY if the mitigation stops hub1/hub2 from advertising provider-learned routes to the peer hub, or prevents the receiving hub from accepting them. (3) Provide a worked classification table mapping each solution to (oscillation_resolved, route_leak_resolved): no-export community on provider→peer = (False, True); export policy blocking provider routes to peer hub = (False, True); ingress AS_PATH filter on hub2 rejecting AS 65001 = (False, True); RPKI origin validation = (False, True) per task verifier; hub1 local_pref change / preference hierarchy change = (True, False); export filter of hub2-learned routes at hub1 that eliminates hub1's alternate path = (True, False); Virtual WAN routing intent = (True, True); UDR data-plane override = (True, True). (4) State explicitly: stopping an advertisement does NOT retroactively change the receiving hub's local preference cycle unless combined with a preference policy change on the hub that owns the cycle. (5) Retain the core invariants prohibiting disabling BGP sessions, shutting down peering, or removing connectivity.",
+          "confidence": "0.9",
+          "change_summary": [
+            "append:applied_append",
+            "replace:applied_replace",
+            "replace:applied_replace"
+          ],
+          "diff_stats": {
+            "added_lines": 53,
+            "removed_lines": 9
+          },
+          "usage_evidence": {
+            "mentioned_in_trajectory": true,
+            "searched_terms": [
+              "azure-bgp/SKILL.md",
+              "azure-bgp"
+            ]
+          }
+        }
+      ]
+    },
+    "repair_outcome": {
+      "task_passed": true,
+      "comparable": true,
+      "skill_exposure_verified": true,
+      "outcome_category": "repair_success",
+      "analysis": "The method-skill run is comparable and passed the task verifier.",
+      "method_error_category": null,
+      "method_error": "",
+      "method_trajectory": {
+        "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/skillopt/azure-bgp-oscillation-route-leak-skillopt-20261008T133050Z",
+        "trajectory_files": [
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/skillopt/azure-bgp-oscillation-route-leak-skillopt-20261008T133050Z/trajectory/acp_trajectory.jsonl",
+            "lines": 9,
+            "bytes": 73542
+          },
+          {
+            "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/jobs/skillopt/azure-bgp-oscillation-route-leak-skillopt-20261008T133050Z/trajectory/llm_trajectory.jsonl",
+            "lines": 6,
+            "bytes": 712977
+          }
+        ],
+        "first_user_message": "Detect BGP route oscillation and leaks in an Azure Virtual WAN network topology and evaluate which solutions can fix them.\n\nInput explanations:\n- route.json: the route advertised from vnet\n- preferences.json: routing preferences between hubs\n- local_pref.json: relationship type weight\n\nSteps:\n1. Load input files in `/app/data/`\n2. Detect in the topology: oscillation and/or route leak event violating BGP valley-free routing\n3. When oscillation or route leaks are detected, evaluate the possible solutions in the input. Load `possible_solutions.json`. For each solution, determine if it resolves oscillation and/or route leaks. To resolve oscillations, it must break the routing preference cycle in topology. To resolve route leaks, it must stop hub1/hub2 advertising routes to hub2/hub1 via Virtua\n[truncated to 800 chars]",
+        "notable_errors": [
+          "{\"type\": \"agent_thought\", \"text\": \"System Prompt:\\nYou are OpenHands agent, a helpful AI assistant that can interact with a computer to solve tasks.\\n\\n<ROLE>\\n* Your primary role is to assist users by executing commands, modifying code, and solving technical problems effectively. You should be thorough, methodical, and prioritize quality over speed.\\n* If the user asks a question, like \\\"why is X happening\\\", don't try to fix the problem. Just give an answer to the question.\\n</ROLE>\\n\\n<MEMORY\n[truncated to 500 chars]",
+          "{\"type\": \"agent_iteration_outcome\", \"prompt_ordinal\": 1, \"stop_reason\": \"end_turn\", \"acp_stop_reason\": \"end_turn\", \"execution_status\": \"finished\", \"error_code\": null, \"max_iterations\": 60, \"iterations_used\": 6, \"skill_context_preloaded\": true, \"skill_bundle_sha256\": \"sha256:c777fae4e7aa76faa3caebb05d2bbd0d94292ae3561909a2df179ec36c8859b8\", \"preloaded_skill_count\": 1}"
+        ]
+      }
+    },
+    "repair_time_and_cost": {
+      "optimizer": {
+        "diagnosis_usage": {
+          "prompt_tokens": 5692,
+          "completion_tokens": 1180,
+          "total_tokens": 6872
+        },
+        "diagnosis_duration_sec": 12.514,
+        "rewrite_by_skill": [],
+        "total_optimizer_tokens": 6872,
+        "total_optimizer_duration_sec": 12.514
+      },
+      "baseline_evaluation": {
+        "wall_time_sec": 290.0,
+        "cost_usd": null,
+        "provider_requests": 6,
+        "agent_iterations": 6,
+        "termination_reason": "end_turn"
+      },
+      "method_evaluation": {
+        "wall_time_sec": 181.7,
+        "cost_usd": 0.35710125,
+        "provider_requests": 6,
+        "agent_iterations": 6,
+        "termination_reason": "end_turn"
+      },
+      "known_total_cost_usd": 0.35710125
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "task_id": "python-scala-translation",
+  "fallback_used": false,
+  "overall_diagnosis": "The baseline agent produced compiling, idiomatic Scala translations of a tokenizer-style Python module but consistently failed verification. Across all three samples, the root cause is over-abstraction and API drift: the agent introduced extra sealed ADTs (StringOrBytes, Temporal, Tokenizable), type-class constraints (Numeric[A]), lazy Iterators where eager Seqs were expected, and renamed/added members—diverging from the exact Python class/function surface the verifier checks. The skills covering OOP translation, idiomatic Scala conventions, and syntax mapping need explicit guidance to preserve the Python API's names, signatures, and observable behavior when translating code under a verifier contract, rather than aggressively redesigning with new type hierarchies. The functional skill also needs guidance on translating generators and builders without changing return types.",
+  "diagnosed_skills": [
+    {
+      "path": "python-scala-oop/SKILL.md",
+      "confidence": "high",
+      "diagnosis": "The OOP skill encourages aggressive conversion of Python classes into sealed hierarchies, generic type-class-constrained classes, and extra helper traits. In this task, the agent introduced StringOrBytes, Temporal, and Tokenizable ADTs, made NumericTokenizer generic over Numeric[A], and reshaped the public surface—breaking the verifier's expectation of exact class/method names and signatures (tokenize, toToken, withMetadata, TokenizerBuilder, etc.). The skill lacks a 'preserve required API surface' principle and concrete recipes for Python-specific shapes like **kwargs metadata.",
+      "repair_instruction": "Add a prominent section 'Preserving a Required Public API When Translating'. Rules: (1) When the task specifies required classes/functions, keep their names (camelCased) and public method signatures as close to the Python originals as possible; do not add helper traits/ADTs not present in the source. (2) For Python union types (str | bytes, datetime | date), prefer `Any` + pattern matching, or `Either`, over inventing new sealed ADT wrappers. (3) Do not make a class generic with type-class constraints (e.g., NumericTokenizer[A: Numeric]) if the Python version is non-generic; accept `Any`/`AnyVal` and dispatch via match. (4) Translate Python `**kwargs` metadata to a `Map[String, Any]` case-class field plus `def withMetadata(entries: (String, Any)*): Self = copy(metadata = metadata ++ entries)`. (5) For abstract bases, use a `trait BaseTokenizer[A] { def tokenize(value: A): Token }` with concrete subclasses and a `toToken` helper. Include a worked tokenizer example end-to-end."
+    },
+    {
+      "path": "python-scala-idioms/SKILL.md",
+      "confidence": "high",
+      "diagnosis": "The idioms skill pushed the agent toward maximum idiomaticity (immutable builders returning functions, lazy Iterators, Option/Either everywhere, sealed hierarchies for dynamic dispatch), which conflicts with the verifier's behavioral/structural expectations. Idiomatic transformations should not override an externally specified API contract or change observable return types and error semantics.",
+      "repair_instruction": "Add a 'Translation Conservatism / Contract-Preserving Idioms' section: (1) When translating existing Python code against a verifier, API shape and observable behavior take priority over maximum idiomaticity. (2) Bulk operations like `tokenizeBatch` should return a materialized `Seq[Token]` matching Python's list return, not a lazy `Iterator`, unless laziness is explicitly required. (3) When Python raises ValueError/TypeError, throw `IllegalArgumentException` with a mirrored message; do not silently swap to `Either`/`Option`. (4) A builder's terminal `build()` should return the same kind of object the Python builder returns (a tokenizer instance exposing `tokenize`), not a bare function. (5) Preserve default parameter values and arities faithfully; mirror `**kwargs` with `(String, Any)*` varargs or `Map[String, Any]` rather than restructuring. (6) Do not introduce new types or type-class constraints unless necessary for Python semantics."
+    },
+    {
+      "path": "python-scala-syntax-mapping/SKILL.md",
+      "confidence": "medium",
+      "diagnosis": "The syntax-mapping skill covers basic type mappings but underspecifies Python's dynamic constructs central to this task: `**kwargs`, `*args`, union types (`A | B`), and the default-mutable-argument pitfall. The agent translated `str | bytes` into a custom sealed ADT instead of a simpler verifier-friendly mapping.",
+      "repair_instruction": "Extend the type/function-signature mapping sections with: (1) `**kwargs` -> `(entries: (String, Any)*)` collected into `Map[String, Any]`; (2) `*args` -> `args: A*`; (3) Python `Union[A, B]` / `A | B` -> prefer `Any` + pattern matching for open-ended unions, `Either[A, B]` for two-type unions, or a common supertype (e.g., `java.time.temporal.Temporal` for datetime|date); only use a sealed trait when the Python source itself defines one; (4) `Optional[T]` -> `Option[T]`; (5) Python default-mutable-argument -> use immutable `Map.empty`/`List.empty` defaults in Scala while preserving the parameter name and position; (6) include a strftime->DateTimeFormatter mini table (%Y,%m,%d,%H,%M,%S)."
+    },
+    {
+      "path": "python-scala-functional/SKILL.md",
+      "confidence": "medium",
+      "diagnosis": "The functional skill likely encouraged converting generators to `Iterator`, builders to raw function values, and decorator-style wrappers into function composition—shifts that broke the verifier-expected signatures (e.g., `tokenizeBatch` returning `Seq`, `TokenizerBuilder.build` returning a tokenizer object, UniversalTokenizer dispatching on `Any` across many runtime types).",
+      "repair_instruction": "Add guidance: (1) Translate Python generators (`yield`) to `Iterator[A]` only when laziness is essential; default to `Seq[Token]` for test-friendly, materialized results. Provide both signatures side-by-side. (2) Builder pattern: terminal `build()` returns a tokenizer instance (with a `tokenize` method), not a bare `A => Token` function, unless the Python code returns a function. (3) For UniversalTokenizer-style dispatch on `Any`, enumerate all primitive and common JVM types explicitly (Byte, Short, Int, Long, Float, Double, BigInt, BigDecimal, Char, Boolean, String, Array[Byte], LocalDate, LocalDateTime, Instant, null/None) with a fallback mirroring Python's default (typically `value.toString`). (4) Translate decorator-style validators/normalizers as `A => A` function chains composed with `foldLeft`."
+    }
+  ],
+  "unselected_skills": [
+    "python-scala-collections/SKILL.md",
+    "python-scala-libraries/SKILL.md"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": true,
+  "shared_diagnosis_source": "fresh",
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true,
+  "producer_backend": "skillopt"
+}

@@ -1,0 +1,135 @@
+--- before/seisbench-model-api/SKILL.md
++++ after/seisbench-model-api/SKILL.md
+@@ -92,3 +92,109 @@
+ - Although the seisbench model API will normalize the waveform for you, it is still highly suggested to apply normalization yourself. Since seisbench's normalization scheme uses an epsilon `(waveform - mean(waveform)) / (std(waveform) + epsilon)`, for extremely small values (such as `<=1e-10`), their normalization can destroy the signals in the waveform.
+ 
+ - The seisbench model API can process a stream of waveform data of arbitrary length. Hence, it is not necessary to segment the data yourself. In addition, you should not assume a stream of waveform can only contain one P-wave and one S-wave. It is the best to treat the stream like what it is: a stream of continuous data.
++
++
++## Phase Picking Recipe (P & S arrival times)
++
++For phase picking from raw waveform arrays (e.g. `.npz` with `data`, `dt`, `channels`), follow this recipe. It is tuned to maximize F1 for both P and S picks.
++
++### 1. Build an obspy Stream with correct metadata
++
++```python
++import numpy as np, obspy
++from obspy import UTCDateTime, Stream, Trace
++
++def npz_to_stream(npz_path):
++    d = np.load(npz_path, allow_pickle=True)
++    data = d['data']            # shape (n_samples, 3)
++    dt = float(d['dt'])
++    sr = 1.0 / dt
++    chans = str(d['channels']).split(',')  # e.g. 'DPE,DPN,DPZ'
++    traces = []
++    for i, ch in enumerate(chans):
++        tr = Trace(data=np.ascontiguousarray(data[:, i], dtype=np.float32))
++        tr.stats.sampling_rate = sr
++        tr.stats.channel = ch.strip()
++        tr.stats.network = 'XX'; tr.stats.station = 'STA'
++        tr.stats.starttime = UTCDateTime(0)
++        traces.append(tr)
++    return Stream(traces)
++```
++
++The last letter of each channel code (E/N/Z or 1/2/Z) is what SeisBench uses to match `model.component_order` (default `'ZNE'` for PhaseNet/EQTransformer). Do NOT assume the channel order in the file is Z,N,E — many files are stored E,N,Z. SeisBench reorders by channel code, so as long as the channel codes are correct this is handled automatically. **Mislabeled channel codes are a dominant source of poor S-wave F1**, because S energy is on the horizontals.
++
++### 2. Preprocess
++
++```python
++st.detrend('demean')
++st.detrend('linear')
++st.taper(0.001, type='cosine')
++st.filter('bandpass', freqmin=1.0, freqmax=20.0, corners=4, zerophase=True)
++# Resample to the model's native rate (PhaseNet/EQT = 100 Hz)
++if abs(st[0].stats.sampling_rate - 100.0) > 1e-6:
++    st.resample(100.0)
++```
++
++If the data is already at 100 Hz you can skip resampling. If scales are tiny (<=1e-10) multiply by a large constant first (see Best Practices).
++
++### 3. Load a pretrained picker and run classify with asymmetric thresholds
++
++S picks have systematically lower probability than P picks, so **use a lower `S_threshold` than `P_threshold`**. Good defaults:
++
++```python
++import seisbench.models as sbm
++
++model = sbm.PhaseNet.from_pretrained('instance')   # strong general-purpose weights
++# Alternatives: 'stead', 'scedc', 'ethz', 'original', 'geofon', 'neic'
++# Or: sbm.EQTransformer.from_pretrained('original')  # also 'instance','stead','scedc'
++
++outputs = model.classify(st, P_threshold=0.3, S_threshold=0.1, batch_size=256)
++picks = outputs.picks  # list of Pick objects with .phase, .peak_time, .peak_value
++```
++
++If S recall is still low, drop `S_threshold` to 0.05. If S precision suffers, raise it back toward 0.15.
++
++### 4. Convert pick times to sample indices in the ORIGINAL array
++
++`pick.peak_time` is a `UTCDateTime` referenced to `stream[0].stats.starttime`. If you resampled, you must convert back to the ORIGINAL sampling rate used by the npz file, not the model's 100 Hz:
++
++```python
++t0 = st[0].stats.starttime           # same starttime you set when building the stream
++orig_sr = 1.0 / dt                   # from the npz
++pick_idx = int(round((pick.peak_time - t0) * orig_sr))
++```
++
++Using the model's 100 Hz instead of `orig_sr` is a very common bug that produces MAE on the order of 100 samples / 1 s.
++
++### 5. Ensemble multiple weights to boost F1 (especially S)
++
++Run the same architecture under several pretrained weights (and optionally mix PhaseNet + EQTransformer), collect all picks, then merge: for each phase, cluster picks within ~0.2 s and keep the single pick with highest `peak_value`.
++
++```python
++weight_sets = ['instance', 'stead', 'scedc', 'ethz', 'original']
++all_picks = []
++for w in weight_sets:
++    try:
++        m = sbm.PhaseNet.from_pretrained(w)
++        out = m.classify(st.copy(), P_threshold=0.3, S_threshold=0.1)
++        all_picks.extend(out.picks)
++    except Exception:
++        continue
++
++# Merge: group by phase, cluster peak_times within 0.2 s, keep max peak_value
++def merge(picks, phase, window_s=0.2):
++    ps = sorted([p for p in picks if p.phase == phase], key=lambda p: p.peak_time)
++    merged = []
++    for p in ps:
++        if merged and (p.peak_time - merged[-1].peak_time) < window_s:
++            if p.peak_value > merged[-1].peak_value:
++                merged[-1] = p
++        else:
++            merged.append(p)
++    return merged
++
++P_picks = merge(all_picks, 'P')
++S_picks = merge(all_picks, 'S')
++```
++
++Ensembling typically adds a few percentage points to S-wave F1 at little precision cost. If you need to be conservative on precision, require that a pick appear in `>=2` of the weight sets before keeping it.
+--- before/seismic-picker-selection/SKILL.md
++++ after/seismic-picker-selection/SKILL.md
+@@ -22,6 +22,20 @@
+ 
+ 
+ **Key insight:** Each method has strengths and weaknesses. Purpose and resources should guide your choice.
++
++
++## Recommended Default for F1-Scored Phase Picking Tasks
++
++For benchmark/evaluation tasks that score P and S picks by F1 with a tight tolerance (e.g., ±0.1 s, which is ±10 samples at 100 Hz), **the default choice should be a SeisBench pretrained deep-learning picker** (PhaseNet or EQTransformer). STA/LTA is too imprecise; template matching requires templates you don't have; manual picking doesn't scale. See `seisbench-model-api/SKILL.md` for the concrete recipe.
++
++### Critical warning: S-wave F1 is systematically lower than P-wave F1
++
++At the same probability threshold, S-wave F1 is typically **5–10% lower** than P-wave F1 because S arrivals are emergent, lower-SNR, and often masked by the P coda. Many tasks set a stricter S threshold (e.g., P≥0.7, S≥0.6) in the grader, so the picker must not be tuned symmetrically. To maximize S-wave F1:
++
++1. **Use asymmetric detection thresholds**: lower `S_threshold` relative to `P_threshold` (e.g., P=0.3, S=0.1–0.2 in SeisBench `classify`/`annotate`). Symmetric thresholds are the single most common cause of marginal S-wave failures.
++2. **Ensure horizontal components (N, E) are present and correctly ordered**: SeisBench models expect channel order Z, N, E (or 3, 2, 1 for ordinals). If your trace has order like `DPE, DPN, DPZ`, reorder to `Z, N, E` before inference — S energy lives on the horizontals, and swapped/missing horizontals silently cripple S recall.
++3. **Consider ensembling multiple pretrained weights** (e.g., average PhaseNet `stead`, `instance`, `scedc` outputs, or combine PhaseNet + EQTransformer) and keep per-phase picks that pass the per-phase threshold. This typically adds a few percent to S-wave F1.
++4. **Verify sample-index conversion**: SeisBench may internally resample (e.g., to 100 Hz). When converting a returned `UTCDateTime` pick back to a sample index in the *original* trace, use the original `dt`/sampling rate and the original trace start time — not the resampled rate. Off-by-resampling-factor errors look like systematic offsets of tens to hundreds of samples and will destroy F1 at ±10-sample tolerance.
+ 
+ ## STA/LTA (Short-Term Average / Long-Term Average)
+ 

@@ -1,0 +1,124 @@
+{
+  "method_profile": {
+    "method_name": "skillopt",
+    "update_mode": "patch",
+    "merge_samples": true,
+    "strict_budget": true,
+    "budget_multiplier": 1.0,
+    "repair_rounds_bonus": 0,
+    "label": "skillopt-bounded-edit"
+  },
+  "smoke_mode": false,
+  "diagnosis_n_env": "SKILLOPT_EVA_DIAGNOSIS_N",
+  "edit_budget_l_env": "SKILLOPT_EVA_EDIT_BUDGET_L",
+  "repair_rounds_r": 2,
+  "rounds": [
+    {
+      "round": 1,
+      "decision": "revert",
+      "score": 0.0,
+      "passed": false,
+      "best_score": 0.0,
+      "best_passed": false,
+      "rejected_buffer_size": 1,
+      "failure_evidence_size": 2
+    },
+    {
+      "round": 2,
+      "decision": "revert",
+      "score": 0.0,
+      "passed": false,
+      "best_score": 0.0,
+      "best_passed": false,
+      "rejected_buffer_size": 2,
+      "failure_evidence_size": 3
+    }
+  ],
+  "rejected_buffer": [
+    {
+      "round": 1,
+      "reason": "gate_no_improve",
+      "method": "skillopt",
+      "update_mode": "patch",
+      "proposals": [
+        {
+          "path": "xlsx/SKILL.md",
+          "update_mode_used": "patch",
+          "proposed_edits": [
+            {
+              "op": "insert_after",
+              "target": "### Number Formatting Standards",
+              "content": "\n### Unit Consistency in Multi-Source Models\n\nWhen combining data from multiple sources (e.g., PWT, IMF WEO, ECB, national accounts) in a single model — especially macro/production-function models — unit mismatches are a leading cause of silent magnitude errors (formulas pass but values are off by orders of magnitude).\n\n#### Required Practices\n1. **Label units explicitly in every header**: Include currency, scale, and base year. Examples:\n   - `K (mn 2017 USD, PWT rnna)`\n   - `Y (mn GEL, real 2015 prices, WEO)`\n   - `CFC (mn GEL, nominal)`\n2. **Reconcile units BEFORE combining series in formulas**: Add an explicit conversion row/cell (FX rate, PPP anchor, or scale factor) with a source citation. Never multiply/divide/log-combine series in different units without a documented conversion.\n   - **PWT specific**: `rnna` (capital stock) is in **millions of 2017 US dollars**. It must be rescaled to local-currency real units before combining with IMF WEO real GDP (which is in local-currency real units, e.g., mn GEL at a national base year). Alternatively, use PWT `rgdpna` (same units as `rnna`) for both Y and K to keep units internally consistent, then rescale the final output.\n3. **Consistent K series across derivation and reconstruction**: In Cobb-Douglas decompositions `Y = Z * K^α * L^(1-α)`, the SAME K series (same units, same source) must be used when deriving `ln(Z) = ln(Y) - α*ln(K)` AND when reconstructing `Y* = exp(lnZ_trend) * K^α`. Mixing K units between derivation and reconstruction will produce a correct-looking but wrong-magnitude Y*.\n4. **Mandatory magnitude sanity-check cell**: For every reconstructed series (e.g., `Ystar_base`), add a cell that compares the reconstructed value at the latest historical year against the observed value:\n   - `=Ystar_latest / Y_observed_latest - 1`\n   - Expected: within **±10–20%**. If the ratio is off by 10× or 1000×, units are mismatched — STOP and fix units before extrapolating. Flag this cell with yellow background.\n"
+            }
+          ],
+          "edit_reports": [
+            {
+              "index": 1,
+              "op": "insert_after",
+              "target": "### Number Formatting Standards",
+              "content_preview": "\n### Unit Consistency in Multi-Source Models\n\nWhen combining data from multiple sources (e.g., PWT, IMF WEO, ECB, national accounts) in a single model — especially macro/production-function models — u",
+              "status": "applied_insert_after"
+            }
+          ],
+          "suggestion_prefix": "{'type': 'clarify', 'title': 'Per-task SkillsBench update for shock-analysis-supply', 'motivation': 'Adapt the shipped skill to the observed single-task execution evidence while keeping the SkillsBench task harness unchanged.', 'instruction': 'Rewrite only this diagnosed skill document (xlsx/SKILL.md) so it better supports task `shock-analysis-supply`. Diagnosis confidence: 0.6. Diagnosis: The xlsx skill covers zero formula errors, color coding, and number formatting but does not require unit consistency checks when combining data from multiple sources (e.g., PWT capital in millions of 2017 USD vs WEO GDP in local currency). This gap caused Ystar_base to be ~78 instead of ~100,000 despite valid formulas. The skill needs explicit guidance for macro/production-function models on (a) labeling",
+          "change_summary": [
+            "insert_after:applied_insert_after"
+          ],
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "reason": "gate_no_improve",
+      "method": "skillopt",
+      "update_mode": "patch",
+      "proposals": [
+        {
+          "path": "xlsx/SKILL.md",
+          "update_mode_used": "patch",
+          "proposed_edits": [
+            {
+              "op": "insert_after",
+              "target": "#### Documentation Requirements for Hardcodes",
+              "content": "\n\n### Multi-Source Macro Unit Reconciliation (REQUIRED for production-function / potential-GDP models)\n\nWhen a model combines capital, GDP, and deflator series from different sources (PWT, IMF WEO, ECB, national accounts), unit mismatches silently produce correct-looking formulas with wrong-magnitude outputs. Follow these steps exactly:\n\n1. **Named conversion cell per input block.** For every raw series in foreign units, add ONE named cell (blue font, yellow background) holding the conversion factor, with a comment citing source and date. Example for Georgia:\n   - PWT `rnna` is in **mn 2017 USD**. WEO real GDP for Georgia is in **mn GEL (real)**.\n   - Create cell `K_unit_conv` = `2.51` (2017 average USD/GEL rate; cite NBG or IMF IFS).\n   - Build `K_GEL = rnna * K_unit_conv` in a dedicated column with header `K (mn GEL, real 2017)`.\n   - Alternative: use PWT `rgdpna` and `rnna` together (both mn 2017 USD) for the entire decomposition, then rescale only the final Y* to GEL — but never mix.\n\n2. **Same K series in derivation AND reconstruction.** When computing `lnZ = lnY − α·lnK` and later `Ystar = exp(lnZ_trend) · K^α`, both steps MUST reference the identical K column (same units). Do not swap PWT raw `rnna` into one and converted `K_GEL` into the other.\n\n3. **Mandatory sanity-check cell below Ystar.** Immediately below the Ystar output block, add:\n   - `=Ystar_lastHist / Y_observed_lastHist − 1`, percent format, yellow background.\n   - Rule: if `|ratio| > 20%` OR Ystar differs from Y_observed by ≥10×, STOP. Units are wrong. Do not extrapolate.\n\n4. **Task-specific magnitude gate — shock-analysis-supply.** In `Production!H60:H65`, `Ystar_base` must land in **10,000–500,000 (mn GEL)**. If values are in the tens or hundreds (e.g., 78), the PWT→GEL conversion was omitted — fix step 1 before proceeding.\n\n5. **Header unit tags are mandatory.** Every column combining macro series must have units in the header, e.g., `K (mn GEL, real 2017)`, `Y (mn GEL, real)`, `CFC (mn GEL, nominal)`. Never combine two series whose headers show different units without routing through a named conversion cell from step 1.\n"
+            }
+          ],
+          "edit_reports": [
+            {
+              "index": 1,
+              "op": "insert_after",
+              "target": "#### Documentation Requirements for Hardcodes",
+              "content_preview": "\n\n### Multi-Source Macro Unit Reconciliation (REQUIRED for production-function / potential-GDP models)\n\nWhen a model combines capital, GDP, and deflator series from different sources (PWT, IMF WEO, EC",
+              "status": "applied_insert_after"
+            }
+          ],
+          "suggestion_prefix": "{'type': 'clarify', 'title': 'Per-task SkillsBench update for shock-analysis-supply', 'motivation': 'Adapt the shipped skill to the observed single-task execution evidence while keeping the SkillsBench task harness unchanged.', 'instruction': 'Rewrite only this diagnosed skill document (xlsx/SKILL.md) so it better supports task `shock-analysis-supply`. Diagnosis confidence: 0.7. Diagnosis: The xlsx skill addresses formula hygiene, color coding, and header unit labels but gives no operational procedure for reconciling multi-source macro inputs (PWT capital in mn 2017 USD vs WEO real GDP in local currency) nor a mandatory magnitude sanity check on reconstructed series. For shock-analysis-supply this caused Ystar_base ≈ 78 instead of ~78,000 (mn GEL), failing test_value_magnitudes while all s",
+          "change_summary": [
+            "insert_after:applied_insert_after"
+          ],
+          "fallback_reason": null
+        }
+      ]
+    }
+  ],
+  "failure_evidence": [
+    {
+      "label": "baseline",
+      "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/baseline/original-skill/shock-analysis-supply/benchmark_result.json"
+    },
+    {
+      "label": "round_1_gate",
+      "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/shock-analysis-supply/workspace/round_1/gate_result.json"
+    },
+    {
+      "label": "round_2_gate",
+      "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-15-skillopt-opus47-tatu-20261008/methods/skillopt/shock-analysis-supply/workspace/round_2/gate_result.json"
+    }
+  ],
+  "final_best_score": 0.0,
+  "final_best_passed": false,
+  "same_task_gate": true,
+  "same_task_gate_leakage": "Acceptance uses the same task that is reported (same-task leakage). This is NOT held-out val/test selection as in original SkillOpt / Lite.",
+  "note": "Gate uses the same task (not held-out val). n=independent diagnosis samples; R=progressive repair rounds; L=merge/edit budget. Rejected proposals feed the next round. All prior failure trajectories (baseline + failed gates) are accumulated into later-round diagnosis/edit evidence."
+}
