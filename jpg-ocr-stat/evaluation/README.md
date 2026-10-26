@@ -6,6 +6,8 @@
 
 图片、参考表和评分代码现已公开，仅供最终冻结Skill评测，不用于修复、诊断或选版。三个组使用同一个冻结版本，沿用[result提交与执行约定](../result/README.md)；实际使用过旧扩展集或评测材料的情况应如实披露。
 
+现有baseline和人工Skill结果见 [results/README.md](results/README.md)：按数据集列出每次字段正确率和均值，同目录提供原Excel、原评分及运行记录。
+
 ```text
 evaluation/
 ├── README.md             # 选择口径、导出和评测命令
@@ -15,6 +17,7 @@ evaluation/
 ├── selection_summary.json # 新两组旧错误次数、旧划分和尺寸汇总
 ├── prepare_task.py       # 免费导出单组20张隔离任务
 ├── score_results.py      # 免费评测真实Excel，三组固定120字段
+├── results/              # 现有baseline、均值、原Excel、评分与轨迹
 ├── group_01/             # 新20张；images/及冻结stat_oracle.xlsx
 ├── group_02/             # 保留v1；图片和参考表不变
 ├── group_03/             # 新20张；images/及冻结stat_oracle.xlsx

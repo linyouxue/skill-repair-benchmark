@@ -8,7 +8,9 @@
 
 修复完成后，按 [result/README.md](result/README.md) 上传一个最终冻结版本：顶层仍为完整`skills/`、简短`README.md`及`evidence/`。证据必须包含真实修复过程、最终冻结Skill在原22张小票任务上的执行轨迹，以及该次执行实际生成并导出的`stat_ocr.xlsx`原文件。最终任务执行上限为65次父迭代，方法内部的诊断与修复迭代不受这个65次限制；接入端落实与留证要求见结果提交说明。本轮不要求泛化成绩。
 
-后续评测材料见 [evaluation/README.md](evaluation/README.md)：3组各20张SROIE小票，配套冻结参考表、隔离任务导出和三份真实Excel的免费评分入口。2026-10-25的v2用旧200张baseline中反复出错、业务正文为英文且通过清晰度目检的40张，替换group1和group3；group2保留原样。因此新两组是基于历史错误筛选的挑战集，不是未经过成绩筛选的随机泛化样本。材料仅供最终冻结Skill评测，不用于修复或选版；旧v1成绩不能标为新组成绩；当前API尺寸修订将唯一超长图等比缩至3000像素，其余39张不变，尚无当前修订的有效baseline。
+后续评测材料见 [evaluation/README.md](evaluation/README.md)：3组各20张SROIE小票，配套冻结参考表、隔离任务导出和三份真实Excel的免费评分入口。2026-10-25的v2用旧200张baseline中反复出错、业务正文为英文且通过清晰度目检的40张，替换group1和group3；group2保留原样。因此新两组是基于历史错误筛选的挑战集，不是未经过成绩筛选的随机泛化样本。材料仅供最终冻结Skill评测，不用于修复或选版；旧v1成绩不能标为新组成绩。当前图片修订将唯一超长图等比缩至3000像素，其余39张不变。
+
+原任务及三个评测组的现有baseline、均值、人工Skill结果和各次原Excel统一放在 [evaluation/results/](evaluation/results/README.md)，直接汇总已有有效运行，不重跑实验。
 
 ```text
 jpg-ocr-stat/
@@ -39,6 +41,7 @@ jpg-ocr-stat/
 │   ├── group_01/            # 第一组图片与评分侧参考表，另有02/03组
 │   ├── prepare_task.py      # 隔离导出20票原生任务，不调用模型
 │   ├── score_results.py     # 三组真实Excel的免费评分
+│   ├── results/             # 已有baseline、均值、原Excel、评分与轨迹
 │   └── source/              # 来源、许可与署名
 ├── tools/
 │   ├── prepare_diagnosis.py # 从指定原运行离线构建诊断包
