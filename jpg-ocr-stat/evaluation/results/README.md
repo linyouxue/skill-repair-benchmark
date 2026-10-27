@@ -1,6 +1,8 @@
 # JPG现有实验结果
 
-同学上传泛化评测结果请看[精简提交说明](methods/README.md)：每个方法配置一份README，加上三组各次运行的原Excel、完整轨迹和评分记录。最终Skill仍提交到[`jpg-ocr-stat/result/`](../../result/README.md)。
+**当前泛化评测只跑group2；group1、group3暂时不用跑，下面保留两组历史baseline。**
+
+同学上传泛化评测结果请看[精简提交说明](methods/README.md)：每个方法配置一份README，加上group2各次运行的原Excel、完整轨迹和评分记录。最终Skill仍提交到[`jpg-ocr-stat/result/`](../../result/README.md)。
 
 指标为日期和金额的字段正确率。原始Skill均使用Opus4.7，最多65次父迭代；同一集合的全部现有有效重复直接取算术均值。
 
@@ -12,6 +14,8 @@
 | group_03 | 20 | 82.50% | 77.50% | — | **80.00%** |
 
 group1、group3为当前新版图片，group2保持不变。旧版组1/3的结果保留在`historical-v1/`，不混入新版均值；对应图片和参考表可从[旧版数据](https://github.com/linyouxue/skill-repair-benchmark/tree/64e7ca807b19b8e3c19e96853a50f175e6dbdb19/jpg-ocr-stat/evaluation)追溯。
+
+group1、group3的逐票错误模式和数量见[错误分析](groups13-error-analysis-20261027.md)，基于已有两次baseline，不重跑或更改成绩。
 
 ## 人工Skill现有结果
 

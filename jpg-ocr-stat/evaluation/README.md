@@ -1,8 +1,12 @@
+# 注意：泛化性测试暂时只在 group2 进行
+
+**目前只运行 `group_02`（20张小票）；`group_01`、`group_03` 暂时不用跑。两组图片和已有结果保留，等待后续安排。**
+
 # JPG评测
 
-版本日期：2026-10-25。
+版本日期：2026-10-27。
 
-图片、参考表和评分代码现已公开，仅供最终冻结Skill评测，不用于修复、诊断或选版。三个组使用同一个冻结版本，沿用[result提交与执行约定](../result/README.md).
+图片、参考表和评分代码现已公开，仅供最终冻结Skill评测，不用于修复、诊断或选版。当前只评测group2，沿用[result提交与执行约定](../result/README.md)及[group2结果提交说明](results/methods/README.md)。
 
 现有baseline和人工Skill结果见 [results/README.md](results/README.md)：按数据集列出每次字段正确率和均值，同目录提供原Excel、原评分及运行记录。
 
@@ -33,7 +37,7 @@ evaluation/
 | group1 | 20 | 19 | 20 | 12 | 68/120 | 43.33% |
 | group3 | 20 | 18 | 20 | 12 | 65/120 | 45.83% |
 
-**表中成绩是这批成员在旧200张实验中的回看统计，不是新20张分组下的实验结果，也不是当前Tatu Opus4.7/65次父迭代的成绩。** 上一图片版的3次新baseline尝试因多图尺寸拒绝及共享网关停转发而中断，未形成有效评分；当前API尺寸修订未运行模型。旧三遍所处批次、上下文和配置与新实验不同。
+**表中成绩是这批成员在旧200张实验中的回看统计，不是新20张分组下的实验结果。** 上一图片版的3次baseline尝试因多图尺寸拒绝及共享网关停转发而中断，未形成有效评分；当前图片版已有baseline成绩见[results/README.md](results/README.md)。旧三遍所处批次、上下文和配置与新实验不同。
 
 两个新组共27张来自旧训练划分、9张来自旧测试2、4张来自旧测试1；这些材料此前已经公开。它们适合检查同类日期/金额错误能否被修复，不能称为严格未见数据、盲测或不经过筛选的整体泛化估计。旧v1成员可从Git历史追溯，既有实验原始记录和成绩不改，旧成绩不重标为v2。
 
@@ -55,14 +59,14 @@ evaluation/
 
 ```bash
 python jpg-ocr-stat/evaluation/prepare_task.py \
-  --group group_01 \
+  --group group_02 \
   --skills /path/to/frozen-final/skills \
-  --output /path/to/new-tasks/jpg-v2-group01
+  --output /path/to/new-tasks/jpg-group02
 ```
 
-其余组更换`--group`和新的输出目录。不传`--skills`时使用原5个Skill。准备命令只复制文件，不构建Docker、不启动Agent、不调用API。导出的Task、Dockerfile和verifier代码保持原样，只换入本组20张图片、冻结参考表和20成员spec；原600秒评分时间不变。参考表只放verifier侧，不挂到Agent工作区。
+本轮只准备group2。不传`--skills`时使用原5个Skill。准备命令只复制文件，不构建Docker、不启动Agent、不调用API。导出的Task、Dockerfile和verifier代码保持原样，只换入本组20张图片、冻结参考表和20成员spec；原600秒评分时间不变。参考表只放verifier侧，不挂到Agent工作区。
 
-实际运行仍交给统一SkillsBench/BenchFlow执行器，冻结Skill后再跑；准备脚本不会自行保证65次父迭代，执行配置必须独立留证。本次图片适配只准备和检查文件，没有调用模型或重跑实验。
+实际运行仍交给统一SkillsBench/BenchFlow执行器，冻结Skill后再跑；准备脚本不会自行保证65次父迭代，执行配置必须独立留证。本次文档更新没有调用模型或重跑实验。
 
 ## 评测真实Excel
 
@@ -70,18 +74,18 @@ python jpg-ocr-stat/evaluation/prepare_task.py \
 
 ```text
 predictions/
-├── group_01/stat_ocr.xlsx
-├── group_02/stat_ocr.xlsx
-└── group_03/stat_ocr.xlsx
+└── group_02/stat_ocr.xlsx
 ```
 
 ```bash
-python jpg-ocr-stat/evaluation/score_results.py \
-  --predictions /path/to/predictions \
-  --report /path/to/v2-field-accuracy.json
+python jpg-ocr-stat/verifier/score_accuracy.py \
+  --actual /path/to/predictions/group_02/stat_ocr.xlsx \
+  --oracle /path/to/new-tasks/jpg-group02/verifier/stat_oracle.xlsx \
+  --spec /path/to/new-tasks/jpg-group02/verifier/receipt_spec.json \
+  --report /path/to/group02-field-accuracy.json
 ```
 
-报告给出各组日期、金额、字段、整票正确率及交付状态；每组固定40字段，三组固定120字段。缺表不缩分母，基础设施故障需另行说明。免费检查中的参考表自比和缺表fixture均为软件检查，不是模型成绩或真实预测Excel。
+上述命令使用同一verifier的评分实现，只评测group2，每次固定40字段；三个重复的均值为三次字段正确率的算术均值。缺表不缩分母，基础设施故障需另行说明。原`score_results.py`仍是三组汇总工具，本轮不要把未运行的group1/3计成零分后使用其120字段总分。免费检查中的参考表自比和缺表fixture均为软件检查，不是模型成绩或真实预测Excel。
 
 ## 免费回归检查
 

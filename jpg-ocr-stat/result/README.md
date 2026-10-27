@@ -87,4 +87,4 @@ evidence/
 
 如果已经使用[可选的`save-result`工具](../diagnosis/README.md)，先在任务包外、候选Skill目录外生成归档，再把其`skills/`用于最终提交，其余真实记录按需放入`evidence/`，并附上方法实际日志。不要直接用该工具写入本任务包内的`result/`。它的`model_calls_by_helper=0`只表示辅助工具没有调用模型，不代表修复方法没有调用模型。
 
-泛化测试使用本目录已冻结的`skills/`，三组各20张、每组3次。泛化结果按[独立上传说明](../evaluation/results/methods/README.md)提交到`jpg-ocr-stat/evaluation/results/methods/`；本目录保留Skill和修复证据，不重复上传。
+泛化测试使用本目录已冻结的`skills/`，**当前只在group2（20张）运行3次，group1、group3暂时不用跑**。泛化结果按[独立上传说明](../evaluation/results/methods/README.md)提交到`jpg-ocr-stat/evaluation/results/methods/`；本目录保留Skill和修复证据，不重复上传。
