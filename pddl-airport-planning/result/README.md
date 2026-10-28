@@ -1,0 +1,24 @@
+# 上传最终冻结的skill与真实证据
+
+每个方法/配置提交一个最终版本，不根据泛化成绩回头选择：
+
+```text
+result/
+├── README.md                         # 本说明，保留
+└── <method_id>__<config_id>/
+    ├── skills/                       # 完整`pddl-skills/`及支持文件/许可
+    ├── README.md                     # 方法、模型/配置、版本、材料和必要披露
+    └── evidence/                     # 真实修复过程、冻结后原题执行及实际产物
+```
+
+只允许修改原有SKILL.md，其他文件和许可保留。修复过程可保留方法原格式或无损压缩，不强制另写submission/diagnosis/history/coverage schema。保留真实方法机制、候选和选择依据，说明额外数据接触、人工参与及样本专用规则；不要求全对才提交。
+
+evidence需同时包含：诊断/修订/选版的真实请求响应及原生配置；同一顶层冻结skills版本执行原题的完整ACP与LLM请求响应、执行元数据、实际计划原文件、verifier的accuracy/CTRF/reward。两类轨迹不互相替代。日志原生run ID和终止状态保留，普通FAIL、超时及用量照实记录；未归档的文件不能从声明或另一条运行补造。
+
+使用统一执行器及60次父迭代约束，completion guard使用同一剩余额度。这个限制仅约束单次原题执行，不新增方法诊断/修复的统一token、轮次或费用限制。修复模型和最终执行模型由实验协议另行明确，给定GPT-5.2轨迹不意味着本工具会调用GPT-5.2。
+
+README简要列出方法/代码版本、修复和执行模型配置、最终skill版本、所用材料版本、同版本最终run ID、实际产物与评分路径、额外材料/人工参与及缺失记录。不能用预制packet证明模型已消费材料。
+
+后续在evaluation上测试前先冻结本目录的完整skill；只读evaluation不用于修复/调参/选版。泛化执行、重复次数以协调者安排为准，不照抄JPG的65轮或仅group2三次设置。泛化真实结果上传到[evaluation/results](../evaluation/results/README.md)，不重复上传完整原输入和原始失败轨迹。
+
+从当前main建自己的分支或fork，保留本说明及其他方法目录，提交面向main的PR。上传前排除凭据和无关个人信息，不把API key放入skills或日志。
