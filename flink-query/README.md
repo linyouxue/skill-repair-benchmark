@@ -7,10 +7,10 @@ flink-query/
 ├── task.md / environment/      # 原题、原输入、完整skill与许可
 ├── verifier/                   # item-accuracy-v1连续正确率，仅评分侧部署
 ├── oracle/                     # 原参考解法，不供诊断/修复读取
-├── diagnosis/                  # GPT-5.2索引、无损记录/窗口、允许反馈
-│   ├── index.json              # 固定来源、正文与全部窗口入口
+├── diagnosis/                  # GPT-5.2完整轨迹索引、允许反馈
+│   ├── index.json              # 固定来源与完整记录索引
 │   └── outputs/                # 原状态、反馈与产物未归档说明
-├── tools/                      # 构建材料、读取packet/record/input、可选过程保存
+├── tools/                      # 离线整理来源与反馈，不改变adapter接口
 ├── result/README.md            # 冻结skills、真实修复过程与原题执行的提交要求
 ├── evaluation/                 # 冻结后三组同源评测
 │   ├── group_01/               # 一组输入和评分资源，另有02/03
@@ -20,13 +20,38 @@ flink-query/
 
 ## 同学先怎样接入
 
-在完整仓库根目录，用Python 3.11或更新版本构造首个窗口，输出必须是包外的新文件：
+先读取以下材料，按各自方法的诊断、修复、迭代和选版机制处理。表中包内路径均相对于本目录：
 
-```bash
-python flink-query/tools/diagnosis_io.py packet --window w0001 --out /tmp/flink-query-window.json
+| 材料 | 位置 | 内容 |
+|---|---|---|
+| 原题 | [task.md](task.md) | 任务要求、输入输出路径约定与执行配置 |
+| 原输入与程序骨架 | [environment/workspace/data/](environment/workspace/data/)、[src/](environment/workspace/src/)、[pom.xml](environment/workspace/pom.xml) | 原始job/task事件、字段说明、Java骨架及构建依赖 |
+| 原 Skill | [pdf/SKILL.md](environment/skills/pdf/SKILL.md)、[senior-data-engineer/SKILL.md](environment/skills/senior-data-engineer/SKILL.md)、[完整bundle](environment/skills/) | 两个原Skill的正文、支持文件和许可；修复时保留完整bundle |
+| 完整失败轨迹 | [ACP事件](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/flink-query/selected_run/trajectory/acp_trajectory.jsonl)、[完整LLM请求/响应](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/flink-query/selected_run/trajectory/llm_trajectory.jsonl)、[ATIF轨迹](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/flink-query/selected_run/trainer/atif.json) | 固定提交中的指定GPT-5.2原始失败运行，交给现有方法adapter读取 |
+| 反馈与运行状态 | [allowed_feedback.json](diagnosis/outputs/allowed_feedback.json)、[execution_metadata.json](diagnosis/outputs/execution_metadata.json)、[output_inventory.json](diagnosis/outputs/output_inventory.json) | 原reward、测试名称及对错、运行元数据和原产物归档状态；不提供隐藏答案 |
+
+包内[diagnosis/records/](diagnosis/records/)另提供便于程序读取的整理记录，记录关系与固定来源见[index](diagnosis/index.json)。各方法沿用现有adapter读取这些完整材料，保留原方法的诊断、修订和选版机制。
+
+指定历史运行的Java/JAR、输出tuple和完整工作区未归档，不能从轨迹中的完成声明补造；原reward=0保留，新评分下的历史正确率为null。修复使用上述原题材料，泛化输入在冻结Skill后再使用。
+
+## 统一 adapter 接入
+
+修复侧沿用现有方法adapter的输入契约，使用上表中的原Task、原完整Skill bundle、完整ACP/LLM轨迹和允许反馈。各子阶段继续按原方法处理这些材料，本任务包不新增请求格式、专用读取API或过程提交格式。
+
+执行侧按[统一执行器接入说明](../DELIVERY_GUIDE.md#5-入口-b修复算法自动调用)初始化`BenchmarkExecutor`，`tasks_root`指向包含本任务目录的父目录。将修复后的完整bundle交给同一个接口：
+
+```python
+result = executor.run(
+    task_id="flink-query",
+    condition="method-skill",
+    skill_bundle="/path/to/method-output/full-skills",
+    method_id="your-method",
+    stage="final",
+    rollout_id="flink-query-final-unique-run-id",
+)
 ```
 
-将返回JSON的`messages`交给方法自身的模型客户端；本工具没有发送请求。可从[index](diagnosis/index.json)按顺序遍历全部22窗，用`record`回溯完整记录、`input`按需读取原输入。详细示例见[诊断说明](diagnosis/README.md)，不限制方法自己的修复、迭代和选版机制。
+每次执行使用新的`rollout_id`。不同任务仅替换`task_id`、完整bundle及运行标识，继续使用同一执行器、OpenHands adapter和既有公共API。
 
 ## 当前评分
 
