@@ -33,7 +33,7 @@ result/
 
 ## 真实Excel与两类轨迹怎样放
 
-参考本仓库[evaluation/results的提交说明](https://github.com/linyouxue/skill-repair-benchmark/blob/main/evaluation/results/README.md)和[SkillAxe的JPG实例](https://github.com/linyouxue/skill-repair-benchmark/tree/main/evaluation/results/SkillAxe-Opus47-Gold15-20260921/tasks/jpg-ocr-stat)。该实例将`repair_generation/`与`repaired_run/`分开：前者是修改Skill的过程，后者是使用修复Skill完成任务的过程。
+参考本仓库[evaluation/results的提交说明](https://github.com/linyouxue/skill-repair-benchmark/blob/main/evaluation/results/README.md)。该实例将`repair_generation/`与`repaired_run/`分开：前者是修改Skill的过程，后者是使用修复Skill完成任务的过程。
 
 下列是放在自己提交目录内的示意。可以直接保留原方法/执行器导出的目录名，只要README指向清楚；不用转写真实日志或为示例制造文件。
 
