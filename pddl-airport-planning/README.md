@@ -7,10 +7,10 @@ pddl-airport-planning/
 ├── task.md / environment/      # 原题、原输入、完整skill与许可
 ├── verifier/                   # item-accuracy-v1连续正确率，仅评分侧部署
 ├── oracle/                     # 原参考解法，不供诊断/修复读取
-├── diagnosis/                  # GPT-5.2索引、无损记录/窗口、允许反馈
-│   ├── index.json              # 固定来源与记录/窗口索引
+├── diagnosis/                  # GPT-5.2完整轨迹索引、允许反馈
+│   ├── index.json              # 固定来源与完整记录索引
 │   └── outputs/                # 原状态、反馈与产物未归档说明
-├── tools/                      # 构建材料、读取packet/record/input、可选过程保存
+├── tools/                      # 离线整理来源与反馈，不改变adapter接口
 ├── result/README.md            # 冻结skills、真实修复过程与原题执行的提交要求
 ├── evaluation/                 # 冻结后三组同源评测
 │   ├── group_01/               # 一组输入和评分资源，另有02/03
@@ -27,12 +27,31 @@ pddl-airport-planning/
 | 原题 | [task.md](task.md) | 任务要求、输入输出路径约定与执行配置 |
 | 原输入 | [environment/problem.json](environment/problem.json)、[environment/airport/](environment/airport/) | 原题要求的task01/02，以及原环境可见的全部domain/problem文件 |
 | 原 Skill | [environment/skills/pddl-skills/SKILL.md](environment/skills/pddl-skills/SKILL.md)、[完整bundle](environment/skills/pddl-skills/) | 原Skill正文、支持文件和许可；修复时保留完整bundle |
-| 完整失败轨迹 | [ACP事件](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/pddl-airport-planning/selected_run/trajectory/acp_trajectory.jsonl)、[完整LLM请求/响应](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/pddl-airport-planning/selected_run/trajectory/llm_trajectory.jsonl)、[ATIF轨迹](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/pddl-airport-planning/selected_run/trainer/atif.json) | 固定提交中的指定GPT-5.2原始失败运行，可直接读取，无需先分窗 |
+| 完整失败轨迹 | [ACP事件](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/pddl-airport-planning/selected_run/trajectory/acp_trajectory.jsonl)、[完整LLM请求/响应](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/pddl-airport-planning/selected_run/trajectory/llm_trajectory.jsonl)、[ATIF轨迹](https://github.com/linyouxue/skill-repair-benchmark/blob/bee9b0df5b04a300735e5009f5238f5d5c8aaf61/evaluation/results/GPT52-AllTasks-RepresentativeRuns-20260916/tasks/pddl-airport-planning/selected_run/trainer/atif.json) | 固定提交中的指定GPT-5.2原始失败运行，交给现有方法adapter读取 |
 | 反馈与运行状态 | [allowed_feedback.json](diagnosis/outputs/allowed_feedback.json)、[execution_metadata.json](diagnosis/outputs/execution_metadata.json)、[output_inventory.json](diagnosis/outputs/output_inventory.json) | 原reward、测试名称及对错、运行元数据和原产物归档状态；不提供隐藏答案 |
 
-包内[diagnosis/records/](diagnosis/records/)另提供便于程序读取的整理记录，记录关系与固定来源见[index](diagnosis/index.json)。同学可以直接读取完整轨迹，也可以按自身方法分段；不要求使用本包的分窗工具。
+包内[diagnosis/records/](diagnosis/records/)另提供便于程序读取的整理记录，记录关系与固定来源见[index](diagnosis/index.json)。各方法沿用现有adapter读取这些完整材料，保留原方法的诊断、修订和选版机制。
 
 指定历史运行的计划原文件未归档，不能从轨迹中的完成声明补造；原reward=0保留，新评分下的历史正确率为null。修复使用上述原题材料，泛化输入在冻结Skill后再使用。
+
+## 统一 adapter 接入
+
+修复侧沿用现有方法adapter的输入契约，使用上表中的原Task、原完整Skill bundle、完整ACP/LLM轨迹和允许反馈。各子阶段继续按原方法处理这些材料，本任务包不新增请求格式、专用读取API或过程提交格式。
+
+执行侧按[统一执行器接入说明](../DELIVERY_GUIDE.md#5-入口-b修复算法自动调用)初始化`BenchmarkExecutor`，`tasks_root`指向包含本任务目录的父目录。将修复后的完整bundle交给同一个接口：
+
+```python
+result = executor.run(
+    task_id="pddl-airport-planning",
+    condition="method-skill",
+    skill_bundle="/path/to/method-output/full-skills",
+    method_id="your-method",
+    stage="final",
+    rollout_id="pddl-airport-planning-final-unique-run-id",
+)
+```
+
+每次执行使用新的`rollout_id`。不同任务仅替换`task_id`、完整bundle及运行标识，继续使用同一执行器、OpenHands adapter和既有公共API。
 
 ## 当前评分
 
@@ -70,13 +89,3 @@ python pddl-airport-planning/tools/prepare_diagnosis.py --validate-only
 原题固定SkillsBench `b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af`，原输入、skill和许可保留。原历史运行未归档完整task tree，不能把本目录的新task digest冒称历史digest；后者在诊断元数据中另存。
 
 当前数据为pilot-v2、评分为item-accuracy-v1。离线验证见[VALIDATION.json](VALIDATION.json)；先前Docker环境验收与当前打包/评分复核分别记录，不宣称本次重演完整Docker。来源、许可及抽样记录见[source](evaluation/source/README.md)。
-
-## 可选工具：分窗与按需读取
-
-需要分段读取长轨迹时，可在完整仓库根目录用Python 3.11或更新版本导出一个窗口，输出为包外的新文件：
-
-```bash
-python pddl-airport-planning/tools/diagnosis_io.py packet --window w0001 --out /tmp/pddl-airport-planning-window.json
-```
-
-返回JSON的`messages`可交给方法自身的模型客户端；工具只准备材料，不发送请求。12个窗口是同一条失败轨迹的连续片段，不是12个样本，也不要求12次模型调用。`record`可回溯完整记录，`input`可按需读取原输入；用法见[诊断说明](diagnosis/README.md)。使用分窗、整段读取或其他读取方式，由各方法自行决定。

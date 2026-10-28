@@ -187,24 +187,6 @@ def validate(package):
             if rid in table:
                 raise ValueError("Duplicate record ID")
             table[rid] = (row, stream["path"], line)
-    spans = defaultdict(list)
-    for number, entry in enumerate(index["windows"], 1):
-        window = read(package / entry["path"])
-        if window["ordinal"] != number or window["text_chars"] != sum(len(x["text"]) for x in window["items"]):
-            raise ValueError("Window order or character count differs")
-        for item in window["items"]:
-            row, path, line = table[item["record_id"]]
-            if item["source_file"] != path or item["source_line"] != line:
-                raise ValueError("Wrong window source")
-            spans[item["record_id"]].append(item)
-    for rid, (row, _, _) in table.items():
-        text, offset = serial(row), 0
-        for item in spans.pop(rid, []):
-            if item["char_start"] != offset or item["record_chars"] != len(text) or item["text"] != text[offset:item["char_end"]]:
-                raise ValueError("A record was truncated, changed or repeated")
-            offset = item["char_end"]
-        if offset != len(text):
-            raise ValueError("Incomplete record coverage")
     messages = {x["message_id"] for x in streams["llm_messages"]}
     contexts = {x["context_id"] for x in streams["api_contexts"]}
     steps = {x["tool_record_id"] for x in streams["atif_steps"]}
@@ -222,16 +204,14 @@ def validate(package):
         if (not event["exact_llm_message_ids"] or not event["exact_atif_step_ids"]
                 or not set(event["exact_llm_message_ids"]) <= messages or not set(event["exact_atif_step_ids"]) <= steps):
             raise ValueError("Tool action lacks exact call/observation/ATIF links")
-    return {"passed": True, "source_runs": 1, "windows": len(index["windows"]), "prepared_records": len(table),
+    return {"passed": True, "source_runs": 1, "prepared_records": len(table),
             "llm_exchanges": len(exchanges), "acp_events": len(streams["timeline"]), "actual_tool_actions": len(tools),
-            "all_record_spans_reconstructed": True, "last_response_preserved": True,
+            "provider_and_tool_references_resolved": True, "last_response_preserved": True,
             "all_tool_events_exactly_linked": True, "model_calls": 0, "verifier_reruns": 0,
             "diagnoser_delivery_or_understanding_tested": False}
 
 
-def build(package, root, commit, segment_chars, refresh=False):
-    if segment_chars < 1:
-        raise ValueError("Window length must be positive; it is not a model budget")
+def build(package, root, commit, refresh=False):
     source, helper = Source(package, root, commit), helpers(package)
     records, (prompt, prompt_source), calls = prepare_records(source, helper)
     result = source.json("result.json")
@@ -275,31 +255,20 @@ def build(package, root, commit, segment_chars, refresh=False):
     add("diagnosis/outputs/execution_metadata.json", metadata)
     add("diagnosis/outputs/allowed_feedback.json", feedback)
     add("diagnosis/outputs/output_inventory.json", inventory)
-    streams, windows = [], []
+    streams = []
     for name, values in records.items():
         path = f"diagnosis/records/{name}.jsonl"
         blobs[path] = "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in values).encode("utf-8")
         streams.append({"name": name, "path": path, "records": len(values)})
-        windows.extend(helper.make_windows(values, name, source.run_id, path, segment_chars))
-    entries = []
-    for i, window in enumerate(windows):
-        wid = f"w{i + 1:04d}"
-        window.update(window_id=wid, ordinal=i + 1, window_count=len(windows),
-                      previous_window_id=f"w{i:04d}" if i else None,
-                      next_window_id=f"w{i + 2:04d}" if i + 1 < len(windows) else None,
-                      segmentation_is_not_model_budget=True, model_usage_limits_set_by_helper=False, model_calls=0)
-        path = f"diagnosis/windows/{wid}.json"
-        add(path, window)
-        entries.append({"window_id": wid, "path": path, "stream": window["stream"], "text_chars": window["text_chars"]})
-    index = {"schema_version": 1, "task_id": package.name, "run_id": source.run_id,
+    index = {"schema_version": 2, "task_id": package.name, "run_id": source.run_id,
              "source": {"commit": commit, "repository_path": source.path_prefix,
                         "github_url": f"https://github.com/linyouxue/skill-repair-benchmark/tree/{commit}/{source.path_prefix}",
                         "verified_git_blobs": source.fingerprints},
              "task_prompt": "diagnosis/task_prompt.md", "skills": skills, "inputs": "diagnosis/inputs.json",
              "outputs": {"feedback": "diagnosis/outputs/allowed_feedback.json", "inventory": "diagnosis/outputs/output_inventory.json",
                          "execution_metadata": "diagnosis/outputs/execution_metadata.json"},
-             "streams": streams, "windows": entries, "counts": {k: len(v) for k, v in records.items()},
-             "window_text_segment_chars": segment_chars, "normalization": ["remove_cache_control", "deduplicate_identical_messages_by_reference", "safe_API_parameter_allowlist_no_transport_headers"],
+             "streams": streams, "counts": {k: len(v) for k, v in records.items()},
+             "normalization": ["remove_cache_control", "deduplicate_identical_messages_by_reference", "safe_API_parameter_allowlist_no_transport_headers"],
              "model_usage_limits_set_by_helper": False, "model_calls": 0, "source_experiments_unchanged": True}
     index["generated_files"] = sorted([*blobs, "diagnosis/index.json", "diagnosis/validation.json"])
     old_files = set()
@@ -335,11 +304,10 @@ if __name__ == "__main__":
     parser.add_argument("--package", type=Path, default=PACKAGE)
     parser.add_argument("--source-run", type=Path)
     parser.add_argument("--source-ref", default=SOURCE_COMMIT)
-    parser.add_argument("--window-chars", type=int, default=60000)
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
     package = args.package.resolve()
     print(json.dumps(validate(package) if args.validate_only else build(package,
         args.source_run or package.parent / ARCHIVE / package.name / "selected_run",
-        args.source_ref, args.window_chars, args.refresh)))
+        args.source_ref, args.refresh)))

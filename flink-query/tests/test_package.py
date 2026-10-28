@@ -16,7 +16,6 @@ def module(name, relative):
     return result
 
 
-IO = module("task_diagnosis_io", "tools/diagnosis_io.py")
 PREP = module("task_diagnosis_builder", "tools/prepare_diagnosis.py")
 EXPORT = module("task_export", "evaluation/prepare_task.py")
 NATIVE = module("task_native", "verifier/native_grade.py")
@@ -24,21 +23,20 @@ SCORER = module("task_scorer", "verifier/score_pddl.py" if PACKAGE.name.startswi
 
 
 class PackageTests(unittest.TestCase):
-    """Guards source bee9b0df material completeness and continuous reward."""
+    """Guards PR #42 native trajectory handoff and item-accuracy-v1."""
 
-    def test_lossless_records_and_all_packets(self):
+    def test_complete_records_and_final_response(self):
         validation = PREP.validate(PACKAGE)
-        self.assertTrue(validation["all_record_spans_reconstructed"])
-        index = json.loads((PACKAGE / "diagnosis/index.json").read_text())
-        for row in index["windows"]:
-            packet = IO.load_window(PACKAGE, row["window_id"])
-            self.assertEqual(packet["messages"][0]["role"], "user")
-            self.assertEqual(packet["model_calls"], 0)
-            self.assertFalse(packet["actual_model_delivery_verified"])
-        stream = next(s for s in index["streams"] if s["name"] == "llm_exchanges")
-        last = json.loads((PACKAGE / stream["path"]).read_text().splitlines()[-1])
-        self.assertTrue(last["response_message_ids"])
-        self.assertTrue(IO.load_record(PACKAGE, last["response_message_ids"][-1]))
+        self.assertTrue(validation["provider_and_tool_references_resolved"])
+        index = json.loads((PACKAGE / "diagnosis/index.json").read_text(encoding="utf-8"))
+        streams = {s["name"]: s for s in index["streams"]}
+        exchanges = PREP.rows(PACKAGE / streams["llm_exchanges"]["path"])
+        messages = {r["message_id"]: r for r in PREP.rows(PACKAGE / streams["llm_messages"]["path"])}
+        final_ids = exchanges[-1]["response_message_ids"]
+        self.assertTrue(final_ids)
+        for message_id in final_ids:
+            self.assertTrue(messages[message_id]["message"])
+        self.assertEqual(len(exchanges), 21 if PACKAGE.name.startswith("pddl") else 40)
 
     def test_missing_original_artifact_is_not_a_zero_accuracy(self):
         index = json.loads((PACKAGE / "diagnosis/index.json").read_text())
@@ -52,24 +50,17 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(meta["n_skill_invocations"], 0)
         self.assertEqual(meta["skill_body_preload_evidence"]["pointer"], "/response/body/instructions")
 
-    def test_input_access_boundary(self):
-        path = "environment/problem.json" if PACKAGE.name.startswith("pddl") else "environment/workspace/data/ClusterData2011_2.md"
-        self.assertTrue(IO.load_input(PACKAGE, path)["text"])
-        for forbidden in ["oracle/solve.sh", "verifier/test.sh", "evaluation/manifest.json", "../README.md"]:
-            with self.assertRaises(ValueError):
-                IO._input_path(PACKAGE, forbidden)
-        with self.assertRaises(ValueError):
-            IO.load_window(PACKAGE, "unknown")
 
-    def test_tampered_middle_span_is_rejected(self):
+    def test_missing_provider_message_reference_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             shutil.copytree(PACKAGE / "diagnosis", base / "diagnosis")
-            index = json.loads((base / "diagnosis/index.json").read_text())
-            path = base / index["windows"][len(index["windows"]) // 2]["path"]
-            window = json.loads(path.read_text(encoding="utf-8"))
-            window["items"][0]["text"] = "!" + window["items"][0]["text"][1:]
-            path.write_text(json.dumps(window))
+            index = json.loads((base / "diagnosis/index.json").read_text(encoding="utf-8"))
+            stream = next(s for s in index["streams"] if s["name"] == "llm_exchanges")
+            path = base / stream["path"]
+            exchanges = PREP.rows(path)
+            exchanges[-1]["response_message_ids"] = ["missing-final-message"]
+            path.write_text("".join(json.dumps(r) + "\n" for r in exchanges), encoding="utf-8")
             with self.assertRaises(ValueError):
                 PREP.validate(base)
 
@@ -129,28 +120,6 @@ class PackageTests(unittest.TestCase):
             finally:
                 NATIVE.LOG = before
 
-    def test_optional_save_keeps_bundle_and_rejects_overwrite(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            candidate = base / "candidate"
-            shutil.copytree(PACKAGE / "environment/skills", candidate)
-            first = next(candidate.glob("*/SKILL.md"))
-            first.write_text(first.read_text(encoding="utf-8") + "\nSynthetic regression edit.\n", encoding="utf-8")
-            diagnosis, history, coverage = base / "d.md", base / "h.md", base / "c.json"
-            diagnosis.write_text("Synthetic regression diagnosis")
-            history.write_text("Synthetic regression history")
-            index = json.loads((PACKAGE / "diagnosis/index.json").read_text())
-            coverage.write_text(json.dumps([{"window_id": r["window_id"], "status": "skipped", "reason": "synthetic fixture"} for r in index["windows"]]))
-            target = base / "state"
-            receipt = IO.save_result(PACKAGE, target, diagnosis, candidate, history, coverage)
-            self.assertEqual(receipt["model_calls_by_helper"], 0)
-            self.assertTrue(receipt["changed_skill_documents"])
-            with self.assertRaises(ValueError):
-                IO.save_result(PACKAGE, target, diagnosis, candidate, history, coverage)
-            support = next(p for p in candidate.rglob("*") if p.is_file() and p.name != "SKILL.md")
-            support.write_bytes(b"not the original support file")
-            with self.assertRaises(ValueError):
-                IO._validate_bundle(PACKAGE / "environment/skills", candidate)
 
 
 if __name__ == "__main__":
