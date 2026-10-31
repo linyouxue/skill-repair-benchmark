@@ -1,0 +1,71 @@
+diff --git a/skills/image-ocr/SKILL.md b/skills/image-ocr/SKILL.md
+index e1b22cf..a036311 100644
+--- a/skills/image-ocr/SKILL.md
++++ b/skills/image-ocr/SKILL.md
+@@ -338,6 +338,66 @@ def multi_pass_ocr(image_path):
+ This approach improves extraction for receipts, faded documents, and images with varying quality.
+ 
+ 
++## Receipt Extraction Patterns
++
++Printed receipts commonly need two canonical fields extracted: a date in ISO form (`YYYY-MM-DD`) and a monetary total as a string with exactly two decimals (e.g. `"47.70"`). The patterns below apply broadly whenever a scanned receipt is the input.
++
++### Robust OCR pass for receipts
++
++Receipts are usually a single narrow column of monospaced or dot-matrix text. Try `--psm 6` (uniform block) and `--psm 4` (single column) first, then widen to `--psm 11` (sparse) only as a fallback. Upscale small images (e.g. 2x–3x via `Image.resize(size, Image.Resampling.LANCZOS)`) **before** OCR; small print and faded thermal paper recognize dramatically better at higher resolution. Union the text of several (preprocessing × PSM) passes before pattern matching — a single pass frequently loses the TOTAL line.
++
++### Date extraction
++
++Receipts rarely use ISO dates, and the day/month order depends on locale (Malaysian, Singaporean, UK, EU, Australian receipts are typically `DD/MM/YYYY`; US receipts are typically `MM/DD/YYYY`). Rules of thumb:
++
++- Search near the first `Date` / `Tarikh` / `Dated` label. Accept the common forms `DD/MM/YYYY`, `DD-MM-YYYY`, `D MMM YYYY`, `YYYY-MM-DD`, and two-digit years `DD/MM/YY` (expand `YY` to `20YY` unless clearly historical).
++- When both halves of a `NN/NN/YYYY` token could be either day or month, let the receipt locale decide. If the address block names Malaysia, Kuala Lumpur, Selangor, Johor, Penang, Singapore, UK or EU, treat the **first** number as the day; otherwise fall back on an unambiguous signal (any component `>12` must be the day).
++- Before emitting, verify month ∈ 1..12 and day ∈ 1..31 and parse through `datetime.date(...)`; if OCR produced an impossible pair like `01/13/2018`, swap day/month and retry.
++- Always output `YYYY-MM-DD`.
++
++### Total amount: keyword hierarchy
++
++Apply the keyword hierarchy strictly, most specific first, and skip exclusion keywords **on the same line**:
++
++1. `GRAND TOTAL`
++2. `TOTAL RM`, `TOTAL: RM`
++3. `TOTAL AMOUNT`
++4. `TOTAL`, `AMOUNT`, `TOTAL DUE`, `AMOUNT DUE`, `BALANCE DUE`, `NETT TOTAL`, `NET TOTAL`
++
++Skip any candidate line whose keyword is `SUBTOTAL`, `SUB TOTAL`, `TAX`, `GST`, `SST`, `DISCOUNT`, `CHANGE`, or `CASH TENDERED`. Pre-tax totals, change due, cash tendered, and standalone rounding-adjustment lines must never win.
++
++### Prefer the final rounded total
++
++Many Malaysian and SE-Asian receipts print **both** a pre-rounding "inclusive of GST" total and a final rounded total that is the actual amount paid:
++
++```
++Total (Inclusive of GST) : 47.70
++Rounding Adj             : -0.02
++TOTAL                    : 47.68
++```
++
++When more than one candidate survives the exclusion filter, choose the one that appears **after** any `Rounding Adj`, `Total Rounded`, `Rounded`, or final bold `TOTAL` line. The final rounded value is the paid amount; the earlier "Inclusive of GST" number is pre-rounding and will fail strict equality. Equivalently: among surviving matches, prefer a line whose keyword is exactly `TOTAL` and that appears after a rounding line, over an earlier `Total (Inclusive of GST)`.
++
++### Numeric parsing
++
++- Accept comma thousands separators (`1,234.56`) and strip them before formatting.
++- Within the extracted number only, repair common OCR confusions: `O/o → 0`, `l/I → 1`, `S → 5`, `B → 8` when flanked by digits. Never apply these substitutions to the keyword text — doing so turns `GST` into `G5T` and misroutes the match.
++- If the keyword and its value are on different lines, take the **last** number on the next non-empty line (the amount column), not the first (which is usually quantity or unit price).
++- Final emission must be a string matching `^\d+\.\d{2}$`; produce it with `f"{value:.2f}"` after parsing the receipt number as a `Decimal`.
++
++### Do not fabricate values
++
++Every emitted date and amount must come from a token actually present in the combined OCR text (after the normalisations above). If no keyword candidate survives filtering, run one more preprocessing variant — invert for dark backgrounds, upscale 3x, or threshold at both ~110 and ~160 — before giving up. Only emit `null` when every pass still yields no plausible candidate; a null is explicitly preferable to a guess, but a guess that is not literally on the receipt (e.g. a 3-digit amount concatenated from unrelated digits on an obviously small-ticket receipt) is the worst outcome.
++
++### Batch sanity checks
++
++Before writing results for the whole batch:
++
++- Cross-check each total against the line-item column: if the chosen amount is more than ~5x the sum of visible item amounts (or more than ~5x the plausible receipt-size range for that image size), re-OCR that single image with alternative preprocessing before accepting the value.
++- Flag any amount missing a decimal point (e.g. `"2325"` instead of `"23.25"`); such strings almost always indicate a stripped period that must be reinserted or the record rechecked.
++- Dates must land in a plausible calendar range (e.g. within the last ~15 years for retail receipts); a date like `2117-02-02` is almost certainly a misread `2017-02-02`.
++
++
+ ## Error Handling
+ 
+ ### Common Issues and Solutions
