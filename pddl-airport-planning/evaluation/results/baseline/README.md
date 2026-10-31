@@ -34,13 +34,13 @@ baseline/
 └── trajectory_timelines/     # 仓库官方脚本生成，不手改索引
 ```
 
-[下载本任务完整原生证据](https://github.com/linyouxue/skill-repair-benchmark/releases/download/pddl-flink-gpt52-baseline-20261030/pddl-airport-planning-original-skill-tatu-gpt52-20261030.tar.gz)（199180411字节）。
+[下载本任务完整原生证据](https://github.com/linyouxue/skill-repair-benchmark/releases/download/pddl-flink-gpt52-baseline-20261030/pddl-airport-planning-original-skill-tatu-gpt52-20261030.tar.gz)。
 原生config/result、ACP、ATIF和评分在original_runs/；完整LLM请求响应、usage、全部保留运行段和实际/app tar在无损归档。
 PDDL实际计划或Flink实际Java/JAR/输出来自各run的artifacts/pre-verifier-workspace.tar.gz，不从摘要补造。
 STATUS.csv列全部12次和精确run ID；canonical-slots.json定位有效评分/补验来源。归档路径沿用runs/official-tatu-gpt52/与slots/，通过artifact-index.json关联。
 
 基础设施故障不冒充模型0分；生成中断优先原会话/剩余额度接续，只有评分/导出故障复用同次真实产物补验。
-旧native错误和故障段保留，有效补验sidecar优先；原本未归档的早期故障文件如实缺失，不补造。旧请求和费用另记，不增加有效样本数。
+废弃的基础设施失败包仅保留运行标识、原因、调用量和费用简记；有效接续所需的真实前段保留。正常FAIL/0分与有效补验sidecar不变，不增加有效样本数。
 完整Skill正文注入、原生评分、真实归档、预算和显式Verifier代理已验收；n_skill_invocations=0的条目有实际完整正文预载证据，callback不是wire dump。
 执行器cost仅为估算，提供商实际扣费未知。
 
