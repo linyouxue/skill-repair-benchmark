@@ -1,0 +1,115 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "within_tier_candidate_selection_last_wins_misses_true_total",
+        "general_pattern": "When multiple keyword matches of the same priority tier appear (e.g., several lines containing bare TOTAL), picking the last occurrence as the amount can select a decorative/rounded/corrupted line (e.g., 'Total Amt Rounded ——S«702.00') over the semantically-correct earlier line (e.g., 'Total incl. of GST 102.00'). The rule needs cross-line consensus or a line-quality signal, not pure positional 'last'.",
+        "wrong_approach": "Within a tier, always take the last keyword-matching line's trailing number.",
+        "observable_evidence": "074.jpg: OCR produced both 'Total incl. of GST 102.00' and 'Total Amt Rounded ——S«702.00'; selector took the last match and emitted 702.00. Agent itself observed 102.00 recurs across Subtotal/Payment lines while 702.00 only recurs in corrupted lines.",
+        "missing_reasoning_step": "Score candidate lines within the same tier by (a) frequency of the extracted value across other amount-bearing lines in the receipt (Subtotal/Payment/CASH-Change arithmetic), and (b) line-cleanliness (presence of garbage glyphs like '——S«'); break ties toward higher-consensus value rather than purely positional last.",
+        "correct_general_approach": "After collecting all keyword-matched candidates in a tier, compute a consensus score per candidate value using cross-reference with Subtotal/Payment/Cash−Change identities, then choose the value with the highest consensus; use positional order only as the final tiebreak.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "total_amount_candidate_selection_consensus",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies only when total extraction is driven by hint-provided priority tiers over OCR text with multiple same-tier matches; does not alter OCR engine choice or date parsing.",
+        "do_not_generalize_to": "Do not apply consensus override when a strictly higher-priority tier (e.g., GRAND TOTAL) matches cleanly; do not use it to override explicit exclusion keywords.",
+        "target_file": "image-ocr",
+        "target_section": "Multi-Pass OCR Strategy",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "ocr_variant_selection_first_nonnull_without_quality_tiebreak",
+        "general_pattern": "Running multiple OCR passes and accepting the first non-null extraction per field ignores that different passes have different per-field reliability. A later pass may yield a numerically more precise or more plausible value, but is discarded once an earlier pass produced any value.",
+        "wrong_approach": "Iterate OCR variants and break as soon as both date and total are non-None, keeping whichever came first.",
+        "observable_evidence": "process_image loop: 'if date is None: date = extract_date(text); if total is None: total = extract_total(text); if date is not None and total is not None: break'. For 064.jpg the default pass returned 88.10 (OCR truncation) and loop exited before the preprocessed pass (which recovered 88.17) ran — fixed only by tightening NUM_RE, not by a principled variant arbitration.",
+        "missing_reasoning_step": "Collect (tier, raw_decimal_string, value) from every OCR variant, then arbitrate across variants: prefer higher priority tier, then prefer values whose source string has exactly 2 fractional digits, then prefer values with cross-variant agreement, then prefer values consistent with Subtotal/Payment/Cash−Change identities.",
+        "correct_general_approach": "Treat each OCR pass as producing candidate (tier, raw_number_string, value) tuples. Union them, then apply a documented arbitration order (tier → raw-decimal-precision → cross-variant agreement → consensus with other receipt lines). Never short-circuit on first non-null.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "multi_variant_ocr_arbitration",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies when multiple OCR passes are run on the same image for the same structured field; does not require any specific preprocessing recipe.",
+        "do_not_generalize_to": "Not a license to run unbounded preprocessing variants; the arbitration rule is independent of how many variants are produced.",
+        "target_file": "image-ocr",
+        "target_section": "Multi-Pass OCR Strategy",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "monetary_number_regex_allowed_one_decimal_digit",
+        "general_pattern": "Monetary amounts on receipts are reliably printed with exactly two fractional digits. A regex that accepts 1–2 fractional digits silently promotes OCR truncations like '88.1' to '88.10', hiding a known OCR failure mode and preventing fallback to a cleaner candidate.",
+        "wrong_approach": "NUM_RE = r'(?<![\\w.])(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})|\\d+\\.\\d{1,2})(?![\\w.])' — permits one-decimal matches.",
+        "observable_evidence": "064.jpg produced 88.10 under the lenient regex (OCR string '88.1'); tightening to '\\.\\d{2}' yielded the correct 88.17 from another candidate. The agent discovered this empirically mid-run.",
+        "missing_reasoning_step": "Treat the two-decimal convention as a structural invariant for Malaysian/English receipt totals; require exactly two fractional digits in the money regex, and treat a one-decimal match as an OCR artifact to be rejected rather than padded.",
+        "correct_general_approach": "Define the monetary number regex to require exactly two fractional digits (optionally with thousand separators), and only fall back to one-decimal or integer parsing as an explicitly flagged last-resort fallback.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "monetary_two_decimal_invariant",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to total_amount extraction from receipt OCR text where the task output format itself specifies two decimal places.",
+        "do_not_generalize_to": "Does not apply to generic numeric extraction from OCR (unit prices, quantities, percentages); only to the final monetary total field.",
+        "target_file": "image-ocr",
+        "target_section": "Full OCR with JSON Output",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "keyword_line_tier_matches_rounded_label_as_plain_total",
+        "general_pattern": "A bare \\bTOTAL\\b keyword tier matches lines like 'Total Amt Rounded', 'Total GST', 'Total Excl. of GST', 'Total (Excluding GST)' when those lines are not explicitly on the exclusion list. These are not the final payable total and should be either excluded or routed to a lower tier.",
+        "wrong_approach": "Treating every line that contains the token TOTAL (and does not contain SUBTOTAL/TAX/GST/etc.) as a priority-4 total candidate.",
+        "observable_evidence": "074.jpg: 'Total Amt Rounded ——S«702.00' and 'Total incl. of GST 102.00' both matched the bare-TOTAL tier. 077.jpg: 'Total (Excluding GSI): 21.30' and 'Total (Inclusive of GST): 23.26' both matched; last-wins happened to be correct here but only by positional luck.",
+        "missing_reasoning_step": "Enumerate 'qualified TOTAL' phrases that are NOT the final payable amount ('Total Excl.', 'Total GST', 'Total Amt Rounded' when a later 'Total incl.' exists, 'Total (Excluding ...)') and either add them to exclusions or demote them below 'Total incl.'/'Total (Inclusive ...)' / 'Net Total' / 'Grand Total' phrasing.",
+        "correct_general_approach": "Extend the keyword hierarchy to recognize GST-inclusive phrasing ('Total incl.', 'Total (Inclusive ...)', 'Net Total', 'TakeOut Total (incl GST)') as a higher-priority tier than bare TOTAL, and add 'TOTAL EXCL', 'TOTAL EXCLUDING', 'TOTAL GST' to the exclusion patterns.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "total_keyword_tier_refinement",
+        "defect_relation": "ambiguous",
+        "scope_boundary": "Applies to the task-prompt-provided keyword list for identifying total_amount; does not change the OCR engine or date extraction.",
+        "do_not_generalize_to": "Do not add exclusions that would drop legitimate 'GRAND TOTAL' or 'TOTAL RM' lines; refinements should be additive, not replace the given tiers.",
+        "target_file": "image-ocr",
+        "target_section": "Full OCR with JSON Output",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "date_parser_rejects_impossible_month_without_glyph_repair",
+        "general_pattern": "When OCR confidently reads a date-shaped token but with an impossible component (month=62, day=32, year outside plausible range), downstream parsing returns None rather than attempting single-digit substitution against known OCR confusables (0↔6, 1↔7, 5↔S, 2↔Z) constrained to produce a valid date.",
+        "wrong_approach": "Parse the date token strictly; if any component is out of range, emit null.",
+        "observable_evidence": "071.jpg: OCR consistently reads '19/62/2018'; all PSM/preprocessing variants reproduce month 62. Agent noted true value is likely 19/02/2018 (0 misread as 6) but left the field null because no glyph-repair step exists.",
+        "missing_reasoning_step": "When a date-shaped token fails validation on exactly one numeric field, attempt bounded single-digit substitutions from a small OCR confusable table and accept the uniquely valid repair when it is also consistent with other date tokens found elsewhere in the OCR text.",
+        "correct_general_approach": "Add an optional date-salvage pass: on validation failure, enumerate one-character substitutions from an OCR-confusable table; accept a repair only when (a) exactly one candidate validates and (b) its year/month/day fall in the plausible receipt range.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "date_ocr_glyph_repair",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to date parsing from receipt OCR where output is ISO date and OCR confusables are the dominant failure mode; off by default to avoid false positives when no plausible repair exists.",
+        "do_not_generalize_to": "Do not use for ambiguous dates with multiple valid repairs; do not use to fabricate dates when no date-shaped token exists.",
+        "target_file": "image-ocr",
+        "target_section": "Error Handling",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "total_amount_candidate_selection_consensus",
+      "editor_direction": "add",
+      "composition_issue": "The current skill (image-ocr) covers OCR mechanics (PSM modes, preprocessing variants, confidence) but says nothing about post-OCR candidate arbitration for structured-field extraction. The five diagnoses together form a coherent overlay layer on top of OCR: (1) monetary two-decimal invariant tightens the numeric atom; (2) tier refinement sharpens keyword routing; (3) within-tier consensus selects among same-tier matches; (4) multi-variant arbitration selects across OCR passes; (5) date glyph repair handles the symmetric date-side failure. They do not conflict: (3) and (4) stack (within-variant selection then across-variant arbitration), and (1)+(2) are preconditions that reduce the candidate set (3) and (4) must arbitrate over. Overlay should be added as a new 'Structured Field Extraction from OCR Text' section rather than rewriting the existing Multi-Pass OCR example.",
+      "preservation_constraints": [
+        "Preserve the existing Tesseract PSM guidance and preprocess_image example verbatim.",
+        "Preserve the existing JSON output schema and field descriptions in image-ocr.",
+        "Do not introduce guidance that implies calling external vision models or networked services; task constrains to tesseract/pytesseract/PIL.",
+        "Do not weaken or remove the task-prompt-provided priority tiers or exclusion keyword list; refinements must be strictly additive.",
+        "Do not add rules that would turn currently-correct 20/22 receipts into losses: all proposed changes must leave the currently-correct date/amount extractions invariant on the observed evidence."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The failure modes (74.jpg 702 vs 102, 77.jpg 23.25 vs 23.26 transient, 64.jpg 88.10 vs 88.17 pre-fix, 71.jpg date null, 34.jpg date month ambiguity) all localize to post-OCR text processing: monetary number regex, keyword-tier definitions, within-tier candidate selection, cross-variant arbitration, and date-token glyph repair. Tesseract itself is deterministic given the preprocessing recipe, so the OCR-engine behavior is not the controllable surface; the controllable surface is the extraction logic documented (or missing) in the image-ocr SKILL.md. The source run reached max_iterations=65 and terminated on budget, not on infrastructure failure; model_calls=0 for feedback indicates offline field scoring, not an executor fault. Thus the diagnosis is squarely in the skill-controllable regime, with no infrastructure_or_executor-only components."
+    }
+  },
+  "response_id": "msg_bdrk_jffq5syguuo5yvbzzztnb2gjls65odkp73inxoyqywxfs7ik2mua",
+  "http_status": 200
+}

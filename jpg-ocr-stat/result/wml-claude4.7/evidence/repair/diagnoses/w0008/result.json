@@ -1,0 +1,114 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "Column-header fallback picks first line-item amount when AMOUNT keyword appears inside a table header",
+        "general_pattern": "When the amount-keyword scanner matches a line whose text is a tabular column header (e.g., 'Description Qty Price Amount', 'Qty U.Price RM(Total)'), the two-line fallback rule naively consumes the next line and returns the first line-item's amount instead of the final total. This causes a wrong, confident numeric prediction rather than a safe null, because the keyword scanner conflates column-header occurrences of TOTAL/AMOUNT with amount-label occurrences.",
+        "wrong_approach": "Treating any line that contains an amount keyword (TOTAL, AMOUNT) as a label line and, when it carries no digits, blindly reading the last number from the next line via the split-across-two-lines fallback.",
+        "observable_evidence": "Window w0008: on 078.jpg variant 0, candidates returned [(3, 20.0)] from line 10 'Description Qty Price Amount' → fallback reads line 11 '\"Ty O6SBRAISED 7 2000 20.00' and yields 20.00; the actual grand total line in that image (seen in supplied source image 078.jpg) is 'Grand Total : 92.80'. Field_feedback shows 078.jpg amount_correct=false. Agent trace in a0067/a0068 explicitly diagnoses this and later adds DESCRIPTION/QTY+AMOUNT/PRICE+AMOUNT exclusion regexes, confirming the mechanism.",
+        "missing_reasoning_step": "Before applying the 'next line last-number' fallback for an amount-keyword line, require that the line looks like an amount label (e.g., keyword near end-of-line, no other column-header tokens like DESCRIPTION/QTY/PRICE on the same line, and the line is at/below a summary region).",
+        "correct_general_approach": "Classify keyword-bearing lines into (a) amount-label lines vs. (b) tabular column headers using co-occurrence of header tokens (DESCRIPTION, ITEM, QTY, U.PRICE, UNIT PRICE, PRICE, AMOUNT appearing together) and position relative to a detected summary/totals region; exclude column-header lines from both direct-match and two-line fallback candidate generation.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "amount-keyword line classification: label vs. tabular column header before applying two-line fallback",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies only to receipt-style OCR text where TOTAL/AMOUNT keywords legitimately appear both as column headers in itemized tables and as summary labels; relevant when the fallback 'use last number on next line' rule is in effect.",
+        "do_not_generalize_to": "Do not generalize to generic document OCR where 'Amount'/'Total' columns do not have a trailing summary section, nor to tasks that must preserve line-item amounts (this constraint specifically concerns extracting the final summary total).",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Receipt total extraction / keyword priority and fallback rules (new or within an existing receipt-oriented subsection; otherwise under 'Multi-Pass OCR Strategy' as a post-OCR parsing note)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "Mangled 'Grand Total' tokens defeat strict GRAND\\s+TOTAL regex and prevent recovery of highest-priority total",
+        "general_pattern": "The highest-priority keyword tier requires a whitespace-separated 'GRAND TOTAL' match, but Tesseract commonly produces 'GrandTotal', 'GrandTota.', 'Grand Tota.', or glues 'Grand' and 'Total' with punctuation/noise. These variants silently fail to match the tier-0 regex and the extractor falls back to lower-priority (plain 'TOTAL') or unrelated lines, losing the strongest signal even when the amount digits were read correctly nearby.",
+        "wrong_approach": "Encoding GRAND TOTAL as a single rigid pattern \\bGRAND\\s+TOTAL\\b that assumes clean whitespace tokenization from OCR.",
+        "observable_evidence": "Window w0008 agent_thought a0070: '\"GrandTota. = tS 92.80\" — \"Grand Tota.\" — my regex `\\\\bGRAND\\\\s+TOTAL\\\\b` needs a space between Grand and Total. Doesn't match.' Window a0071 OCR dump shows multiple variants producing 'GrandTotal.', 'GrandTota.', 'GrandTotal =', 'Grand Tota.' with 92.80 adjacent. Final predicted amount for 078.jpg remained null after the fix (field_feedback amount_correct=false).",
+        "missing_reasoning_step": "Normalize OCR label tokens prior to keyword matching (collapse internal spaces, strip trailing punctuation, allow 0+ whitespace between GRAND and TOTAL and fuzzy suffix like TOTA[.L]?), or run keyword search against a canonicalized representation of each line.",
+        "correct_general_approach": "Define GRAND TOTAL detection with a tolerant pattern such as GRAND\\s*TOTA(?:L|\\.|L\\.)? applied after collapsing whitespace/punctuation; and/or canonicalize each line (lowercase, remove non-alnum, re-split) before keyword matching while still extracting the number from the original line.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "OCR-tolerant keyword matching for compound labels (GRAND TOTAL, SUB TOTAL, NET TOTAL)",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to compound-word label detection in low-quality scanned receipt OCR; the hint's keyword priority list is preserved — only the matching regex strictness is relaxed.",
+        "do_not_generalize_to": "Do not relax matching so far that 'GRAND' alone or 'TOTAL' hidden inside a word like 'SUBTOTAL' matches; must still respect existing exclusion keywords (SUBTOTAL/SUB TOTAL) and tier priority.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Receipt total extraction / keyword priority and OCR-tolerant matching (same subsection as diagnosis 1)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "OCR variant set lacks aggressive upscaling+PSM 4 pass needed for small-font totals",
+        "general_pattern": "The multi-pass OCR variant generator yields default, grayscale+autocontrast PSM 6, and 2x-upscale PSM 6, which can still produce heavily corrupted amount digits ('92:80', '92 80', '9280', 'SRT') for small/thin fonts. Without a higher-magnification variant plus a column-oriented PSM (e.g., 3x upscale + PSM 4), the voting pool never contains a clean 'Grand Total ... 92.80' line, so no candidate can be elected regardless of downstream matching rules.",
+        "wrong_approach": "Fixing a short, static list of preprocessing+PSM combinations and relying on voting without diagnosing whether any variant actually captured the summary digits legibly.",
+        "observable_evidence": "Window a0071 experimental sweep for 078.jpg: 'upscale 3x gray, psm=4: [Grand Total a 92.80]'; agent in a0072 recognises this specific variant is needed; a0073 then adds a big3+psm 4 variant. Prior pipeline (a0066/a0069) with only the three original variants produced [] candidates in variants 1 and 2 and only the mis-matched 20.00 in variant 0.",
+        "missing_reasoning_step": "When a receipt image's summary region is small or thin-printed, treat preprocessing/PSM as a tunable search space and include at least one high-magnification (3x+) upscale paired with a column-mode PSM (4) in addition to block-mode PSM 6.",
+        "correct_general_approach": "Expose a receipt-tuned OCR variant list that spans (resolution: 1x,2x,3x) × (PSM: 4,6, optionally 11) with grayscale+autocontrast, and recommend adding/removing variants empirically when summary-region digits remain unreadable; document this as part of the Multi-Pass OCR Strategy for receipts.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt-tuned preprocessing+PSM variant matrix for small-font summary digits",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to Tesseract-based receipt OCR where total/grand-total digits are rendered at small physical size; costs more CPU per image, acceptable for small batches like this dataset.",
+        "do_not_generalize_to": "Do not generalize to large-text/high-DPI inputs where 3x upscaling wastes compute, or to tasks requiring strict single-pass OCR; do not replace existing variants, only add.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Multi-Pass OCR Strategy / Advanced Preprocessing Strategies",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "No cross-variant total-value voting rule documented; implicit voting masks correct minority candidates",
+        "general_pattern": "When different OCR variants disagree on the total (e.g., one yields a correct label-match 92.80, others yield null or a misread 20.00), the extractor's implicit majority/first-match voting can select the wrong value or null even though a correct candidate exists. The skill does not describe how to combine per-variant candidates by priority tier and label-anchor quality rather than raw frequency.",
+        "observable_evidence": "Window a0066 shows variant-0 produced the only candidate (3, 20.0) due to header-line fallback; variants 1 and 2 produced []. After the header-exclusion fix (a0069), 078.jpg became None because the one remaining candidate was removed and no variant surfaced a legitimate GRAND TOTAL match. Agent thought a0070 notes 'voting picks majority which is 702 from 2 variants' for 074.jpg and that 074.jpg amount_correct=false in field_feedback, suggesting the voting rule itself is a repeated failure surface.",
+        "missing_reasoning_step": "Define a deterministic combination rule: (1) prefer candidates whose keyword tier is highest across all variants; (2) within a tier, prefer values that appear in multiple variants; (3) break remaining ties by proximity to a detected summary region; (4) require a minimum anchor-quality (label actually matched, not fallback) before returning a non-null value.",
+        "correct_general_approach": "Document a tiered-vote aggregation for multi-pass receipt OCR: collect (tier, value, anchor_type) tuples per variant, group by rounded value, score by (tier_rank, anchor_strength, variant_support), return the top-scoring value or null if no tier<=3 anchored candidate exists.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "tiered multi-variant candidate aggregation for receipt totals",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies whenever multiple OCR variants are run for the same receipt and must be reconciled into one value; does not apply to single-pass OCR flows.",
+        "do_not_generalize_to": "Do not generalize to non-receipt OCR where there is no keyword priority list, or to tasks where any detected amount is acceptable.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Multi-Pass OCR Strategy / combining results across passes (extend existing 'Combine results' bullet)",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "Budget exhaustion before field accuracy stabilizes — not directly skill-controllable, but amplified by iterative per-image debugging pattern",
+        "general_pattern": "The agent consumed 65/65 iterations and terminated at max_iterations with the pipeline still mid-fix for 078.jpg and 074.jpg (amount), after adopting a per-receipt debugging loop (trace one image, add exclusion/variant, rerun whole batch). The underlying skill does not steer the agent toward offline/precomputed diagnostics (dump all per-image candidate lists once, then batch-fix) which would make the same reasoning fit within the iteration budget.",
+        "wrong_approach": "Treating each failing receipt as a fresh interactive debug session (trace candidates → think → edit regex → rerun full pipeline), consuming an iteration per micro-adjustment.",
+        "observable_evidence": "execution_metadata.agent_iterations=65, max_iterations_at_source=65, termination_reason='max_iterations', acp_stop_reason='max_turn_requests'. Window a0074 explicitly records MaxIterationsReached. Multiple consecutive windows (a0065–a0073) show single-image iterative tracing/editing against 078.jpg alone.",
+        "missing_reasoning_step": "Before iterative per-image fixes, dump a single aggregated diagnostic artifact listing, for every image: per-variant OCR text slice around keywords, candidate tier/value/anchor, and current prediction; then plan a small set of pattern/variant edits that address multiple images together.",
+        "correct_general_approach": "Recommend a 'batch diagnostic snapshot then batch edit' workflow in the receipt-OCR section: one pass to build a per-image candidate report, then a single consolidated change set, then one re-run — rather than one re-run per image.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "batch-diagnostic-then-batch-edit workflow for OCR extraction tasks",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to batch OCR extraction tasks over N images where per-image interactive debugging is likely to exhaust iteration budgets; the budget itself is infrastructure, but the workflow guidance is skill-controllable.",
+        "do_not_generalize_to": "Do not frame the iteration cap itself as a skill defect; do not forbid interactive debugging for genuinely singular hard images once budget is known to be sufficient.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Multi-Pass OCR Strategy / workflow guidance for batch extraction (new short subsection)",
+        "target_layer": "L3",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "target_binding",
+      "primary_anchor": "amount-keyword line classification: label vs. tabular column header before applying two-line fallback",
+      "editor_direction": "add",
+      "composition_issue": "The current image-ocr SKILL.md stops at generic Tesseract/pytesseract usage, preprocessing, and PSM guidance; it has no section on receipt-specific total extraction, keyword-priority matching, OCR-tolerant compound-label matching, column-header vs. label disambiguation, two-line fallback safety rules, or multi-variant candidate aggregation. All five diagnosed mechanisms are additive and share one receipt-oriented subsection; they should be composed as a single new 'Receipt Total Extraction' subsection with explicit anchors so later edits strengthen rather than duplicate rules.",
+      "preservation_constraints": [
+        "Preserve the hint's keyword priority tiers verbatim (GRAND TOTAL > TOTAL RM/TOTAL: RM > TOTAL AMOUNT > TOTAL/AMOUNT/TOTAL DUE/AMOUNT DUE/BALANCE DUE/NETT TOTAL/NET TOTAL) and exclusion keywords list.",
+        "Preserve the hint's split-across-two-lines fallback as the default, but gate it behind the new label-vs-header classifier.",
+        "Do not remove or rewrite existing generic sections (Basic OCR, Confidence, PSM options, Preprocessing, Multi-Pass, Error Handling, Limitations, Version History); only add a new subsection and a short cross-reference bullet in Multi-Pass OCR Strategy.",
+        "Do not add task-specific values (e.g., specific receipt filenames, specific totals like 92.80) or any content that leaks reference answers.",
+        "Keep all code examples language-agnostic to the receipt domain (do not hardcode currency or locale beyond what the task hint already specifies, e.g., RM and 1,234.56 comma format)."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "Four of the five observed failure mechanisms (header-vs-label disambiguation, OCR-tolerant compound-label matching, receipt-tuned preprocessing+PSM matrix, tiered multi-variant aggregation) are purely text-processing/configuration rules that live naturally in image-ocr/SKILL.md and would deterministically change the extractor's behavior on the observed evidence without needing new tools, models, or infrastructure. The fifth (iteration-budget exhaustion) is partly infrastructure, but the proximate cause observed in the trajectory — a per-image interactive debug loop — is addressable by skill-level workflow guidance ('batch diagnostic snapshot then batch edit'). No diagnosis depends on hidden gold answers; each is anchored to explicit trajectory evidence (candidate traces, OCR variant dumps, agent thoughts, field_feedback booleans) and to visible content in the supplied source images (e.g., 'Description Qty Price Amount' header line and 'Grand Total : 92.80' summary line in 078.jpg)."
+    }
+  },
+  "response_id": "msg_bdrk_x5zcyk3gkdom4t5vfzuh2cwohvppvlux7uxlwrxklawu4omb7avq",
+  "http_status": 200
+}

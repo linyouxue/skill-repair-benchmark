@@ -1,0 +1,115 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "amount_extraction_prefers_total_rounded_over_grand_total_or_total_rm_when_both_present",
+        "general_pattern": "When a receipt contains multiple candidate total lines whose priority is governed by the task's keyword hierarchy (GRAND TOTAL > TOTAL RM/TOTAL: RM > TOTAL AMOUNT > TOTAL/AMOUNT/TOTAL DUE/AMOUNT DUE/BALANCE DUE/NETT TOTAL/NET TOTAL), the agent must select the amount tied to the highest‑priority matching keyword rather than the lexically last total‑like line.",
+        "wrong_approach": "The run accepted a lower‑priority or scan‑order total (e.g., Total Rounded / Total RM Incl GST / Subtotal‑derived number) when a higher‑priority keyword line existed in the same OCR text, visible on 074.jpg (Total Incl. of GST 102.00 vs predicted 702.00; also Rounded 102.00 was available) and 077.jpg (Total (Inclusive of GST) 23.26 was predicted while a lower bold TOTAL: 23.25 line was the keyword‑priority winner).",
+        "observable_evidence": "Predictions: 074.jpg total_amount=702.00 while OCR shows 'Total incl. of GBT 702.00' is an OCR glitch and 'Total Amt Rounded 102.00' / 'Payment : 102.00' are present (field_feedback amount_correct=false). 077.jpg total_amount=23.26 while OCR shows 'Total (Inclusive of GST): 23.26' and a later bold 'TOTAL: 23.25' (field_feedback amount_correct=false). Field accuracy for amount = 19/22 while date = 21/22, so amount is the dominant failure mode.",
+        "missing_reasoning_step": "An explicit, priority‑ranked keyword scan that (a) walks the keyword tiers in the stated order, (b) only falls through to the next tier when no tier‑matching line yields a parseable number, and (c) handles OCR digit corruption on the chosen line by cross‑checking the number against other tier‑matching lines on the same receipt (e.g., 'Payment', 'Rounded Total', 'Total RM').",
+        "correct_general_approach": "Implement a documented tiered keyword matcher in image-ocr/SKILL.md's receipt section: iterate keyword tiers in priority order; within a tier collect all lines, parse amounts tolerant to OCR noise (letters-as-digits like o/O→0, l/I→1, u→0, B→8, S→5), reconcile duplicates by majority / nearest‑to‑subtotal‑plus‑tax, and only move to the next tier if the current tier yields no parseable number. Skip exclusion‑keyword lines before matching.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "receipt_total_keyword_priority_selection",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to receipt-style OCR tasks where the task prompt supplies an explicit, ranked list of total keywords and an exclusion list; applies at the text-to-field extraction step after OCR text is available.",
+        "do_not_generalize_to": "Do not apply to generic document OCR tasks without a declared total-keyword hierarchy, to invoice tasks where 'Total' refers to pre-tax subtotal by convention, or to multi-currency documents where the keyword tier itself is ambiguous.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "new subsection under 'Multi-Pass OCR Strategy' titled 'Structured Field Extraction from Receipts: Priority Keyword Matching'",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "ocr_digit_corruption_on_chosen_total_line_not_repaired",
+        "general_pattern": "Tesseract regularly maps digits to visually similar letters on receipts (0→o/O/u/D, 1→l/I/i, 2→Z, 5→S/s, 6→b/G, 8→B, 9→g); when the chosen total line contains such corruption, the extracted amount must be normalized/validated against neighboring numeric evidence before being written.",
+        "wrong_approach": "The agent accepted the raw OCR substring '702.00' from a line that in the image reads '102.00' because the leading '1' was OCR'd as '7', without any sanity check against Subtotal/Payment/Rounded lines on the same receipt.",
+        "observable_evidence": "074.jpg OCR text block: 'Subtotal : 102.00', 'Tolalecl. of GST 96.23', 'Total inel. of GBT 702.00', 'Toial Amt Rounded oO yo2.00', 'Payment : 102.00'. The majority of parseable amounts cluster at 102.00; the prediction wrote 702.00. Field feedback amount_correct=false for 074.jpg confirms the chosen value disagrees with ground truth.",
+        "missing_reasoning_step": "A post-parse validation that (1) collects all numeric amounts from candidate total lines, (2) checks whether the chosen amount is approximately equal to subtotal+tax−discount±rounding or matches the modal 'Payment'/'Rounded Total' value, and (3) prefers the mode / arithmetic-consistent value when a single outlier differs by exactly one leading-digit substitution.",
+        "correct_general_approach": "Add an 'OCR digit normalization and cross-check' step to image-ocr/SKILL.md: define a confusables map, re-parse the chosen total line with the map applied, then compare against (subtotal + tax - discount) and against other total-tier lines; if the chosen value is an outlier and a corrected candidate is arithmetically consistent, substitute it.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "ocr_amount_normalization_and_arithmetic_crosscheck",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies only to receipt-like documents containing both a subtotal/tax breakdown and a single total; the arithmetic check is skipped when subtotal/tax are not confidently parsed.",
+        "do_not_generalize_to": "Do not apply confusables substitution to free-form product-code or invoice-ID fields where digits and letters are semantically distinct, and do not override an unambiguous high-confidence total just because arithmetic is off by rounding.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "new subsection 'Numeric Field Repair for Receipts' near 'Error Handling'",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "single_pass_tesseract_default_psm_used_for_all_receipts",
+        "general_pattern": "The skill documents a multi-pass OCR strategy, but the agent invoked only the default Tesseract pass for every image. For receipts where total/date lines were visibly damaged by OCR (011.jpg '15.u00', 063.jpg '7B 02/18', 074.jpg '702.00'), the multi-pass strategy would have provided alternative hypotheses that the keyword/arithmetic check could choose from.",
+        "wrong_approach": "The agent called `pytesseract.image_to_string(img)` with no --psm override, no preprocessing variants, and no result reconciliation, despite the skill explicitly listing multi-pass OCR as the recommended approach for receipts.",
+        "observable_evidence": "Trajectory shows three batches of OCR each invoking only `pytesseract.image_to_string(img)` with no config argument. Several outputs contain character substitutions on the exact lines that determine total_amount (e.g., 011.jpg 'TOTAL 15.u00', 080.jpg '69 Tye 2. Toa 1040', 074.jpg 'Total incl. of GBT 702.00'). Field accuracy for amount is 19/22; two of the three amount errors (074, 077) correspond to lines that a different PSM/preprocessing variant could re-read.",
+        "missing_reasoning_step": "Running at least a second OCR pass with --psm 6 and a grayscale+autocontrast preprocessing variant for any image whose first-pass extracted total line contains non-digit noise within the numeric substring, and reconciling the candidates by majority vote keyed to the keyword-priority match.",
+        "correct_general_approach": "In image-ocr/SKILL.md's 'Multi-Pass OCR Strategy' section, add a trigger condition: 'If the chosen total line contains any non-[0-9.,] character inside the numeric span, or if arithmetic cross-check fails, re-run OCR with --psm 6 and ImageOps.autocontrast(grayscale) and reparse before committing the value.'",
+        "skill_controllable": true,
+        "workflow_node": "input_grounding",
+        "mechanism_anchor": "conditional_multi_pass_ocr_on_noisy_numeric_fields",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to receipt/invoice OCR where the target field is a short numeric string on a known-keyword line; the trigger is cheap (regex on the chosen line) so the extra pass is only paid when needed.",
+        "do_not_generalize_to": "Do not run exhaustive 9-variant multi-pass OCR unconditionally for every image in large batches; cost grows linearly and the first pass is correct for the majority of clean receipts.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "'Multi-Pass OCR Strategy' – add a 'Conditional Reprocessing Trigger' subsection",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "amount_written_as_empty_string_instead_of_null_on_extraction_failure",
+        "general_pattern": "When extraction of a required field fails, the task specification requires the cell to be null, not an empty string; writing '' changes the field's type and will not compare equal to a null oracle cell.",
+        "wrong_approach": "For 078.jpg the agent wrote total_amount='' (empty string) rather than a null/None value even though the OCR clearly shows 'GrandTotal 92.80' and 'Total 92:80' – the agent apparently decided it was ambiguous and emitted '' instead of null.",
+        "observable_evidence": "Predictions row for 078.jpg: {\"date\": \"2017-02-02\", \"total_amount\": \"\"}. Field feedback for 078.jpg amount_correct=false. Task prompt explicitly states: 'If extraction fails for either field, the value is set to null.'",
+        "missing_reasoning_step": "A terminal normalization step that converts any non-conforming total_amount (missing, empty string, non-numeric) to Python None before writing to the Excel cell with openpyxl / pandas.",
+        "correct_general_approach": "In xlsx/SKILL.md receipt-output guidance (or a new 'Null-vs-Empty Cells' note), document that empty string and None are distinct in openpyxl output and that fields the task declares as nullable must be written as None, with a small helper that normalizes '' / 'nan' / 'None' strings to None before cell assignment.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_on_failed_field_extraction",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies whenever a task specifies that failed-extraction cells must be null and the output is an Excel/CSV file compared cell-by-cell.",
+        "do_not_generalize_to": "Do not apply to tasks that explicitly require empty string sentinels or that compare values after string coercion, and do not retroactively null out legitimately-extracted zero amounts ('0.00').",
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "new subsection 'Null vs Empty String in Output Cells' under 'Common Workflow'",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "date_disambiguation_near_rare_formats_or_corrupt_separators_not_hardened",
+        "general_pattern": "Dates on receipts appear in multiple formats (DD-MM-YYYY, DD/MM/YY, 'Date : 2032018 13:01' with lost separator, 'Data: 09/08/2018'); without a robust parser that enumerates plausible format hypotheses and chooses the one consistent with other dates on the same receipt, a single corrupted date wins silently.",
+        "wrong_approach": "For 034.jpg the predicted date is 2018-08-09, which parses 'Data: 09/08/2018' as MM/DD/YYYY instead of the DD/MM/YYYY convention used by every other Malaysian receipt in this run.",
+        "observable_evidence": "Field feedback 034.jpg date_correct=false. OCR text clearly shows 'Data: 09/08/2018' (the 'Date' label was OCR'd as 'Data'). All other receipts in the batch use DD/MM/YYYY (e.g., 039.jpg 30/03/2018 → 2018-03-30 correct; 019.jpg 18/03/18 → 2018-03-18 correct). The predicted 2018-08-09 is the only date interpreted in MM/DD order.",
+        "missing_reasoning_step": "A locale/consistency check: when the batch's other dates unambiguously fit DD/MM/YYYY (because the first component exceeds 12 in at least some rows), bind the whole batch to DD/MM ordering and apply it to ambiguous rows where both components are ≤12.",
+        "correct_general_approach": "Add a 'Date Parsing for Receipt Batches' subsection to image-ocr/SKILL.md: parse all raw date strings in the batch, detect the dominant day/month ordering from unambiguous rows, then re-parse ambiguous rows under that fixed convention; also allow digit-run fallback like '2032018'→'20/03/2018'.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "batch_consistent_date_ordering_binding",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies when a batch of related receipts is processed together and at least some rows are unambiguous under one ordering; falls back to the receipt's own country / phone-code hints when the batch is homogeneous.",
+        "do_not_generalize_to": "Do not force DD/MM across unrelated single-document OCR tasks where the source locale is unknown or mixed, and do not override an unambiguous date (day>12) based on batch majority.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "new 'Date Parsing for Receipt Batches' subsection, co-located with the new receipt extraction content",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "receipt_total_keyword_priority_selection",
+      "editor_direction": "add",
+      "composition_issue": "The image-ocr skill teaches generic OCR extraction and multi-pass strategy but contains no mechanism for structured field extraction from receipts: no priority keyword ladder, no exclusion-keyword handling, no numeric OCR normalization, no null-vs-empty-string convention, and no batch-consistent date parsing. The xlsx skill likewise does not note that nullable fields must be written as None rather than ''. Adding these receipt-oriented extraction mechanisms to image-ocr/SKILL.md and a short null-cell note to xlsx/SKILL.md directly addresses the observed amount and date failures (3/22 amount wrong, 1/22 date wrong) without changing the preserved multi-pass OCR, PSM, or preprocessing content that is already correct.",
+      "preservation_constraints": [
+        "Keep the existing 'Multi-Pass OCR Strategy' guidance and sample code in image-ocr/SKILL.md intact; only augment it with a conditional trigger.",
+        "Do not alter image-ocr's output JSON schema or confidence tiers; the new mechanisms operate on the extracted_text field.",
+        "Do not change xlsx/SKILL.md's formula/recalc workflow; only add a small 'Null vs Empty String' note.",
+        "Preserve the task's declared keyword tiers and exclusion-keyword list verbatim when documenting the priority matcher.",
+        "Keep diagnoses observable-evidence based; do not import oracle totals/dates into the skill text."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four field errors (074 amount, 077 amount, 078 amount, 034 date) are text-to-field extraction mistakes made after Tesseract produced OCR text that contained the correct answer either verbatim or with locally-repairable noise. Each error maps to a reusable mechanism that can live in image-ocr/SKILL.md (priority keyword ladder, numeric OCR normalization + arithmetic cross-check, conditional multi-pass trigger, batch-consistent date parsing) or xlsx/SKILL.md (null vs empty string). None of the errors stem from executor/infrastructure limits, missing tools, or the agent lacking vision access; the run terminated at max_iterations after producing an output file, but the field errors are logical/skill defects independent of the iteration budget."
+    }
+  },
+  "response_id": "msg_bdrk_luma22ygbwxrcphsvyz25n2jrnwi4xz3ucqrauvjjxqy366n4mga",
+  "http_status": 200
+}

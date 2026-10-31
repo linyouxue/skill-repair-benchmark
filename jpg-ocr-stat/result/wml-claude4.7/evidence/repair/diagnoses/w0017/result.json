@@ -1,0 +1,97 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "amount_writeback_empty_string_instead_of_null_for_078",
+        "general_pattern": "When a receipt-extraction task declares that failed extractions must be written as null, the writeback layer must emit a true empty cell (Python None in openpyxl) rather than an empty string. If the extraction function returns None but the serializer coerces it (e.g., via f-string or str()) or if a sentinel \"\" is used in the DataFrame, the output cell becomes an empty-string cell distinct from null and fails a strict null equality check.",
+        "wrong_approach": "For image 078.jpg, the extraction pipeline returned total=None (the trajectory ends with '078.jpg: date=2017-02-02, total=None' after script fix), but the delivered xlsx row shows total_amount as the empty string \"\" rather than a null cell. This indicates the writeback step converted None to \"\" (string sentinel) at xlsx assignment time.",
+        "observable_evidence": "predictions row for 078.jpg has \"total_amount\": \"\" while every other row contains a two-decimal string. The trajectory shows the extraction function printed total=None for 078. Verifier field_feedback marks 078 amount_correct=false. The current image-ocr skill already carries a null_vs_empty_string_contract mechanism anchor and xlsx has a 'Preserving null vs empty string on writeback' section, but the delivered artifact still contains \"\" rather than an empty cell.",
+        "missing_reasoning_step": "After the extraction function returns None, the writeback must pass None directly to openpyxl/pandas without string coercion and the delivery_contract_self_check must assert cell.value is None (not == \"\") before finishing. Neither check appears to have been applied to row 078 in the actual run.",
+        "correct_general_approach": "In the writeback layer, keep None as a sentinel through to the openpyxl cell assignment; never run it through f\"{v}\" or str(v). Add a verification pass that reloads the workbook with data_only=True and asserts, for every row whose extraction failed, cell.value is None (not \"\" and not \"None\"). This is already codified in both image-ocr (null_vs_empty_string_contract) and xlsx (Preserving null vs empty string on writeback / Delivery contract verification) but was not operationalized in code.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract + xlsx_delivery_contract_self_check",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to receipt-extraction / data-only xlsx tasks whose contract explicitly declares that failed extractions must be null. Not applicable to tasks whose contract accepts \"\" or a specific placeholder string, nor to formatted financial models.",
+        "do_not_generalize_to": "Do not fold this into generic xlsx guidance for financial models or templates where empty-string cells are a legitimate pattern. Do not apply to tasks where the contract is silent on null vs empty string.",
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Preserving null vs empty string on writeback / Delivery contract verification for data-only xlsx outputs",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "amount_lost_to_fallback_header_misroute_for_074_077",
+        "general_pattern": "On receipts where the chosen keyword line is actually a column header (e.g. 'Description Qty Price Amount', 'Total(RM)' at the top of an item table) or a secondary intermediate value, the split-line fallback and tier walk can promote an unrelated numeric line (first line-item amount, GST row, or subtotal variant) into the total slot. The receipt_total_keyword_priority_disambiguation anchor documents header-exclusion and summary-cutoff rules, but if the regex set for header-detection and the fallback guard are incomplete, specific layouts (IKEA 074, Banh Mi 077) will still route to the wrong number.",
+        "wrong_approach": "074.jpg (IKEA, Trans 311136194, 2 pc BOSTRAK 538.00): the delivered row has total_amount=\"702.00\" instead of a receipt-consistent two-decimal value; the fallback likely picked a cross-line number. 077.jpg (Banh Mi, TOTAL: 23.25): delivered total=\"23.26\" which equals the pre-rounding 'Total (Inclusive of GST)' line, not the final 'TOTAL:' line after rounding adjustment. In both cases, the keyword/priority walk accepted an earlier non-final anchor instead of the lowest post-summary final-total line.",
+        "observable_evidence": "field_feedback: 074 amount_correct=false, 077 amount_correct=false. The predictions table shows 074=702.00 and 077=23.26. Trajectory debug around 078 shows the same selection code paths are used for all receipts (column-header exclusion was added for 078 but did not cover IKEA/Banh Mi layouts). The images (074, 077) contain the correct totals as cleanly-anchored lines ('Total Rounded 538.00'; 'TOTAL: 23.25') that a stricter rounding-aware preference would have picked.",
+        "missing_reasoning_step": "The tier walker must (a) prefer the last post-summary tier-matching line over an earlier same-tier candidate when the receipt contains explicit 'Total Rounded' / 'Total After Rounding' / 'Rounding Adj' anchors, and (b) treat 'Total (Inclusive of GST)' as a pre-rounding candidate that is overridden by any following 'TOTAL:' line in the same summary block. The guarded split-line fallback must also refuse to cross into a different summary row.",
+        "correct_general_approach": "Extend the receipt_total_keyword_priority_disambiguation anchor so that, within one summary block, a later same-or-higher-tier total line overrides an earlier one, and 'Total Rounded'/'Total After Rounding'/post-'Rounding Adj' lines are preferred when present. Keep the walker scoped to post-cutoff summary lines and keep header exclusions (Description/Qty/Price Amount) already in place.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to receipt OCR tasks where the task prompt declares a keyword priority list and an exclusion list, and where receipts expose explicit rounding-adjustment or post-rounding total lines. Not applicable to receipts with only one total line.",
+        "do_not_generalize_to": "Do not generalize this 'prefer later / post-rounding total' rule to non-receipt documents, nor to tasks where no rounding-adjustment convention is declared. Do not reorder the task-declared tier priority list; this is a within-tier/within-summary-block tiebreak, not a cross-tier override.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: receipt_total_keyword_priority_disambiguation",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "date_label_binding_missed_closed_vs_transaction_date_for_034",
+        "general_pattern": "When a receipt contains multiple date-like tokens (transaction/invoice date, print timestamp, 'Closed' date, loyalty/promo date), binding the extracted date to the correct label matters. The receipt_date_label_binding_and_locale anchor already lists 'CLOSED'/'CLOSING'/'PRINT' as negative preludes, but if the label-binding step is weak for a specific layout (e.g., Perniagaan Zheng Hui 034 with Date 09/03/2018 but another date-like token present or OCR corruption on the primary Date line), the walker can bind to a secondary date token and emit the wrong ISO value.",
+        "wrong_approach": "034.jpg (Perniagaan Zheng Hui, visible 'Date: 09/03/2018'): delivered date=\"2018-08-09\" instead of a date consistent with the visibly-labeled transaction date on the receipt. The pipeline appears to have (a) bound to a non-primary date token, or (b) misparsed day/month ordering locally without consulting batch-dominant ordering (other rows in the same batch are parsed consistently as DD/MM/YYYY, so 09/03/2018 should resolve to 2018-03-09).",
+        "observable_evidence": "field_feedback: 034 date_correct=false. The predictions row for 034 shows date=\"2018-08-09\". The source image contains an explicit 'Date: 09/03/2018' label line. Every other date in the batch is parsed under DD/MM/YYYY, so the batch-dominant ordering is unambiguous.",
+        "missing_reasoning_step": "After collecting all date-shaped tokens, the walker must (a) prefer tokens on lines whose canonicalized text contains 'DATE'/'INVOICE DATE' and is not preceded by 'PRINT'/'CLOSED'/'CLOSING'/'FRN'/'LOYALTY'/'PROMO', and (b) when the batch has established a DD/MM/YYYY dominant ordering, apply it to ambiguous rows rather than re-inferring per-row.",
+        "correct_general_approach": "Keep receipt_date_label_binding_and_locale as the primary binding rule; make the batch-dominant locale inference an actual pass (first collect unambiguous rows, lock the ordering, then re-parse ambiguous rows). Do not override an unambiguous row based on batch majority, but do apply the locked ordering to otherwise-ambiguous dates like 09/03/2018.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to receipt-OCR tasks where the task prompt declares an ISO date requirement and receipts can contain multiple date-like tokens. Not applicable to tasks with a single declared date field or a known fixed locale that overrides batch inference.",
+        "do_not_generalize_to": "Do not fold receipt-specific DD/MM/YYYY defaults into generic OCR or xlsx guidance; do not use this to override unambiguous rows based on batch majority.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: receipt_date_label_binding_and_locale",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "iteration_budget_exhausted_before_consolidated_batch_edit",
+        "general_pattern": "The run terminated at max_iterations=65 with termination_reason=max_iterations and acp_stop_reason=max_turn_requests. The trajectory shows an iteration-per-receipt interactive debug loop (e.g., repeated per-image OCR variant inspections for 078) rather than one consolidated diagnostic pass followed by a small batch of pattern edits, which is exactly the pattern the batch-diagnostic-then-batch-edit workflow note already warns against.",
+        "wrong_approach": "The agent used many iterations to tune OCR variants for a single receipt (078) and did not reach a consolidated re-run that would have swept the writeback-null fix and the within-summary-block preference across 074, 077, 078, and 034 together. The budget was spent on narrow improvements rather than on the shared mechanism edits.",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations'; agent_iterations=65=max_iterations_at_source; budget_termination_is_not_natural_completion=true; response_tool_call_counts shows 27 terminal + 22 think + 16 file_editor invocations concentrated on single-receipt experimentation around 078. The current image-ocr SKILL.md already carries a 'Workflow note: batch-diagnostic-then-batch-edit' entry.",
+        "missing_reasoning_step": "Before iterating on any single image, dump a per-image diagnostic table (OCR slice around keywords, candidate (tier, value, anchor) list, current prediction) for all 22 receipts, then plan a single consolidated edit set that addresses the pattern defects (writeback null, within-summary rounded-total preference, header-line exclusion, date label binding) and re-run once.",
+        "correct_general_approach": "Keep the existing batch-diagnostic-then-batch-edit workflow note; its content is correct but it was not operationally enforced in this run. The L1-level change needed is to strengthen it as a first-step directive (produce the batch diagnostic artifact before any single-image preprocessing experiment).",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "Workflow note: batch-diagnostic-then-batch-edit",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to batch OCR extraction tasks over N images with a declared iteration budget. Not applicable to single-image tasks or to tasks where per-image preprocessing is itself the goal.",
+        "do_not_generalize_to": "Do not turn this into a blanket ban on per-image debugging; interactive debugging is still appropriate when the batch diagnostic has localized the failure to one receipt and the budget allows.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "L1",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "writeback_or_delivery",
+      "primary_anchor": "null_vs_empty_string_contract",
+      "editor_direction": "strengthen",
+      "composition_issue": "The current candidate SKILL.md already contains the correct mechanism anchors (null_vs_empty_string_contract and xlsx_delivery_contract_self_check for writeback; receipt_total_keyword_priority_disambiguation and receipt_date_label_binding_and_locale for target_binding; batch-diagnostic-then-batch-edit for operation_decision). The failures 074/077/078/034 are not caused by missing anchors but by weak operationalization: the writeback did not actually emit a true empty cell for 078, the tier walker did not apply a within-summary-block 'prefer later / post-rounding' tiebreak for IKEA (074) and Banh Mi (077), and the batch-diagnostic workflow was not followed before the iteration budget was spent on single-receipt experiments. Strengthen rather than add: make the null-cell self-check and the within-summary rounded-total preference explicit executable steps, and promote the batch-diagnostic note into a first-step directive.",
+      "preservation_constraints": [
+        "Preserve the task-declared keyword priority tiers and exclusion list exactly; do not reorder or extend tiers under the guise of a tiebreak.",
+        "Preserve the scope boundaries that confine receipt-overlay rules to receipt-extraction tasks with declared keyword/exclusion/null conventions; do not leak receipt heuristics into openai-vision, pdf, video-frame-extraction, or generic xlsx guidance.",
+        "Preserve the null-vs-empty-string contract as scoped to tasks whose contract explicitly declares null; do not globalize to tasks where \"\" or placeholder strings are legitimate.",
+        "Preserve the Multi-Pass OCR Strategy as additive/conditional; do not promote exhaustive variant sweeps to a default.",
+        "Preserve the generic OCR flow, JSON output schema, and non-receipt guidance unchanged."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four observed field failures (074 amount, 077 amount, 078 amount, 034 date) sit in skill-controllable workflow nodes (writeback and target_binding) that already have named mechanism anchors in the current candidate SKILL.md. The termination at max_iterations is also skill-controllable via the existing batch-diagnostic-then-batch-edit workflow note. No infrastructure/executor-only failure is implicated: the run delivered a well-formed xlsx and the verifier scored it; the defects are in content selection and null emission, not in tooling."
+    }
+  },
+  "response_id": "msg_bdrk_kq2plhnhpchychjpazl5pgibbtojdleeqwnkyiiqzhyg26tegdiq",
+  "http_status": 200
+}

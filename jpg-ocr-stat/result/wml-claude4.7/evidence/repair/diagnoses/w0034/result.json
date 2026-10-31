@@ -1,0 +1,117 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "total_last_match_wins_over_higher_quality_candidate_within_same_tier",
+        "general_pattern": "When multiple lines within the same keyword-priority tier match, selecting the last candidate by position without checking per-line OCR fidelity causes a cleanly parsed higher-quality candidate (e.g. 'Total incl. of GST 102.00') to be overridden by a later same-tier line whose numeric token was corrupted by OCR into a different value (e.g. 'Total Amt Rounded ——S«702.00').",
+        "wrong_approach": "Rank tier-4 candidates purely by position (last match wins) and accept the first numeric token found, with no corroboration against sibling anchors on the same receipt (Subtotal, Payment, Cash) and no preference for a candidate consistent with payment/subtotal arithmetic.",
+        "observable_evidence": "074.jpg: OCR under PSM 6 produces 'Subtotal : 102.00', 'Total incl. of GST 102.00', 'Total Amt Rounded ——S«702.00', 'Payment : 102.00'. Prediction wrote total_amount='702.00'. The sibling Subtotal/Payment lines unambiguously corroborate 102.00; the chosen candidate differs by exactly one leading-digit OCR substitution (7↔1).",
+        "missing_reasoning_step": "Within a tier with multiple candidates, cross-check each candidate's numeric value against other total-adjacent anchors on the same receipt (Subtotal, Payment, Cash − Change) and prefer the candidate whose value is corroborated by at least one such anchor over an outlier that differs by a single leading-digit confusable substitution.",
+        "correct_general_approach": "After collecting same-tier candidates, parse each candidate's monetary token, parse Subtotal/Payment/Cash/Change anchors, and rank by (tier_rank, corroborated_support_from_non_tier_anchors, cross_variant_support, position). Only fall through to position when corroboration is tied.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "multi_variant_consensus_over_tier_priority",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies when the current task declares keyword-priority total extraction over receipt OCR text and the receipt contains multiple same-tier candidate lines plus independent subtotal/payment anchors on the same page.",
+        "do_not_generalize_to": "Non-receipt OCR, tasks without a declared keyword tier list, or receipts where no independent subtotal/payment anchor exists; never use arithmetic corroboration to override a strictly higher-priority tier that already has a cleanly anchored match.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: multi_variant_consensus_over_tier_priority",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "fallback_line_total_from_descriptive_amount_split",
+        "general_pattern": "For receipts where the final total keyword and its numeric value are split across two lines (e.g. 'Grand Total' on one line and a trailing descriptive 'Total : 92.80 / Grand Total : 92.80' block), relying on last-position same-tier match without inspecting a split-line fallback picks up an unrelated nearby amount (e.g. an itemized line like 'PORK LEG SMALL ... 20.00') and writes it as the receipt total.",
+        "wrong_approach": "Treat the keyword line as if it must itself contain the numeric total, or walk only forward from the first keyword match, so that when the keyword line has no digits the code either skips it or binds to a different, earlier line with a digit that is not the real total.",
+        "observable_evidence": "078.jpg: OCR contains '* Fotal : BO', '{ Grand Total —— ~\"\"\"92 80', 'Cash Received — 100.00', 'Change 7.20'. Prediction wrote total_amount='' (empty string), while the receipt's own Cash−Change (100.00−7.20=92.80) and the 'Grand Total' line both support 92.80. The extractor failed to recover 92.80 from the keyword line with corrupted spacing/decimal and did not use the Cash−Change cross-check.",
+        "missing_reasoning_step": "When the chosen keyword line's digits fail the two-decimal monetary regex, before falling through to the next tier, (a) attempt OCR-confusable repair restricted to the digit-dominated span on that line, and (b) corroborate against Cash−Change / Payment anchors; only after both fail should the extractor emit None.",
+        "correct_general_approach": "Apply the guarded split-line fallback: if the keyword line has no parseable monetary token, try (i) digit-span-only confusable repair ('92 80' → '92.80'), (ii) corroboration via Cash−Change arithmetic from non-excluded tender lines, (iii) only then move to a prior same-tier candidate. Never fabricate; prefer None over a non-total amount.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "ocr_amount_normalization_and_arithmetic_crosscheck",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt-style OCR tasks where the task prompt declares a keyword tier list and the receipt supplies independent tender lines (Cash Received, Change) that bracket the true total.",
+        "do_not_generalize_to": "Receipts with no tender/change anchors, non-receipt OCR, or tasks that forbid arithmetic reconstruction; do not use this to override a cleanly parsed higher-tier match.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: ocr_amount_normalization_and_arithmetic_crosscheck",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "writeback_contract_null_vs_empty_string_violation",
+        "general_pattern": "When extraction fails for a field whose contract requires `null`, writing the Python empty string `\"\"` into the openpyxl cell produces a cell whose readback is `\"\"` not `None`, which violates both the declared schema and any downstream equality check against null, even if the extraction logic itself is otherwise fine.",
+        "wrong_approach": "Format the final cell value via `f\"{value:.2f}\" if value is not None else \"\"` or an equivalent coercion that collapses None to the empty string before assignment, instead of routing None straight through to the openpyxl cell.",
+        "observable_evidence": "Predictions row for 078.jpg has total_amount='' (empty string, not null). The schema explicitly requires null on failed extraction. All other failed-field cells in this task family must satisfy cell.value is None; here it does not.",
+        "missing_reasoning_step": "At writeback, verify that failed-extraction cells are assigned Python None (not `\"\"`, `\"None\"`, `\"nan\"`), and after wb.save() reload with data_only=True and assert that each such cell satisfies `cell.value is None`.",
+        "correct_general_approach": "Return None from the extractor on failure and assign that None directly to the openpyxl cell; add a post-save self-check pass that loads the workbook and asserts contract conformance (sheet name, column order, per-cell type, null vs empty string) before finishing.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract",
+        "defect_relation": "weak",
+        "scope_boundary": "Data-only xlsx delivery contracts where the task prompt declares that a failed extraction must be written as null and comparison is cell-by-cell.",
+        "do_not_generalize_to": "Tasks whose contract uses \"\" as a sentinel, tasks with a required placeholder string, or financial models with formulas (where empty strings do not appear in extraction cells).",
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Preserving null vs empty string on writeback / Delivery contract verification for data-only xlsx outputs",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "preprocessing_variant_singleton_without_consensus",
+        "general_pattern": "Switching the OCR pipeline to a single preprocessed variant (grayscale + autocontrast + PSM 6) improves most receipts but silently introduces one-off character-level errors on individual receipts (e.g. '23.26' → '23.25' from an adjacent 'TOTAL: 23.25' footer, or Cash−Change line corruption). Running only one variant and taking the last same-tier match leaves no mechanism to reconcile such single-character OCR substitutions.",
+        "wrong_approach": "Pick one PSM/preprocessing combination globally and skip the Multi-Pass OCR Strategy entirely, so there is no cross-variant evidence available when a single pass produces a one-digit-off amount or picks a nearby but non-authoritative total line.",
+        "observable_evidence": "077.jpg: PSM 6 produced both 'Total (Inclusive of GST): 23.26' and a footer 'TOTAL: 23.25'; the extractor picked the last same-tier candidate 23.25. The default PSM output contained only the 23.26 anchor. A multi-variant consensus pass would have had both tokens available and could have ranked 23.26 higher via corroboration with the 'Total (Inclusive of GST)' anchor.",
+        "missing_reasoning_step": "Trigger the conditional multi-pass OCR fallback when the chosen total line is close (±0.01–0.05) to another same-receipt anchor like Total (Inclusive of GST) or when the numeric span of the chosen line contains confusable characters near the decimal; then reconcile candidates via corroborated support.",
+        "correct_general_approach": "Keep a single-variant primary pass for throughput, but invoke the conditional multi-pass OCR anchor whenever (a) parsed total disagrees with another anchor on the same receipt by a one-character substitution distance, or (b) the regex fails on all tiers.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "conditional_multi_pass_ocr_on_noisy_numeric_fields",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt OCR batches processed by a single-variant primary pass; applies when sibling anchors (Total Inclusive of GST, Subtotal, Payment, Rounded Total) are present on the same receipt.",
+        "do_not_generalize_to": "Non-receipt OCR, or receipts where only one total line exists; do not run exhaustive variant sweeps unconditionally on every image.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: conditional_multi_pass_ocr_on_noisy_numeric_fields",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "date_label_binding_overridden_by_salesperson_line",
+        "general_pattern": "On receipts whose transaction date is printed on the same line as another label (e.g. 'Salesperson: Date: 09/08/2018'), a single-variant preprocessed OCR pass can corrupt the day/month digits ('09/08/2018' → '09/03/2018'). Without label-bound date extraction and multi-variant corroboration, the pipeline silently writes the corrupted date without flagging the ambiguity.",
+        "wrong_approach": "Take the first date-shaped token from the preprocessed OCR text without comparing against alternative OCR variants of the same labeled line or against other date anchors on the same receipt (Receipt date, Closed, Print Date).",
+        "observable_evidence": "034.jpg: default-PSM OCR line is 'Salesperson: Date: 09/03/2018' under preprocessing, while the raw non-preprocessed OCR earlier in trajectory was consistent with 09/08. Prediction wrote date='2018-03-09'; feedback marks the date field incorrect. The extraction has no mechanism to reconcile the ambiguous month digit against another anchor.",
+        "missing_reasoning_step": "For each extracted date, confirm it against at least one other same-receipt date anchor (second line Date/Time, Closed, Print Date) and, when a conditional multi-pass OCR is invoked, prefer the day/month ordering supported by the majority of corroborated anchors.",
+        "correct_general_approach": "Apply receipt_date_label_binding_and_locale with corroboration: parse all date-labelled lines, keep only transaction-date-labelled ones (exclude PRINT/CLOSED/PROMO), and in a conditional multi-pass only accept a date whose (day, month, year) is consistent across variants or across multiple labelled anchors.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt tasks that declare an ISO date output and whose receipts contain more than one date-shaped token (transaction, print, closed, promo).",
+        "do_not_generalize_to": "Receipts with a single unambiguous date line; do not use corroboration to override an unambiguous day>12 anchor.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: receipt_date_label_binding_and_locale",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "multi_variant_consensus_over_tier_priority",
+      "editor_direction": "strengthen",
+      "composition_issue": "The current receipt overlay in image-ocr/SKILL.md defines keyword-priority tiers, two-decimal invariant, OCR amount normalization, multi-variant consensus, label-bound dates, lenient date salvage, and null-vs-empty-string writeback, but the observed failures sit at the composition seams: same-tier last-match selection does not invoke the consensus/corroboration mechanism when a sibling Subtotal/Payment anchor is present (074.jpg → 702.00); the amount-normalization/arithmetic-crosscheck is not triggered for split-line Grand Total blocks when the keyword line's digits are corrupted (078.jpg → \"\"); the single-variant preprocessed pass does not escalate to conditional multi-pass OCR when the chosen total line and a sibling 'Total (Inclusive of GST)' anchor differ by one character (077.jpg → 23.25). The xlsx overlay's null-vs-empty-string contract is defined but not enforced at writeback, allowing an empty-string cell to ship. The editor should strengthen the composition between tier selection, arithmetic crosscheck, conditional multi-pass OCR, and writeback self-check, not add new mechanisms.",
+      "preservation_constraints": [
+        "Keep the task-declared keyword priority tiers and exclusion keywords verbatim; do not reorder, drop, or extend them.",
+        "Preserve the two-decimal monetary invariant and the primary monetary regex.",
+        "Preserve the summary-section cutoff (GST SUMMARY / TAX CODE / Amount (RM) Tax column header) as a hard pre-filter before tier walking.",
+        "Preserve the generic OCR flow and JSON schema for non-receipt tasks; keep the receipt overlay scoped to tasks declaring keyword/exclusion/null conventions.",
+        "Preserve the null-vs-empty-string writeback contract scope: receipt-extraction tasks whose contract explicitly requires null, not a blanket xlsx rule.",
+        "Preserve the conditional (not unconditional) nature of the multi-pass OCR fallback to avoid unbounded cost on large batches.",
+        "Do not fold receipt-specific hints into openai-vision, pdf, or video-frame-extraction SKILL.md."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four observable failures (074 amount 702 vs 102, 077 amount 23.25 vs 23.26, 078 amount empty-string vs recoverable 92.80, 034 date 03-09 vs 08-09) are localized to the receipt-overlay mechanisms already present in the candidate image-ocr/SKILL.md and the xlsx writeback contract already present in xlsx/SKILL.md. Each failure maps to a reusable workflow node (operation_decision for tier selection, compute_or_transform for amount normalization and conditional multi-pass, target_binding for label-bound dates, writeback_or_delivery for null-vs-empty-string). None of the failures require new infrastructure, external tools, or executor-only changes; they are compositional gaps between existing mechanism anchors. The source run terminated at max_iterations (65) but produced a scorable workbook and the failures are deterministic OCR+text-processing issues, not infrastructure faults."
+    }
+  },
+  "response_id": "msg_bdrk_wqmecja34bzdcpegwtwtrjsucoggnupgeanhv762jgc5iottdjyq",
+  "http_status": 200
+}

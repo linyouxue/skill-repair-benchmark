@@ -1,0 +1,116 @@
+{
+  "tool_input": {
+    "overlay": {
+      "primary_node": "writeback_or_delivery",
+      "primary_anchor": "null_vs_empty_string_contract",
+      "editor_direction": "preserve",
+      "composition_issue": "The current candidate skill already contains a strong receipt overlay with keyword-priority disambiguation, two-decimal invariant, OCR amount normalization, date label binding, lenient date salvage, and the null-vs-empty-string writeback contract. Observed failures correspond to narrow pattern gaps (not missing mechanisms): (1) 078.jpg wrote empty string instead of Python None, violating the already-declared null_vs_empty_string_contract; (2) 074.jpg and 077.jpg have amount parsing errors where tier selection or OCR normalization picked a wrong-tier/wrong-value candidate; (3) 034.jpg has a date binding/locale ambiguity error. These are addressable by strengthening (not replacing) existing anchors.",
+      "preservation_constraints": [
+        "Preserve the entire 'Structured Field Extraction from Receipts' overlay in image-ocr/SKILL.md including its scope and negative boundary paragraphs.",
+        "Preserve xlsx 'Preserving null vs empty string on writeback' section exactly as scoped - do not generalize beyond declared-null contracts.",
+        "Do not touch openai-vision, pdf, or video-frame-extraction skills.",
+        "Do not add task-specific hardcoded expected answers or image-specific hints.",
+        "Do not reorder or expand the task-declared keyword priority tiers or exclusion lists.",
+        "Keep the batch-diagnostic-then-batch-edit workflow note."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four observed failures (3 amount, 1 date) are post-OCR text processing choices and writeback conventions that are directly governed by anchors already present (or that fit cleanly into existing anchors) in the current image-ocr receipt overlay and xlsx null-contract overlay. No infrastructure/executor fault: the agent terminated on max_iterations (65) with a valid delivered xlsx (field_accuracy 0.909). The termination is a workflow efficiency symptom (batch-diagnostic-then-batch-edit note already exists) but the residual field errors are controllable via strengthened mechanism anchors - no new skill or external capability required."
+    },
+    "diagnoses": [
+      {
+        "label": "null_contract_violated_on_078_amount_written_as_empty_string",
+        "general_pattern": "When field extraction fails and the task contract declares `null` as the failure sentinel, the writeback must assign Python None to the cell so openpyxl stores a genuinely empty cell. Writing \"\" instead produces an empty-string cell that is a distinct value from null and will mismatch the oracle on exact comparison.",
+        "wrong_approach": "Extraction routine returned an empty string (or a str-coerced None) for the amount field on 078.jpg, and that empty string was passed through to the openpyxl cell. The resulting cell contains an empty string, not a true empty cell.",
+        "observable_evidence": "Prediction row for 078.jpg has date=\"2017-02-02\" and total_amount=\"\" (empty string in the predictions table). Field feedback marks amount_correct=false for 078.jpg while prediction_present=true, consistent with a value being written but not matching the declared null convention. All other failed extractions in the batch were populated with strings, so 078.jpg is the only row that reached the failure path.",
+        "missing_reasoning_step": "Before assigning the extracted amount to the worksheet cell, verify that a failed extraction is represented as Python None (not \"\", \"None\", \"nan\") and assign None directly - never route it through f\"{value}\" or str(value).",
+        "correct_general_approach": "In the extraction function, return None on failure; in the writeback loop, assign the returned value directly to ws.cell(...).value without string coercion; in the final data-only reload self-check, assert that any intended-null cell satisfies cell.value is None rather than cell.value == \"\".",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to receipt-extraction (and analogous data-only xlsx) tasks whose contract explicitly declares null as the failure sentinel; the task_prompt here states 'If extraction fails for either field, the value is set to null.'",
+        "do_not_generalize_to": "Tasks that accept empty string as a valid sentinel, financial models where empty strings never appear, or tasks requiring a specific placeholder string like 'N/A'. Do not retroactively null out legitimately-extracted zero-valued totals.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: null_vs_empty_string_contract (and cross-reference in xlsx/SKILL.md > Preserving null vs empty string on writeback)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "amount_tier_or_normalization_miss_on_074",
+        "general_pattern": "When OCR of the amount token on the highest-priority tier line is corrupted (digit/letter confusables, decimal dropouts) or when a lower-priority candidate line appears before the true summary total, the extractor can accept a value that is numerically plausible but structurally wrong (wrong tier, wrong normalization). Guardrails: enforce the two-decimal invariant, apply confusable substitution only inside digit-dominant tokens on tier-matched lines, and prefer corroborated candidates (subtotal+tax, cash-change) over single-anchor outliers.",
+        "wrong_approach": "On 074.jpg (Thai Delicious Restaurant, Grand Total line present), the extractor emitted total_amount=\"702.00\" which is implausible for the receipt's visible line items (sum ~92.80). This looks like either (a) wrong-tier capture of a non-total number from a numeric ID / table row, or (b) a confusable substitution/concatenation that produced a 3-digit integer where a 2-decimal monetary token was required. Either way, the two-decimal invariant and arithmetic cross-check were not binding.",
+        "observable_evidence": "Predictions row 074.jpg has total_amount=\"702.00\" with amount_correct=false. The receipt image clearly shows 'Total : 92.80' and 'Grand Total : 92.80' with items summing to 92.80, so the chosen token diverges by an order of magnitude from any corroborated anchor on the receipt.",
+        "missing_reasoning_step": "After selecting a tier-matched candidate line, parse monetary tokens with the strict two-decimal regex, apply confusable substitution only when the token sits on a tier-keyword line and is already digit-dominant, and cross-check the candidate against subtotal/line-item sums when they are reliably parsed. If the candidate differs from a corroborated anchor by an order of magnitude, back off to an earlier same-tier candidate instead of accepting it.",
+        "correct_general_approach": "Apply receipt_total_keyword_priority_disambiguation strictly: walk tiers in declared order, within each tier iterate last-to-first and accept only candidates whose numeric token passes the two-decimal invariant and ocr_amount_normalization_and_arithmetic_crosscheck; prefer candidates corroborated by subtotal/payment/line-item sum.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation + monetary_two_decimal_invariant + ocr_amount_normalization_and_arithmetic_crosscheck",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to receipt-style OCR tasks that declare a keyword-priority total selection convention; the current task prompt declares exactly such tiers including GRAND TOTAL as highest priority.",
+        "do_not_generalize_to": "Non-receipt documents, free-form OCR, images where the task does not declare a tiered keyword priority, or numeric fields that are not two-decimal monetary totals (quantities, phone numbers, IDs).",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: receipt_total_keyword_priority_disambiguation and > Mechanism anchor: ocr_amount_normalization_and_arithmetic_crosscheck",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "amount_split_line_or_normalization_miss_on_077",
+        "general_pattern": "On receipts where the total keyword and its monetary token are on the same line but OCR corrupts the token (confusables, missing decimal), the extractor must detect the corruption, apply bounded confusable substitution, and re-validate the two-decimal invariant - rather than fall through to the next line (which is often a payment/tender/change line) or silently truncate a one-decimal match.",
+        "wrong_approach": "On 077.jpg (Banh Mi Cafe), the predicted total_amount=\"23.26\" is a tier-adjacent anchor (the pre-rounding 'Total (Inclusive of GST): 23.26') but the actual summary bold TOTAL line is '23.25' after a '-0.01' rounding adjustment. The extractor picked the pre-rounding candidate instead of the final declared total, missing the lower-position same-tier candidate that supersedes it.",
+        "observable_evidence": "Predictions row 077.jpg has total_amount=\"23.26\" with amount_correct=false. The receipt visibly shows two consecutive total-keyword lines ('Total (Inclusive of GST): 23.26' then 'Rounding Adj: -0.01' then 'TOTAL: 23.25'); accepting the first match instead of iterating last-to-first within the same tier yields the pre-rounding value.",
+        "missing_reasoning_step": "Within the surviving candidates for a tier, iterate from last to first (not first to last) so a later same-tier line (the final TOTAL after rounding) wins over an earlier intermediate 'Total (Inclusive of GST)' line. Treat a trailing rounding adjustment line as a signal that an earlier total was intermediate.",
+        "correct_general_approach": "In receipt_total_keyword_priority_disambiguation step 3c, strictly iterate same-tier candidates from last to first; do not accept the first candidate just because it parses cleanly. Only fall through to the next tier when the current tier yields zero accepted candidates.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt tasks with a declared tiered keyword priority where multiple same-tier total lines can appear (pre-rounding vs final rounded total).",
+        "do_not_generalize_to": "Tasks without declared tier priority, or forms where a single total line is guaranteed. Do not use last-to-first ordering to override a strictly higher-priority tier.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: receipt_total_keyword_priority_disambiguation (step 3c last-to-first iteration)",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "date_label_binding_or_locale_slip_on_034",
+        "general_pattern": "When a receipt contains multiple date-shaped tokens (transaction date, print timestamp, closing date) and the locale is DD/MM/YYYY, the extractor must bind the extracted date to a transaction-date label and parse under the declared locale, rather than taking the first date-shaped match or defaulting to MM/DD/YYYY.",
+        "wrong_approach": "On 034.jpg (Perniagaan Zheng Hui, Date: 09/03/2018 under Malaysian DD/MM/YYYY locale), the extractor emitted date=\"2018-08-09\". That ISO value corresponds to swapping day and month (09/03 read as month=08?... more likely a confused parse mixing 09 and 03). The result diverges from the labeled 'Date: 09/03/2018' line, indicating either locale misordering (MM/DD assumed instead of DD/MM) or binding to a non-transaction date-like token elsewhere on the receipt.",
+        "observable_evidence": "Predictions row 034.jpg has date=\"2018-08-09\" with date_correct=false. The receipt image shows a clearly labeled 'Date: 09/03/2018' row and a 'Time: 08:49:00' row; no other date-shaped token on the receipt matches 2018-08-09 under DD/MM/YYYY, so this is a label-binding or locale ordering error, not an OCR confusables error.",
+        "missing_reasoning_step": "Before accepting a date-shaped token, (a) prefer lines whose canonicalized text contains DATE and that are not preceded by PRINT/CLOSED/CLOSING; (b) parse under the declared locale (DD/MM/YYYY for this Malaysian-receipt family); (c) if ambiguous (both components <=12), use batch majority inferred from unambiguous rows to resolve ordering.",
+        "correct_general_approach": "Apply receipt_date_label_binding_and_locale: canonicalize labels, exclude PRINT/CLOSED context, parse DD/MM/YYYY first for this locale, and emit ISO 8601. Do not swap day and month based on first-position heuristics.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipts in a declared locale (Malaysian DD/MM here, inferable from the batch majority of unambiguous dates like 23-01-2019, 15/06/2017, 18/03/18).",
+        "do_not_generalize_to": "Tasks without a declared or inferable locale, documents with ISO-only dates, or tasks whose contract uses a different date output format than YYYY-MM-DD.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: receipt_date_label_binding_and_locale",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "iteration_budget_exhaustion_without_convergence_meta",
+        "general_pattern": "Interactive per-image debug loops on batch OCR extraction tasks consume iteration budget without converging the heuristics; a single diagnostic pass that dumps per-image (per-variant OCR slice, candidate list, prediction) followed by a consolidated set of pattern edits and one re-run converges faster.",
+        "wrong_approach": "The source run reached max_iterations=65 (termination_reason='max_iterations', acp_stop_reason='max_turn_requests') with 27 terminal calls, 22 think calls, 16 file_editor calls and 0 skill invocations, suggesting iterative per-image fiddling rather than one consolidated diagnostic-then-edit pass.",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations'; response_tool_call_counts shows 27+22+16=65 tool calls, matching iteration cap exactly. n_skill_invocations=0 means the overlay guidance in the current candidate was present but never explicitly invoked. Field accuracy 0.909 with only 4 field errors despite exhausting iterations indicates the agent was close to converged but iterated inefficiently.",
+        "missing_reasoning_step": "At the start of a batch OCR task, run a single diagnostic sweep producing a compact per-image table of (OCR slices around keywords, candidate (tier, value, anchor) list, current prediction), then plan a small consolidated set of pattern/variant edits and re-run once.",
+        "correct_general_approach": "Follow the existing 'Workflow note: batch-diagnostic-then-batch-edit' in image-ocr/SKILL.md: avoid iteration-per-image interactive debug loops; produce one diagnostic artifact, make a consolidated edit, re-run.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "Workflow note: batch-diagnostic-then-batch-edit",
+        "defect_relation": "weak",
+        "scope_boundary": "Batch OCR / batch extraction tasks over N>5 images with a shared heuristic.",
+        "do_not_generalize_to": "Single-image tasks or tasks where each image legitimately needs bespoke handling.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "meta_only",
+        "confidence": "medium"
+      }
+    ]
+  },
+  "response_id": "msg_bdrk_iigmvosrkipijhoiivdopxfjdpvkf3djxs4cdev7atnj4xbh57xq",
+  "http_status": 200
+}

@@ -1,0 +1,79 @@
+{
+  "tool_input": {
+    "overlay": {
+      "primary_node": "compute_or_transform",
+      "primary_anchor": "receipt_total_keyword_priority_disambiguation",
+      "editor_direction": "strengthen",
+      "composition_issue": "Current overlay in image-ocr correctly scopes keyword-priority total selection, but the three remaining field errors show gaps in (a) the writeback-side null contract for the specific 'empty-string vs None' failure mode (078), (b) handling receipts where the total line itself is OCR-corrupted so a same-tier retry with stronger preprocessing is required rather than falling to a lower tier or an unrelated candidate (074, 077, 078), and (c) handling tabular 'Price Amount' column headers vs. the summary 'Total : 92.80' / 'Grand Total : 92.80' line (078). The anchors already exist; they need to be strengthened with (i) an explicit rule that when the chosen tier's keyword line yields a monetary token that fails the two-decimal invariant OR falls outside an arithmetic-plausibility window given parsed subtotal/tax, trigger `conditional_multi_pass_ocr_on_noisy_numeric_fields` with upscales >= 3x and PSM 4 before degrading tier, and (ii) a tighter cross-reference from the receipt overlay to `xlsx_delivery_contract_self_check` so the None-not-empty-string writeback is actually verified on reload. No new anchors needed; preserve current scope boundaries and negative boundaries.",
+      "preservation_constraints": [
+        "Preserve receipt-only scoping of the Structured Field Extraction overlay in image-ocr.",
+        "Preserve negative boundaries forbidding folding receipt-specific hints into openai-vision/pdf/video-frame-extraction/generic xlsx guidance.",
+        "Preserve the explicit tier list and exclusion list as given by the task prompt; do not reorder, extend, or hard-code task-specific values.",
+        "Preserve the null-vs-empty-string contract scoping in xlsx to tasks whose contract declares null; do not generalize to tasks using '' as sentinel.",
+        "Preserve the batch-diagnostic-then-batch-edit workflow note; do not revert to per-image interactive debugging."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The run terminated at max_iterations (65) with reward 0.0 under the original binary scorer, but offline field-level scoring shows 40/44 fields correct (0.909). The three remaining failures (074 amount, 077 amount, 078 amount) are all amount-extraction defects on receipts whose keyword/exclusion lists, locale, and null contract are declared by the task prompt and already modeled by anchors in the current candidate skill (receipt_total_keyword_priority_disambiguation, monetary_two_decimal_invariant, conditional_multi_pass_ocr_on_noisy_numeric_fields, null_vs_empty_string_contract, xlsx_delivery_contract_self_check). The infrastructure delivered a well-formed xlsx with 22 rows ordered by filename, so writeback plumbing works; the defects live in the compute/transform step (candidate selection and OCR-noise handling on the chosen total line) and in verification (confirming null vs empty string on reload). Nothing here depends on hidden gold data or executor-only behavior; all failures are reachable from text/image evidence plus the task's own declared rules."
+    },
+    "diagnoses": [
+      {
+        "label": "null_written_as_empty_string_breaks_null_contract",
+        "general_pattern": "When the task contract requires a failed extraction to be written as null, routing the failure value through an empty string (or a formatted string) instead of Python None produces a cell whose value is '' on reload. Downstream exact-equality verifiers that distinguish null from '' then mark the field wrong even though the extraction correctly chose to abstain.",
+        "wrong_approach": "On receipt 078 the amount could not be confidently extracted, and the writer emitted the string \"\" into the total_amount cell rather than Python None. The predictions table shows total_amount for 078.jpg as \"\" (empty string), and field_feedback marks amount_correct=false for that row while date_correct=true and prediction_present=true, consistent with a present-but-wrong-typed cell rather than a missing row.",
+        "observable_evidence": "predictions.rows entry {\"filename\": \"078.jpg\", \"date\": \"2017-02-02\", \"total_amount\": \"\"} together with field_feedback entry {\"filename\": \"078.jpg\", \"prediction_present\": true, \"date_correct\": true, \"amount_correct\": false}; the task_prompt explicitly states 'If extraction fails for either field, the value is set to null.' The delivered xlsx is reported valid with 22 ordered rows, so the mismatch is at the cell-type level, not row-count level.",
+        "missing_reasoning_step": "Before terminating, reload the saved workbook with openpyxl load_workbook(path, data_only=True) and assert, for every column whose contract permits null, that failed cells satisfy cell.value is None rather than cell.value == ''. Return Python None from the extraction function and assign it directly to the openpyxl cell without string coercion.",
+        "correct_general_approach": "Treat 'failed extraction' as a distinct sentinel at the Python level (None) and preserve it end-to-end: never route through f-strings, str(), or default='' kwargs on DataFrame/openpyxl writes. Add a reload-and-check step that verifies the null-vs-empty-string invariant for the specific columns declared nullable by the task, scoped to data-only output workbooks.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only when the task contract explicitly declares that failed-extraction cells must be null (not '' and not a placeholder string) and the verifier distinguishes those on reload.",
+        "do_not_generalize_to": "Tasks whose contract accepts '' as the failed sentinel, tasks that require a specific placeholder string (e.g. 'N/A'), or financial-model workbooks where empty strings never appear.",
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Preserving null vs empty string on writeback / Delivery contract verification for data-only xlsx outputs",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "ocr_corrupted_total_line_triggers_tier_fall_through_or_bad_fallback_instead_of_stronger_variant",
+        "general_pattern": "On receipts where the correct tier's keyword line is present but its own numeric span is OCR-corrupted (letters inside digits, missing decimal, concatenated '92:80' or '92-80', or the keyword itself is split like 'Grand Tota.'), the extractor either (a) accepts a corrupted number from the same line, (b) falls through to a lower tier that matches an unrelated 'Total' column header or a different summary line, or (c) emits null. The structurally correct fix is to re-run OCR on that line with stronger preprocessing (higher upscale, different PSM) and re-parse, rather than degrading tier or giving up.",
+        "wrong_approach": "On receipt 078 (THAI DELICIOUS RESTAURANT), the ground-truth summary lines are 'Total : 92.80' and 'Grand Total : 92.80'. The source Agent's own OCR variants produced 'a Total — 92:80' and 'GrandTota. = tS 92.80'. The agent's regex requires '\\bGRAND\\s+TOTAL\\b' (whitespace between words), so 'GrandTota.' never matches, and the ':' in '92:80' breaks the two-decimal regex. Instead of triggering the conditional multi-pass fallback with 3x upscale + PSM 4 (which the agent later verified does yield 'Grand Total a 92.80'), the agent emitted an empty string. Analogous OCR noise on 074 and 077 likely selected wrong candidates in-tier.",
+        "observable_evidence": "field_feedback rows show amount_correct=false for 074.jpg (predicted '702.00'), 077.jpg (predicted '23.26'), and 078.jpg (predicted ''). The agent's own debug thought (message m0192) explicitly records: 'Upscale 3x with PSM 4 gives \"Grand Total a 92.80\"!', confirming the stronger-variant path recovers the correct line. For 077 (HON HWA HARDWARE), the predicted '23.26' matches a line unrelated to this receipt's own 'Total Inclusive GST: 10.40' / 'Total 10.40' structure, consistent with cross-contamination from a wrong candidate or a bad fallback. For 074 (IKEA Cheras), '702.00' does not match 'Total RM Including GST 6% 538.00' / 'Total Rounded 538.00', again indicating in-tier or fallback mis-selection rather than a tier-list defect.",
+        "missing_reasoning_step": "After the keyword-priority tier selects a candidate line, before accepting its numeric token or falling through, test the token against the two-decimal invariant and (where subtotal/tax are both reliably parsed) an arithmetic-plausibility window. If the token fails either test, invoke conditional_multi_pass_ocr_on_noisy_numeric_fields with at least a 3x upscale and PSM 4 variant and re-parse the same line. Only after that retry still fails may the extractor fall through to a lower tier or emit None.",
+        "correct_general_approach": "Treat an OCR-corrupted total line as a signal to escalate OCR effort on that line, not as a signal to change tier. Compose receipt_total_keyword_priority_disambiguation with monetary_two_decimal_invariant and conditional_multi_pass_ocr_on_noisy_numeric_fields: tier chooses which line, invariant decides whether the number is trustworthy, multi-pass fallback is triggered when the invariant fails, and only after a bounded set of variants fails do we degrade tier or abstain.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "conditional_multi_pass_ocr_on_noisy_numeric_fields",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to receipt-style OCR tasks that declare keyword-priority total lists; strictly a post-tier-selection retry policy on the chosen line.",
+        "do_not_generalize_to": "Non-receipt OCR, free-form document OCR, or any task without a declared tier-priority list for totals; do not use multi-pass escalation to override a clean higher-tier match that already passes the two-decimal invariant.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts / Mechanism anchor: conditional_multi_pass_ocr_on_noisy_numeric_fields (with cross-reference to receipt_total_keyword_priority_disambiguation step 3c and monetary_two_decimal_invariant)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "iteration_budget_exhausted_by_per_image_debug_loop",
+        "general_pattern": "On batch extraction tasks with N images, iterating per-image through terminal/think cycles to debug individual OCR outputs exhausts the parent iteration budget before the shared extraction heuristics converge. The method's own batch-diagnostic-then-batch-edit workflow note anticipates this failure mode.",
+        "wrong_approach": "The source run terminated at max_iterations=65 (acp_stop_reason='max_turn_requests'), with response_tool_call_counts {terminal: 27, think: 22, file_editor: 16} and 0 skill invocations. The late exchanges (e.g. e0061-e0064) show the agent interactively diagnosing single images (078) with per-image OCR probes and thoughts, even after it had already demonstrated that 3x+PSM4 recovers the correct line, instead of consolidating the fix into the shared extractor and re-running once over the batch.",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations'; agent_iterations=65 == max_iterations_at_source=65; response_tool_call_counts shows a terminal-heavy loop; late exchange windows (w0028-w0029 of 37) are still probing a single image's variants after the batch-level fix was already visible; n_skill_invocations=0 indicates the batch-workflow note in the skill was not consulted during the loop.",
+        "missing_reasoning_step": "After the first diagnostic pass over all N images, consolidate the observed failure modes into a single set of pattern/variant edits and re-run the extractor once on the whole batch, before any further per-image interactive debugging. Treat the per-image debug loop as a last resort, not a default.",
+        "correct_general_approach": "Follow the Workflow note in image-ocr/SKILL.md ('batch-diagnostic-then-batch-edit'): one diagnostic pass dumps per-image slices and candidates; one consolidated edit addresses several images together; one re-run; only then, if specific images remain wrong, drill in. This bounds the iteration cost at O(diagnose+edit+rerun) rather than O(N * debug).",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "batch-diagnostic-then-batch-edit workflow note",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to batch OCR/extraction tasks over multiple images with a fixed iteration budget; does not apply to single-image tasks or to tasks where each item requires genuinely independent reasoning.",
+        "do_not_generalize_to": "Single-image analysis, tasks where per-item debugging is cheap, or infrastructure/executor-only failures (e.g. runtime crashes) that are not addressable by workflow reordering.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts / Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "L3",
+        "confidence": "medium"
+      }
+    ]
+  },
+  "response_id": "msg_bdrk_7v6xkjtmn4zmh6oebbxqxicmajhslbuthyv5ao7lhowqci4g3prq",
+  "http_status": 200
+}

@@ -1,0 +1,117 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "ikea_negative_payment_total_selection",
+        "general_pattern": "On receipts that print the final paid amount both at a 'Total (RM) Including GST' summary line and again at a card/tender line as a negative number (e.g., 'Visa -538.00' or 'Mastercard -99.80'), the extractor must pick the positive summary total line and must not let a negative payment token or an upstream 'TAX INVOICE' header mis-anchor the fallback.",
+        "wrong_approach": "The run writes 702.00 for 074.jpg (IKEA) where the receipt clearly shows 'Total RM Including GST 6% 538.00' with a 'Visa -538.00' tender line; a non-total amount from elsewhere on the receipt (e.g., 702.00 produced by digit substitution/concatenation on a subtotal/tender fragment or a mis-selected candidate from a sibling receipt pattern) is selected instead of the printed 538.00 summary total. For 088.jpg (also IKEA, 99.80) the same shape is handled correctly, so the failure is pattern-contingent on this particular OCR variant of 074.",
+        "observable_evidence": "Prediction row 074.jpg total_amount='702.00' with feedback amount_correct=false; 088.jpg total_amount='99.80' amount_correct=true. Image 074 printed 'Total RM Including GST 6% 538.00' / 'Visa -538.00'. Trajectory shows multi-pass voting (ocr_variants, extract_total_with_tier) and debug on 064/074/077/078 as problematic cases; '702.00' does not appear on the receipt as any legitimate monetary token.",
+        "missing_reasoning_step": "The skill's receipt_total_keyword_priority_disambiguation and multi_variant_consensus_over_tier_priority anchors do not instruct the agent to (a) treat negative-signed tender lines ('Visa -X', 'Mastercard -X') as tender anchors that corroborate (rather than compete with) a same-magnitude 'Total RM Including GST' summary line, and (b) reject any candidate whose magnitude is not corroborated by at least one of {same-tier line, subtotal, |negative tender|} when such anchors are confidently present on the same variant.",
+        "correct_general_approach": "In the receipt overlay, extend the TOTAL RM tier to canonically match 'TOTAL RM INCLUDING GST', 'TOTAL (RM) INCLUDING GST', 'TOTAL ROUNDED', and 'TOTAL INCL(.) GST'. When a tender line matching VISA/MASTERCARD/CARD/CREDIT/DEBIT carries a signed amount, use its absolute value as a corroborating anchor in multi_variant_consensus_over_tier_priority: a candidate equal (within rounding) to |tender| should outrank an uncorroborated same-tier candidate from another variant. Never select a token that is not corroborated by any other total/subtotal/|tender| anchor across variants.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "multi_variant_consensus_over_tier_priority",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to receipt-OCR tasks whose declared keyword list contains TOTAL/TOTAL RM/TOTAL AMOUNT and whose receipts commonly show a negative-signed tender line equal to the printed total; still scoped to the receipt overlay already present in image-ocr/SKILL.md.",
+        "do_not_generalize_to": "Do not import |tender| corroboration into generic OCR, non-receipt forms, or xlsx formula-model totals; do not apply to receipts where the tender is split across multiple cards (sum must equal total, not any single tender).",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → multi_variant_consensus_over_tier_priority (and receipt_total_keyword_priority_disambiguation canonical keyword list)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "myNEWS_grand_total_null_writeback_regression",
+        "general_pattern": "When the receipt prints a clean 'GRAND TOTAL' line with the number on the same line (highest priority tier), the extractor must emit that value as a two-decimal string; a failed extraction must be written as a true null, not as an empty string that compares differently from None on readback.",
+        "wrong_approach": "For 078.jpg the agent wrote total_amount='' (empty string) despite the receipt showing 'SUB TOTAL 10.00' / 'GRAND TOTAL 10.00' plainly on separate lines. The historical trajectory also shows a 92.80→100.00 oscillation on another receipt (THAI DELICIOUS, image 078 in a prior iteration was conflated via upscaled 'Grand Total' with no digits causing fallback to 'Change 7.20' or 'Cash Received 100.00'). The final writeback uses '' rather than Python None.",
+        "observable_evidence": "Prediction row 078.jpg total_amount='' feedback amount_correct=false; task_prompt declares 'If extraction fails for either field, the value is set to null'. Image 078 (myNEWS, Pagoh) prints 'GRAND TOTAL 10.00'. Image 074 trajectory thought: 'Grand Total line had no number! So my algorithm fell back to next line — Change 7.20 is excluded → break. No number → try next candidate.' Delivery scoring treats '' as not matching the expected null, so '' is a contract violation even where extraction legitimately fails.",
+        "missing_reasoning_step": "The skill tells the agent to use Python None on failure (null_vs_empty_string_contract) but does not reinforce that: (1) when a GRAND TOTAL line clearly has a trailing numeric token the two-decimal regex must be applied directly to that line before any fallback; (2) the writeback layer must guard against stringifying None to '' when round-tripping through pandas/openpyxl, and the xlsx delivery self-check must assert cell.value is None rather than cell.value == ''.",
+        "correct_general_approach": "Strengthen the receipt overlay so the GRAND TOTAL tier (priority 1) always re-runs the monetary two-decimal regex on the keyword line itself before the guarded split-line fallback, including on degraded variants (e.g., 'GRAND TOTAL 10.00' with inner whitespace). In the xlsx writeback companion, require the delivery self-check to specifically test for None (not '') and to fail-loud if any cell declared nullable contains ''.",
+        "observable_evidence_source": "field_feedback and task_prompt",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to receipt-extraction tasks whose contract declares null for failed extractions; targets both the extraction null-return and the xlsx writeback self-check.",
+        "do_not_generalize_to": "Do not apply to tasks whose contract uses '' or a specific placeholder; do not treat legitimate '0.00' values as nulls.",
+        "target_file": "image-ocr/SKILL.md and xlsx/SKILL.md",
+        "target_section": "image-ocr: Structured Field Extraction from Receipts → null_vs_empty_string_contract, Quality Self-Check; xlsx: Preserving null vs empty string on writeback, Delivery contract verification for data-only xlsx outputs",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "shell_petrodeli_summary_total_vs_tender_disambiguation",
+        "general_pattern": "On Shell/petrol receipts, 'Total', 'Total Gross', 'Visa', and the fuel-amount line all share the same numeric magnitude. The extractor must prefer the labeled summary 'Total' (or 'Total Gross') line and must not drift to a tender/row-adjacent value whose OCR has a leading-digit substitution (e.g., 85.54 ↔ 85.84, 86.00 ↔ 86.17).",
+        "wrong_approach": "077.jpg (Shell Petrodeli, 85.54) is written as 23.26 in an earlier iteration and 23.25 in the final — both wrong; the final write 23.26 reflects a candidate pulled from a different receipt pattern or from an unrelated 'Total (Inclusive of GST)' line that OCR confused with the Shell receipt's own layout. For 063.jpg (Shell Petrodeli-like, 85.54) the correct value is emitted, so the issue is variant-specific OCR noise plus tier selection, not the keyword list itself.",
+        "observable_evidence": "Prediction 077.jpg total_amount='23.26' amount_correct=false; image 077 printed 'Total RM 85.54 / Visa RM 85.54 / Total Gross C RM 85.54'. Trajectory thought on 064 shows the voting mechanism pulling 688.17 from a non-total line via the TOTAL RM tier because 'Total RM = B81?' failed numeric parse and the fallback used an adjacent 'Visa RM =688.17'. The same class of failure plausibly misroutes 077 to an unrelated '23.26' candidate from a different image under batch voting.",
+        "missing_reasoning_step": "ocr_amount_normalization_and_arithmetic_crosscheck is defined but is not wired to petrol-receipt layout where subtotal/tax are not both present; multi_variant_consensus_over_tier_priority also lacks an explicit rule that cross-variant support must be computed per-image, never pooled across images in a batch. Additionally the guarded split-line fallback should refuse to walk from a 'Total RM' line to a 'Visa RM' line even when the former has zero digits, because VISA is a tender keyword.",
+        "correct_general_approach": "Tighten the guarded split-line fallback: the fallback line must not match any payment/tender keyword (VISA, MASTERCARD, CASH, CARD, CREDIT, DEBIT, TENDER, PAYMENT) even when the keyword line has zero digits; instead back off to an earlier same-tier candidate or try the next tier. Make per-image state isolation explicit in multi_variant_consensus_over_tier_priority so that batch processing cannot leak a candidate value across images.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt overlay only; applies to petrol/retail receipts where tender lines (VISA/MASTERCARD) print the same magnitude as the total.",
+        "do_not_generalize_to": "Do not add VISA/MASTERCARD to the generic exclusion list that governs tier matching (the keyword 'TOTAL' can legitimately appear on a 'Total Gross' line); the restriction is only on the split-line fallback destination.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → receipt_total_keyword_priority_disambiguation step 4 (guarded split-line fallback) and multi_variant_consensus_over_tier_priority",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "receipt_date_locale_batch_inference_regression_on_034",
+        "general_pattern": "In Malaysian receipt batches the dominant day/month ordering is DD/MM/YYYY. The locale/label-bound date resolver must bind the date to a 'Date' label line and must not swap day/month when both components are ≤12 unless an unambiguous row in the batch forces the alternate ordering.",
+        "wrong_approach": "034.jpg date is written as 2018-08-09; the receipt shows 'Date: 09/03/2018' (Perniagaan Zheng Hui, Malaysian layout). The agent appears to have interpreted the date under MM/DD/YYYY (03→09 month/day swap) despite dominant batch evidence (e.g., 23/01/2019, 18/01/2018, 15/06/2017, 29/12/2017, 20/02/18, 18/03/18, 21/02/18, 26/02/18, 27/07/17, 09/08/17, 30/05/2017, 29-10-2017, 02/02/2017, 20/03/2018, 23/03/2018, 30/03/2018, 13/03/2017) — many of which have day>12 and anchor DD/MM/YYYY.",
+        "observable_evidence": "Prediction 034.jpg date='2018-08-09' feedback date_correct=false; all other 21 dates are date_correct=true, consistent with DD/MM/YYYY parsing (e.g., 2019-01-23 for 007 which reads '23-01-2019'). The anomalous 034 result is consistent with the parser silently falling back to MM/DD/YYYY on this one row.",
+        "missing_reasoning_step": "receipt_date_label_binding_and_locale states the batch-majority inference rule but does not force the parser to apply the inferred locale uniformly to every row once at least one unambiguous DD>12 row exists in the batch. The parser also lacks a tie-break instruction that, under declared Malaysian locale (DD/MM/YYYY), DD/MM is the default even for all-≤12 tokens.",
+        "correct_general_approach": "Make the locale inference a hard precondition: compute the dominant ordering once from unambiguous rows in the batch, then apply it to every ambiguous row. When the task prompt or receipts clearly declare a locale (Malaysian GST/SST receipts), DD/MM/YYYY must be the default even in the absence of any DD>12 anchor; MM/DD may only override when an unambiguous MM>12 row forces it.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt overlay only; applies to date fields extracted from receipts with declared or inferable Malaysian/DD-first locale.",
+        "do_not_generalize_to": "Do not force DD/MM/YYYY on US-locale receipts, ISO-dated receipts, or non-receipt documents; do not override an unambiguous MM>12 row.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → receipt_date_label_binding_and_locale",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "iteration_budget_consumed_by_per_image_debug_loop",
+        "general_pattern": "For N-image batch OCR with per-image heuristic failures, interactive per-image terminal debug loops exhaust the agent's iteration budget before the heuristic set converges, leaving late-identified regressions unpatched at termination.",
+        "wrong_approach": "The source run terminated via termination_reason='max_iterations' at 65 iterations (acp_stop_reason='max_turn_requests') with response_tool_call_counts terminal=27, think=22, file_editor=16, and the final write still contained three uncorrected amount errors (074, 077, 078) and one uncorrected date error (034). The windowed exchanges show the agent repeatedly re-running single-image OCR with print(repr(line)) and thinking through each case rather than planning a consolidated edit.",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations', agent_iterations=65, max_iterations_at_source=65, iteration_limit_hits=1; late exchanges (e0041-e0046) show per-image debug on 064/074/077/078/078 with no corresponding workbook rewrite before termination. Final predictions still have the three amount regressions and the 034 date flip.",
+        "missing_reasoning_step": "The skill's workflow note 'batch-diagnostic-then-batch-edit' exists but is not prescriptive enough: it does not require (a) a single dump pass that emits per-image (variant, candidate_tier, candidate_value, chosen_value) rows for all N images into one artifact, (b) a planning step that proposes one consolidated set of pattern/variant edits covering multiple failures, and (c) a single re-run and writeback. It also does not warn that interactive per-image iteration will deplete the budget.",
+        "correct_general_approach": "Strengthen the workflow note into a required procedure: for batch OCR tasks of size ≥10, after the first prediction pass, emit a single diagnostic CSV/JSON with one row per image (OCR slice around keywords, candidate list, current prediction, confidence) and then propose at most one consolidated edit set per outer loop. Explicitly cap per-image interactive debug (e.g., budget-fraction heuristic) and prefer re-running the full pipeline over per-image edits.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "workflow_note: batch-diagnostic-then-batch-edit",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to batch OCR / batch structured-extraction tasks only; not to single-image or small-N interactive flows.",
+        "do_not_generalize_to": "Do not forbid interactive debugging on single-document tasks or on tasks whose verifier reports per-row errors with high-confidence oracle labels.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "multi_variant_consensus_over_tier_priority",
+      "editor_direction": "strengthen",
+      "composition_issue": "The current receipt overlay in image-ocr/SKILL.md already encodes tier-priority disambiguation, two-decimal invariants, guarded split-line fallback, locale-bound dates, and the null-vs-empty-string contract. The observed failures (074 702.00, 077 23.26, 078 '', 034 date flip, and termination at max_iterations) sit at seams between anchors: (a) multi_variant_consensus_over_tier_priority does not treat negative-signed tender lines (Visa/Mastercard -X) as corroboration for an equal-magnitude summary total, nor require per-image state isolation under batch voting; (b) receipt_total_keyword_priority_disambiguation step 4 does not forbid the guarded split-line fallback from walking to a tender/payment line when the keyword line's digits failed OCR parse; (c) receipt_date_label_binding_and_locale leaves the DD/MM default implicit when all date components are ≤12 in a declared Malaysian batch; (d) null_vs_empty_string_contract is not strongly cross-linked to the xlsx delivery self-check so '' leaks into failed-extraction cells; (e) the batch-diagnostic-then-batch-edit workflow note is advisory rather than prescriptive and did not prevent the per-image debug loop that consumed the iteration budget. The editor should strengthen these existing anchors rather than add new skills or rewrite the generic OCR flow.",
+      "preservation_constraints": [
+        "Do not alter the generic OCR flow, JSON output schema, PSM/preprocessing guidance, or guidance for non-receipt documents in image-ocr/SKILL.md.",
+        "Do not import receipt-specific tokens (RM, VISA, MASTERCARD, GRAND TOTAL, DD/MM/YYYY) into openai-vision, pdf, video-frame-extraction, or into xlsx guidance that is unrelated to data-only receipt extraction.",
+        "Preserve the explicit scope language (receipt-style OCR tasks that declare their own keyword/exclusion/null conventions) on every strengthened anchor.",
+        "Do not hard-code the current task's keyword tiers, exclusion list, locale, or specific example values from any receipt in the source run.",
+        "Preserve the xlsx 'Preserving null vs empty string on writeback' scope note that this rule only applies when the task contract explicitly distinguishes null from empty string.",
+        "Keep the batch-diagnostic-then-batch-edit note scoped to batch OCR / batch structured-extraction tasks; do not forbid interactive debugging in general."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four observable field-level failures (074 amount, 077 amount, 078 amount, 034 date) and the iteration-budget termination map cleanly to seams in anchors that already exist in the candidate image-ocr receipt overlay and the xlsx null-vs-empty writeback note. The infrastructure (Tesseract/pytesseract/Pillow/openpyxl) is pre-installed per the task prompt and worked (predictions were delivered as a valid xlsx with 22 rows; 20/22 cells correct). The source agent did not use vision tools and had no model-side limitation blocking the correct heuristics; the regressions are heuristic-selection and writeback-contract failures, not executor/infra failures. Therefore the package is skill-controllable and the correct response is to strengthen existing anchors (multi_variant_consensus_over_tier_priority, receipt_total_keyword_priority_disambiguation step 4, receipt_date_label_binding_and_locale, null_vs_empty_string_contract, batch-diagnostic-then-batch-edit) rather than add new skills."
+    }
+  },
+  "response_id": "msg_bdrk_uqnkojmvqau4voufdigf4rseftlzxo4ltrrvwoakqnhdejz6gdza",
+  "http_status": 200
+}

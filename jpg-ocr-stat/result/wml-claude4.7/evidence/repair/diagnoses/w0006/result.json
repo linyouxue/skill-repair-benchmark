@@ -1,0 +1,78 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "amount_voting_tier_bypasses_consensus_on_OCR_noise",
+        "general_pattern": "When combining results from multiple OCR variants, the policy of 'pick highest-priority tier first, then tie-break by frequency' allows a single noisy variant that spuriously matches a high-priority keyword tier to override a value that is consistently extracted across the majority of variants at a lower tier.",
+        "wrong_approach": "pick_best_total uses min(tier_idx) first; a single variant that happens to match a higher-priority keyword (e.g. 'TOTAL RM' or 'GRAND TOTAL') on a line whose number is corrupted (e.g. 'Visa RM =688.17' being joined with 'Total RM' context, or a blank 'Grand Total' line falling back to 'Cash Received 100.00') is unconditionally preferred over a value (88.17 / 92.80) that two other variants agree on at a lower tier.",
+        "observable_evidence": "064.jpg: Variant 0 and 1 both extract tier=3 value=88.17 from clear lines 'Total RN 88.17'; Variant 2 (upscaled) corrupts the same line into 'Total RM = B81?' and 'Visa RM =688.17', yielding tier=1 value=688.17 which wins by lowest tier → final output 688.17 (feedback marks amount_correct=false). 078.jpg: Variant 0 gets tier=3 value=92.80 from 'GrandTota. = tS 92.80'; Variants 1 and 2 upscale into a blank/garbled Grand Total line and fall back to the next line 'Cash Received 100.00' producing tier=0 value=100.00, which wins by lowest tier → final output 100.00 (amount_correct=false).",
+        "missing_reasoning_step": "Before applying tier priority, cross-variant consensus must be checked: if two or more variants independently extract the same value at any tier, that value should be preferred over an isolated higher-tier value from a single variant, especially when the losing value is sanity-plausible (e.g. consistent with Subtotal/Cash/Payment lines) and the winning value is not.",
+        "correct_general_approach": "In pick_best_total, first compute a frequency map across all (tier, value) pairs and across all values regardless of tier. Give consensus (count ≥ 2 across variants) higher weight than tier index; only use tier priority as a tiebreaker among values with equal support. Additionally, sanity-check the winning value against other numeric signals on the receipt (e.g. Subtotal, Payment, Cash lines) and demote candidates that are inconsistent with every other numeric line.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "multi_variant_consensus_over_tier_priority",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only when multiple OCR variants (default / preprocessed / upscaled) are aggregated for a single receipt; irrelevant when only one OCR pass is used or when all variants agree.",
+        "do_not_generalize_to": "Do not use consensus voting to override a clearly higher-priority keyword match when consensus is only 1-vs-1, nor use it to pick numbers unrelated to any total/grand-total/amount keyword.",
+        "target_file": "image-ocr",
+        "target_section": "Multi-Pass OCR Strategy",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "fallback_to_next_line_crosses_semantic_boundary",
+        "general_pattern": "When a keyword line (e.g. 'Grand Total') has no parseable number, the fallback that reads the 'next non-empty line' blindly accepts a number from a different semantic field (Cash Received, Change, Payment) as the total.",
+        "wrong_approach": "In extract_total_with_tier, when the current candidate line yields no number, the code advances to the next 1–2 lines and returns the first number found, breaking only on an is_excluded() match. 'Cash Received 100.00' on 078.jpg is not in the exclusion set, so it is returned as the Grand Total.",
+        "observable_evidence": "078.jpg variants 1 and 2: candidate line is 'Grand Total' (empty number); fallback walks to 'Cash Received 100.00' and returns tier=0 value=100.00. The actual grand total 92.80 appears on an earlier 'Total ... 92.80' line that is never reconsidered.",
+        "missing_reasoning_step": "The fallback must (a) include 'CASH RECEIVED', 'CASH', 'PAYMENT', 'VISA', 'MASTERCARD', 'CARD', 'TENDERED', 'RECEIVED' in the exclusion set and (b) prefer looking at an earlier 'Total ...' line in the same receipt before accepting a value from a payment/change line below the keyword.",
+        "correct_general_approach": "Extend the exclusion keyword list to cover tender/payment lines, and when the primary candidate line has no number, first look upward/sideways within the receipt for another candidate in the same or adjacent tier before descending into following lines.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "exclusion_keywords_cover_tender_and_payment_lines",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to the next-line fallback branch of total-keyword extraction in receipt OCR; not applicable when the keyword line itself contains a parseable number.",
+        "do_not_generalize_to": "Do not add generic numeric exclusions that would also drop valid rounded-total or 'Total After Rounding' lines; the exclusion must be scoped to payment/tender/change semantics.",
+        "target_file": "image-ocr",
+        "target_section": "Multi-Pass OCR Strategy",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "last_candidate_in_tier_wins_without_plausibility_check",
+        "general_pattern": "Within a priority tier, always picking the LAST matching line and ignoring numeric agreement with other lines of the same receipt lets a single-digit OCR glitch on the final line override the majority value.",
+        "wrong_approach": "extract_total_with_tier iterates `reversed(candidates)` and returns the first parseable number; on 074.jpg, Variant 0 and Variant 1 both pick the last tier-3 match ('Total inel. of GBT 702.00' / 'Total Amt Rounded ——S«702.00') despite the same receipt showing 102.00 on Subtotal, Total incl. of GST, and Payment lines.",
+        "observable_evidence": "074.jpg: OCR variants show Subtotal 102.00, Total incl. of GST 102.00, Payment 102.00, but the last total-tier line is read as 702.00 (first digit '1' merged into '7'); the algorithm returns 702.00 and feedback reports amount_correct=false.",
+        "missing_reasoning_step": "After selecting a candidate number from a tier, compare it against other 'Total' / 'Subtotal' / 'Payment' numbers on the same receipt. If the chosen value is a lone outlier while 2+ other total-like lines agree on a different value, prefer the agreeing value.",
+        "correct_general_approach": "Collect all numbers from lines matching any total/subtotal/payment keyword in a single OCR variant. If the LAST-in-tier candidate disagrees with the mode of the other total-like numbers by more than a plausible rounding delta (e.g. > 1.00), prefer the mode value and record the discrepancy as a warning.",
+        "skill_controllable": true,
+        "workflow_node": "verification",
+        "mechanism_anchor": "intra_receipt_total_consistency_check",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to receipts where multiple total/subtotal/payment lines are available for cross-check; not applicable to minimal receipts with a single total line.",
+        "do_not_generalize_to": "Do not use this check to overwrite a correct total that genuinely differs from an earlier Subtotal because of GST/rounding (differences within ~10% should not trigger override).",
+        "target_file": "image-ocr",
+        "target_section": "Quality Self-Check",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "compute_or_transform",
+      "primary_anchor": "multi_variant_consensus_over_tier_priority",
+      "editor_direction": "add",
+      "composition_issue": "The three diagnosed defects all live in the aggregation layer that sits on top of per-variant OCR extraction. They compose: tier-priority voting (D1) interacts with the next-line fallback (D2) and with the last-in-tier selection (D3). Any fix must preserve the existing per-tier keyword priority (which produces 20/22 correct amounts) while adding consensus and plausibility layers on top. The Skill overlay should ADD a 'Multi-Variant Aggregation' subsection to image-ocr's Multi-Pass OCR Strategy, not rewrite the pass logic itself.",
+      "preservation_constraints": [
+        "Keep the four-tier priority keyword hierarchy (GRAND TOTAL > TOTAL RM > TOTAL AMOUNT > TOTAL/AMOUNT/...) as the primary ordering.",
+        "Keep existing exclusion keywords (SUBTOTAL, TAX, GST, SST, DISCOUNT, CHANGE, CASH TENDERED, EXCLUDING) intact.",
+        "Preserve the 3-variant OCR pipeline (default / autocontrast+PSM6 / 2x-upscale+PSM6) because it is what enables consensus in the first place.",
+        "Do not break the correct date-voting behavior (pick_best_date) which currently yields 21/22 dates correct."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All three localized failures reside in logic that is explicitly instructed by the image-ocr skill (Multi-Pass OCR Strategy, exclusion/priority keyword guidance, quality self-check). The infrastructure (tesseract, PIL, openpyxl) worked; the agent completed 22/22 predictions with valid Excel delivery and a 0.909 field accuracy. The remaining errors are all in the aggregation/verification layer of total extraction, which the skill can govern through added mechanism anchors without touching executor behavior or requiring hidden oracle values."
+    }
+  },
+  "response_id": "msg_bdrk_ixza34mry72g3povlx3yb4k4lipapxdo3b7smst7ec2yb7goxllq",
+  "http_status": 200
+}

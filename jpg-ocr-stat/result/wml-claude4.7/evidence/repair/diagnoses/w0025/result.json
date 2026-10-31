@@ -1,0 +1,97 @@
+{
+  "tool_input": {
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "receipt_total_keyword_priority_disambiguation",
+      "editor_direction": "strengthen",
+      "composition_issue": "The current image-ocr receipt overlay already specifies a guarded split-line fallback (keyword line must contain zero digits; fallback line must not match payment/tender keywords). The source trajectory shows the agent independently rediscovered the same rule mid-run but still produced wrong totals on 074 (538.00 vs IKEA Visa line -538.00), 077 (23.26 vs 23.25 Rounding-Adj total), and 078 (empty string instead of null for extraction failure). This indicates the anchors exist but their guards are not consistently composed in a single consolidated procedure (payment-exclusion is listed in step 4 but the sign/negative-amount case and the rounding-adjusted TOTAL variant are not called out). Strengthen the existing anchors; do not add a new skill or new tier. Preserve the keyword-priority tier list, the exclusion list, and the null-vs-empty writeback contract exactly as given.",
+      "preservation_constraints": [
+        "keep declared keyword priority tiers unchanged",
+        "keep declared exclusion keyword list unchanged",
+        "keep null-vs-empty-string writeback contract scoped to this task family",
+        "do not fold receipt-specific hints into openai-vision/pdf/video-frame-extraction/xlsx generic sections",
+        "do not hard-code expected values from this task"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "Failures are localized to post-OCR text processing (keyword/line selection and null writeback), which the current image-ocr receipt overlay and xlsx null contract are designed to govern. OCR engine quality, infrastructure, and executor behavior are not implicated — the source Tesseract output contained the correct totals on the implicated lines (e.g., 23.25 TOTAL on 077, 99.80/538.00 on IKEA receipts). The agent terminated at max_iterations with an iteration-per-image debug loop, which the overlay already warns against under 'batch-diagnostic-then-batch-edit'. Three remaining defects (negative-amount payment line misread as total; preferring 'Total (Inclusive of GST)' over the final 'TOTAL:' line after rounding adjustment; writing empty string instead of None on failure) are each addressable by tightening observable guards in existing anchors."
+    },
+    "diagnoses": [
+      {
+        "label": "negative_signed_payment_line_misread_as_total",
+        "general_pattern": "On receipts where payment/card-refund lines are printed as signed negatives beside the final total (e.g., 'Visa -538.00'), a split-line or last-number fallback that only checks payment-keyword exclusions on the *keyword* line can still pick up the signed payment amount when the monetary regex accepts the magnitude. The sign must either (a) exclude the line from total candidacy, or (b) be preserved so the arithmetic cross-check rejects it.",
+        "wrong_approach": "Selecting the last numeric token on a Visa/Mastercard/Cash line as the total because its absolute value matches the two-decimal invariant and the line is not strictly a tier-keyword candidate but gets reached via fall-through or free-text last-number scan.",
+        "observable_evidence": "074.jpg prediction total_amount='702.00' versus the IKEA receipt visibly printing 'Total RM Including GST 6% 538.00', 'Total Rounded 538.00', and 'Visa -538.00'. The predicted value 702.00 does not appear on the receipt image at all, suggesting an OCR-corrupted number was chosen or a split-line fallback walked onto a non-total line and parsed digits mangled by Tesseract. The receipt clearly offers 538.00 on an unambiguous 'Total RM Including GST' and 'Total Rounded' pair.",
+        "missing_reasoning_step": "After selecting a Tier-3/4 'TOTAL' candidate, verify that an equal-or-near-equal value is corroborated on at least one other total-adjacent line (Total Rounded, Grand Total, or payment magnitude). When corroboration exists for value V and the chosen value differs by more than rounding tolerance, back off to the corroborated V. This is the existing multi_variant_consensus_over_tier_priority anchor, but it needs an explicit same-variant corroboration rule for IKEA-style 'Total ... / Total Rounded / Visa' triples.",
+        "correct_general_approach": "Within the already-selected tier, prefer the candidate whose numeric value is corroborated by another total-adjacent anchor in the same OCR variant (Total Rounded, Grand Total, Net Total, or the absolute value of a payment line). Reject candidates that have no corroboration when a corroborated alternative exists at the same tier. Do not override tier priority — only disambiguate within a tier.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "multi_variant_consensus_over_tier_priority",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to receipt-extraction tasks that declare a keyword priority list and where multiple total-adjacent anchors appear on the same receipt (e.g., 'Total Rounded', 'Grand Total', 'Net Total' alongside 'TOTAL'). Scoped to image-ocr receipt overlay.",
+        "do_not_generalize_to": "Non-receipt OCR, documents without redundant total anchors, financial models in xlsx, or openai-vision generic analysis.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: multi_variant_consensus_over_tier_priority",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "inclusive_of_gst_total_preferred_over_final_rounded_total",
+        "general_pattern": "On receipts that print 'Total (Inclusive of GST): X' followed by 'Rounding Adj: ±y' and then a bold 'TOTAL: Z' where Z = X + y, the selection procedure can accept the first 'Total' line it encounters (matching Tier-4 TOTAL) and never reach the final rounded TOTAL line because tier iteration is 'last-to-first within tier' but both candidates share the same tier and the first one encountered on the reversed scan is the inclusive-of-GST line, not the rounded total.",
+        "wrong_approach": "Returning 'Total (Inclusive of GST): 23.26' as the final total when the receipt also prints an immediately following rounded 'TOTAL: 23.25' line that supersedes it.",
+        "observable_evidence": "077.jpg prediction total_amount='23.26'. The receipt image shows 'Total (Inclusive of GST): 23.26' followed by 'Rounding Adj: -0.01' and then a prominently printed 'TOTAL: 23.25'. The predicted value is the pre-rounding line, not the final total.",
+        "missing_reasoning_step": "Among Tier-4 candidates on the same receipt, when one candidate line is annotated with a qualifier like '(Inclusive of GST)', '(Excluding GST)', '(incl GST)', or '(excl GST)' and a later same-tier candidate has no such qualifier and sits after a 'Rounding Adj' line, prefer the later unqualified candidate. The two-decimal invariant alone cannot distinguish them.",
+        "correct_general_approach": "Within a tier, downrank candidates whose keyword is parenthetically qualified with GST/tax-inclusion wording when a later same-tier candidate (post 'Rounding Adj' line, or printed in a visually dominant style) exists. Keep the rule observable: it is driven by the presence of '(Inclusive of GST)', '(Excluding GST)', 'incl GST', 'excl GST' tokens on the keyword line and a subsequent 'Rounding' or 'Rounded' line.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation",
+        "defect_relation": "ambiguous",
+        "scope_boundary": "Applies only within a single tier when the receipt prints both an inclusive/exclusive-of-tax total and a rounded final total. Scoped to receipts that declare the standard keyword list.",
+        "do_not_generalize_to": "Receipts that only print one total line, or non-receipt OCR tasks.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: receipt_total_keyword_priority_disambiguation (step 3)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "failed_extraction_written_as_empty_string_not_null",
+        "general_pattern": "When total extraction fails for a receipt, the writeback stores an empty string '' in the cell instead of a true empty cell (Python None), violating a declared null-vs-empty-string contract and causing readback comparisons that use `is None` to fail.",
+        "wrong_approach": "Returning '' from the extraction function (or formatting None through f-string / str()) and assigning it directly to the openpyxl cell, so that cell.value == '' rather than cell.value is None.",
+        "observable_evidence": "078.jpg prediction row shows total_amount='' (empty string) in the delivered xlsx; task contract declares 'If extraction fails for either field, the value is set to null.' The feedback marks amount_correct=false for 078 even though the agent explicitly treated this row as a failed extraction.",
+        "missing_reasoning_step": "On extraction failure, return Python None and pass it unchanged to the cell. Verify on readback that cell.value is None (not == '').",
+        "correct_general_approach": "Follow the null_vs_empty_string_contract anchor exactly: never substitute '' for None, never route failure sentinels through string formatting, and run the xlsx_delivery_contract_self_check loop so that any surviving '' cell is caught before termination.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to tasks whose contract explicitly declares that failed extraction cells must be null. Scoped to the image-ocr receipt overlay and the companion xlsx 'Preserving null vs empty string on writeback' note.",
+        "do_not_generalize_to": "Tasks whose contract accepts '' or a placeholder string, formula-bearing financial workbooks, or non-receipt pipelines.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Mechanism anchor: null_vs_empty_string_contract (and xlsx/SKILL.md cross-reference)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "iteration_per_image_debug_loop_exhausts_budget",
+        "general_pattern": "On a batch OCR task, the agent debugs one image at a time with multi-tool-call iterations (think → terminal → str_replace → rerun), consuming the iteration budget before the full batch of heuristics converges. Source run terminated at max_iterations=65 with partial fixes.",
+        "wrong_approach": "Running an interactive per-image debug loop (inspect OCR → tweak regex → rerun whole batch → inspect next failing image) instead of a single consolidated diagnostic dump followed by a small set of pattern edits.",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations', agent_iterations=65, response_tool_call_counts={terminal:27, think:22, file_editor:16}, stop_reason='max_turn_requests'. The llm_exchanges window shows the agent re-tracing a single receipt (064) across multiple exchanges to understand the TOTAL RM / Visa RM / Total Gross fallback interaction. The current overlay already warns against this under 'Workflow note: batch-diagnostic-then-batch-edit'.",
+        "missing_reasoning_step": "Perform a single diagnostic sweep that, for each image, logs (per-variant OCR slice around keywords, candidate (tier,value,anchor) list, current prediction) once, then plan a small consolidated set of pattern/variant edits that address several images together, and re-run once.",
+        "correct_general_approach": "Honor the existing 'batch-diagnostic-then-batch-edit' workflow note: emit a per-image structured report, cluster failures by pattern, make one consolidated edit, re-run the full batch, then stop.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "batch-diagnostic-then-batch-edit (Workflow note)",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to batch OCR extraction with N≥10 images and a shared heuristic pipeline. Not a prescription for single-image tasks or non-batch workflows.",
+        "do_not_generalize_to": "Interactive single-image debugging where per-item inspection is cheap and necessary; non-OCR coding tasks.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ]
+  },
+  "response_id": "msg_bdrk_pc5xz4j4tvppapgmm7nghk56bd7ep45hbdrp3abrjwcw2d77v7za",
+  "http_status": 200
+}

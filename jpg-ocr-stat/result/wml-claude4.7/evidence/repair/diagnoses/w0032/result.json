@@ -1,0 +1,97 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "amount_extraction_fails_when_total_line_has_zero_digits_and_fallback_is_blocked_or_corrupted",
+        "general_pattern": "On receipts where the keyword line (e.g. 'Total RM' or 'TOTAL:') contains the amount split onto the next printed line, or the amount token on the same line is OCR-corrupted to a sub-numeric form, the extractor must look at the next non-empty line (excluding payment/tender/change keywords) rather than returning None or falling back to a lower-tier wrong number.",
+        "wrong_approach": "The source extractor accepts the first same-line last-number match, and if the keyword line has no digits it only probes 1-2 following lines without filtering out payment/tender lines; when the chosen total line has OCR corruption (e.g. '88.1' instead of '88.17', '23.25' vs the printed digits), it emits the corrupted number verbatim or an empty string.",
+        "observable_evidence": "078.jpg: predicted total_amount='' though receipt shows 'Grand Total 92.80' - extractor returned empty-string sentinel. 074.jpg: predicted '702.00' vs OCR text 'Toial Amt Rounded ... 102.00' (OCR substituted '7' for '1' leading digit) with no arithmetic sanity check against Subtotal 102.00 printed just above. 077.jpg: predicted '23.26' vs printed bold 'TOTAL: 23.25' after rounding adjustment -0.01 - extractor picked the pre-rounding 'Total (Inclusive of GST): 23.26' line instead of the final 'TOTAL:' line that appears after it.",
+        "missing_reasoning_step": "No step reconciles multiple total-adjacent anchors (Subtotal, Total Rounded, final TOTAL line, Payment line) against each other, and no arithmetic cross-check against subtotal/tax/rounding is applied. No OCR-confusable substitution is attempted on numeric amount tokens on a confirmed total line. The two-decimal invariant is not enforced to reject '88.1'-style truncations.",
+        "correct_general_approach": "Collect every candidate (tier, value, anchor_type) across the raw OCR text and across preprocessed variants; apply the two-decimal monetary invariant; attempt OCR-confusable digit repair on confirmed total lines; and reconcile with corroborating anchors (Subtotal/Payment/Cash-Change) before selecting. For failed extractions, emit Python None (not empty string) so the delivery cell is a true empty cell.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation + monetary_two_decimal_invariant + ocr_amount_normalization_and_arithmetic_crosscheck + multi_variant_consensus_over_tier_priority",
+        "defect_relation": "missing",
+        "scope_boundary": "Receipt-style OCR tasks whose prompt declares a keyword priority list, an exclusion list, and a null-on-failure writeback contract.",
+        "do_not_generalize_to": "Non-receipt OCR documents, free-form invoices without declared keyword tiers, or tasks whose contract uses empty-string sentinel; also not applicable to non-amount numeric fields (quantities, IDs, dates).",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "null_sentinel_written_as_empty_string_breaks_null_vs_empty_contract",
+        "general_pattern": "When the task contract requires a failed extraction to be written as null in the xlsx cell, routing the value through an empty string or f-string formatter writes a distinct empty-string cell that does not equal None on readback.",
+        "wrong_approach": "The source agent's prediction row for 078.jpg has total_amount='' (empty string) rather than a true null cell; the format branch `f\"{total:.2f}\" if total is not None else None` is correct in isolation, but somewhere in the pipeline (likely the fallback that returns a partial parse or an openpyxl assignment path) a '' leaked through, violating the contract.",
+        "observable_evidence": "078.jpg row shows date='2017-02-02', total_amount='' in the delivered xlsx; the task contract declares 'null' on failure and the amount_correct=False.",
+        "missing_reasoning_step": "No post-write delivery verification step reloads the workbook with data_only=True and asserts `cell.value is None` for intended-null cells before finishing.",
+        "correct_general_approach": "Return Python None from the extractor on failure, assign None directly to the openpyxl cell (never through str()/f-string), then reload the saved workbook and assert that the per-column schema (including null vs empty string) matches the declared contract before terminating.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract + xlsx_delivery_contract_self_check",
+        "defect_relation": "weak",
+        "scope_boundary": "Data-only xlsx outputs for tasks whose contract explicitly distinguishes null from empty string.",
+        "do_not_generalize_to": "Tasks where empty-string sentinel is acceptable, financial models with formulas, or tasks where the output format is a plain text/CSV file.",
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Preserving null vs empty string on writeback + Delivery contract verification for data-only xlsx outputs",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "date_locale_misordering_or_single_component_substitution_not_attempted",
+        "general_pattern": "When OCR corrupts one digit of a date-shaped token adjacent to a 'Date' label, or when the day/month ordering is ambiguous, the extractor must either try bounded single-character OCR-confusable substitutions on an out-of-range component or fix the ordering from unambiguous batch rows, instead of silently emitting an incorrect date.",
+        "wrong_approach": "The source extractor applies strict regex over all lines, takes the first calendar-valid triple under DD/MM/YYYY, and never attempts an OCR-confusable repair on a single corrupted digit nor uses batch-level locale inference.",
+        "observable_evidence": "034.jpg: predicted date='2018-08-09' though the printed receipt shows 'Date: 09/03/2018' (OCR produced 'Data: 09/08/2018' - one month digit substituted). The extractor accepted the OCR'd date verbatim with no single-character confusable repair or cross-check against other date-shaped tokens on the receipt.",
+        "missing_reasoning_step": "No bounded salvage pass attempts single-character substitutions from an OCR-confusables table on an out-of-range or anomalous date component; no cross-reference between multiple date-shaped tokens on the same receipt (e.g. invoice date vs print date vs closing date) is used to disambiguate.",
+        "correct_general_approach": "Bind the date to a labeled 'Date'/'Invoice Date' line first; where multiple date-shaped tokens exist, prefer the labeled one; where OCR might have corrupted a single digit, enumerate confusable substitutions and accept a repair only when exactly one is calendar-valid and plausible; emit ISO YYYY-MM-DD.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale + receipt_date_lenient_parse",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt-style OCR tasks with a declared date locale (e.g. Malaysian DD/MM/YYYY) or batches where locale can be inferred.",
+        "do_not_generalize_to": "Tasks without declared or inferrable locale, or non-date numeric fields; do not use this to override an unambiguous labeled date based on batch majority.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "no_batch_diagnostic_then_consolidated_edit_workflow_leading_to_iteration_exhaustion",
+        "general_pattern": "For batch OCR extraction over N images, an iteration-per-image debug loop with ad-hoc patches tends to exhaust iteration budgets without converging the heuristics; a single diagnostic pass over all images followed by one consolidated edit converges faster.",
+        "wrong_approach": "The source run terminated at max_iterations (65 iterations, termination_reason='max_iterations', stop_reason='max_turn_requests') after an iterative inspect-and-patch loop; several residual field errors (3 amount errors, 1 date error) remained at termination.",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations', agent_iterations=65, max_iterations_at_source=65, acp_stop_reason='max_turn_requests'; residual error rate 4/44 fields with the iteration budget consumed.",
+        "missing_reasoning_step": "No single consolidated diagnostic dump of per-image (tier, value, anchor) tuples across all 22 images before any patch; instead successive patches target one image at a time.",
+        "correct_general_approach": "Produce one diagnostic table (filename, raw OCR slice around keywords, candidate tuples, current prediction) for all images in a single pass; then plan a small consolidated set of pattern/variant edits that address several images together; then re-run once.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "batch-diagnostic-then-batch-edit workflow note",
+        "defect_relation": "weak",
+        "scope_boundary": "Batch OCR extraction tasks with N≥~10 images sharing a common extraction heuristic.",
+        "do_not_generalize_to": "Single-image tasks, tasks where each image needs genuinely bespoke handling, or non-OCR batch workflows.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts / Workflow note",
+        "target_layer": "L3",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "compute_or_transform",
+      "primary_anchor": "receipt_total_keyword_priority_disambiguation + monetary_two_decimal_invariant + ocr_amount_normalization_and_arithmetic_crosscheck",
+      "editor_direction": "preserve",
+      "composition_issue": "The explicit_method_draft candidate already contains well-scoped overlay sections (receipt_total_keyword_priority_disambiguation, monetary_two_decimal_invariant, ocr_amount_normalization_and_arithmetic_crosscheck, multi_variant_consensus_over_tier_priority, receipt_date_label_binding_and_locale, receipt_date_lenient_parse, null_vs_empty_string_contract, xlsx_delivery_contract_self_check cross-reference, and batch-diagnostic-then-batch-edit workflow note) that collectively address every observed defect in this run. The diagnoses map 1:1 onto these existing anchors with correct scope boundaries. No new section is needed; this run is observable evidence that the already-drafted overlay is on-target. Editor should preserve the current overlay as-is; the defect was that the source run executed under the ORIGINAL skill (which lacks these anchors), not that the candidate overlay is insufficient.",
+      "preservation_constraints": [
+        "Keep scope-fenced overlay (receipt-only, declared-keyword-list-only, null-contract-only) intact; do not widen to non-receipt OCR.",
+        "Keep negative boundaries (no fabrication, no cross-skill leakage to openai-vision/pdf/video-frame-extraction, no hard-coded expected outputs).",
+        "Keep two-decimal invariant and OCR-confusable substitution gated to confirmed total lines (not free text, IDs, phone numbers, dates).",
+        "Keep null_vs_empty_string_contract scoped to tasks whose contract declares null-on-failure; do not generalize to tasks where '' is acceptable.",
+        "Keep xlsx_delivery_contract_self_check scoped to data-only workbooks; do not run recalc.py on formula-free outputs."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four observed residual failures (3 amount errors on 074/077/078, 1 date error on 034) sit in post-OCR text processing and writeback - domains that are directly addressable by Skill mechanisms. The candidate explicit_method_draft already carries matching anchors; the source run's failure is explained by it executing under the original (overlay-less) skill set, not by any infrastructure or executor-only cause. Iteration-budget exhaustion is a workflow-decision issue, also skill-controllable via the batch-diagnostic-then-batch-edit note. No OCR engine failure, no file-access failure, no API/runtime failure is observed."
+    }
+  },
+  "response_id": "msg_bdrk_vatavvvapztl24b4vf6bequ2rar7v25dh4fupknd5xi32twbyoxa",
+  "http_status": 200
+}

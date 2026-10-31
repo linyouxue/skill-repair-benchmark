@@ -1,0 +1,116 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "amount_split_line_fallback_misroutes_to_payment_line_for_corrupted_keyword_line",
+        "general_pattern": "When the keyword line's amount token fails numeric parsing (OCR corruption inside the digits), the split-across-two-lines fallback is triggered and consumes the next line's monetary token even when that next line is a payment/tender/change line, producing a payment amount in place of the total.",
+        "wrong_approach": "Treat any failure of monetary parsing on a keyword-matched line as a 'keyword-only line' and walk forward to the next non-empty, non-excluded line to pick its last number, with exclusions limited to SUBTOTAL/TAX/GST/SST/DISCOUNT/CHANGE/CASH TENDERED. Lines like 'Visa RM =688.17', 'Cash Received 100.00', 'Mastercard -99.80' are not matched by that exclusion list, so they silently become the total.",
+        "observable_evidence": "074.jpg predicted total 702.00 while OCR variants show 'Total incl. of GST 102.00' and 'Subtotal : 102.00' corroborating 102.00; 078.jpg predicted 100.00 while 'Grand Total 92.80' is the printed total and 'Cash Received 100.00' is the tender line consumed by fallback; trace in step 33 shows tier-1 TOTAL-RM candidate on 064 variant 2 fell through to 'Visa RM =688.17' before the digit-guard was added. The current skill overlay already recognizes 'guarded split-line fallback' but the executed code uses a narrower payment exclusion and the writeback shows the regression.",
+        "missing_reasoning_step": "Before consulting the next line as fallback, enumerate and exclude a payment/tender keyword set (CASH, CASH RECEIVED, CASH TENDERED, TENDERED, PAYMENT, PAID, RECEIVED, CHANGE, VISA, MASTERCARD, MASTER, CARD, CREDIT, DEBIT) in addition to the subtotal/tax/discount exclusions; also require that fallback only triggers when the keyword line is a pure-keyword line (no digits anywhere) so that corrupted-digit lines back off to earlier same-tier candidates instead of pulling in the following receipt line.",
+        "correct_general_approach": "Model the receipt total extractor as (a) keyword-tier match, (b) numeric parse on the matched line, and (c) a tightly guarded split-line fallback that fires only when the matched line contains no digits AND the following line matches neither the subtotal/tax exclusion set nor an explicit payment/tender exclusion set. On failure of digit parsing with digits present, back off to an earlier same-tier candidate rather than fall through.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to receipt-style OCR tasks whose prompt declares a keyword priority list and an exclusion list for totals; the payment/tender exclusion set is additive to the task-declared exclusions and must not reorder tiers.",
+        "do_not_generalize_to": "Non-receipt documents, free-text OCR, invoice tables where 'Payment' is itself the labelled total, or any task that explicitly treats tender lines as the authoritative total.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: receipt_total_keyword_priority_disambiguation (step 4: Guarded split-line fallback)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "cross_variant_vote_overrides_within_tier_corroboration_on_ocr_digit_substitution",
+        "general_pattern": "When multiple OCR variants produce different numeric values for the same tier-matched line, pure majority voting across variants can select an OCR-corrupted value that happens to appear in two variants over a value corroborated by other anchors (subtotal, payment) within a single variant.",
+        "wrong_approach": "Rank candidates purely by (tier_index, cross_variant_frequency, position); treat identical digits across variants as independent evidence even when they share a systematic OCR substitution (e.g. 1→7 at the hundreds digit, B→8, O→0).",
+        "observable_evidence": "074.jpg: variants 0 and 1 extract 702.00 from the 'Total Amt Rounded' line while variant 2 extracts 102.00; the raw text shows 'Subtotal : 102.00' and 'Total incl. of GST 102.00' in all three variants, so 102.00 is corroborated by two independent same-receipt anchors but 702.00 wins the cross-variant vote and is written to the workbook.",
+        "missing_reasoning_step": "Before cross-variant majority voting, compute per-candidate corroborated_support within each variant (count of other total-adjacent lines whose parsed value matches within rounding tolerance: Subtotal, Total incl./excl., Payment, Cash−Change). Rank by (tier_rank, corroborated_support, cross_variant_support, position) so a candidate corroborated by a non-tier anchor outranks a higher cross-variant frequency with zero corroboration.",
+        "correct_general_approach": "Reconcile candidates with a lexicographic key that prioritizes tier, then same-variant corroboration from independent anchor lines, then cross-variant support, then position – making consensus voting a tie-breaker rather than the primary signal.",
+        "skill_controllable": true,
+        "workflow_node": "verification",
+        "mechanism_anchor": "multi_variant_consensus_over_tier_priority",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies when the receipt text yields independent corroborating anchors (subtotal, inclusive/exclusive total, payment, cash−change) parseable with the two-decimal invariant. Not applicable when only a single anchor line is present or when subtotal/tax are not reliably parsed.",
+        "do_not_generalize_to": "Tasks where the subtotal is semantically distinct from the final total (e.g. tipped restaurant checks where service charge adds a known delta) and corroboration would mislead; also do not apply to non-monetary fields such as dates.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: multi_variant_consensus_over_tier_priority",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "date_label_binding_misses_print_timestamp_disambiguation_on_simplified_tax_invoice",
+        "general_pattern": "On receipts that print both a transaction date and a secondary 'print date' / 'closed' / 'invoice print' timestamp, taking the first DATE-labeled regex match (or a label whose text was OCR-canonicalized to 'DATE') can bind to the wrong token when both labels normalize to the same string.",
+        "wrong_approach": "Prefer any line canonicalized to contain 'DATE' without checking preceding tokens like PRINT/CLOSED/CLOSING/FRN/LOYALTY/PROMO, and emit the first matching date in ISO format.",
+        "observable_evidence": "034.jpg is reported as date_correct=false in field_feedback while the OCR variants clearly show 'Date: 09/03/2018' as the transaction date; this is the only date failure out of 22, consistent with a label-binding ambiguity on a 'SIMPLIFIED TAX INVOICE' layout where multiple date-shaped tokens or label variants compete and the extractor's label-priority chain did not disambiguate.",
+        "missing_reasoning_step": "When multiple DATE-labeled candidates exist, prefer the one whose label is not preceded by PRINT/CLOSED/CLOSING/FRN/LOYALTY/PROMO; when ambiguity remains, prefer the earlier label-bound candidate on the invoice body over a footer timestamp, and apply the declared locale (DD/MM/YYYY first for Malaysian receipts) before ISO conversion.",
+        "correct_general_approach": "Bind extracted dates to their label line and surrounding context, filter out print/closed/loyalty timestamps explicitly, then parse under the declared locale before emitting ISO 8601.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to receipt-style OCR tasks whose prompt declares an ISO output format and where receipts routinely include both transaction and non-transaction timestamps. Does not change date handling for free-form documents.",
+        "do_not_generalize_to": "Tasks where the task contract explicitly requests the print or closing date, or where no explicit label precedes the date token (pure positional extraction).",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: receipt_date_label_binding_and_locale",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "amount_two_decimal_invariant_tolerates_one_decimal_truncation_as_rounding_target",
+        "general_pattern": "When the authoritative total line's OCR output drops the final decimal digit (e.g. '88.1' instead of '88.17') or renders a one-decimal value, treating the parsed value as valid and formatting it as '{:.2f}' hides an OCR truncation and can select a wrong candidate when corroboration exists.",
+        "wrong_approach": "Rely on a monetary regex that permits either '\\d+\\.\\d{2}' or implicitly accepts '\\d+\\.\\d' and then force two-decimal formatting on the Python side, masking truncation and allowing a truncated same-tier line to compete with a well-formed one.",
+        "observable_evidence": "077.jpg feedback marks amount incorrect; OCR variants show 'Total (Inclusive of GST): 23.26', 'Rounding Adj: -0.01', 'TOTAL: 23.25' and the voter picked 23.25 while the Rounding Adj corroborates that 23.26 is the pre-rounding GST-inclusive total that the task likely considers. 064 variant 0 shows 'Total Gross C RM 88.1' (one-decimal truncation) that would be accepted if the regex is loose. These show the invariant is enforced in principle but not used to down-rank truncated or ambiguously-rounded candidates against corroborated siblings.",
+        "missing_reasoning_step": "Treat one-decimal matches as truncation artifacts (reject within tier), and when two same-tier candidates differ by a parseable 'Rounding Adj' line, select the candidate consistent with the rounding direction declared by that adjustment rather than the lexically-last keyword line.",
+        "correct_general_approach": "Enforce the two-decimal invariant strictly in the regex, reject one-decimal matches as OCR artifacts, and when a Rounding Adj line is parseable, use it to arbitrate between pre- and post-rounding total candidates rather than defaulting to the last line.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "monetary_two_decimal_invariant",
+        "defect_relation": "ambiguous",
+        "scope_boundary": "Scoped to receipt totals where a Rounding Adj / Rounding Adjustment line is parseable alongside the total; otherwise the lexically-last tier match remains the default.",
+        "do_not_generalize_to": "Non-monetary numeric fields, item prices, GST percentages, invoice IDs; also not to tasks that explicitly want the pre-rounding or post-rounding value regardless of adjustment.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Mechanism anchor: monetary_two_decimal_invariant",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "iterative_single_image_debug_loop_consumes_iteration_budget_without_consolidated_edit",
+        "general_pattern": "On a batch task of N images, running a per-image debug/edit/rerun loop (inspect OCR dump → patch regex/exclusion → rerun full batch) exhausts the iteration budget before all failure modes converge, and the run terminates on max_iterations rather than natural completion.",
+        "wrong_approach": "Treat each regression as a standalone bug to fix in isolation, re-run the whole extractor after every single-line edit, and let the trajectory accumulate 65 iterations without a consolidated batch-diagnostic pass.",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations', acp_stop_reason='max_turn_requests', agent_iterations=65 at the source limit; response_tool_call_counts shows 27 terminal + 16 file_editor + 22 think, with repeated OCR-dump-and-patch cycles visible in windowed steps 28–36 (064→688.17→88.17, 074→702.00 unresolved, 078→100.00 unresolved).",
+        "missing_reasoning_step": "After the first full-batch run, perform one consolidated diagnostic pass that dumps per-image (per-variant keyword slice, candidate tuples, current prediction), then plan a small bundled edit set (tighten fallback guard, add payment exclusion set, add corroboration-aware voting, add rounding-adj arbitration) and re-run once.",
+        "correct_general_approach": "Adopt the batch-diagnostic-then-batch-edit workflow note already present in the skill overlay: single diagnostic dump across all images, consolidated plan, single re-run – rather than iteration-per-image interactive debugging.",
+        "skill_controllable": true,
+        "workflow_node": "verification",
+        "mechanism_anchor": "batch-diagnostic-then-batch-edit workflow note",
+        "defect_relation": "weak",
+        "scope_boundary": "Scoped to batch extraction tasks over multiple images/receipts under a bounded iteration budget. Not applicable to single-image interactive debugging or to tasks that genuinely require per-item user feedback loops.",
+        "do_not_generalize_to": "Tasks with no iteration budget pressure, or tasks where each image is semantically independent and warrants separate deep inspection.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "receipt_total_keyword_priority_disambiguation",
+      "editor_direction": "strengthen",
+      "composition_issue": "The current skill overlay already defines guarded split-line fallback, two-decimal invariant, multi-variant consensus, and the batch-diagnostic-then-batch-edit workflow note, but the executed trajectory shows the guard is too narrow (payment/tender exclusion set incomplete), consensus voting lacks within-variant corroboration from subtotal/payment anchors, and no rounding-adj arbitration is encoded. Strengthening the existing anchors (not adding new ones) in image-ocr/SKILL.md closes the observed amount failures on 074 and 078, with 077 remaining ambiguous pending task-contract clarification on pre- vs post-rounding totals. Date failure on 034 maps to the existing label-binding anchor, which should be sharpened for print/closed/loyalty disambiguation.",
+      "preservation_constraints": [
+        "Do not alter generic OCR flow or JSON schema for non-receipt tasks",
+        "Keep the receipt overlay scoped: only applies when the task prompt declares keyword tiers / exclusions / null writeback contract",
+        "Preserve the null-vs-empty-string writeback contract and the xlsx delivery-contract self-check cross-reference",
+        "Do not import receipt-specific heuristics into openai-vision/pdf/video-frame-extraction/xlsx",
+        "Do not reorder or extend task-declared keyword tiers; payment/tender exclusions are additive guards on the fallback step only",
+        "Preserve the two-decimal monetary invariant as a strict regex, not a formatting-time coercion"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All four field errors (074 amount, 077 amount, 078 amount, 034 date) and the max_iterations termination map to mechanisms already anchored in image-ocr/SKILL.md's receipt overlay: guarded split-line fallback (receipt_total_keyword_priority_disambiguation), multi-variant consensus with corroboration (multi_variant_consensus_over_tier_priority), label-bound date extraction (receipt_date_label_binding_and_locale), two-decimal invariant with rounding-adj awareness (monetary_two_decimal_invariant), and the batch-diagnostic-then-batch-edit workflow note. No infrastructure/executor fault is implicated: the agent had full tool access, Tesseract worked, images were readable, and the workbook was delivered with valid schema. The remaining gap is a strengthening of existing anchors (tighter payment/tender exclusion set in fallback, within-variant corroboration in voting, explicit print/closed/loyalty filtering in date binding, and rounding-adj arbitration), all expressible as edits to image-ocr/SKILL.md within the already-declared receipt scope."
+    }
+  },
+  "response_id": "msg_bdrk_b672alxob22mpbzu3hoqiuinsvycvwilfi7mqeyyxe6imjn3ef4q",
+  "http_status": 200
+}

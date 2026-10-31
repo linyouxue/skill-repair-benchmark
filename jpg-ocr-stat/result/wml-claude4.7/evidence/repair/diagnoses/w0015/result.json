@@ -1,0 +1,133 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "cross_variant_voting_overrides_higher_tier_without_corroboration",
+        "general_pattern": "When the Multi-Pass OCR Strategy produces multiple (tier, value) candidates across preprocessing variants, the agent used plain frequency voting within the best tier to pick the final value. Because low-signal variants (upscaled or inverted PSM 6) can produce spurious keyword matches that still occupy a nominally 'higher' priority tier, raw cross-variant frequency voting can promote a corrupted candidate over a well-anchored one.",
+        "wrong_approach": "Treat every variant equally, pick the smallest tier_idx present in any variant, then within that tier choose the most frequent numeric value, breaking ties by earliest occurrence. No requirement that the chosen value be corroborated by another anchor (subtotal, payment, cash-change) and no demotion when the only candidate at that tier comes from an obviously corrupted line (`Total RM = B81?`, `Grand Total` with no digits on-line).",
+        "observable_evidence": "In 064.jpg variant 2 the keyword line is 'Total RM = B81?' with no parseable 2-decimal token; the split-line fallback consulted the next line 'Visa RM =688.17' (a payment line) and emitted 688.17 at tier 1, overriding the clean tier-3 value 88.17 that variants 0 and 1 produced on 'Total RN 88.17' / 'Total Gross C RM 88.17'. In 078.jpg variants 1 and 2 the 'Grand Total' line has no digits; fallback reached the 'Cash Received 100.00' line and emitted 100.00 at tier 0, overriding variant 0's 92.80 drawn from 'GrandTota. = tS 92.80'. The final workbook shows 064=88.17 (reverted) but 078=100.00, confirming the voting path can override a corroborated lower-tier candidate with an uncorroborated higher-tier one.",
+        "missing_reasoning_step": "Before promoting a candidate from variant V at tier T, require that (a) the keyword line in V actually contains a parseable 2-decimal monetary token, OR (b) the split-line fallback target is not a payment/tender keyword line AND the resulting value is corroborated by at least one same-receipt anchor (another total line, subtotal+tax, cash-change). Cross-variant frequency should only break ties among equally corroborated candidates at the same tier, never override a corroborated lower-tier value with an uncorroborated higher-tier one.",
+        "correct_general_approach": "Rank candidates by (tier_rank, corroborated_support, cross_variant_support, position) exactly as the current image-ocr overlay already specifies under multi_variant_consensus_over_tier_priority; additionally forbid the split-line fallback from consulting a payment/tender keyword line (CASH, CASH RECEIVED, VISA, MASTERCARD, PAYMENT, CHANGE, TENDERED). When the fallback target is excluded, back off to an earlier same-tier candidate rather than emitting the payment-line amount.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "multi_variant_consensus_over_tier_priority",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to receipt-style OCR tasks that run multi-pass OCR variants AND use a declared keyword-priority list with a split-line fallback. Governs the reconciliation step between per-variant (tier, value) tuples and the final written total.",
+        "do_not_generalize_to": "Do not apply this ranking override to single-pass OCR, to non-monetary fields (dates, IDs, quantities), or to tasks whose contract does not declare a tier priority list. Do not use it to justify arithmetic repair of individually valid OCR values.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: multi_variant_consensus_over_tier_priority (and the guarded split-line fallback step in receipt_total_keyword_priority_disambiguation)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "split_line_fallback_reaches_payment_tender_line_when_keyword_line_lacks_digits",
+        "general_pattern": "Guarded split-line fallback (rule 4 of receipt_total_keyword_priority_disambiguation) is intended to recover a total when the keyword line itself contains zero digits. If the exclusion filter on the fallback target does not include payment/tender keywords, the fallback silently binds the total to a payment amount (cash tendered, card charge) that may differ from the actual total.",
+        "wrong_approach": "Allow the fallback line to be any non-excluded, pre-cutoff line, where 'excluded' only covers the subtotal/tax/discount/change list. VISA, MASTERCARD, CASH RECEIVED, PAYMENT, TENDERED are not treated as exclusions on the fallback target, so a Grand-Total-without-digits line falls through to the Cash Received line.",
+        "observable_evidence": "078.jpg variant 1 and variant 2 produced tier=0 value=100.00 because the 'Grand Total' keyword line held no digits and the fallback reached 'Cash Received 100.00'. The predicted total_amount for 078.jpg was emitted as an empty string in the delivered xlsx (amount_correct=false), showing the fallback both mis-anchored and interacted poorly with the null writeback contract.",
+        "missing_reasoning_step": "Expand the fallback-target exclusion set to include payment/tender tokens (CASH, CASH RECEIVED, CASH TENDERED, TENDERED, PAYMENT, PAID, RECEIVED, VISA, MASTERCARD, MASTER, CARD, CREDIT, DEBIT, CHANGE) in addition to the existing subtotal/tax exclusions. When the fallback target is excluded, back off to an earlier same-tier candidate before falling through tiers.",
+        "correct_general_approach": "Treat the fallback as 'look at the next non-empty line only if it is not excluded AND not a payment/tender line'; otherwise retry earlier same-tier candidates; only then fall through to the next priority tier.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation (step 4: Guarded split-line fallback)",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt-style OCR tasks that declare a total-keyword priority list and an exclusion list, and that use a split-line fallback to recover totals when the keyword line itself has no digits.",
+        "do_not_generalize_to": "Do not expand the exclusion set for the primary keyword-line matching step (payment keywords are not themselves total keywords, but the primary step already requires a tier-keyword hit). Do not apply the payment exclusion to date extraction or to quantity/price field extraction.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: receipt_total_keyword_priority_disambiguation (step 4)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "null_sentinel_written_as_empty_string_breaks_null_contract",
+        "general_pattern": "When total extraction fails, Python code paths that format the amount via f-string or str() coerce None into an empty string before openpyxl assignment, producing a cell whose value is '' rather than None. The task contract declares null for failed extractions, so an empty-string cell is not contract-equivalent to a null cell.",
+        "wrong_approach": "Use `total_str = f\"{total:.2f}\" if total is not None else None` for successful extraction, but then rely on upstream code to accept either None or a non-string sentinel; in practice the delivered xlsx row for 078.jpg has total_amount='' (string), not a true empty/null cell, suggesting a conversion through str()/f-string or a DataFrame fillna('') somewhere in the writeback path.",
+        "observable_evidence": "The predictions table lists 078.jpg with total_amount='' (empty string), while the task contract calls for null on failed extraction. Field feedback marks amount_correct=false for 078.jpg. No other row shows '', indicating the None sentinel was successfully preserved elsewhere but not on 078.jpg.",
+        "missing_reasoning_step": "Assign Python None directly to the openpyxl cell / DataFrame cell on failed extraction, and run a reload-and-assert pass that asserts `cell.value is None` (not `== ''`) for the amount column before termination.",
+        "correct_general_approach": "Enforce null_vs_empty_string_contract on writeback and add xlsx_delivery_contract_self_check as a mandatory post-save step: reload with data_only=True, for each row where extraction failed assert cell.value is None, for each successful row assert the value matches the declared regex.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract / xlsx_delivery_contract_self_check",
+        "defect_relation": "weak",
+        "scope_boundary": "Data-only xlsx outputs whose contract explicitly distinguishes null from empty string, and where failed extractions are expected to be true empty cells.",
+        "do_not_generalize_to": "Do not apply this to tasks that explicitly use '' or a placeholder string as the failure sentinel, nor to formatted financial models where empty strings do not appear.",
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Preserving null vs empty string on writeback / Delivery contract verification for data-only xlsx outputs",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "iteration_budget_exhausted_by_per_image_debug_loop",
+        "general_pattern": "The source run terminated at max_iterations=65 (stop_reason=max_iterations), with 27 terminal calls, 22 think calls, and 16 file_editor calls spent in a per-image interactive debug loop (OCR dump → regex tweak → re-run → inspect one image → tweak again). The run reached 90.9% field accuracy but never executed a consolidated batch-diagnostic-then-batch-edit cycle that would have surfaced the payment-line fallback bug on 078 and the voting override on 064 together.",
+        "wrong_approach": "Iterate one receipt at a time: pick the image whose extraction currently fails, print its per-variant OCR text, adjust the regex or exclusion list, re-run the entire batch, inspect the next failing image, repeat. Each iteration improves one image at the cost of one iteration slot, and the method converges only when the budget is exhausted.",
+        "observable_evidence": "Trajectory shows repeated single-image debug cycles (064.jpg, 074.jpg, 077.jpg, 078.jpg inspected individually in the fragment), followed by regex edits and re-runs. Final termination_reason=max_iterations with budget_termination_is_not_natural_completion=true. agent_iterations=65 of 65.",
+        "missing_reasoning_step": "After the first full-batch run, dump per-image (variant_text, tier, value, prediction) in a single table, group failures by failure type (payment-line fallback, 3-decimal regex miss, confusable substitution), and plan one consolidated edit addressing all images in a group before re-running the batch.",
+        "correct_general_approach": "Follow the Workflow note: batch-diagnostic-then-batch-edit in image-ocr/SKILL.md. Produce one batch-wide diagnostic artifact, cluster failures by mechanism, make a small consolidated set of edits, re-run once, then stop.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "Workflow note: batch-diagnostic-then-batch-edit",
+        "defect_relation": "weak",
+        "scope_boundary": "Batch extraction tasks over N>5 images where iteration budget is finite and per-image debug cycles compete with batch-wide fixes for the same budget.",
+        "do_not_generalize_to": "Do not apply to single-image or ad-hoc inspection tasks, and do not interpret this as forbidding interactive debugging entirely; it is a budgeting discipline, not a prohibition.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "L3",
+        "confidence": "medium"
+      },
+      {
+        "label": "date_label_binding_misses_IKEA_slip_date_header",
+        "general_pattern": "On receipts whose date is printed on the same line as the word 'Date:' but inside a slip header (e.g. 'Date: 09/08/17' on an IKEA slip), the date extractor may bind to a 2-digit-year header date and parse it correctly, OR to a secondary date elsewhere (promo/loyalty/print timestamp). When multiple date-like tokens exist, lacking label-anchored priority causes the final ISO date to drift to the wrong token.",
+        "wrong_approach": "Scan the OCR text for the first regex-matching date pattern without weighting lines whose canonicalized text contains 'DATE' or 'INVOICE DATE' and without demoting lines preceded by PRINT/CLOSED/CLOSING/FRN/LOYALTY/PROMO.",
+        "observable_evidence": "034.jpg (IKEA-style, slip 'Date: 09/08/17') was marked date_correct=false in field feedback (the only date error in the batch), while 21/22 dates were correct. All other IKEA/MyNEWS/Shell receipts with explicit 'Date:' labels were handled correctly, so the failure mode is narrow and consistent with label-binding ambiguity on this particular layout.",
+        "missing_reasoning_step": "Rank date candidates by (label-anchored, locale-primary ordering, position); prefer lines whose canonicalized form contains DATE/INVOICE DATE and are not preceded by PRINT/CLOSED/LOYALTY/PROMO; apply the DD/MM/YY → DD/MM/YYYY expansion under the declared Malaysian locale.",
+        "correct_general_approach": "Apply receipt_date_label_binding_and_locale: prefer label-anchored lines, demote print-timestamp/loyalty lines, parse under declared locale, emit ISO.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt-style OCR tasks declaring an ISO date output and a locale (Malaysian DD/MM/YYYY here); applies when more than one date-like token appears on the receipt.",
+        "do_not_generalize_to": "Do not generalize to tasks with a single unambiguous date, to non-receipt documents, or to tasks whose contract does not fix a locale ordering.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: receipt_date_label_binding_and_locale",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "amount_regex_rejects_three_decimal_or_corrupted_tokens_without_substitution_retry",
+        "general_pattern": "The two-decimal monetary invariant is correct as a structural rule, but when OCR injects an extra digit before the decimal ('189.673' instead of '189.75') or substitutes letters mid-token ('702.00' vs '102.00'), rejection without a confusable-substitution retry on the matched line leaves the extractor to fall through to the wrong anchor.",
+        "wrong_approach": "Apply the strict `\\d+\\.\\d{2}` regex, reject '189.673' as 3-decimal, and silently fall through to a lower-priority or earlier same-tier candidate without first attempting ocr_amount_normalization inside the already-keyword-anchored line.",
+        "observable_evidence": "074.jpg was marked amount_correct=false (predicted 702.00); OCR variants show 'Total incl. of GST 102.00' and 'Total Amt Rounded ——S«702.00'; the 702.00 reading is a Tesseract '1'→'7' substitution on the leading digit. 039.jpg's 'Het Total 189.673' also exhibits the pattern (fortunately resolved in this run). Neither case triggers an on-line confusable-substitution retry.",
+        "missing_reasoning_step": "After a two-decimal regex miss on a keyword-anchored line, apply the OCR confusables table (O/o/Q→0, l/I/|→1, S→5, B→8, Z→2, u→0, G→6, 7→1 for leading digit) to the numeric span only and re-match; prefer the substituted candidate that is consistent with subtotal+tax (102.00 vs 702.00 here).",
+        "correct_general_approach": "Apply ocr_amount_normalization_and_arithmetic_crosscheck inside the keyword-anchored line before falling through tiers; prefer substituted candidates consistent with subtotal/payment anchors.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "ocr_amount_normalization_and_arithmetic_crosscheck",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt-style OCR amount extraction where confusable substitutions are likely inside the numeric token of a keyword-anchored line. Not for free text or non-monetary fields.",
+        "do_not_generalize_to": "Do not apply confusable substitution to IDs, phone numbers, GST registration numbers, invoice numbers, or dates; do not substitute outside tokens that are already dominated by digits and a decimal point.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts > Mechanism anchor: ocr_amount_normalization_and_arithmetic_crosscheck",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "multi_variant_consensus_over_tier_priority",
+      "editor_direction": "strengthen",
+      "composition_issue": "The current image-ocr overlay already defines multi_variant_consensus_over_tier_priority and the guarded split-line fallback inside receipt_total_keyword_priority_disambiguation, but the trajectory shows the agent implemented a simpler cross-variant frequency vote without (a) requiring corroboration from a non-tier anchor (subtotal/payment/cash-change), (b) demoting candidates whose keyword line contains no parseable monetary token, or (c) excluding payment/tender keyword lines as split-line fallback targets. Strengthen the two anchors to make these three sub-rules explicit and enforceable, and tie them to the xlsx null_vs_empty_string_contract so a failed-but-uncorroborated extraction writes true None rather than a payment-line amount. Preserve the existing scope boundary that restricts the overlay to receipt-style tasks with declared keyword/exclusion/null conventions.",
+      "preservation_constraints": [
+        "Keep the overlay strictly scoped to receipt OCR tasks that declare their own keyword priority, exclusion list, and null convention; do not import receipt-specific tokens into openai-vision, pdf, video-frame-extraction, or into unrelated xlsx guidance.",
+        "Preserve the two-decimal monetary invariant as a hard structural rule for totals only, not for prices/quantities/dates/IDs.",
+        "Preserve the null_vs_empty_string_contract and xlsx_delivery_contract_self_check as data-only-xlsx-scoped notes; do not promote them to a universal xlsx rule.",
+        "Preserve the Workflow note: batch-diagnostic-then-batch-edit as a budgeting discipline, not a prohibition on interactive debugging.",
+        "Do not introduce dataset-specific values (e.g. expected totals or dates for 064/074/077/078) into the SKILL.md; keep anchors mechanism-level."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All six observed failure modes map cleanly to existing mechanism anchors already present in the current image-ocr and xlsx SKILL.md overlays (multi_variant_consensus_over_tier_priority, receipt_total_keyword_priority_disambiguation step 4, ocr_amount_normalization_and_arithmetic_crosscheck, receipt_date_label_binding_and_locale, null_vs_empty_string_contract, xlsx_delivery_contract_self_check, batch-diagnostic-then-batch-edit). The failures are consistent with the agent implementing weaker versions of these anchors (plain frequency vote, incomplete fallback exclusion set, no on-line confusable retry, f-string formatting of the null sentinel) rather than with infrastructure or executor defects. Termination at max_iterations is a scheduling symptom of the per-image debug loop and is itself addressed by the batch-diagnostic workflow note. No oracle values or verifier assertions were consulted; diagnoses rely only on predictions, per-field correctness flags, and OCR text visible in the trajectory window."
+    }
+  },
+  "response_id": "msg_bdrk_h2e6dirw5vvqg6nnztlyqe53rjzhupezvy5x4s6bxnugxmh6sk6a",
+  "http_status": 200
+}

@@ -1,0 +1,132 @@
+{
+  "tool_input": {
+    "overlay": {
+      "primary_node": "compute_or_transform",
+      "primary_anchor": "receipt_total_disambiguation_priority_rules",
+      "editor_direction": "add",
+      "composition_issue": "image-ocr SKILL.md gives generic OCR recipes but does not encode the task-domain disambiguation rules (keyword priority tiers, exclusion keywords, GST/tax-summary section boundary, decimal-amount sanity filter, next-line fallback) that the receipt total-extraction task actually requires. Preprocessing + PSM-6 defaults are also only mentioned as options rather than as the preferred Tesseract configuration for receipts.",
+      "preservation_constraints": [
+        "Keep existing Multi-Pass OCR Strategy and Image Preprocessing sections intact",
+        "Do not alter the generic JSON output schema fields",
+        "Do not add task-specific hardcoded answers; keep rules as reusable patterns",
+        "Preserve openai-vision, xlsx, pdf, video-frame-extraction skills unchanged"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The remaining 3 wrong amounts (074, 077, 078) are all explainable by missing/weak Skill-level guidance about (a) applying grayscale+autocontrast preprocessing with --psm 6 as the preferred receipt OCR config, (b) treating lines after a 'GST SUMMARY'/'TAX SUMMARY' header as excluded, (c) within a priority tier iterating candidates last→first and skipping candidates whose number lacks two decimals, and (d) when multiple same-tier TOTAL variants coexist, preferring 'Inclusive of GST' / 'Rounded Total' / 'Net Total' over a bare final 'TOTAL:' line that is an OCR-truncated/rounded duplicate. These are reusable extraction mechanisms, not hidden answer lookups, and are controllable by adding guidance to image-ocr SKILL.md. The one date error (034) and the two amount errors tied purely to OCR character corruption that preprocessing already fixed are weaker but still partly controllable via the same preprocessing/priority rules. No infrastructure-only failures were observed; the agent ran to max_iterations without a natural completion, so delivery is partial but the Excel was produced and scored."
+    },
+    "diagnoses": [
+      {
+        "label": "missing_summary_section_boundary_rule",
+        "general_pattern": "When extracting a canonical total from receipt OCR text, lines occurring after a 'GST SUMMARY' / 'TAX SUMMARY' / 'Tax Code ... Amount ... Tax' header belong to a tax breakdown table and must not be considered candidates for the receipt total, even if they contain the token 'Total' or 'Amount'.",
+        "wrong_approach": "Treating every line containing 'TOTAL' or 'AMOUNT' as a candidate across the entire OCR text and using only line-local exclusion patterns like 'GST SUMMARY' on the same line, which fails when a later 'Total 16.71 0.99' or 'a Total: 348.50' row sits under a previously printed 'GST SUMMARY' header.",
+        "observable_evidence": "Trajectory a0012/a0014 shows 071.jpg producing total 0.99 from 'Total 16.71 0.99' under 'GST Summary Amount Tay'; 034 producing 348.50 from 'a Total: 348.50 8H' after 'GST SUMMARY'; 074 producing 96.23 via next-line fallback into 'SR gy a% 96.23 B77' after 'GST Summary Amount (RM) Tax (RM)'. Agent later had to invent SUMMARY_HEADER_RE in-run (a0022) to fix this.",
+        "missing_reasoning_step": "Scan once for a summary-section header (GST SUMMARY / TAX SUMMARY / 'Amount (RM) Tax (RM)' / 'Tax Code') and restrict total-keyword candidate collection to lines strictly before that index.",
+        "correct_general_approach": "Before applying priority tiers, locate the first summary-header line; only lines with index < summary_start are eligible candidates. Keep per-line exclusion patterns as a second filter for subtotals/tax/change/item-count.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_total_disambiguation_priority_rules",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to receipt/invoice-style OCR text that contains a trailing GST/SST/VAT breakdown table; the eligible-region cutoff only governs total-amount candidate selection.",
+        "do_not_generalize_to": "Do not apply this cutoff to date extraction, to non-receipt OCR documents, or to generic 'Amount' fields in tables where no summary header exists.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "new subsection under 'Multi-Pass OCR Strategy' titled 'Domain pattern: receipt total disambiguation'",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "last_candidate_only_without_decimal_sanity",
+        "general_pattern": "When multiple lines in the same priority tier contain the keyword, selecting strictly the last candidate without a sanity check on the extracted number (two-decimal monetary form) can latch onto item-count or truncated numbers (e.g., 'Total Item(s): 4', 'Total Gross C RM 88.1').",
+        "wrong_approach": "Picking candidates[-1] and, if its line has no decimal number, blindly falling through to the next non-excluded line via a short-range fallback (which lands on tax-summary rows).",
+        "observable_evidence": "In a0012/a0016 the agent traces that for 074 priority 4 picks 'Total Item(s): 4' (num=None) and then next-line fallback captures 96.23 from the SR row; for 009 the final 'TOTAL INCLUDES 6% GST' tail yields None causing total=None; for 064 'Total Gross C RM 88.1' is chosen over the earlier 'Total RN 88.17'.",
+        "missing_reasoning_step": "Iterate candidates in reverse order; require the extracted number to match a monetary form (digits with exactly two decimals, optional thousands separators) before accepting; skip 'Total Item(s)/Qty/Savings' phrases as excluded.",
+        "correct_general_approach": "For each tier: collect candidates, iterate from last to first; a candidate is accepted only if its line yields a two-decimal number. The next-line fallback is used only when the current line has NO number at all, and the fallback line is itself non-excluded and inside the pre-summary region.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_total_disambiguation_priority_rules",
+        "defect_relation": "weak",
+        "scope_boundary": "Within receipt total-amount extraction only; number-shape sanity is monetary (two decimals), not for arbitrary numeric fields.",
+        "do_not_generalize_to": "Do not reject non-two-decimal numbers for date, invoice-number, quantity, or price-per-unit fields.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "same 'Domain pattern: receipt total disambiguation' subsection",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "preprocessing_and_psm_not_defaulted_for_receipts",
+        "general_pattern": "Thermal/scanned receipts are low-contrast and benefit strongly from grayscale + autocontrast preprocessing combined with Tesseract --psm 6 (uniform block). Using the default pytesseract.image_to_string on the raw PIL image loses digits (e.g., '15.u00' instead of '15.00', '702.00' instead of '102.00', '88.1' instead of '88.17').",
+        "wrong_approach": "Calling pytesseract.image_to_string(Image.open(path)) with no preprocessing and no PSM, then trying to patch digit errors downstream via regex substitutions.",
+        "observable_evidence": "a0013 vs a0017: raw OCR of 074 gives 'Total inel. of GBT 702.00' and 'Toial Amt Rounded oO yo2.00'; after grayscale+autocontrast+psm 6 the same image yields 'Total incl. of GST 102.00' and 'Date : 20/03/2018 13:01'. Similar gains on 011, 063, 064, 077, 083, 087, 088, 094.",
+        "missing_reasoning_step": "For receipt-like inputs, apply convert('L') + ImageOps.autocontrast and pass config='--psm 6' as the default pass before falling back to multi-pass strategies.",
+        "correct_general_approach": "Document a 'receipt preset' in the OCR skill: grayscale, autocontrast, --psm 6, 300+ DPI; fall back to --psm 4/11 and inverted/sharpened variants only if the preset extraction fails downstream validation.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_ocr_preprocessing_preset",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies specifically to printed receipt/invoice OCR with Tesseract; preset is a recommended starting point, not a mandate for all image types.",
+        "do_not_generalize_to": "Do not force --psm 6 on sparse text, forms with multi-column layouts, or handwriting; do not autocontrast photographic images where it harms accuracy.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "'Image Preprocessing' / 'Tesseract Configuration Options' – add 'Receipt preset' note",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "duplicate_total_lines_tie_break_missing",
+        "general_pattern": "Some receipts print both a verbose total ('Total (Inclusive of GST): 23.26') and a bare restated total ('TOTAL: 23.25') that may differ by rounding or OCR error. A naive last-match rule can prefer the less-reliable restatement.",
+        "wrong_approach": "Always take the lexically last TOTAL keyword line in the priority tier without considering phrase specificity or decimal consistency.",
+        "observable_evidence": "a0017/a0018 shows 077.jpg producing two candidates 'Total (Inclusive of GST): 23.26' and 'TOTAL: 23.25'; the agent explicitly notes the ambiguity and settles on 23.25, which the field feedback marks as incorrect.",
+        "missing_reasoning_step": "When same-tier TOTAL candidates co-occur, prefer the one qualified by 'Inclusive of GST', 'Net Total', 'Rounded Total', 'Grand Total' over a bare 'TOTAL:' restatement; or prefer the earlier of two numerically close values when both are plausible.",
+        "correct_general_approach": "Add a secondary ordering inside tier 4: qualified-TOTAL phrases outrank bare 'TOTAL:' phrases; among equally-qualified, use the last; treat a trailing bare 'TOTAL' line within 1-2 lines of the qualified total as a duplicate echo.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_total_disambiguation_priority_rules",
+        "defect_relation": "ambiguous",
+        "scope_boundary": "Only when multiple TOTAL candidates exist in the pre-summary region and all share the same priority tier.",
+        "do_not_generalize_to": "Do not use this preference where only one TOTAL candidate exists, or when hints explicitly give a different priority (e.g., GRAND TOTAL already handled by tier 1).",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "'Domain pattern: receipt total disambiguation' – tie-breaking rules",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "date_parsing_lenience_for_corrupted_separators",
+        "general_pattern": "Receipt OCR frequently drops or substitutes date separators (e.g., '2032018' for '20/03/2018', '09/03/2018' for '08/09/2018'). A date extractor that only matches canonical DD/MM/YYYY, DD-MM-YYYY, or YYYY-MM-DD patterns will fail or capture a wrong-reading date.",
+        "wrong_approach": "Relying solely on strict separator-based regexes without a fallback that tries re-inserting separators after 8 consecutive digits or that cross-validates DD/MM/YY against known month ranges.",
+        "observable_evidence": "a0017 shows 074 raw OCR 'Date : 2032018 13:01' versus preprocessed 'Date : 20/03/2018 13:01'; 063 raw 'pe /02/18' vs preprocessed '26/02/18'. Field feedback marks 034's date as incorrect while the amount is correct, consistent with an OCR-order ambiguity the skill does not address.",
+        "missing_reasoning_step": "After strict pattern matching fails, attempt a lenient parse: look for an 8-digit run near a 'Date' keyword and segment as DDMMYYYY / YYYYMMDD, validating month in 1..12 and day in 1..31; prefer dates near a 'Date' or 'Invoice' keyword.",
+        "correct_general_approach": "Document in SKILL.md a two-stage date extractor: strict regex first, then a keyword-anchored lenient parser that reconstructs separators and validates ranges; always output ISO-8601 YYYY-MM-DD.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_date_lenient_parse",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt/invoice date fields anchored by a 'Date' keyword; not a general heuristic for timestamps embedded in free text.",
+        "do_not_generalize_to": "Do not apply lenient 8-digit segmentation to arbitrary numeric strings like invoice/transaction IDs that happen to be 8 digits long.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "new subsection 'Domain pattern: receipt date extraction'",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "iteration_budget_terminated_before_natural_completion",
+        "general_pattern": "The source run hit max_iterations=65 (stop_reason=max_iterations) rather than finishing naturally; this is an executor/budget observation, not a reasoning defect in the Skill.",
+        "wrong_approach": "Interpreting the final 90.9% field accuracy as the agent's chosen stopping point when in fact the loop was cut off; the agent was mid-iteration on tie-breaking refinements (e.g., 077 duplicate-total ambiguity, 074 OCR noise).",
+        "observable_evidence": "execution_metadata.termination_reason='max_iterations', acp_stop_reason='max_turn_requests', iteration_limit_hits=1, agent_iterations=65=max_iterations_at_source; budget_termination_is_not_natural_completion=true.",
+        "missing_reasoning_step": "None — this is infrastructure context, not a skill gap.",
+        "correct_general_approach": "Preserve this as metadata; do not patch Skill text to compensate for budget caps. If future runs still hit the cap, consider raising the executor budget rather than compressing skill guidance.",
+        "skill_controllable": false,
+        "workflow_node": "infrastructure_or_executor",
+        "mechanism_anchor": "executor_iteration_budget",
+        "defect_relation": "not_skill_controllable",
+        "scope_boundary": "Scope is the executor's per-step iteration limit; it affects completeness of exploration, not the correctness of individual extractions.",
+        "do_not_generalize_to": "Do not use this as justification to shortcut skill repair; the two or three remaining errors have independent, skill-controllable mechanisms above.",
+        "target_file": "none",
+        "target_section": "meta_only",
+        "target_layer": "meta_only",
+        "confidence": "high"
+      }
+    ]
+  },
+  "response_id": "msg_bdrk_ufd6d5nkcdtwv4o34ravz5yxenvaqkfvwsdtdr5yxskx6d3zwvpq",
+  "http_status": 200
+}

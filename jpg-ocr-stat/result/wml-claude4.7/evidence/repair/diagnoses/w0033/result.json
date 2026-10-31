@@ -1,0 +1,115 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "writeback_null_contract_violation_empty_string_for_failed_amount",
+        "general_pattern": "When a task contract requires failed extractions to be written as null, the writeback must assign Python None to the openpyxl cell. Writing the empty string \"\" instead produces a distinct empty-string cell that does not satisfy cell.value is None, violating a null-vs-empty-string contract.",
+        "wrong_approach": "In the delivered workbook, row 078.jpg carries total_amount=\"\" (empty string) rather than None. The source code already returns None from process_image when extract_total fails, but the delivered row shows an empty-string cell for a failed amount, indicating either the None was coerced to \"\" at writeback or the empty cell is being treated as a valid value by the schema check (predictions show total_amount=\"\" for 078).",
+        "observable_evidence": "predictions row {\"filename\": \"078.jpg\", \"date\": \"2017-02-02\", \"total_amount\": \"\"} vs other failed rows where None would be expected; the current image-ocr candidate explicitly adds 'null_vs_empty_string_contract' and xlsx adds 'Preserving null vs empty string on writeback' sections, so the mechanism is already named but the trajectory shows the output still emits empty string.",
+        "missing_reasoning_step": "Before saving, assert for every column whose contract allows null that failed cells satisfy cell.value is None, not cell.value == \"\" or str-coerced \"None\"; and ensure the extraction function returns None (never \"\") and that no formatting step (f-string, str()) is applied to the sentinel on the writeback path.",
+        "correct_general_approach": "Return Python None from extract_total on failure and assign total_str = f\"{total:.2f}\" if total is not None else None directly to the cell; then reload with load_workbook(path, data_only=True) and verify cell.value is None for the failed row before finishing.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract + xlsx_delivery_contract_self_check",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies only to data-only xlsx outputs whose task contract explicitly distinguishes null from empty string in a given column (here total_amount per task prompt).",
+        "do_not_generalize_to": "Tasks whose contract uses \"\" or a placeholder string as a valid sentinel; financial models where empty strings never appear; columns whose contract does not permit null.",
+        "target_file": "xlsx/SKILL.md",
+        "target_section": "Preserving null vs empty string on writeback / Delivery contract verification for data-only xlsx outputs",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "gst_summary_table_total_misclassified_as_grand_total",
+        "general_pattern": "On GST/tax-summary tables printed near the end of Malaysian receipts, column headers like 'Amount (RM) Tax (RM)' and a summary row labeled 'Total' or 'a Total:' reuse the TOTAL keyword to summarize tax amounts, not the receipt total. Without a post-summary cutoff, the last TOTAL-matching line falls inside the GST-summary section and the extractor returns a tax-table amount instead of the final grand total.",
+        "wrong_approach": "For 074.jpg, the trajectory and OCR dump show a GST Summary block with 'Total 96.23 5.77' being the last candidate after keyword/exclusion filtering, and the agent-produced total was 702.00 then 96.23 (both from the summary/tax table, not the Total Amt Rounded line). The extractor walks all lines of the OCR without ever treating 'GST Summary' / 'Amount (RM) Tax (RM)' as a hard cutoff.",
+        "observable_evidence": "amount_correct=false for 074.jpg (predicted 702.00/96.23 in trajectory, delivered 702.00 originally; final delivered row has total_amount=\"702.00\"); OCR line 25: 'GST Summary Amount (RM) Tax (RM)' and line 26 'SR gy a% 96.23 B77'; the agent's own think-steps explicitly identify 'GST SUMMARY' as the cutoff needed.",
+        "missing_reasoning_step": "Before tier walk, scan lines for a GST/TAX/SST SUMMARY header or a tax-table column header ('Amount (RM) Tax (RM)', 'Tax Code', 'Amount GST'); record its index; drop all later lines from the candidate pool for every priority tier.",
+        "correct_general_approach": "Implement the receipt_total_keyword_priority_disambiguation step-2 summary-section cutoff: detect GST/TAX/SST SUMMARY and tax-table column headers, mark that index as the ineligibility boundary, and only consider candidates strictly before it when choosing within any tier.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation (summary-section cutoff clause)",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt-OCR tasks whose receipts include a GST/VAT/SST summary block that reuses TOTAL/AMOUNT as column or row labels for tax breakdowns.",
+        "do_not_generalize_to": "Non-receipt documents, receipts without a tax-summary block, or tasks whose declared total appears inside the tax-summary table by design.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → receipt_total_keyword_priority_disambiguation (step 2: summary-section cutoff)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "ocr_truncation_one_decimal_accepted_as_total",
+        "general_pattern": "Tesseract occasionally drops the final digit of a two-decimal monetary token (e.g. 88.17 → 88.1), especially near line edges or in low-contrast rows. A monetary regex that accepts \\d+\\.\\d{1,2} will match the truncated one-decimal token and emit it as the total, violating the receipts' two-decimal invariant.",
+        "wrong_approach": "For 074.jpg, the delivered total_amount is \"702.00\" from the OCR-corrupted line 'Total inel. of GBT 702.00' (true value 102.00). Related same-receipt line 'Toial Amt Rounded oO yo2.00' was discarded because 'Toial' failed the TOTAL keyword and 'yo2.00' failed the two-decimal regex. The regex NUM_RE used \\d+\\.\\d{1,2} rather than enforcing exactly two decimals and did not reject truncated/corrupted monetary tokens.",
+        "observable_evidence": "Field feedback: 074.jpg amount_correct=false (delivered 702.00). Trajectory 064.jpg also exhibits the pattern: 'Total Gross C RM 88.1' is accepted and written as 88.10 (field feedback shows amount_correct=true only because the specific receipt tolerated it; 077 field_feedback amount_correct=false with delivered 23.26 is actually correct per task prompt but was initially None).",
+        "missing_reasoning_step": "Enforce exactly two fractional digits on the monetary-token regex for total extraction; reject one-decimal matches as OCR truncation artifacts and fall back to another candidate in the same tier (or an earlier same-tier candidate) rather than silently padding one decimal to two or accepting a wildly different number from an OCR-corrupted neighbor line.",
+        "correct_general_approach": "Apply the monetary_two_decimal_invariant: primary regex (?<![\\w.])(\\d{1,3}(?:,\\d{3})+\\.\\d{2}|\\d+\\.\\d{2})(?![\\w.]); when the chosen candidate line yields no two-decimal token (or only a one-decimal token), back off to an earlier same-tier candidate rather than accepting a wrong neighbor.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "monetary_two_decimal_invariant",
+        "defect_relation": "weak",
+        "scope_boundary": "Only the total-amount monetary token on receipts whose contract specifies two-decimal formatting; applies alongside the keyword-priority tiering, not for prices, quantities, or non-monetary numerics.",
+        "do_not_generalize_to": "Dates, quantities, IDs, phone numbers, or receipts whose totals legitimately have one decimal (none in this task family).",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → monetary_two_decimal_invariant",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "receipt_date_label_locale_disambiguation_for_dd_mm_yyyy_vs_mm_dd",
+        "general_pattern": "On Malaysian receipts the dominant date format is DD/MM/YYYY, but a strict first-regex-match extractor can bind to a non-transaction date token (print date, closing date, loyalty date) or misorder day/month when both components are ≤12. Without label binding and declared locale, the extractor silently commits to the wrong date.",
+        "wrong_approach": "For 034.jpg the delivered date is 2018-08-09 while the receipt text 'Date: 09/03/2018' is clearly DD/MM/YYYY. The extractor's DATE_PATTERNS used first-match-wins over text lines, with no label binding to a 'Date' token and no declared Malaysian locale, so it apparently accepted a differently-ordered token on this receipt and output 2018-08-09 instead of 2018-03-09 (feedback marks 034 date_correct=false).",
+        "observable_evidence": "field_feedback: 034.jpg date_correct=false; receipt image text 'Date: 09/03/2018'; extractor code sets 2-digit years to 2000+yy but does not bind to a 'Date' label nor declare Malaysian DD/MM/YYYY as the primary parse convention.",
+        "missing_reasoning_step": "Bind date extraction to a 'Date' / 'Invoice Date' label (allow OCR variants DATA/DAIE collapsing to DATE), avoid 'Print/Closed/Closing/Loyalty' lines, and when the task prompt declares Malaysian receipts parse DD/MM/YYYY (and DD/MM/YY, DD-MM-YY) as the primary convention before considering any other ordering.",
+        "correct_general_approach": "Apply receipt_date_label_binding_and_locale: prefer label-adjacent date tokens, use the declared DD/MM/YYYY primary ordering, and only infer ordering from unambiguous rows (first component >12) within a batch; emit ISO 8601.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "weak",
+        "scope_boundary": "Receipt-OCR tasks whose prompt or batch indicates a specific locale (here Malaysian DD/MM/YYYY) and that have multiple date-like tokens per image.",
+        "do_not_generalize_to": "Non-receipt documents, tasks with no declared locale, or sources where MM/DD/YYYY is the ground-truth convention.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → receipt_date_label_binding_and_locale",
+        "target_layer": "L2",
+        "confidence": "medium"
+      },
+      {
+        "label": "iteration_budget_exhausted_by_per_image_interactive_debug",
+        "general_pattern": "Batch OCR extraction with per-image interactive debugging (repeated OCR dumps, think-steps, and ad-hoc regex tweaks per receipt) consumes the agent iteration budget without converging the heuristics; the run terminates on max_iterations instead of natural completion, leaving edge cases unaddressed.",
+        "wrong_approach": "Trajectory shows 65 agent iterations with 27 terminal, 22 think, 16 file_editor tool calls, terminating on max_iterations. The agent repeatedly OCR-dumped single images, hand-reasoned about one receipt at a time, and iteratively patched regexes rather than running one diagnostic pass across all images and planning a consolidated edit.",
+        "observable_evidence": "execution_metadata.termination_reason=max_iterations, agent_iterations=65, acp_stop_reason=max_turn_requests; response_tool_call_counts terminal=27, think=22, file_editor=16; several receipts (074, 077, 078, 034 date) ended unresolved despite being discussed in think-steps.",
+        "missing_reasoning_step": "Run a single consolidated diagnostic pass that dumps, per image, (a) OCR slices around keyword lines, (b) candidate (tier, value, anchor) list, (c) current prediction; then plan a small batched set of pattern/variant edits that address multiple images jointly; re-run once.",
+        "correct_general_approach": "Apply the batch-diagnostic-then-batch-edit workflow note in image-ocr: emit a per-image structured debug table once, make a consolidated edit set, and re-run; avoid per-image iterative loops.",
+        "skill_controllable": true,
+        "workflow_node": "verification",
+        "mechanism_anchor": "batch-diagnostic-then-batch-edit workflow note",
+        "defect_relation": "weak",
+        "scope_boundary": "Batch extraction over multiple images where per-image debug would otherwise multiply iterations; applies when iteration budget is a binding constraint.",
+        "do_not_generalize_to": "Single-image OCR tasks or tasks whose evaluation requires true per-image interactive adjudication.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Structured Field Extraction from Receipts → Workflow note: batch-diagnostic-then-batch-edit",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "target_binding",
+      "primary_anchor": "receipt_total_keyword_priority_disambiguation (summary-section cutoff clause)",
+      "editor_direction": "strengthen",
+      "composition_issue": "The current image-ocr candidate already names most of the right anchors (summary-section cutoff, two-decimal invariant, null-vs-empty-string, batch-diagnostic). The remaining defects are not from missing mechanisms but from under-emphasized or under-operationalized clauses: (1) the summary-section cutoff is described but not visibly enforced ahead of tier walk, (2) null vs empty string is described in both image-ocr and xlsx but writeback still emitted \"\" for a failed amount, (3) the two-decimal invariant is stated but no explicit backoff is wired when the chosen tier candidate yields only a one-decimal (truncated) token, (4) the batch-diagnostic workflow note needs to be elevated so iteration budget is not consumed by per-image debug. The overlay should strengthen these specific clauses in-place without introducing new sections or widening scope beyond receipt-OCR tasks that already declare the keyword/exclusion/null conventions.",
+      "preservation_constraints": [
+        "Keep the explicit scope block limiting the receipt overlay to tasks whose prompt declares keyword priority, exclusion list, and null-sentinel convention.",
+        "Preserve the negative-boundary language forbidding import of receipt-specific hints into openai-vision, pdf, video-frame-extraction, and unrelated xlsx guidance.",
+        "Preserve the existing Multi-Pass OCR Strategy as additive, not default, and the conditional_multi_pass_ocr_on_noisy_numeric_fields trigger conditions.",
+        "Preserve the xlsx note's scope restriction to data-only outputs whose contract distinguishes null from empty string; do not generalize to all xlsx tasks.",
+        "Do not add task-specific keywords, oracle values, or per-image hardcodes; keep anchors reusable."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All observed field-level failures (074 amount, 077 initial amount, 078 null-vs-empty, 034 date) and the termination-by-max-iterations are localizable to clauses already present in the current candidate (summary-section cutoff, two-decimal invariant, null-vs-empty-string writeback, label-bound/locale date parsing, batch-diagnostic workflow). They do not require tools, visual messages the source agent did not have, or executor changes; strengthening the existing mechanism anchors in image-ocr and xlsx is sufficient. Infrastructure signals (max_iterations termination) are a symptom of the per-image debug anti-pattern already named in the Workflow note, not an executor defect."
+    }
+  },
+  "response_id": "msg_bdrk_oxmbe6fuzycieaas2zrpchilmbgtzuzhf4d4njf5yvsn355vd55a",
+  "http_status": 200
+}

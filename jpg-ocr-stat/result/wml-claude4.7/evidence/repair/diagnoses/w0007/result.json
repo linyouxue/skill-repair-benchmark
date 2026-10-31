@@ -1,0 +1,79 @@
+{
+  "tool_input": {
+    "diagnoses": [
+      {
+        "label": "amount_split_line_fallback_consumes_payment_lines",
+        "general_pattern": "When a keyword line matches a priority tier but no numeric value is extracted from it, a 'split-across-two-lines' fallback scans subsequent lines for a number. Without constraining that fallback to lines whose semantics are compatible with 'the next line continuing the same total', it can latch onto adjacent payment/tender rows (Visa, Cash Received, Mastercard) that share currency tokens, yielding a payment amount instead of the receipt total.",
+        "wrong_approach": "Trigger the split-line fallback whenever the keyword line itself fails to yield a 2-decimal number, and accept the first non-empty, non-excluded next line's last number regardless of whether that next line is actually a payment/tender/change row.",
+        "observable_evidence": "In 064.jpg variant 2, 'Total RM = B81?' matches TOTAL RM but has no valid decimal; the fallback walks to 'Visa RM =688.17' and returns 688.17 instead of the correctly-parsed 'Total Gross C RM 86.17/88.17' on nearby lines. In 078.jpg, Grand Total line loses its number and the fallback uses 'Cash Received 100.00' until 'Cash Received' is added to exclusions.",
+        "missing_reasoning_step": "Before invoking the split-line fallback, require that (a) the keyword line contains no digit at all (true pure-keyword case per task hint), and (b) the exclusion set covers all payment/tender synonyms that commonly appear immediately below totals (Cash Received/Tendered/Payment, Visa, Mastercard, Credit, Debit, Card). The fallback must not act when the keyword line already contains digits that failed numeric parsing (indicating OCR corruption, not a line split).",
+        "correct_general_approach": "Scope the split-line fallback to the exact task-specified case: keyword line has zero digits. For any other failure to parse a decimal, continue iterating earlier same-tier candidates rather than reading forward into unrelated rows. Also broaden the payment/tender exclusion list to include Visa/Mastercard/Credit/Debit/Card and all Cash <verb> variants, so even a legitimate split cannot land on a payment line.",
+        "skill_controllable": true,
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "keyword_tier_total_extraction::split_line_fallback_guard",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to receipt total extraction where keyword/value may be on different lines and payment/tender rows immediately follow the total line. Only governs the fallback branch, not the primary same-line numeric extraction.",
+        "do_not_generalize_to": "Do not generalize to date extraction, to the primary same-line regex, or to non-receipt OCR domains. Does not justify banning all forward-looking parsing when the keyword line is a true pure-keyword line.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Multi-Pass OCR Strategy / Receipt total extraction heuristics (new or existing section covering keyword-based field extraction)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "cross_variant_vote_prefers_frequency_over_consistency",
+        "general_pattern": "When aggregating a field across multiple OCR variants of the same image, selecting by (tier priority, raw frequency across variants) alone can let an OCR mis-recognition that is replicated across variants outvote the correct value that appears consistently with corroborating lines in a single clean variant. Majority vote is not a substitute for internal consistency checks against supporting fields (subtotal, payment, change).",
+        "wrong_approach": "Pick the total by taking the highest-priority tier with any candidate and, within that tier, the value with the highest count across variants, breaking ties by earliest occurrence; ignore whether the same value also appears elsewhere in the receipt (e.g., matching subtotal / payment minus change).",
+        "observable_evidence": "For 074.jpg the model selects 702.00 because two upscaled variants both OCR 'Total Amt Rounded' as 702.00 while variant 2 yields 102.00 (and 102.00 also appears as Subtotal and Payment in that variant). The vote prefers 702.00 purely because of count=2 vs count=1, despite 102.00 having internal cross-line support.",
+        "missing_reasoning_step": "Augment the voting score with a corroboration signal: for each candidate value, count how many times the exact value also appears on non-excluded non-tier lines of any variant (subtotal, payment/cash amount, change-consistent arithmetic). Use that signal to break ties or override low-margin frequency wins at the same tier.",
+        "correct_general_approach": "Rank candidates by (tier priority, corroborated_support, raw frequency, position). Corroborated support = count of other total-adjacent anchors (SUB TOTAL value, Payment value, Cash - Change arithmetic) that match the candidate within tolerance. Only when corroboration ties should raw cross-variant frequency decide.",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "multi_variant_field_aggregation::corroborated_voting",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to multi-pass OCR aggregation for numeric receipt fields with multiple internal anchors (totals, subtotals, payments). Scoped to the voting/aggregation step, not to per-variant extraction regexes.",
+        "do_not_generalize_to": "Do not generalize to free-text aggregation, to fields without redundant internal anchors, or to replacing tier priority. Does not justify arithmetic reconstruction when subtotal and tax are not both reliably parseable.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Multi-Pass OCR Strategy (voting / result combination subsection)",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "preprocessing_variants_can_degrade_clear_receipts",
+        "general_pattern": "Running aggressive preprocessing variants (upscale, invert, sharpen) and treating all variants as equal voters can introduce systematic OCR errors on already-legible scans. If downstream aggregation does not weight by per-variant quality (confidence or anchor consistency), degraded variants can dominate correct ones.",
+        "wrong_approach": "Produce N preprocessed variants and feed every variant's extracted candidate into the voter with equal weight, assuming more variants is always better.",
+        "observable_evidence": "078.jpg variant 0 (base) cleanly produces Grand Total 92.80 and matching Total 92.80, while upscaled variants 1 and 2 destroy the number on the Grand Total line and leave only Cash Received 100.00 nearby. 074.jpg shows two variants OCR 702.00 while a third gives the self-consistent 102.00. Equal-weight aggregation lets degraded variants win.",
+        "missing_reasoning_step": "Attach a quality signal to each variant (e.g., average Tesseract confidence, or internal-consistency score computed from how many of {Grand Total, Total, Subtotal, Payment, Cash-Change} agree). Downweight variants with low consistency when voting; or short-circuit to the single variant whose extracted total is internally corroborated.",
+        "correct_general_approach": "Compute a per-variant consistency score before voting. Prefer a variant whose total aligns with at least one other anchor on the same variant over any cross-variant plurality that lacks such alignment. Keep multi-pass for recall, but use quality-weighted combination.",
+        "skill_controllable": true,
+        "workflow_node": "verification",
+        "mechanism_anchor": "per_variant_quality_weighting::internal_consistency_check",
+        "defect_relation": "weak",
+        "scope_boundary": "Applies to multi-variant OCR pipelines for structured documents with redundant fields. Does not apply when only a single OCR pass is used or when no cross-field consistency anchors exist.",
+        "do_not_generalize_to": "Do not generalize to disabling preprocessing variants wholesale; they still help on faded or dark images. Does not justify discarding Tesseract confidence for other fields where it is unreliable.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Image Preprocessing / Multi-Pass OCR Strategy (quality-weighted combination guidance)",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "keyword_tier_total_extraction::split_line_fallback_guard",
+      "editor_direction": "add",
+      "composition_issue": "The current image-ocr SKILL.md documents multi-pass OCR and preprocessing but contains no reusable mechanism for keyword-based receipt field extraction. The failures are not in OCR invocation but in the downstream parsing/voting layer: an under-guarded forward fallback and a frequency-only cross-variant vote. These need to be added as named sub-mechanisms within the existing Multi-Pass OCR Strategy section so they compose with (not replace) current preprocessing and PSM guidance.",
+      "preservation_constraints": [
+        "Preserve all existing OCR invocation examples, PSM mode guidance, and preprocessing variant guidance in image-ocr/SKILL.md.",
+        "Preserve the task-provided priority tier ordering (GRAND TOTAL > TOTAL RM / TOTAL: RM > TOTAL AMOUNT > TOTAL/AMOUNT/*DUE/NET(T) TOTAL) and the exclusion keyword list from the task prompt as the baseline; only extend, do not reorder.",
+        "Preserve the task-stated split-line fallback semantics ('keyword and numeric amount split across two lines; use last number on next line') and tighten with an explicit precondition rather than replacing it.",
+        "Do not introduce reference answer values, per-image special cases, or oracle-derived rules; mechanisms must be stated as general heuristics with explicit scope and negative boundaries.",
+        "Keep the current date-extraction behavior untouched: field feedback shows 21/22 dates correct and only one localized date miss (034.jpg), which is not clearly skill-controllable from this evidence window."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The three remaining field errors (064 was fixed mid-run; 074 amount, 077 was fixed, 078 amount) are all localized in the parsing/aggregation layer that the agent itself built on top of pytesseract, which is squarely within the scope of a receipt-OCR skill document. The infrastructure (Tesseract, pytesseract, openpyxl, file I/O) worked; the delivery format was valid; and the run terminated at max_iterations only after converging on these specific heuristic bugs. Adding named, scoped mechanisms for (a) a guarded split-line fallback and (b) corroborated cross-variant voting into image-ocr/SKILL.md directly addresses the observed failure modes without needing new tools, new data, or oracle answers. The one date miss (034) and the inherent OCR mis-read risk (074's 102 vs 702) have residual non-skill components, but the dominant, reusable defects are skill-controllable."
+    }
+  },
+  "response_id": "msg_bdrk_twx3sjn2yasiq5eajo5ewu2bmazupcxzmkdxghpfsegvuqexfpkq",
+  "http_status": 200
+}

@@ -1,0 +1,78 @@
+{
+  "tool_input": {
+    "overlay": {
+      "primary_node": "compute_or_transform",
+      "primary_anchor": "receipt_total_keyword_priority_disambiguation",
+      "editor_direction": "add",
+      "composition_issue": "image-ocr SKILL.md documents OCR extraction only and has no reusable mechanism for the task's domain-specific total-amount keyword priority ladder, exclusion keywords, two-line fallback, or thousands-separator normalization. The task prompt supplies these as hints but the skill provides no reusable procedure anchoring them, so the compute step after OCR is skill-controllable but under-specified.",
+      "preservation_constraints": [
+        "Preserve pytesseract/PIL dependency and the Multi-Pass OCR Strategy section (used successfully on 19/22 amounts and 21/22 dates).",
+        "Do not alter the output JSON schema of ocr_to_json (success/filename/extracted_text/confidence/metadata/warnings).",
+        "Keep PSM mode guidance and preprocessing variants intact; only ADD a post-OCR field-extraction mechanism, do not rewrite OCR itself.",
+        "Do not generalize the new mechanism into openai-vision, pdf, video-frame-extraction, or xlsx SKILL.md."
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The run completed with a valid xlsx and 20/22 fields correct, demonstrating infrastructure, OCR, and xlsx writeback all functioned. The three observable field errors (034 date, 074 amount, 077 amount, 078 amount) are all post-OCR interpretation/selection failures over text that the task prompt itself describes with concrete keyword/exclusion/fallback rules. image-ocr SKILL.md currently stops at raw text extraction and offers no reusable mechanism for applying those rules, so a targeted SKILL.md addition in image-ocr (or a sibling receipt-field-extraction section) is the correct lever. No evidence of executor-only failure beyond the max_iterations termination, which did not block delivery."
+    },
+    "diagnoses": [
+      {
+        "label": "amount_keyword_priority_vs_last_number_fallback_misapplied",
+        "general_pattern": "When a receipt contains the primary keyword line (e.g., GRAND TOTAL / TOTAL) with the numeric amount on the SAME line, the extractor must take that number and must not fall back to the 'last number on the next line' rule. The two-line fallback is only valid when the keyword line itself has no number.",
+        "wrong_approach": "Selecting an unrelated nearby number (e.g., a trailing line's figure, a tax/GST amount, or an item unit price) instead of the number co-located with the highest-priority keyword, or applying the next-line fallback even when the keyword line already contains the amount.",
+        "observable_evidence": "077.jpg prediction total_amount=23.26 is marked incorrect; the receipt (Banh Mi Cafe) shows 'Total (Inclusive of GST): 23.26' and a bold 'TOTAL: 23.25' after rounding adjustment -0.01. The predicted value matched a non-final 'Total (Inclusive of GST)' line rather than the final bold TOTAL after rounding. 074.jpg prediction 702.00 is marked incorrect; the Thai Delicious receipt shows 'Total : 92.80' and 'Grand Total : 92.80' with Cash Received 100.00, so 702.00 is not any line's value and indicates a misassembled/concatenated OCR number was selected rather than the GRAND TOTAL line. Both are compute-stage selection errors over text, not OCR glyph errors on the digits themselves (prices are visible).",
+        "missing_reasoning_step": "A deterministic priority-ladder pass that (1) scans OCR lines top-to-bottom, (2) picks the FIRST line matching the highest-available priority keyword that is not in the exclusion set, (3) extracts the LAST numeric token on that line with the pattern d{1,3}(,d{3})*(.d{2}) or d+.d{2}, and only (4) falls back to the next non-empty line's last numeric token when step 3 yields no number. The current flow instead appears to pick numbers by proximity/size heuristics without binding to the keyword ladder, and does not sanity-check the extracted token against a monetary regex (which would have rejected 702.00 as a mis-concat of two tokens on 074).",
+        "correct_general_approach": "Define a reusable receipt_total_extraction procedure in image-ocr SKILL.md: iterate the keyword priority list GRAND TOTAL > TOTAL RM/TOTAL: RM > TOTAL AMOUNT > TOTAL/AMOUNT/TOTAL DUE/AMOUNT DUE/BALANCE DUE/NETT TOTAL/NET TOTAL; skip any line whose normalized text contains SUBTOTAL/SUB TOTAL/TAX/GST/SST/DISCOUNT/CHANGE/CASH TENDERED; for the matched line take the last token matching a strict monetary regex; only if none, read the next line's last monetary token; format to exactly two decimals. Also, when multiple matches at the same priority exist, prefer the LAST occurrence (post-rounding 'TOTAL:' typically appears after 'Total (Inclusive of GST):').",
+        "skill_controllable": true,
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "receipt_total_keyword_priority_disambiguation",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies only to receipt-style images processed via image-ocr for monetary total extraction after raw OCR text is obtained. Does not apply to arbitrary document OCR or to date extraction.",
+        "do_not_generalize_to": "Do not fold this into openai-vision (vision-based extraction uses prompts), pdf (structured text already available), video-frame-extraction, or xlsx. Do not apply to non-receipt text extraction.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "Add a new section 'Receipt Field Extraction (Totals)' under or adjacent to 'Multi-Pass OCR Strategy'",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "amount_output_null_vs_empty_string_contract_violation",
+        "general_pattern": "The task contract specifies that failed amount extraction must be written as null, not as an empty string. The writeback stage must distinguish 'no value' from 'empty value' when materializing the xlsx cell.",
+        "wrong_approach": "Writing an empty string into the total_amount cell when extraction fails, instead of writing a true null (openpyxl None, which produces an empty cell distinguishable from the string ''). This changes equality semantics for the verifier.",
+        "observable_evidence": "078.jpg row has total_amount=\"\" (empty string) in the predicted xlsx and is marked amount_correct=false in field_feedback. The task prompt explicitly states: 'If extraction fails for either field, the value is set to null.' All other failed cells (none for date in this run) and the amount formatting examples use real two-decimal strings or null, never empty strings.",
+        "missing_reasoning_step": "An explicit writeback rule: when the extraction function returns a sentinel for failure, pass None (not '') into the openpyxl cell / pandas DataFrame cell; verify by reading back the workbook with data_only and confirming the cell is None.",
+        "correct_general_approach": "In image-ocr SKILL.md's receipt extraction section (or a short xlsx-interaction note cross-referenced there), state that failed field extractions must be emitted as Python None so that the resulting xlsx cell is empty/null, and that empty strings are a distinct and incorrect encoding of 'missing'.",
+        "skill_controllable": true,
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "null_vs_empty_string_contract",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to the xlsx writeback step for this receipt-OCR task family where the contract distinguishes null from empty string. Not a general xlsx rule for all tasks.",
+        "do_not_generalize_to": "Do not add a blanket 'always use None' rule to xlsx/SKILL.md; many xlsx tasks legitimately use ''. Keep the rule scoped to the receipt-extraction procedure.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "New 'Receipt Field Extraction (Totals)' section, subsection on emitting failures",
+        "target_layer": "L2",
+        "confidence": "high"
+      },
+      {
+        "label": "date_disambiguation_when_multiple_dates_present",
+        "general_pattern": "Receipts frequently contain more than one date-like token (transaction date, print date, closing date, promotion date). The transaction/invoice date is the correct target; the extractor must bind to a date-labeled line or to the earliest/primary date and ignore 'PRINT', 'Closed', 'FRN ON', loyalty, or footer dates.",
+        "wrong_approach": "Picking the first or last date-like regex match without checking the surrounding label, causing selection of a secondary date (e.g., print timestamp or a nearby but unrelated date) when multiple dates are present.",
+        "observable_evidence": "034.jpg (Perniagaan Zheng Hui) prediction date=2018-08-09 is marked date_correct=false. The receipt displays 'Date: 09/03/2018' (DD/MM/YYYY => 2018-03-09) under 'Receipt #: CS00084670'. The predicted ISO value 2018-08-09 corresponds to interpreting '09/03/2018' as 2018-08-09 only if month/day are swapped AND the 03 is misread as 08, OR to a different token entirely; either way the extractor failed to bind to the labeled 'Date:' line with a MY-locale DD/MM/YYYY convention. 21/22 other receipts had correct dates, showing the general date routine works but fails specifically on multi-date / low-contrast cases without a label-binding step.",
+        "missing_reasoning_step": "A date-selection pass that (1) prefers lines whose normalized text contains 'DATE' or 'INVOICE DATE' and is not preceded by 'PRINT', 'CLOSED', 'FRN', 'LOYALTY'; (2) parses with DD/MM/YYYY as primary and DD-MM-YY/DD/MM/YY as secondary for Malaysian receipts; (3) when multiple candidates survive, picks the earliest in reading order on the first qualifying line.",
+        "correct_general_approach": "Add a 'Receipt Date Extraction' subsection documenting the label-binding and DD/MM/YYYY-first convention, with explicit exclusion of PRINT/CLOSED/FRN/LOYALTY-prefixed date lines, then ISO-format the chosen date.",
+        "skill_controllable": true,
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "receipt_date_label_binding_and_locale",
+        "defect_relation": "missing",
+        "scope_boundary": "Applies to receipt-style OCR where multiple dates may appear and locale is predominantly DD/MM/YYYY. Does not apply to generic document OCR or to tasks where date locale is known to differ.",
+        "do_not_generalize_to": "Do not push into openai-vision or pdf. Do not assume DD/MM for non-receipt tasks.",
+        "target_file": "image-ocr/SKILL.md",
+        "target_section": "New 'Receipt Field Extraction (Dates)' subsection adjacent to the totals subsection",
+        "target_layer": "L2",
+        "confidence": "medium"
+      }
+    ]
+  },
+  "response_id": "msg_bdrk_tprtophqznbv63bxbkbasd25pm6wk5rxsbqm6wqtffs6w6iqpvcq",
+  "http_status": 200
+}
