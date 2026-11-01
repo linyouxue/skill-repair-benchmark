@@ -1,0 +1,330 @@
+Hit:1 http://security.ubuntu.com/ubuntu noble-security InRelease
+Hit:2 http://archive.ubuntu.com/ubuntu noble InRelease
+Get:3 http://archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+Hit:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease
+Get:5 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [2172 kB]
+Get:6 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1741 kB]
+Fetched 4040 kB in 23s (172 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (8.5.0-2ubuntu10.16).
+0 upgraded, 0 newly installed, 0 to remove and 30 not upgraded.
+downloading uv 0.9.7 x86_64-unknown-linux-gnu
+no checksums to verify
+installing to /root/.local/bin
+  uv
+  uvx
+everything's installed!
+
+To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+    source $HOME/.local/bin/env (sh, bash, zsh)
+    source $HOME/.local/bin/env.fish (fish)
+Downloading pygments (1.2MiB)
+ Downloading pygments
+Installed 6 packages in 57ms
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-8.4.1, pluggy-1.7.0
+rootdir: /app/workspace
+configfile: ../../dev/null
+plugins: json-ctrf-0.3.5
+collected 3 items
+
+. ..F                                                                    [100%]
+
+=================================== FAILURES ===================================
+_________________________ test_output_matches_expected _________________________
+
+    def test_output_matches_expected():
+        """Test that the output file matches the expected output. This testcase also check the query semantics."""
+        expected_path = os.path.join(os.path.dirname(__file__), "out_lsj_001a.txt")
+        actual_path = "/app/workspace/out.txt"
+    
+        assert os.path.isfile(actual_path), f"Output file {actual_path} does not exist"
+        assert os.path.isfile(expected_path), f"Expected file {expected_path} does not exist"
+    
+        with open(expected_path, "r") as f:
+            expected_lines = set(f.read().strip().splitlines())
+        with open(actual_path, "r") as f:
+            actual_lines = set(f.read().strip().splitlines())
+    
+        # Sort by jobId (first field in tuple format like "(jobId,count)")
+        def extract_jobId(line):
+            try:
+                return int(line.strip("()").split(",")[0])
+            except ValueError:
+                return 0
+        sorted_actual = sorted(actual_lines, key=extract_jobId)
+        print(f"Actual lines (sorted by jobId): {sorted_actual}")
+    
+        missing = expected_lines - actual_lines
+        extra = actual_lines - expected_lines
+    
+>       assert expected_lines == actual_lines, (
+            f"Output mismatch:\n"
+            f"Missing {len(missing)} lines (first 5): {list(missing)[:5]}\n"
+            f"Extra {len(extra)} lines (first 5): {list(extra)[:5]}"
+        )
+E       AssertionError: Output mismatch:
+E         Missing 644 lines (first 5): ['(6252254077,1)', '(6252063707,1)', '(6252131980,1)', '(6252153977,1)', '(6252011963,1)']
+E         Extra 0 lines (first 5): []
+E       assert {'(6251432964...1965,1)', ...} == set()
+E         
+E         Extra items in the left set:
+E         '(6252254077,1)'
+E         '(6252063707,1)'
+E         '(6252131980,1)'
+E         '(6252153977,1)'
+E         '(6252011963,1)'...
+E         
+E         ...Full output truncated (640 lines hidden), use '-vv' to show
+
+/verifier/test_outputs.py:72: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Actual lines (sorted by jobId): []
+==================================== PASSES ====================================
+_______________________________ test_maven_build _______________________________
+----------------------------- Captured stdout call -----------------------------
+
+=== Content of LongestSessionPerJob.java ===
+package clusterdata.query;
+
+import clusterdata.datatypes.JobEvent;
+import clusterdata.datatypes.TaskEvent;
+import clusterdata.utils.AppBase;
+import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.util.Collector;
+
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+
+public class LongestSessionPerJob extends AppBase {
+
+    private static final int TASK_EVENT_SUBMIT = 0;
+    private static final int JOB_EVENT_FINISH = 4;
+
+    public static void main(String[] args) throws Exception {
+
+        ParameterTool params = ParameterTool.fromArgs(args);
+        String taskInput = params.get("task_input", null);
+        String jobInput = params.get("job_input", null);
+        String outputPath = params.get("output", null);
+        System.out.println("task_input  " + taskInput);
+        System.out.println("job_input  " + jobInput);
+        final int sesssizeSeconds = params.getInt("sesssize", 600);
+
+        if (taskInput == null || jobInput == null || outputPath == null) {
+            throw new IllegalArgumentException("Missing required parameters: task_input, job_input, output");
+        }
+
+        final long sessionGapMicros = sesssizeSeconds * 1_000_000L;
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<TaskEvent> taskEvents;
+        if (AppBase.taskEvents == null) {
+            taskEvents = env
+                    .readTextFile(taskInput)
+                    .name("task-event-lines")
+                    .map(new ParseTaskEvent());
+        } else {
+            taskEvents = env.addSource(AppBase.taskEvents);
+        }
+
+        taskEvents = taskEvents.assignTimestampsAndWatermarks(
+                        WatermarkStrategy
+                                .<TaskEvent>forBoundedOutOfOrderness(Duration.ofMinutes(5))
+                                .withTimestampAssigner(new SerializableTimestampAssigner<TaskEvent>() {
+                                    @Override
+                                    public long extractTimestamp(TaskEvent element, long recordTimestamp) {
+                                        return element.timestamp;
+                                    }
+                                }))
+                .name("task-event-watermarks");
+
+        DataStream<JobEvent> jobEvents;
+        if (AppBase.jobEvents == null) {
+            jobEvents = env
+                    .readTextFile(jobInput)
+                    .name("job-event-lines")
+                    .map(new ParseJobEvent());
+        } else {
+            jobEvents = env.addSource(AppBase.jobEvents);
+        }
+
+        jobEvents = jobEvents.assignTimestampsAndWatermarks(
+                        WatermarkStrategy
+                                .<JobEvent>forBoundedOutOfOrderness(Duration.ofMinutes(5))
+                                .withTimestampAssigner(new SerializableTimestampAssigner<JobEvent>() {
+                                    @Override
+                                    public long extractTimestamp(JobEvent element, long recordTimestamp) {
+                                        return element.timestamp;
+                                    }
+                                }))
+                .name("job-event-watermarks");
+
+        SingleOutputStreamOperator<Tuple2<Long, Long>> longestStagePerJob = taskEvents
+                .keyBy(e -> e.jobId)
+                .connect(jobEvents.keyBy(e -> e.jobId))
+                .process(new LongestStageOnFinish(sessionGapMicros))
+                .name("longest-stage-per-job");
+
+        SinkFunction<Tuple2<Long, Long>> sink = new LocalTupleFileSink(outputPath);
+
+        longestStagePerJob.addSink((SinkFunction<Tuple2<Long, Long>>) sinkOrTest(sink)).name("file-sink");
+
+        env.execute("LongestSessionPerJob");
+    }
+
+
+    private static class LocalTupleFileSink extends RichSinkFunction<Tuple2<Long, Long>> {
+        private final String outputPath;
+        private transient BufferedWriter writer;
+
+        private LocalTupleFileSink(String outputPath) {
+            this.outputPath = outputPath;
+        }
+
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            File outFile = new File(outputPath);
+            File parent = outFile.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
+            writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile, false), StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public void invoke(Tuple2<Long, Long> value, Context context) throws Exception {
+            writer.write("(" + value.f0 + "," + value.f1 + ")");
+            writer.newLine();
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (writer != null) {
+                writer.flush();
+                writer.close();
+            }
+        }
+    }
+
+    private static class ParseTaskEvent implements MapFunction<String, TaskEvent> {
+        @Override
+        public TaskEvent map(String value) {
+            String[] parts = value.split(",", -1);
+            long ts = Long.parseLong(parts[0]);
+            long jobId = Long.parseLong(parts[2]);
+            int eventType = Integer.parseInt(parts[5]);
+            return new TaskEvent(ts, jobId, eventType);
+        }
+    }
+
+    private static class ParseJobEvent implements MapFunction<String, JobEvent> {
+        @Override
+        public JobEvent map(String value) {
+            String[] parts = value.split(",", -1);
+            long ts = Long.parseLong(parts[0]);
+            long jobId = Long.parseLong(parts[2]);
+            int eventType = Integer.parseInt(parts[3]);
+            return new JobEvent(ts, jobId, eventType);
+        }
+    }
+
+    private static class LongestStageOnFinish extends KeyedCoProcessFunction<Long, TaskEvent, JobEvent, Tuple2<Long, Long>> {
+        private final long sessionGapMicros;
+
+        private transient ValueState<Long> lastSubmitTimestamp;
+        private transient ValueState<Long> currentStageCount;
+        private transient ValueState<Long> maxStageCount;
+        private transient ValueState<Boolean> hasQualifyingSubmit;
+
+        private LongestStageOnFinish(long sessionGapMicros) {
+            this.sessionGapMicros = sessionGapMicros;
+        }
+
+        @Override
+        public void open(org.apache.flink.configuration.Configuration parameters) {
+            lastSubmitTimestamp = getRuntimeContext().getState(new ValueStateDescriptor<>("lastSubmitTimestamp", Long.class));
+            currentStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("currentStageCount", Long.class));
+            maxStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("maxStageCount", Long.class));
+            hasQualifyingSubmit = getRuntimeContext().getState(new ValueStateDescriptor<>("hasQualifyingSubmit", Boolean.class));
+        }
+
+        @Override
+        public void processElement1(TaskEvent value, Context ctx, Collector<Tuple2<Long, Long>> out) throws Exception {
+            if (value.eventType != TASK_EVENT_SUBMIT) {
+                return;
+            }
+
+            Long lastTs = lastSubmitTimestamp.value();
+            Long cur = currentStageCount.value();
+            if (cur == null) {
+                cur = 0L;
+            }
+
+            if (lastTs == null || value.timestamp - lastTs > sessionGapMicros) {
+                cur = 1L;
+            } else {
+                cur = cur + 1L;
+            }
+
+            currentStageCount.update(cur);
+            lastSubmitTimestamp.update(value.timestamp);
+
+            Long max = maxStageCount.value();
+            if (max == null || cur > max) {
+                maxStageCount.update(cur);
+            }
+
+            hasQualifyingSubmit.update(true);
+        }
+
+        @Override
+        public void processElement2(JobEvent value, Context ctx, Collector<Tuple2<Long, Long>> out) throws Exception {
+            if (value.eventType != JOB_EVENT_FINISH) {
+                return;
+            }
+
+            if (!Boolean.TRUE.equals(hasQualifyingSubmit.value())) {
+                return;
+            }
+
+            Long max = maxStageCount.value();
+            if (max == null) {
+                return;
+            }
+
+            out.collect(Tuple2.of(ctx.getCurrentKey(), max));
+        }
+    }
+
+}
+
+=== End of LongestSessionPerJob.java ===
+
+=========================== short test summary info ============================
+PASSED ::test_maven_build
+PASSED ::test_flink_job_runs
+FAILED ::test_output_matches_expected - AssertionError: Output mismatch:
+=================== 1 failed, 2 passed in 263.81s (0:04:23) ====================

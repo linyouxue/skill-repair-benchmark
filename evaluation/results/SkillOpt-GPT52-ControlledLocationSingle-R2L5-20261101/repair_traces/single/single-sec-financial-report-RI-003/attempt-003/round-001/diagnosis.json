@@ -1,0 +1,34 @@
+{
+  "task_id": "sec-financial-report",
+  "fallback_used": false,
+  "overall_diagnosis": "The failure is centered on the cross-quarter “Top Buys / increased investment” procedure for Q2→Q3 comparisons in 13f-analyzer. The current documentation is ambiguous about the exact definition and ranking metric for “increased investment” (delta VALUE vs current VALUE vs shares), join/aggregation level (CUSIP), and treatment of new/closed positions, which can cause incorrect top-5 results. In addition, the supporting implementation (one_fund_analysis.py) appears syntactically broken/truncated and has a malformed stock TITLEOFCLASS filter list (missing commas), which can break execution and/or corrupt stock-only filtering—directly impacting both summary stats and cross-quarter delta computations.",
+  "diagnosed_skills": [
+    {
+      "path": "13f-analyzer/SKILL.md",
+      "confidence": "0.8",
+      "diagnosis": "The cross-quarter ‘change of holdings’ / ‘Top Buys’ workflow is underspecified or mis-specified for tasks asking ‘top increased investment by dollar value increase’ between two quarters. It likely fails to clearly require ranking by VALUE delta (current-baseline) per CUSIP, and does not precisely state how to handle new positions (missing in baseline) vs increases to existing positions, nor the required output fields (CUSIPs, delta values).",
+      "repair_instruction": "Rewrite/clarify the cross-quarter comparison section to explicitly define ‘increased investment’ as DELTA_VALUE = VALUE_current_quarter − VALUE_baseline_quarter, computed per manager and aggregated by CUSIP (sum VALUE per CUSIP within each quarter). Specify: outer-join on CUSIP, fill missing VALUE with 0, filter to DELTA_VALUE>0, rank descending by DELTA_VALUE, and return top-k CUSIPs with their delta values. Clearly state treatment of new positions (baseline missing => 0, counts as increase unless explicitly excluded) and closed/reduced positions (negative deltas). Include an example command using --quarter/--accession_number with --baseline_quarter/--baseline_accession_number and instructions on extracting the top-5 results from the script output."
+    },
+    {
+      "path": "13f-analyzer/scripts/one_fund_analysis.py",
+      "confidence": "0.72",
+      "diagnosis": "The helper script appears broken/incomplete (truncated/unterminated expression in summary printing) and the title_class_of_stocks list is malformed due to missing commas, causing unintended string concatenation and incorrect stock filtering. These defects can prevent the script from running and/or distort holdings counts and cross-quarter ‘top buys’ calculations that depend on stock-only rows and correct per-CUSIP aggregation.",
+      "repair_instruction": "Fix the script to run end-to-end: repair any truncated/unterminated code (e.g., Total AUM print), and correct title_class_of_stocks by adding missing commas between all string literals. Ensure quarter-scoped reads use /root/<quarter>/INFOTABLE.tsv, filter by ACCESSION_NUMBER, optionally filter stock rows using the corrected TITLEOFCLASS list, then for cross-quarter mode: aggregate VALUE by CUSIP for each quarter, outer-join, fill missing with 0, compute DELTA_VALUE, and print deterministic top increases ranked by DELTA_VALUE (with CUSIP and delta). Keep outputs aligned with the clarified SKILL.md definitions (e.g., ‘Number of stock holdings’ based on the stock filter, not total rows)."
+    }
+  ],
+  "unselected_skills": [
+    "13f-analyzer/scripts/holding_analysis.py",
+    "fuzzy-name-search/SKILL.md",
+    "fuzzy-name-search/scripts/search_fund.py",
+    "fuzzy-name-search/scripts/search_stock_cusip.py"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 5,
+  "shared_diagnosis": false,
+  "shared_diagnosis_source": null,
+  "consumer_method": "skillopt-controlled-oracle-hint-r2l5-v2",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true
+}

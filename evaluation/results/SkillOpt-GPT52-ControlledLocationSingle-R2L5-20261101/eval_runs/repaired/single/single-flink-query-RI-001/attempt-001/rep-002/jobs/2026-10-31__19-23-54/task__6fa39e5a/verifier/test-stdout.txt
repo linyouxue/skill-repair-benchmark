@@ -1,0 +1,359 @@
+Hit:1 http://security.ubuntu.com/ubuntu noble-security InRelease
+Hit:2 http://archive.ubuntu.com/ubuntu noble InRelease
+Hit:3 http://archive.ubuntu.com/ubuntu noble-updates InRelease
+Hit:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (8.5.0-2ubuntu10.16).
+0 upgraded, 0 newly installed, 0 to remove and 30 not upgraded.
+downloading uv 0.9.7 x86_64-unknown-linux-gnu
+no checksums to verify
+installing to /root/.local/bin
+  uv
+  uvx
+everything's installed!
+
+To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+    source $HOME/.local/bin/env (sh, bash, zsh)
+    source $HOME/.local/bin/env.fish (fish)
+Downloading pygments (1.2MiB)
+ Downloading pygments
+Installed 6 packages in 64ms
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-8.4.1, pluggy-1.7.0
+rootdir: /app/workspace
+configfile: ../../dev/null
+plugins: json-ctrf-0.3.5
+collected 3 items
+
+. .FF                                                                    [100%]
+
+=================================== FAILURES ===================================
+_____________________________ test_flink_job_runs ______________________________
+
+    def test_flink_job_runs():
+        """Test that the Flink job runs without error."""
+        result = subprocess.run(
+            "cd /opt/flink/bin && ./flink run -t local "
+            "-c clusterdata.query.LongestSessionPerJob "
+            "/app/workspace/target/LongestSessionPerJob-jar-with-dependencies.jar "
+            "--task_input /app/workspace/data/task_events/part-00001-of-00500.csv.gz "
+            "--job_input /app/workspace/data/job_events/part-00001-of-00500.csv.gz "
+            "--output /app/workspace/out.txt",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+>       assert result.returncode == 0, f"Flink job failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+E       AssertionError: Flink job failed:
+E         stdout: 
+E         stderr: 
+E         ------------------------------------------------------------
+E          The program finished with the following exception:
+E         
+E         clusterdata.query.LongestSessionPerJob$$Lambda$263/0x00007fff841b1000@73a2e526 is not serializable. The object probably contains or references non serializable fields.
+E         	org.apache.flink.api.java.ClosureCleaner.clean(ClosureCleaner.java:170)
+E         	org.apache.flink.api.java.ClosureCleaner.clean(ClosureCleaner.java:138)
+E         	org.apache.flink.api.java.ClosureCleaner.clean(ClosureCleaner.java:69)
+E         	org.apache.flink.streaming.api.environment.StreamExecutionEnvironment.clean(StreamExecutionEnvironment.java:2595)
+E         	org.apache.flink.streaming.api.environment.StreamExecutionEnvironment.addSource(StreamExecutionEnvironment.java:2223)
+E         	org.apache.flink.streaming.api.environment.StreamExecutionEnvironment.addSource(StreamExecutionEnvironment.java:2206)
+E         	org.apache.flink.streaming.api.environment.StreamExecutionEnvironment.addSource(StreamExecutionEnvironment.java:2165)
+E         	org.apache.flink.streaming.api.environment.StreamExecutionEnvironment.addSource(StreamExecutionEnvironment.java:2146)
+E         	clusterdata.query.LongestSessionPerJob.main(LongestSessionPerJob.java:68)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args='cd /opt/flink/bin && ./flink run -t local -c clusterdata.query.LongestSessionPerJob /app/worksp...(StreamExecutionEnvironment.java:2146)\n\tclusterdata.query.LongestSessionPerJob.main(LongestSessionPerJob.java:68)\n').returncode
+
+/verifier/test_outputs.py:44: AssertionError
+_________________________ test_output_matches_expected _________________________
+
+    def test_output_matches_expected():
+        """Test that the output file matches the expected output. This testcase also check the query semantics."""
+        expected_path = os.path.join(os.path.dirname(__file__), "out_lsj_001a.txt")
+        actual_path = "/app/workspace/out.txt"
+    
+>       assert os.path.isfile(actual_path), f"Output file {actual_path} does not exist"
+E       AssertionError: Output file /app/workspace/out.txt does not exist
+E       assert False
+E        +  where False = <function isfile at 0x7fffff18cb80>('/app/workspace/out.txt')
+E        +    where <function isfile at 0x7fffff18cb80> = <module 'posixpath' (frozen)>.isfile
+E        +      where <module 'posixpath' (frozen)> = os.path
+
+/verifier/test_outputs.py:52: AssertionError
+==================================== PASSES ====================================
+_______________________________ test_maven_build _______________________________
+----------------------------- Captured stdout call -----------------------------
+
+=== Content of LongestSessionPerJob.java ===
+package clusterdata.query;
+
+import clusterdata.datatypes.JobEvent;
+import clusterdata.datatypes.TaskEvent;
+import clusterdata.utils.AppBase;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.KeyedStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.util.Collector;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileWriter;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.zip.GZIPInputStream;
+
+public class LongestSessionPerJob extends AppBase {
+
+    private static final int TASK_SUBMIT_EVENT_TYPE = 0;
+
+    private static boolean isTerminalJobEvent(int eventType) {
+        // ClusterData job_event types are small ints; terminal events include FAIL/FINISH/KILL/LOST.
+        return eventType == 3 || eventType == 4 || eventType == 5 || eventType == 6;
+    }
+
+    public static void main(String[] args) throws Exception {
+
+        ParameterTool params = ParameterTool.fromArgs(args);
+        String taskInput = params.get("task_input", null);
+        String jobInput = params.get("job_input", null);
+        String outputPath = params.get("output", null);
+        final int sesssizeSeconds = params.getInt("sesssize", 600);
+
+        if (taskInput == null || jobInput == null || outputPath == null) {
+            throw new IllegalArgumentException("Required params: --task_input --job_input --output");
+        }
+
+        final long sessionGapMs = sesssizeSeconds * 1000L;
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        SourceFunction<TaskEvent> taskSource = taskSourceOrTest(new GzipCsvSourceFunction<>(taskInput, TaskEvent::fromCsv));
+        SourceFunction<JobEvent> jobSource = jobSourceOrTest(new GzipCsvSourceFunction<>(jobInput, JobEvent::fromCsv));
+
+        WatermarkStrategy<TaskEvent> taskWm = WatermarkStrategy
+                .<TaskEvent>forBoundedOutOfOrderness(Duration.ZERO)
+                .withTimestampAssigner((e, ts) -> e.timestampMicros / 1000L);
+
+        WatermarkStrategy<JobEvent> jobWm = WatermarkStrategy
+                .<JobEvent>forBoundedOutOfOrderness(Duration.ZERO)
+                .withTimestampAssigner((e, ts) -> e.timestampMicros / 1000L);
+
+        KeyedStream<TaskEvent, Long> tasks = env
+                .addSource(taskSource)
+                .assignTimestampsAndWatermarks(taskWm)
+                .keyBy(e -> e.jobId);
+
+        KeyedStream<JobEvent, Long> jobs = env
+                .addSource(jobSource)
+                .assignTimestampsAndWatermarks(jobWm)
+                .keyBy(e -> e.jobId);
+
+        DataStream<Tuple2<Long, Long>> results = tasks
+                .connect(jobs)
+                .process(new LongestStageOnJobFinish(sessionGapMs));
+
+        @SuppressWarnings("unchecked")
+        org.apache.flink.streaming.api.functions.sink.SinkFunction<Tuple2<Long, Long>> sink =
+                (org.apache.flink.streaming.api.functions.sink.SinkFunction<Tuple2<Long, Long>>) sinkOrTest(new LocalFileSink(outputPath));
+
+        results
+                .addSink(sink)
+                .setParallelism(1);
+
+        env.execute("LongestSessionPerJob");
+    }
+
+    private interface LineParser<T> {
+        T parse(String line);
+    }
+
+    private static final class GzipCsvSourceFunction<T> extends RichSourceFunction<T> {
+        private final String path;
+        private final LineParser<T> parser;
+        private volatile boolean running = true;
+
+        private GzipCsvSourceFunction(String path, LineParser<T> parser) {
+            this.path = path;
+            this.parser = parser;
+        }
+
+        @Override
+        public void run(SourceContext<T> ctx) throws Exception {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    new GZIPInputStream(new FileInputStream(path)), StandardCharsets.UTF_8))) {
+                String line;
+                while (running && (line = reader.readLine()) != null) {
+                    if (line.isEmpty()) {
+                        continue;
+                    }
+                    ctx.collect(parser.parse(line));
+                }
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
+    }
+
+    private static final class LocalFileSink extends RichSinkFunction<Tuple2<Long, Long>> {
+        private final String path;
+        private transient BufferedWriter writer;
+
+        private LocalFileSink(String path) {
+            this.path = path;
+        }
+
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            File f = new File(path);
+            File parent = f.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            writer = new BufferedWriter(new FileWriter(f, false));
+        }
+
+        @Override
+        public void invoke(Tuple2<Long, Long> value, Context context) throws Exception {
+            writer.write(value.toString());
+            writer.newLine();
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (writer != null) {
+                writer.flush();
+                writer.close();
+            }
+        }
+    }
+
+    private static final class LongestStageOnJobFinish extends KeyedCoProcessFunction<Long, TaskEvent, JobEvent, Tuple2<Long, Long>> {
+
+        private final long sessionGapMs;
+
+        private transient ValueState<Long> lastSubmitMs;
+        private transient ValueState<Long> currentStageCount;
+        private transient ValueState<Long> maxStageCount;
+        private transient ValueState<Boolean> hasQualifyingActivity;
+        private transient ValueState<Long> terminalJobTsMs;
+        private transient ValueState<Boolean> emitted;
+
+        private LongestStageOnJobFinish(long sessionGapMs) {
+            this.sessionGapMs = sessionGapMs;
+        }
+
+        @Override
+        public void open(Configuration parameters) {
+            lastSubmitMs = getRuntimeContext().getState(new ValueStateDescriptor<>("lastSubmitMs", Long.class));
+            currentStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("currentStageCount", Long.class));
+            maxStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("maxStageCount", Long.class));
+            hasQualifyingActivity = getRuntimeContext().getState(new ValueStateDescriptor<>("hasQualifyingActivity", Boolean.class));
+            terminalJobTsMs = getRuntimeContext().getState(new ValueStateDescriptor<>("terminalJobTsMs", Long.class));
+            emitted = getRuntimeContext().getState(new ValueStateDescriptor<>("emitted", Boolean.class));
+        }
+
+        @Override
+        public void processElement1(TaskEvent value, Context ctx, Collector<Tuple2<Long, Long>> out) throws Exception {
+            if (value.eventType != TASK_SUBMIT_EVENT_TYPE) {
+                return;
+            }
+
+            hasQualifyingActivity.update(true);
+
+            long tsMs = value.timestampMicros / 1000L;
+            Long last = lastSubmitMs.value();
+            Long cur = currentStageCount.value();
+            Long max = maxStageCount.value();
+
+            if (cur == null) {
+                cur = 0L;
+            }
+            if (max == null) {
+                max = 0L;
+            }
+
+            if (last == null || last < 0L || tsMs - last >= sessionGapMs) {
+                max = Math.max(max, cur);
+                cur = 1L;
+            } else {
+                cur = cur + 1L;
+            }
+
+            lastSubmitMs.update(tsMs);
+            currentStageCount.update(cur);
+            maxStageCount.update(max);
+        }
+
+        @Override
+        public void processElement2(JobEvent value, Context ctx, Collector<Tuple2<Long, Long>> out) throws Exception {
+            if (!isTerminalJobEvent(value.eventType)) {
+                return;
+            }
+
+            long tsMs = value.timestampMicros / 1000L;
+            Long prevTerminal = terminalJobTsMs.value();
+            if (prevTerminal == null || tsMs > prevTerminal) {
+                terminalJobTsMs.update(tsMs);
+                ctx.timerService().registerEventTimeTimer(tsMs);
+            }
+        }
+
+        @Override
+        public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple2<Long, Long>> out) throws Exception {
+            if (Boolean.TRUE.equals(emitted.value())) {
+                return;
+            }
+            if (!Boolean.TRUE.equals(hasQualifyingActivity.value())) {
+                return;
+            }
+            Long terminal = terminalJobTsMs.value();
+            if (terminal == null || timestamp != terminal) {
+                return;
+            }
+
+            Long cur = currentStageCount.value();
+            Long max = maxStageCount.value();
+            if (cur == null) {
+                cur = 0L;
+            }
+            if (max == null) {
+                max = 0L;
+            }
+            long result = Math.max(max, cur);
+            if (result <= 0L) {
+                return;
+            }
+
+            out.collect(Tuple2.of(ctx.getCurrentKey(), result));
+            emitted.update(true);
+        }
+    }
+}
+
+=== End of LongestSessionPerJob.java ===
+
+=========================== short test summary info ============================
+PASSED ::test_maven_build
+FAILED ::test_flink_job_runs - AssertionError: Flink job failed:
+FAILED ::test_output_matches_expected - AssertionError: Output file /app/work...
+=================== 2 failed, 1 passed in 189.01s (0:03:09) ====================

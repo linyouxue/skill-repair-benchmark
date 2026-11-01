@@ -1,0 +1,22 @@
+Repository: /home/travis/build/failed/google/auto
+CI environment: Travis CI using openjdk7/oraclejdk7 and Maven verify on build-pom.xml.
+Reproduced command:
+source /opt/jdk_switcher/jdk_switcher.sh && jdk_switcher use openjdk7
+mvn -Dhttps.protocols=TLSv1.2 -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure:
+The Maven Invoker integration-test build failed for value/src/it/functional/pom.xml.
+The concrete compiler failure in value/target/it/functional/build.log was:
+- cannot find symbol: class MoreObjects in com.google.common.base
+- package MoreObjects does not exist
+
+Root cause:
+The functional integration-test POM has stale test dependency versions. The build resolved Guava 17.0 transitively, but the tests use com.google.common.base.MoreObjects, which requires a newer Guava release. The integration-test dependency set drifted away from the intended synchronized versions.
+
+Planned fix:
+Update value/src/it/functional/pom.xml to synchronize the functional integration-test dependencies:
+- jsr305 -> 3.0.0 (provided)
+- junit -> 4.12 (test)
+- add direct com.google.guava:guava:19.0 test dependency
+- guava-testlib -> 19.0 (test)
+- truth -> 0.28 (test)

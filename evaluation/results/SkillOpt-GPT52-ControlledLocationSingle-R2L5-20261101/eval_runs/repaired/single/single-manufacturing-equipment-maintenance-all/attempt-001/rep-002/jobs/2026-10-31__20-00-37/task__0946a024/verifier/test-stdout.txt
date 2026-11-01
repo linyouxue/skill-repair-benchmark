@@ -1,0 +1,135 @@
+Collecting uv==0.9.7
+  Downloading uv-0.9.7-py3-none-manylinux_2_28_aarch64.whl.metadata (11 kB)
+Downloading uv-0.9.7-py3-none-manylinux_2_28_aarch64.whl (20.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 20.3/20.3 MB 4.5 MB/s eta 0:00:00
+Installing collected packages: uv
+  Attempting uninstall: uv
+    Found existing installation: uv 0.11.6
+    Uninstalling uv-0.11.6:
+      Successfully uninstalled uv-0.11.6
+Successfully installed uv-0.9.7
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Downloading pygments (1.2MiB)
+Downloading pandas (10.9MiB)
+Downloading numpy (15.0MiB)
+ Downloading pygments
+ Downloading pandas
+ Downloading numpy
+Installed 11 packages in 44ms
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-8.4.1, pluggy-1.7.0
+rootdir: /app
+configfile: ../dev/null
+plugins: json-ctrf-0.3.5
+collected 7 items
+
+. .FF....                                                                [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_Q01_preheat_ramp_rate_loose _______________________
+
+    def test_Q01_preheat_ramp_rate_loose():
+        df_runs = load_runs()
+        df_tc = load_tc()
+        out = load_json(Q01)
+    
+        recs = _q01_iter_records(out)
+        assert recs, "Q01 must contain per-run ramp records (list or dict/max_ramp_by_run)"
+    
+        got: Dict[str, Dict[str, Any]] = {}
+        for r in recs:
+            rid = _q01_get_run_id(r)
+            if rid:
+                got.setdefault(rid, r)
+    
+        exp_ids = run_ids(df_runs)
+        missing = [rid for rid in exp_ids if rid not in got]
+        assert not missing, f"Q01 missing run_ids: {missing}"
+    
+        if isinstance(out, dict) and "ramp_rate_limit_c_per_s" in out:
+            assert_float_close(out["ramp_rate_limit_c_per_s"], RAMP_LIMIT_C_S, msg="Q01 ramp_rate_limit mismatch")
+    
+        for rid in exp_ids:
+            tc_max, r_max = max_preheat_ramp_for_run(df_tc, rid)
+            rec = got[rid]
+            got_r = _q01_get_max_ramp(rec)
+    
+            if tc_max == "" or math.isnan(r_max):
+                assert got_r is None, f"Expected null/None ramp for run {rid}, got {got_r}"
+                continue
+    
+            assert got_r is not None, f"Missing ramp value for run {rid}"
+>           assert_float_close(got_r, float(r_max), msg=f"Preheat ramp mismatch for run {rid}")
+
+/verifier/test_outputs.py:312: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+got = 1.91, exp = 1.9
+
+    def assert_float_close(got: Any, exp: float, *, msg: str = ""):
+        g = _as_float(got)
+        assert not math.isnan(g), msg or f"Expected a numeric value, got {got!r}"
+>       assert round2(g) == round2(exp), msg or f"Expected {round2(exp)}, got {round2(g)}"
+E       AssertionError: Preheat ramp mismatch for run R0006
+E       assert 1.91 == 1.9
+E        +  where 1.91 = round2(1.91)
+E        +  and   1.9 = round2(1.9)
+
+/verifier/test_outputs.py:94: AssertionError
+______________________________ test_Q02_tal_loose ______________________________
+
+    def test_Q02_tal_loose():
+        df_runs = load_runs().set_index("run_id")
+        df_tc = load_tc()
+        out = load_json(Q02)
+    
+        by = _q02_group_by_run(out)
+        exp_ids = run_ids(df_runs.reset_index())
+    
+        missing = [rid for rid in exp_ids if rid not in by]
+        assert not missing, f"Q02 missing run_ids: {missing}"
+    
+        ids_in_out = [str(r.get("run_id")) for r in out if isinstance(r, dict) and r.get("run_id") is not None]
+        assert_sorted_non_decreasing(ids_in_out, "Q02 records must be sorted non-decreasing by run_id (duplicates allowed)")
+    
+        for rid in exp_ids:
+            liquidus = float(df_runs.loc[rid, "solder_liquidus_c"])
+            tc_min, tal = min_tal_for_run(df_tc, rid, liquidus)
+    
+            picked = _q02_pick_min_tal_record(by[rid])
+    
+            if tc_min == "" or math.isnan(tal):
+                if picked is not None and "status" in picked:
+                    assert str(picked["status"]) not in {"compliant"}, f"Q02 run {rid} should not be compliant without TC data"
+                continue
+    
+            assert picked is not None, f"Q02 run {rid} has TC data but no TAL numeric record found in output"
+            got_tal = picked.get("tal_s", picked.get("time_above_liquidus_s"))
+            assert got_tal is not None, f"Q02 run {rid} picked record missing TAL field"
+>           assert_float_close(got_tal, float(tal), msg=f"TAL mismatch for run {rid}")
+
+/verifier/test_outputs.py:355: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+got = 159.57, exp = 129.95
+
+    def assert_float_close(got: Any, exp: float, *, msg: str = ""):
+        g = _as_float(got)
+        assert not math.isnan(g), msg or f"Expected a numeric value, got {got!r}"
+>       assert round2(g) == round2(exp), msg or f"Expected {round2(exp)}, got {round2(g)}"
+E       AssertionError: TAL mismatch for run R0001
+E       assert 159.57 == 129.95
+E        +  where 159.57 = round2(159.57)
+E        +  and   129.95 = round2(129.95)
+
+/verifier/test_outputs.py:94: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ::test_L0_required_outputs_exist_and_parse
+PASSED ::test_Q03_peak_loose
+PASSED ::test_Q04_conveyor_loose
+PASSED ::test_Q05_best_run_per_board_family_loose
+PASSED ::test_minimal_schema_guards_loose
+FAILED ::test_Q01_preheat_ramp_rate_loose - AssertionError: Preheat ramp mism...
+FAILED ::test_Q02_tal_loose - AssertionError: TAL mismatch for run R0001
+========================= 2 failed, 5 passed in 1.24s ==========================

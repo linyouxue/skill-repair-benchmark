@@ -1,0 +1,80 @@
+---
+name: 13f-analyzer
+description: Perform various data analysis on SEC 13-F and obtain some insights of fund activities such as number of holdings, AUM, and change of holdings between two quarters.
+---
+
+## Overview
+
+
+
+## Data layout (quarter-scoped inputs)
+
+This skill expects quarter data to be available under repo-external directories:
+
+- `/root/{quarter}/COVERPAGE.tsv` (fund manager / filer metadata; used for fuzzy name search to find the correct `accession_number`)
+- `/root/{quarter}/INFOTABLE.tsv` (13F holdings/positions; used for AUM/holdings analysis and cross-quarter comparison)
+
+Where `{quarter}` is like `2025-q2` or `2025-q3`.
+
+### Analyze the holding summary of a particular fund in one quarter:
+
+```bash
+python3 13f-analyzer/scripts/one_fund_analysis.py \
+    --accession_number ... \
+    --quarter 2025-q2 \
+```
+
+This script will print out several basic information of a given fund on 2025-q2, including total positions (rows), AUM, and total number of stocks held (distinct CUSIPs). Run the command from the repository root so the script path `13f-analyzer/scripts/one_fund_analysis.py` resolves correctly.
+
+
+
+### Metric definitions (important for answering tasks)
+
+- **Total positions (rows)**: the number of rows in `INFOTABLE.tsv` for the fund+quarter. This can exceed the number of stocks if a filer reports multiple line items per issuer/class.
+- **Stocks held (distinct CUSIPs)**: the count of **unique `CUSIP`** values in `INFOTABLE.tsv` for the fund+quarter.
+
+For questions phrased as **“How many stocks are held”**, use **distinct CUSIPs** (stocks held), not total position rows.
+
+
+
+When computing distinct stocks held, first filter `INFOTABLE.tsv` to the selected fund accession number and quarter, then count unique `CUSIP` values after combining all rows belonging to the same security. Do not answer using raw INFOTABLE row counts.
+### Analyze the change of holdings of a particular fund in between two quarters:
+
+```bash
+python3 13f-analyzer/scripts/one_fund_analysis.py \
+    --quarter 2025-q3 \
+    --accession_number <accession number assigned in q3> \
+    --baseline_quarter 2025-q2 \
+    --baseline_accession_number <accession number assigned in q2>
+```
+
+This script will print out the dynamic changes of holdings from 2025-q2 to 2025-q3. Such as newly purchased stocks ranked by notional value, and newly sold stocks ranked by notional value.
+
+
+
+### Workflow for cross-quarter “Top Buys” / increased-investment analysis
+
+To identify securities with the largest increase in investment between quarters:
+
+1. Use `COVERPAGE.tsv` for each quarter to obtain the correct accession number for the same fund in both quarters.
+2. Load holdings from `/root/{quarter}/INFOTABLE.tsv` separately for each quarter.
+3. Filter rows to the chosen accession number.
+4. Aggregate holdings within each quarter by `CUSIP` using summed `VALUE` because a single security may appear in multiple line items.
+5. Merge the two quarter-level aggregates by `CUSIP`.
+6. Compute `delta = target_quarter_value - baseline_quarter_value`.
+7. If a security is absent in the baseline quarter, treat its baseline value as zero (new position).
+8. Filter to positive deltas only.
+9. Rank descending by dollar increase (`delta`) to obtain the top buys / increased investments.
+
+Do not compare raw INFOTABLE rows directly without first aggregating duplicate CUSIPs within each quarter.
+
+### Analyze which funds hold a stock to the most extent
+
+```bash
+python3 13f-analyzer/scripts/holding_analysis.py \
+    --cusip <stock cusip> \
+    --quarter 2025-q3 \
+    --topk 10
+```
+
+This script will print out the top 10 hedge funds who hold a particular stock with highest notional value.

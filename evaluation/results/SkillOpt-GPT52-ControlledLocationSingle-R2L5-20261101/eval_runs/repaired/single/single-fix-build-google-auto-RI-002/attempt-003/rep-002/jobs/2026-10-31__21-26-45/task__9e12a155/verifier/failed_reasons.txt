@@ -1,0 +1,28 @@
+Repository: /home/travis/build/failed/google/auto
+CI command (.travis.yml): mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure
+- Maven reactor succeeds until module :auto-value runs Maven Invoker integration tests.
+- Invoker reports 1 failed fixture: value/src/it/functional (reported as functional/pom.xml).
+- Failing log: value/target/it/functional/build.log
+
+Root causes (in nested IT fixture build config)
+1) Java compilation fails with "unmappable character for encoding ASCII" in several *test* sources.
+   - The fixture does not set source encoding.
+   - Maven defaults to platform encoding (ANSI_X3.4-1968 / ASCII in this environment).
+   - The fixture sources contain non-ASCII characters, so javac fails.
+
+2) Test compilation fails: "cannot find symbol: class MoreObjects" (com.google.common.base.MoreObjects).
+   - The fixture compiles against Guava 17.0 (see build.log downloading guava-17.0.jar).
+   - MoreObjects is not present in Guava 17.
+   - The fixture declares guava-testlib 18.0 but Maven resolves guava 17.0 via transitive deps (e.g., auto-value or other deps), so we need to force a newer guava.
+
+Plan
+- Patch only the failing invoker fixture POM: value/src/it/functional/pom.xml.
+  a) Set project.build.sourceEncoding (and reporting) to UTF-8.
+  b) Configure maven-compiler-plugin encoding to UTF-8.
+  c) Add an explicit com.google.guava:guava test dependency at 18.0 to ensure MoreObjects is on the test classpath.
+
+Verification
+- Re-run the original CI command: mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+- Confirm Invoker summary shows all IT projects passed.

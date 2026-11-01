@@ -1,0 +1,29 @@
+Repository: /home/travis/build/failed/google/auto
+CI command (from .travis.yml): mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+JDK target: 7 (oraclejdk7/openjdk7)
+
+Observed failure (reproduced with JDK7):
+- Reactor fails in module :auto-value during maven-invoker-plugin integration-test.
+- Invoker summary shows: "1 build failed" and the failing invoker project is: functional/pom.xml
+
+Root cause details (from value/target/it/functional/build.log):
+1) Java compilation fails with "unmappable character for encoding ASCII" for multiple files.
+   - Maven is using platform default encoding ANSI_X3.4-1968 (ASCII).
+   - The functional integration-test sources contain non-ASCII characters, so javac fails.
+   - This is a build configuration problem: the invoker project's maven-compiler-plugin does not set source encoding.
+
+2) Java compilation also fails with:
+     cannot find symbol: class com.google.common.base.MoreObjects
+   - The build log shows Guava 17.0 on the classpath.
+   - MoreObjects was introduced in newer Guava versions (>=18).
+   - The invoker project's pom.xml depends on guava-testlib 18.0, but Maven dependency mediation still selects Guava 17.0 (likely via the auto-value dependency and/or dependency ordering).
+   - This is a dependency management problem inside the invoker project's pom.xml.
+
+Fix plan:
+- Edit value/src/it/functional/pom.xml (the source for the invoker project) to:
+  a) Force UTF-8 encoding for compilation (set project.build.sourceEncoding=UTF-8 and/or maven-compiler-plugin <encoding>UTF-8</encoding>).
+  b) Add an explicit test-scoped dependency on com.google.guava:guava:18.0 so MoreObjects is available.
+
+Expected result:
+- The invoker project functional should compile and tests should run.
+- mvn -B -U -f build-pom.xml verify --fail-at-end ... should succeed for the full reactor.

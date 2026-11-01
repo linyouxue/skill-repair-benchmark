@@ -1,0 +1,39 @@
+{
+  "task_id": "sec-financial-report",
+  "fallback_used": false,
+  "overall_diagnosis": "The SEC 13F skill bundle has recurring documentation and workflow inconsistencies centered on correct script invocation paths, quarter-scoped data conventions, stock-count metric definitions, and the methodology for cross-quarter Top Buys analysis. In addition, the stock CUSIP fuzzy-search helper script contains a parser/implementation defect that can block stock lookup workflows. The most impactful repairs are concentrated in the SKILL.md guidance files plus the broken stock search helper.",
+  "diagnosed_skills": [
+    {
+      "path": "13f-analyzer/SKILL.md",
+      "confidence": "0.95",
+      "diagnosis": "The documentation is inconsistent or incomplete about repository-relative script invocation paths, quarter-scoped data layout expectations, the definition of 'stocks held', and the required workflow for cross-quarter Top Buys analysis. Users can incorrectly count total INFOTABLE rows instead of distinct securities, or apply the wrong comparison logic when identifying increased investments between quarters.",
+      "repair_instruction": "Revise the documentation to consistently use the correct invocation paths such as `python3 13f-analyzer/scripts/one_fund_analysis.py ...` from repo root and explicitly document the `/root/{quarter}/INFOTABLE.tsv` and `COVERPAGE.tsv` layout. Clarify that 'How many stocks are held' means the number of distinct `CUSIP` values for the selected fund+quarter, not total position rows. Expand the cross-quarter comparison section with a step-by-step Top Buys workflow: obtain accession numbers for both quarters, aggregate VALUE by CUSIP within each quarter, merge quarters by CUSIP, compute delta = target quarter value minus baseline quarter value, treat missing baseline values as zero for new positions, sum duplicate line items before comparison, filter to positive deltas, and rank descending by dollar increase."
+    },
+    {
+      "path": "fuzzy-name-search/SKILL.md",
+      "confidence": "0.88",
+      "diagnosis": "The fuzzy-search documentation has outdated or unclear helper-script invocation examples and inconsistent quarter/path conventions relative to the actual repository structure. Since accession-number lookup and CUSIP discovery are prerequisites for downstream analysis, these inconsistencies disrupt the intended workflow.",
+      "repair_instruction": "Update all examples to use the correct repository-relative script paths, including `python3 fuzzy-name-search/scripts/search_fund.py ...` and `python3 fuzzy-name-search/scripts/search_stock_cusip.py ...`. Clearly document quarter argument behavior and expected `/root/{quarter}` data layout conventions, and ensure examples are internally consistent with downstream 13F analyzer usage across both Q2 and Q3 workflows."
+    },
+    {
+      "path": "fuzzy-name-search/scripts/search_stock_cusip.py",
+      "confidence": "0.93",
+      "diagnosis": "The script contains a functional argument-parser defect where `parse_args()` is called before the `--quarter` argument is added, making the quarter option unreachable. The excerpt also shows an incomplete CUSIP-processing statement that would cause runtime failure or broken normalization behavior during stock lookup.",
+      "repair_instruction": "Refactor `get_args()` so all arguments, including `--quarter`, are added before calling `parser.parse_args()`. Ensure quarter handling is consistent with the documented behavior in SKILL.md. Repair the incomplete CUSIP normalization logic (for example by converting to string and trimming whitespace), preserve proper filtering on stock-like TITLEOFCLASS values, deduplicate issuer/CUSIP combinations where appropriate, and ensure fuzzy-search results reliably print issuer names and matching CUSIPs without runtime errors."
+    }
+  ],
+  "unselected_skills": [
+    "13f-analyzer/scripts/holding_analysis.py",
+    "13f-analyzer/scripts/one_fund_analysis.py",
+    "fuzzy-name-search/scripts/search_fund.py"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 5,
+  "shared_diagnosis": false,
+  "shared_diagnosis_source": null,
+  "consumer_method": "skillopt-controlled-oracle-hint-r2l5-v2",
+  "repair_round": 2,
+  "diagnosis_n": 3,
+  "merge_samples": true
+}
