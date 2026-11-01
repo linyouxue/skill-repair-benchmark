@@ -19,22 +19,21 @@ group1、group3的逐票错误模式和数量见[错误分析](groups13-error-an
 
 ## 人工Skill现有结果
 
-| Skill | 数据集 | 次数 | 字段正确率 |
-|---|---|---:|---:|
-| manual-round28 | group_02 | 1 | 97.50% |
-| manual-round26 | group_02 | 1 | 97.50% |
+| Skill | 数据集 | 次数 | 第1次 | 第2次 | 第3次 | 均值 |
+|---|---|---:|---:|---:|---:|---:|
+| manual-round26 | group_02 | 3 | 97.50% | 97.50% | 97.50% | **97.50%** |
 
-人工Skill各为一次探索结果，分别保留，不与原始Skill baseline混算。
+人工Round26三次使用同一冻结Skill，均值为三次字段正确率的算术均值；第一次使用Tatu/AIGW，后两次使用Paratera，分别记录配置。人工Round26不与原始Skill baseline混算。
 
 ## 文件
 
 - `summary.json`：全部成绩和当前baseline均值。
-- `runs.csv`：18次已有有效运行的逐次数据，含10次当前baseline、2次人工Skill、6次旧版结果。
+- `runs.csv`：19次已有有效运行的逐次数据，含10次当前baseline、3次人工Skill、6次旧版结果。
 - `baseline/`、`manual/`、`historical-v1/`：每次真实原Excel、原评分及已有验收记录；`run.json`对应运行身份。
-- `manual/<run>/skills/`：人工Round26/28实际使用的完整冻结Skill及支持文件、许可。
-- `trajectory/`（各运行内）：15次本地运行的完整LLM记录（无损XZ）与已有ACP、ATIF或恢复会话原件；恢复前原段和接续段分别保留。
+- `manual/<run>/skills/`：人工Round26实际使用的完整冻结Skill及支持文件、许可。
+- `trajectory/`（各运行内）：16次本地运行的完整LLM记录（无损XZ）与已有ACP、ATIF或恢复会话原件；恢复前原段和接续段分别保留。
 - `accounting.json`：已保存的用量与费用记录，估算与实际确认字段沿用原记录。
 
-另3份远端旧LLM日志本次未补取，已在对应`run.json`中标记；18份原Excel和评分均齐全，不用另一条轨迹替代。
+另3份远端旧LLM日志本次未补取，已在对应`run.json`中标记；19份原Excel和评分均齐全，不用另一条轨迹替代。
 
 当前评测图片和参考表见[上级目录](../README.md)，原22票任务见[任务目录](../../README.md)。本次只整理已有数据，不重跑、不重新评分。
