@@ -1,0 +1,73 @@
+diff --git a/skills/senior-data-engineer/SKILL.md b/skills/senior-data-engineer/SKILL.md
+index 6eb3d86..847518f 100644
+--- a/skills/senior-data-engineer/SKILL.md
++++ b/skills/senior-data-engineer/SKILL.md
+@@ -78,6 +78,68 @@ verified: true
+ ---
+ # Senior Data Engineer
+ 
++## Task-Focused Playbooks
++
++### Flink Java (bounded inputs) — get to a compiling baseline fast
++
++When you inherit a Flink Java skeleton, **make it compile first** (many evaluators fail fast on compilation):
++
++1. Run a quick compile early (e.g., `mvn -q -DskipTests package`) and fix missing symbols before designing the full pipeline.
++2. Search for missing packages referenced by the skeleton (e.g., `clusterdata.datatypes.*`) and add **minimal Flink-POJO** classes:
++   - include a **no-arg constructor**
++   - use **public fields** or standard getters/setters
++   - prefer `long` for IDs/timestamps that may exceed 32-bit
++   - keep only fields you truly need for the query
++
++### Parsing gzipped CSV traces without extra tooling
++
++In restricted sandboxes you often **cannot** rely on `sudo`, `apt-get`, or Python `pip`, and PDF utilities may be missing. If the PDF is just schema documentation, don’t block on it—**infer the needed columns from the actual CSV lines**.
++
++Pragmatic pattern for “cluster trace” style inputs:
++
++- Read the `.gz` as lines (Flink text input supports common compression formats by extension) and parse with `String.split(",", -1)`.
++- Only extract the columns required by your logic, typically:
++  - `timestamp` (often microseconds → convert to milliseconds)
++  - `jobId` (often a large integer → `long`)
++  - `eventType` (int code; for Google cluster traces, task_events often use `0` for SUBMIT)
++
++### Sessionizing “stages” by inactivity gap (event time)
++
++A “stage” defined as *bursts separated by ≥10 minutes of inactivity* maps cleanly to an **event-time session window**:
++
++- Convert microseconds → milliseconds: `tsMs = tsUs / 1000`.
++- Assign timestamps + watermarks:
++  - If input is time-sorted, use `WatermarkStrategy.forMonotonousTimestamps()`.
++  - Otherwise use `forBoundedOutOfOrderness(...)`.
++- Pipeline shape:
++  1. Filter to SUBMIT events.
++  2. `keyBy(jobId)`.
++  3. `window(EventTimeSessionWindows.withGap(Time.minutes(10)))`.
++  4. Aggregate `count` per window.
++  5. `keyBy(jobId)` again and take `max(count)` across that job’s sessions.
++
++Minimal sketch (details vary by Flink version / APIs):
++
++```java
++WatermarkStrategy<TaskEvent> wm = WatermarkStrategy
++    .<TaskEvent>forMonotonousTimestamps()
++    .withTimestampAssigner((e, ts) -> e.timestampMs);
++
++DataStream<Tuple2<Long, Long>> longestStagePerJob = tasks
++    .filter(e -> e.eventType == SUBMIT)
++    .assignTimestampsAndWatermarks(wm)
++    .keyBy(e -> e.jobId)
++    .window(EventTimeSessionWindows.withGap(Time.minutes(10)))
++    .aggregate(new CountAgg(), new WindowToJobCount())
++    .keyBy(t -> t.f0)
++    .reduce((a, b) -> a.f1 >= b.f1 ? a : b);
++```
++
++### Output: format + test-harness friendliness
++
++- Prefer emitting `Tuple2<Long, Long>` (or `Tuple2<Long, Integer>`). `Tuple2.toString()` prints as `(jobId,count)` with no extra spaces.
++- If the repository provides “test injection” hooks (e.g., `AppBase.sinkOrTest(...)`, `jobSourceOrTest(...)`), **use them** so unit tests can swap sources/sinks without touching your core logic.
++
+ ## Core Capabilities
+ 
+ - **Batch Pipeline Orchestration** - Design and implement production-ready ETL/ELT pipelines with Airflow, intelligent dependency resolution, retry logic, and comprehensive monitoring

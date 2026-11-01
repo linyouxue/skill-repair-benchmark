@@ -1,0 +1,1 @@
+原始ACP见本目录。完整LLM及全部保留原生输出在[证据归档](https://github.com/linyouxue/skill-repair-benchmark/releases/download/pddl-flink-skillhone-gpt52-diagnosis-s0-20261101/flink-query-skillhone-generalization-20261101.tar.xz)，成员前缀`native-runs/flink-query-frozen-group_01-r3-fbc36a28/`；原文件字节未改写。缺失或partial状态以原result/benchmark元数据为准，接续段不增加独立样本数。
