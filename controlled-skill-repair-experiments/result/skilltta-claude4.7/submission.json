@@ -1,0 +1,1121 @@
+{
+  "method_id": "skilltta-claude47-paratera-controlled22-20261028",
+  "benchmark_version": "controlled-datasets-20261020",
+  "tasks": [
+    {
+      "task_id": "location-data-to-d3",
+      "base_task_id": "data-to-d3",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The location hint flags three acceptance areas: clickable bubbles, overlay text layer, and bidirectional linking. The current skill mentions `text { pointer-events: none }` but only in prose — it is not emphasized as a required CSS rule in the deliverable's style.css, so an implementer may append labels inside the same clickable element and have the overlay text swallow clicks on bubbles.",
+          "locations": [
+            {
+              "file": "skilltta-task-guidance/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The bidirectional linking section uses `d3.selectAll('tr.stock-row')` and `rows.on('click', ...)` but does not instruct the implementer to actually assign the `stock-row` class and `data-ticker` attribute when building rows; this gap can lead to click handlers that never match, so row→bubble (and bubble→row) linking silently fails.",
+          "locations": [
+            {
+              "file": "skilltta-task-guidance/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The bubble click handler example attaches `.on('click', ...)` to `circles`, but the skill does not require that each bubble be rendered as a `<g class='bubble-node'>` containing circle+text with the circle receiving pointer events — nor does it warn that if labels are appended as siblings drawn after circles in the same parent, label hit areas near bubble centers block clicks. The 'Clickability Pitfall' note exists but is not promoted to a mandatory CSS/structure rule.",
+          "locations": [
+            {
+              "file": "skilltta-task-guidance/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The tooltip guidance for ETFs says 'skip tooltip entirely' but does not instruct hiding/removing any lingering tooltip when moving from a non-ETF to an ETF bubble, which can leave stale tooltips visible — minor but relevant to the hover acceptance.",
+          "locations": [
+            {
+              "file": "skilltta-task-guidance/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The self-verification checklist does not explicitly require testing a click on the bubble's center (where the text label sits) — exactly the failure mode the location hint points to.",
+          "locations": [
+            {
+              "file": "skilltta-task-guidance/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-data-to-d3/repaired_skill",
+      "executor_run_id": "task__02988a4f"
+    },
+    {
+      "task_id": "location-dialogue-parser",
+      "base_task_id": "dialogue-parser",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "The Adding Edges guidance shows `Edge(source=\"Choices\", target=\"End\", ...)` but never instructs callers to also `add_node` an `End` node. The task's JSON schema requires `End` to appear in `nodes` (since 'multiple paths can lead to the node End' and 'All nodes reachable from first'). Following the skill verbatim yields edges that point to a target absent from `nodes`, failing the constraint that every edge target exists as a node.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "dialogue-graph/SKILL.md › Adding Edges"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Export section documents only `to_dict()`/`to_json()`. There is no guidance for emitting `/app/dialogue.dot`, which the task mandates. The accompanying `visualize()` method renders a PNG/SVG via Graphviz binary (with `cleanup=True`, so even the intermediate .dot is deleted) and is not a substitute for writing a `.dot` file at the required path.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "dialogue-graph/SKILL.md › Export"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "`Graph.validate` treats `target == \"End\"` as always valid even when no `End` node is registered. This masks the real requirement: `End` must be a registered, deduplicated terminal node (`{id:'End', type:'line', text:'', speaker:''}`) so that reachability and schema checks pass. The skill never states this convention and never performs a reachability-from-root check, both of which the task requires.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "dialogue-graph/SKILL.md › End handling / dialogue_graph.py::validate"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "`add_node` raises on duplicate ids, but multiple branches naturally converge on `End`; the skill tells users to `add_edge(..., target='End')` repeatedly with no safe way to materialize/dedup the End node. `visualize()` hard-codes an `End` node in the diagram but `to_dict()` does not emit one—producing a JSON/DOT mismatch.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "dialogue-graph/scripts/dialogue_graph.py (consistency with SKILL)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-dialogue-parser/repaired_skill",
+      "executor_run_id": "task__5d13cd96"
+    },
+    {
+      "task_id": "location-flink-query",
+      "base_task_id": "flink-query",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Workflow 2.3 (Job-finish determination) in senior-data-engineer/SKILL.md — wait, correction: the hint points at skilltta-task-guidance/SKILL.md Workflow 2. In section 2.3, the rule restricts 'finished' to terminal job_events types FINISH(4)/KILL(5)/FAIL(3). This is too narrow: it omits other terminal-like job event states that the task considers 'finished' (e.g., EVICT(2) and LOST(6) may also terminate a job in the Google trace semantics). The guidance's hard exclusion of these types from completion detection likely causes finished jobs to be withheld from output.",
+          "locations": [
+            {
+              "file": "skilltta-task-guidance/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Workflow 2.4 (Output eligibility) in skilltta-task-guidance/SKILL.md gates emission on receiving a terminal job_events record. Combined with 2.3's narrow terminal set, jobs whose completion is signaled by task-level FINISH/KILL events or by other job_event types are never emitted. The output eligibility rule should be based on the job having completed (any terminal signal) rather than strictly on a job_events terminal record of types 3/4/5 only.",
+          "locations": [
+            {
+              "file": "skilltta-task-guidance/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-flink-query/repaired_skill",
+      "executor_run_id": "task__7d2b0dd1"
+    },
+    {
+      "task_id": "location-manufacturing-equipment-maintenance",
+      "base_task_id": "manufacturing-equipment-maintenance",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "SKILL.md for reflow-profile-compliance-toolkit does not specify explicit deliverables (q01.json–q05.json under /app/output/) nor the task completion condition that all five files must exist and conform to schemas.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Q2 representative thermocouple selection guidance in reflow-profile-compliance-toolkit/SKILL.md is ambiguous — it only gives generic 'min metric → smallest tc_id' tie-break rules but does not state that for TAL the representative TC is the one with the shortest (minimum) TAL (worst-case against min-TAL compliance), nor the deterministic tie-break by smallest tc_id.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-manufacturing-equipment-maintenance/repaired_skill",
+      "executor_run_id": "task__27229d13"
+    },
+    {
+      "task_id": "location-pddl-airport-planning",
+      "base_task_id": "pddl-airport-planning",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "SKILL.md Plan Saving section documents save-plan(plan_object, output_path) using unified_planning.io.PDDLWriter, which does not emit the required action(arg1, arg2, ...) per-line format demanded by the task prompt and writes to a planner-chosen path rather than the literal plan_output path from problem.json.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "SKILL.md Example Workflow calls save_plan(plan, \"task01.plan\") with a hardcoded path, ignoring the per-task plan_output field in problem.json and omitting parent-directory creation plus round-trip verification.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "save_plan.skill inputs are defined as (plan_object, output_path) relying on a plan object serializer; the contract must instead accept the literal plan_output path and pre-formatted plan_lines so the output matches the required textual format and exact destination.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-pddl-airport-planning/repaired_skill",
+      "executor_run_id": "task__03b869c0"
+    },
+    {
+      "task_id": "single-fix-build-google-auto-RI-001",
+      "base_task_id": "fix-build-google-auto",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "Patch output path in maven-build-lifecycle/SKILL.md is hardcoded to `google/auto` instead of the task's generic `<repo>/<id>` placeholder.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Minimal diagnostic sequence hardcodes `cd /home/travis/build/failed/google/auto`, contradicting the task's `<repo>/<id>` convention and omitting the id segment.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "Location hint flags that build-command conventions and failure-reproduction steps are under-specified in maven-build-lifecycle/SKILL.md. The current 'Minimal diagnostic sequence' lacks an actual Maven build command to reproduce the failure (only `sed`/`find` are shown).",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "No explicit toolchain-selection guidance (JDK version expected for this legacy Google Auto snapshot, Maven version) in maven-build-lifecycle/SKILL.md despite the hint explicitly calling out toolchain selection.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D5",
+          "description": "The 'Minimal diagnostic sequence' numbering starts at step 3 with no steps 1 and 2, indicating truncated/garbled content.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D6",
+          "description": "Repository-specific checkpoint prescribes a concrete fix (dependency versions) that borders on 'solving the end task' inside a reusable skill, rather than guiding the agent to derive it. Should be reframed as diagnostic guidance (how to detect version drift) with the versions as an illustrative example or moved to an attachment.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-fix-build-google-auto-RI-001/repaired_skill",
+      "executor_run_id": "task__2c009f04"
+    },
+    {
+      "task_id": "single-fix-build-google-auto-RI-002",
+      "base_task_id": "fix-build-google-auto",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "maven-build-lifecycle/SKILL.md hard-codes the repository path as /home/travis/build/failed/google/auto, ignoring the task's <repo>/<id> structure where id is a distinct subdirectory. Patch artifact path and cd target are therefore wrong for nested test projects / multi-id layouts.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "The lifecycle skill lacks guidance on scoping dependency fixes to nested test modules (e.g., Maven Invoker IT projects, compile-tests). It mentions Invoker tests only as a gating step but does not instruct editing the nested module's own pom vs. the parent, which the location hint flags.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "The reproduce command uses -f build-pom.xml unconditionally, implying every target repo has build-pom.xml. For google/auto this is correct, but as a reusable skill it should direct the user to detect the CI-declared POM/reactor from .travis.yml rather than hardcode build-pom.xml.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "skilltta-task-guidance/SKILL.md step 3 says 'Do not run tests unless requested; the task is build repair + patch artifacts' — this conflicts with maven-build-lifecycle's contract requiring re-running the CI verify command including Invoker ITs. The two skills give contradictory finishing criteria.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D5",
+          "description": "Nested-test guidance in skilltta-task-guidance only lists symptoms generically; it does not explicitly instruct: when a nested Invoker/IT project under src/it or a *-tests module fails, modify that nested pom (including its own <dependencyManagement>/<dependencies>) rather than propagating changes to the root reactor pom. The location hint specifically calls out this scoping question.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-fix-build-google-auto-RI-002/repaired_skill",
+      "executor_run_id": "task__4e964dcf"
+    },
+    {
+      "task_id": "single-fix-build-google-auto-all",
+      "base_task_id": "fix-build-google-auto",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "maven-build-lifecycle/SKILL.md hardcodes the repo path as /home/travis/build/failed/google/auto, omitting the required <id> subdirectory from the task prompt (/home/travis/build/failed/<repo>/<id>). This misleads diff placement and the cd target.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Minimal diagnostic sequence is empty — no actual build/reproduce command is provided, contradicting the skill's purpose of failure reproduction and build command convention.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "Artifact contract numbering is broken (jumps from heading to step 2) — step 1 (diagnose/write failed_reasons.txt) is missing, so the contract omits the diagnosis-file requirement from the task.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "'General Maven lifecycle reminders' section is empty, providing no guidance about toolchain selection, nested test projects, or dependency resolution scope — which the location hint flags as the problem areas.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D5",
+          "description": "No guidance on nested/sub-module (Invoker IT or nested test project) dependency resolution and modification scope, despite the skill description explicitly covering 'Maven Invoker integration tests' and the location hint pointing to nested test projects.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D6",
+          "description": "Toolchain selection convention is not documented in maven-build-lifecycle, though the location hint identifies '构建工具链选择' as a required topic.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-fix-build-google-auto-all/repaired_skill",
+      "executor_run_id": "task__c3e7baa5"
+    },
+    {
+      "task_id": "single-flink-query-RI-001",
+      "base_task_id": "flink-query",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-flink-query-RI-001/repaired_skill",
+      "executor_run_id": "task__faa18993"
+    },
+    {
+      "task_id": "single-flink-query-RI-002",
+      "base_task_id": "flink-query",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "Workflow 2 (streaming) in senior-data-engineer/SKILL.md lacks guidance on gating output emission by job lifecycle/completion events. The 'Semantic Contract Gate' subsection defines contributing/completion predicates abstractly but does not explicitly instruct that per-key aggregates must only be emitted after the authorized completion event is observed, nor warn against emitting one tuple per key seen in the activity stream.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "Numbered list in the Semantic Contract Gate is malformed: it declares '1.' and '2.' then an empty paragraph before continuing, suggesting a missing third predicate about emission eligibility (the exact rule the location hint flags).",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-flink-query-RI-002/repaired_skill",
+      "executor_run_id": "task__92e08dc7"
+    },
+    {
+      "task_id": "single-flink-query-all",
+      "base_task_id": "flink-query",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "The 'Semantic Contract Gate' enumerates only one predicate (contributing-event) and omits the other two predicates that the section header promises ('three separate predicates'). In particular, it does not define a 'completion/terminal event' predicate (which event types mark a key as finished) nor an 'emission eligibility' predicate (when a key is allowed to produce output). This directly matches the location hint about missing rules for '完成事件判定' (completion event determination) in Workflow 2.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "The validation guidance mentions that 'a key with qualifying activity and the required completion event must be emitted', but the skill never previously defines what 'required completion event' means nor states the inverse rule (keys without a qualifying completion/terminal event must NOT be emitted). This matches the second location hint about missing rules for '结果输出资格' (output eligibility). Without an explicit negative/eligibility rule, implementers can emit results for every key seen in the activity stream, producing extra keys even when expected keys are all present (which the current bullet acknowledges but does not instruct how to prevent).",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-flink-query-all/repaired_skill",
+      "executor_run_id": "task__5637e4ad"
+    },
+    {
+      "task_id": "single-manufacturing-equipment-maintenance-RI-001",
+      "base_task_id": "manufacturing-equipment-maintenance",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "reflow-profile-compliance-toolkit/SKILL.md lacks explicit, hard requirements about deliverables and task completion conditions: it does not enumerate the five required output files (/app/output/q01.json .. q05.json), their exact schemas, or a final self-check gate. The location hint points specifically at '交付物和任务完成条件' (deliverables and completion conditions) in this file.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The toolkit SKILL.md's 'Minimal end-to-end scaffold' stops at 'Write outputs into /app/output' without naming q01..q05 files or asserting their existence/schema conformance before finishing, so an agent following only this skill may skip or misname outputs.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The toolkit SKILL.md does not state the completion contract (all 5 files must exist, be valid JSON, match the per-question schema, floats rounded to 2 decimals, arrays sorted by run_id/board_family/board_id ascending, null for missing). These acceptance conditions are only partially present and scattered under 'Output construction guardrails'.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Q4 guidance inside the toolkit is ambiguous about which direction 'required_min_speed_cm_min' encodes and how 'meets' is evaluated; it offers two formulas without tying them to the schema field used by the task, risking inverted meets logic as a completion-condition defect.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "Q5 completion conditions (best run per board_family, runner_up_run_ids content/sorting) are not described at all in the toolkit SKILL.md, leaving the deliverable undefined.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-manufacturing-equipment-maintenance-RI-001/repaired_skill",
+      "executor_run_id": "task__0382dd5c"
+    },
+    {
+      "task_id": "single-manufacturing-equipment-maintenance-RI-002",
+      "base_task_id": "manufacturing-equipment-maintenance",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The task hint explicitly flags Q02 representative thermocouple selection in reflow-profile-compliance-toolkit/SKILL.md. In section 'Deterministic sensor selection (tie-breaks)', the toolkit says for TAL-type ('minimum metric') selection use min(value, tc_id) — i.e., smallest tc_id on ties. However, the handbook-grounded guidance in skilltta-task-guidance/SKILL.md says the representative tc for TAL is the one with the minimum TAL (coolest joint). The toolkit's section 3 example (time_above_threshold) and section 4 'min metric' rule are generically correct, but the toolkit does NOT explicitly state that for Q02/TAL the representative selection is the TC with minimum TAL. More importantly, the earlier guidance block near the top (section about peak uses 'coldest' = min_peak_run = min(peak_tc)), while for TAL the toolkit never explicitly ties 'select minimum TAL as representative' — leaving the agent to possibly reuse Q01's max-rule or wrong tie-break.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Additionally, the 'max metric' tie-break example is written incorrectly: `max(items, key=lambda x: (x.value, -lex(x.tc_id)))` is not valid Python (undefined `lex`) and the stated rule 'smallest tc_id on ties' for max metric is inconsistent with the min-metric rule. This could cause the agent to pick wrong tc on ties for Q01 as well, but the location hint narrows the defect to Q02 representative TC selection.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-manufacturing-equipment-maintenance-RI-002/repaired_skill",
+      "executor_run_id": "task__acdfc774"
+    },
+    {
+      "task_id": "single-manufacturing-equipment-maintenance-all",
+      "base_task_id": "manufacturing-equipment-maintenance",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The reflow-profile-compliance-toolkit/SKILL.md does not define concrete deliverable file paths or completion criteria (which files to write under /app/output/, required schema fields, null handling for runs lacking TC data). The 'Output construction guardrails' section mentions rounding/sorting but never names q01.json–q05.json as mandatory outputs, so an agent may skip or misname deliverables.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The Q02 representative-thermocouple selection guidance in reflow-profile-compliance-toolkit/SKILL.md is missing/ambiguous. Section 4 'Deterministic sensor selection' only states generic rules ('max metric → smallest tc_id, min metric → smallest tc_id') and the TAL recipe (Section 3) never specifies which TC to pick for TAL. Since TAL compliance is worst-case driven (coolest probe = minimum TAL), the toolkit should explicitly instruct selecting the TC with the minimum TAL (ties by smallest tc_id), consistent with the handbook's worst-case/representative-sensor guidance. Without this, the agent may wrongly reuse Q1's max-ramp TC or pick the maximum TAL.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-manufacturing-equipment-maintenance-all/repaired_skill",
+      "executor_run_id": "task__ebe4254d"
+    },
+    {
+      "task_id": "single-sec-financial-report-RI-001",
+      "base_task_id": "sec-financial-report",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "13f-analyzer/scripts/holding_analysis.py ignores --quarter when reading INFOTABLE",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "fuzzy-name-search/scripts/search_stock_cusip.py hard-codes 2025-q2 and exposes no --quarter flag",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "SKILL.md commands use bare `scripts/...` relative paths without specifying the working directory",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "search_fund.py pretty_print references FILINGMANAGER_STREET1 while SKILL.md example shows FILINGMANAGER_STREET field name",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-RI-001/repaired_skill",
+      "executor_run_id": "task__682bea0c"
+    },
+    {
+      "task_id": "single-sec-financial-report-RI-002",
+      "base_task_id": "sec-financial-report",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "Single-quarter holding count口径 is wrong: the helper reports raw INFOTABLE row counts instead of distinct issuer positions (CUSIPs).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "13f-analyzer/SKILL.md does not pin down the quantity semantic for single-quarter holding counts, so an agent reading the helper's output has no corrective instruction.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-RI-002/repaired_skill",
+      "executor_run_id": "task__7fb9800d"
+    },
+    {
+      "task_id": "single-sec-financial-report-RI-003",
+      "base_task_id": "sec-financial-report",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-RI-003/repaired_skill",
+      "executor_run_id": "task__5db65932"
+    },
+    {
+      "task_id": "single-sec-financial-report-all",
+      "base_task_id": "sec-financial-report",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002",
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D5",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D6",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D7",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D8",
+          "description": "",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-all/repaired_skill",
+      "executor_run_id": "task__1c032592"
+    },
+    {
+      "task_id": "single-video-silence-remover-RI-001",
+      "base_task_id": "video-silence-remover",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "silence-detector uses np.convolve with mode='valid', which shortens the array by smoothing_window-1 samples, but the detected index is returned directly as seconds. This yields a silence_end that is off by up to (smoothing_window-1) seconds relative to the real audio timeline (with defaults, up to ~29 s early). The detector docstring claims the smoothed value is simply compared to a threshold and uses the index as time, with no shift correction.",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "silence-detector/SKILL.md does not describe the index→time mapping for the smoothed signal nor warn about the window offset; it only lists smoothing_window as a tuning knob. This lets callers believe the returned `end` is already in seconds, propagating the alignment bug downstream.",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "video-processor/SKILL.md documents its pipeline step 'Detect the non-teaching opening with the silence detector's result, then start long-pause detection at that returned boundary', but gives no guidance that the detector's `end` must be the opening cutoff in seconds on the original timeline. Combined with D1, the pause-detector is started at a too-early `--start-time`, so part of the opening leaks into pause detection or is missed entirely.",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "Secondary consequence of D1: because silence_end is under-reported, the opening segment `{start:0,end:silence_end}` emitted into segment-combiner is too short, so the opening is not fully removed; the removed_duration in the final report is systematically low and compression_percentage falls out of the expected range.",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-RI-001/repaired_skill",
+      "executor_run_id": "task__201d6393"
+    },
+    {
+      "task_id": "single-video-silence-remover-RI-002",
+      "base_task_id": "video-silence-remover",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "segment-combiner does not merge overlapping or adjacent intervals",
+          "locations": [
+            {
+              "file": "segment-combiner/scripts/combine_segments.py",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "video-processor assumes non-overlapping sorted removal segments and does not validate or re-merge",
+          "locations": [
+            {
+              "file": "segment-combiner/scripts/combine_segments.py",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "Documentation of the half-open interval convention is not propagated into segment-combiner and video-processor SKILL.md",
+          "locations": [
+            {
+              "file": "segment-combiner/scripts/combine_segments.py",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-RI-002/repaired_skill",
+      "executor_run_id": "task__718d14c5"
+    },
+    {
+      "task_id": "single-video-silence-remover-RI-003",
+      "base_task_id": "video-silence-remover",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The pause-detector's `threshold_ratio` is documented and defaulted as a fraction of the local average RMS (default 0.5), but the task-guidance skill and location hint describe it as a fraction of a reference peak/median RMS (≈0.03–0.05 of peak, or -30 to -35 dBFS). This definitional mismatch means the three skills (pause-detector, silence-detector, video-processor) do not share a common semantics for `threshold_ratio`, so tuning advice is inconsistent and the default is likely too aggressive relative to the documented intent.",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "silence-detector exposes `threshold_multiplier` (ratio applied to the initial-window baseline) but is referenced in the hint as needing matching `threshold_ratio` guidance; its SKILL.md lacks explicit documentation of what the ratio is relative to (baseline vs peak) and how it should be jointly tuned with the pause detector's threshold.",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "video-processor SKILL.md contains no `threshold_ratio` tuning notes at all, even though the location hint says it should carry corresponding guidance so that downstream segment removal honors the same silence definition used upstream.",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Because of the inconsistent `threshold_ratio` definition, there is a latent risk of over-cutting teaching speech or under-cutting pauses, and the min-duration gate (default 2s) is documented only in pause-detector, not reinforced across the pipeline.",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-RI-003/repaired_skill",
+      "executor_run_id": "task__b191729c"
+    },
+    {
+      "task_id": "single-video-silence-remover-all",
+      "base_task_id": "video-silence-remover",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002",
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "D1",
+          "description": "silence-detector uses mode='valid' convolution but reports index directly as seconds, causing a (smoothing_window-1)/2 second offset between detected index and true timestamp.",
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2",
+          "description": "segment-combiner does not merge overlapping/adjacent intervals or clamp to video duration; it only concatenates and sorts, so overlapping opening+pause segments or adjacent segments produce invalid removal lists for video-processor.",
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3",
+          "description": "pause-detector threshold_ratio semantics are ambiguous/under-documented and inconsistent with silence-detector's threshold definition; default 0.5 against a local uniform average is too aggressive for noisy openings and misses long pauses when local average is dragged down by the pause itself.",
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D4",
+          "description": "video-processor SKILL.md does not instruct callers to run segment-combiner (with merge+clamp) before process_video.py, and process_video.py itself does not merge/clamp, so the pipeline silently accepts invalid overlapping segment lists.",
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md",
+              "section": "unspecified"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-all/repaired_skill",
+      "executor_run_id": "task__751ce94c"
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "diagnoses": [
+    {
+      "id": "D1",
+      "file": "13f-analyzer/SKILL.md",
+      "symptom": "The cross-quarter section describes `one_fund_analysis.py` output as 'newly purchased stocks ranked by notional value, and newly sold stocks ranked by notional value.' This phrasing is doubly misleading relative to what the script actually computes and what Q3 of this task needs.",
+      "root_cause": "(a) 'newly purchased' suggests only brand-new positions (q2 value absent), when the script actually emits every CUSIP with ABS_CHANGE > 0 (new positions AND increases on existing positions). An agent could filter out existing-position increases and miss the correct top-5. (b) 'ranked by notional value' suggests ranking by Q3 position size, when the script actually ranks by `ABS_CHANGE = VALUE - VALUE_base` (dollar-value delta). The Q3 task explicitly says 'ranked by dollar value increase', which matches ABS_CHANGE, not notional value. The SKILL offers no instruction to use the `Abs change` column from the printout, nor warns against the natural-language misreading.",
+      "evidence_in_trial": "Task Q3 says: 'top 5 stocks received increased investment ... ranked by dollar value increase'. The script's actual output line is `Abs change: {ABS_CHANGE:.2f}` after `sort_values(by='ABS_CHANGE', ascending=False)` and filter `ABS_CHANGE > 0`. The SKILL.md narrative does not match this. Location hint explicitly names '13f-analyzer/SKILL.md 中跨季度 Top Buys 的计算流程'."
+    },
+    {
+      "id": "D2",
+      "file": "13f-analyzer/SKILL.md",
+      "symptom": "The cross-quarter instructions never specify how to pick the two Berkshire accession numbers (one per quarter), nor warn that COVERPAGE can return multiple affiliated filers (e.g., Berkshire Hathaway Inc vs. subsidiaries). Without guidance, an agent may pair mismatched accessions across quarters.",
+      "root_cause": "SKILL.md jumps straight to invoking the script with `<accession number assigned in q2/q3>` and gives no rule for disambiguating when fuzzy search returns several Berkshire-related filers. The companion `skilltta-task-guidance` SKILL does spell this out (pick the filer with the largest `tableValueTotal`), but the primary 13f-analyzer SKILL does not reference that rule, so a user following only 13f-analyzer could easily use the wrong accession for one quarter."
+    },
+    {
+      "id": "D3",
+      "file": "13f-analyzer/SKILL.md",
+      "symptom": "SKILL.md does not tell users that the script internally restricts to stock `TITLEOFCLASS`, and does not say that the merged top-buys table is already stock-only. For Q3 top buys this is actually the correct scope (question says 'stocks'), but without this note the user cannot judge whether to use this script or build a wider pipeline, and may second-guess results.",
+      "root_cause": "Documentation gap: the stock-filtering behavior documented in the single-quarter section is not restated in the cross-quarter section, where it also applies via `read_one_quarter_data`."
+    }
+  ],
+  "affected_files": [
+    "13f-analyzer/SKILL.md"
+  ],
+  "repair_plan": [
+    "In 13f-analyzer/SKILL.md, rewrite the cross-quarter output description to state precisely: the script prints 'Top 10 Buys' (CUSIPs with ABS_CHANGE > 0, i.e. new positions plus increased existing positions) and 'Top 10 Sells' (ABS_CHANGE < 0), each sorted by the signed dollar-value change (`VALUE - VALUE_base`). Explicitly say ranking is by the printed `Abs change` column, NOT by the Q3 notional `VALUE`.",
+    "Add a short note that for a question of the form 'top N stocks that received increased investment ranked by dollar value increase', the answer is the first N rows of 'Top Buys', using their CUSIPs as printed (upper-case).",
+    "Add a disambiguation note for selecting accession_number per quarter: when the fuzzy fund search returns multiple matches (common for large filers like Berkshire Hathaway), pick the filer whose SUMMARYPAGE/`Total AUM` is largest among non-amendment filings, and do this independently in each quarter (accession numbers differ across Q2 and Q3). Point to `search_fund.py` for the lookup and to `one_fund_analysis.py --accession_number ... --quarter ...` (single-quarter mode) to confirm AUM before locking in both accessions.",
+    "Add a one-line scope note in the cross-quarter section: the script restricts to stock holdings (same TITLEOFCLASS whitelist as single-quarter mode), so output is already appropriate for stock-only questions.",
+    "Preserve all unchanged guidance in other sections (single-quarter fields interpretation, holding_analysis.py usage) and leave fuzzy-name-search/SKILL.md and skilltta-task-guidance/SKILL.md untouched; do not modify the Python scripts (behavior is correct; only the SKILL.md narrative is wrong)."
+  ],
+  "preservation_constraints": [
+    "Keep the YAML frontmatter (name, description) of 13f-analyzer/SKILL.md intact.",
+    "Keep the single-quarter usage block and its 'Interpret the printed fields precisely' bullets verbatim (Total AUM / Total number of holdings / Number of stock holdings guidance is already correct and task-relevant for Q1 and Q2).",
+    "Keep the holding_analysis.py usage section unchanged (needed for Q4).",
+    "Do not alter fuzzy-name-search/SKILL.md, skilltta-task-guidance/SKILL.md, or any script under scripts/ — their logic is correct for this trial; only the cross-quarter narrative in 13f-analyzer/SKILL.md is defective.",
+    "Keep absolute-path invocation conventions (`/skills/13f-analyzer/scripts/...`)."
+  ],
+  "confidence": 0.6,
+  "_usage": {
+    "input_tokens": 11971,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 6028,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 3865
+    },
+    "iterations": [
+      {
+        "input_tokens": 11971,
+        "output_tokens": 6028,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "type": "message"
+      }
+    ]
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "diagnoses": [
+    {
+      "id": "D1",
+      "title": "Workflow 2 completion-event predicate is underspecified; silently permits over-broad terminal set",
+      "evidence": "senior-data-engineer/SKILL.md 'Semantic Contract Gate for Keyed Event Aggregations' (inside Workflow 2) enumerates three predicates (contributing-event, output-eligibility, and an unnamed third) but never says HOW to derive the completion-event predicate from the task wording. It only states that completion events must not synthesize aggregates. Because the rule is missing, downstream guidance (skilltta-task-guidance) interprets 'once the job has finished' as 'any terminal job_event (3,4,5,6)', which conflates genuine FINISH with KILL/FAIL/LOST.",
+      "scope": "senior-data-engineer/SKILL.md Workflow 2 / Semantic Contract Gate section"
+    },
+    {
+      "id": "D2",
+      "title": "skilltta-task-guidance encodes a broadened completion set (3,4,5,6) and tells the implementer to prefer the broadest terminal set when unsure",
+      "evidence": "skilltta-task-guidance/SKILL.md R1 reads: 'treat any terminal job event (3,4,5,6) as \"finished\" for emission eligibility. If unsure, prefer the broadest terminal set; narrowing to only FINISH=4 will drop valid rows.' The task text literally says 'once the job has finished', which in Google cluster_data_2011_2 schema is the FINISH event (type 4). KILL(5)/FAIL(3)/LOST(6) are distinct terminal states that are not 'finished'. The 'prefer broadest' heuristic is backwards: broadening injects extra jobIds into the output that will mismatch the per-jobId comparison described in the task.",
+      "scope": "skilltta-task-guidance/SKILL.md section 'R1. Event-type filtering' and the self-review checklist bullet referencing {3,4,5,6}"
+    },
+    {
+      "id": "D3",
+      "title": "Code-level emission gate does not key the completion predicate to a specific event-type literal",
+      "evidence": "senior-data-engineer/SKILL.md 'Non-negotiable Flink Emission Gate' demonstrates the hasQualifyingActivity gate but gives no example of how the lifecycle event is identified. Combined with D1, implementers inherit only the broad terminal filter from the task-guidance SKILL and apply it inside the CoProcess function. The gate's correctness check ('a key with the required completion event but no qualifying activity must not be emitted') cannot be meaningfully run without a precise definition of 'required completion event'.",
+      "scope": "senior-data-engineer/SKILL.md top-level 'Non-negotiable Flink Emission Gate' and the Semantic Contract Gate's validation checklist"
+    },
+    {
+      "id": "D4",
+      "title": "Guidance skeleton hard-codes the wrong terminal filter into the Flink pipeline",
+      "evidence": "skilltta-task-guidance/SKILL.md 'Skeleton Outline' includes `.filter(e -> e.eventType==3||e.eventType==4||e.eventType==5||e.eventType==6)` on the job-events stream and the corresponding R4 text ('terminal event's timestamp is ≥ last SUBMIT'). This propagates D2 directly into generated code, producing output rows for KILLED/FAILED/LOST jobs that the task does not request.",
+      "scope": "skilltta-task-guidance/SKILL.md 'Skeleton Outline' and 'R4. Join with job completion'"
+    }
+  ],
+  "affected_files": [
+    "senior-data-engineer/SKILL.md",
+    "skilltta-task-guidance/SKILL.md"
+  ],
+  "repair_plan": [
+    {
+      "file": "senior-data-engineer/SKILL.md",
+      "section": "Workflow 2 > Semantic Contract Gate for Keyed Event Aggregations",
+      "change": "Add an explicit 'Completion-event predicate derivation' bullet: when the task uses lifecycle-specific vocabulary (e.g. 'finished', 'completed', 'succeeded'), map it to the single matching lifecycle code in the source schema; do not expand to the full terminal set unless the task explicitly says 'terminated/ended/stopped in any state'. State that in schemas where distinct terminal codes exist (FINISH vs KILL/FAIL/LOST), choosing the narrower code is the default, and broadening requires a textual trigger in the task."
+    },
+    {
+      "file": "senior-data-engineer/SKILL.md",
+      "section": "Non-negotiable Flink Emission Gate",
+      "change": "Add a one-line note that the gate presumes a precisely enumerated completion-event set defined per the Semantic Contract Gate; the gate's negative fixture must include a key whose only lifecycle event is a non-completion terminal (e.g. KILL/FAIL/LOST when 'finish' was requested) and verify no row is emitted."
+    },
+    {
+      "file": "skilltta-task-guidance/SKILL.md",
+      "section": "R1. Event-type filtering",
+      "change": "Rewrite the completion-event rule: the task says 'once the job has finished', so the completion predicate is job_events.event_type == FINISH (4) ONLY. Remove the 'prefer broadest terminal set' heuristic. Add that KILL(5), FAIL(3), LOST(6) are terminal but not 'finished' and must NOT trigger emission."
+    },
+    {
+      "file": "skilltta-task-guidance/SKILL.md",
+      "section": "R4. Join with job completion and Skeleton Outline",
+      "change": "Replace the filter `eventType==3||4||5||6` with `eventType == 4` (FINISH). Update prose and the EmitOnFinish description to speak of 'FINISH event' rather than 'terminal event'."
+    },
+    {
+      "file": "skilltta-task-guidance/SKILL.md",
+      "section": "Self-Review Checklist Before Returning",
+      "change": "Update the bullet 'Emission gated on terminal job event (eventType ∈ {3,4,5,6})' to 'Emission gated on FINISH job event (eventType == 4) only'. Add a negative-check bullet: 'A job whose only lifecycle event is KILL/FAIL/LOST must NOT appear in output.'"
+    }
+  ],
+  "preservation_constraints": [
+    "Do not change the pdf/* skill bundle; it is unrelated to this trial.",
+    "Preserve all other sections of senior-data-engineer/SKILL.md (frameworks, templates, tools, streaming guidance, performance targets, YAML frontmatter).",
+    "Preserve skilltta-task-guidance guidance on microsecond→millisecond conversion, 10-minute event-time session gap, SUBMIT-only filtering, resubmission counting (no taskIndex dedupe), gzip handling via TextInputFormat, single-file output with `(id,count)` formatting, parallelism=1 sink, and class/package naming constraints.",
+    "Preserve the Non-negotiable Flink Emission Gate code snippet and its invariant that output is gated by hasQualifyingActivity; only add clarifying text around it.",
+    "Do not introduce references to a specific verifier, Gold output, or trial-specific test harness.",
+    "Keep CSV parsing / Counter.most_common analogies and other transferred patterns intact."
+  ],
+  "confidence": 0.72,
+  "_usage": {
+    "input_tokens": 49581,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 3829,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 1219
+    },
+    "iterations": [
+      {
+        "input_tokens": 49581,
+        "output_tokens": 3829,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "type": "message"
+      }
+    ]
+  }
+}

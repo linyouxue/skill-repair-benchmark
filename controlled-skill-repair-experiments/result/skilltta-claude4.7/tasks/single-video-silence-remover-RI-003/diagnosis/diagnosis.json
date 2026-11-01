@@ -1,0 +1,57 @@
+{
+  "diagnoses": [
+    "The pause-detector's `threshold_ratio` is documented and defaulted as a fraction of the local average RMS (default 0.5), but the task-guidance skill and location hint describe it as a fraction of a reference peak/median RMS (≈0.03–0.05 of peak, or -30 to -35 dBFS). This definitional mismatch means the three skills (pause-detector, silence-detector, video-processor) do not share a common semantics for `threshold_ratio`, so tuning advice is inconsistent and the default is likely too aggressive relative to the documented intent.",
+    "silence-detector exposes `threshold_multiplier` (ratio applied to the initial-window baseline) but is referenced in the hint as needing matching `threshold_ratio` guidance; its SKILL.md lacks explicit documentation of what the ratio is relative to (baseline vs peak) and how it should be jointly tuned with the pause detector's threshold.",
+    "video-processor SKILL.md contains no `threshold_ratio` tuning notes at all, even though the location hint says it should carry corresponding guidance so that downstream segment removal honors the same silence definition used upstream.",
+    "Because of the inconsistent `threshold_ratio` definition, there is a latent risk of over-cutting teaching speech or under-cutting pauses, and the min-duration gate (default 2s) is documented only in pause-detector, not reinforced across the pipeline."
+  ],
+  "affected_files": [
+    "pause-detector/SKILL.md",
+    "silence-detector/SKILL.md",
+    "video-processor/SKILL.md"
+  ],
+  "repair_plan": [
+    "In pause-detector/SKILL.md: expand the `--threshold-ratio` parameter description to explicitly state (a) units: linear ratio, not dB; (b) reference level: the local sliding-window mean RMS (window_size seconds); (c) semantic: a second is 'low energy' iff energy < local_mean * threshold_ratio; (d) sane range (e.g., 0.3–0.6 for lecture audio with varying volume, default 0.5); (e) interaction with `--min-duration` (>=2s) to avoid cutting natural speech; (f) note that this ratio is NOT the same as a fraction of peak RMS or an absolute dBFS value — if the caller wants dBFS semantics they must convert. Keep existing tuning table and extend it with a 'reference level' row.",
+    "In silence-detector/SKILL.md: clarify that `--threshold-multiplier` is a ratio applied to the initial-window baseline RMS (silent-period mean), not to peak or local mean, and that it is conceptually distinct from pause-detector's `threshold_ratio` (one marks the end of opening silence, the other marks interior pauses). Add a 'How it relates to pause-detector.threshold_ratio' note so operators tune them together: lower multiplier -> opening ends sooner; pause-detector ratio controls interior low-energy sensitivity. Document default 1.5 and sane range 1.3–2.0.",
+    "In video-processor/SKILL.md: add a short 'Threshold ratio downstream contract' section stating that this processor does not itself threshold audio; it only consumes `segments` produced by the detectors, and therefore the quality of cuts depends entirely on the detectors using consistent `threshold_ratio` / `threshold_multiplier` semantics. Add a reminder bullet that every removed segment must satisfy `duration >= min_duration` from pause-detector (except the opening from silence-detector) and that overlapping/touching segments are merged but positive gaps are preserved.",
+    "Across all three SKILL.md files: use the same wording for the shared definition ('threshold_ratio = fraction of the local reference RMS below which a 1s window is considered silent; reference level is documented per detector') to eliminate the cross-skill inconsistency the hint points to. Do not change script defaults or CLI flags."
+  ],
+  "preservation_constraints": [
+    "Do not change CLI flag names, defaults, or output JSON schemas of any script.",
+    "Preserve existing skilltta-task-guidance content, including the pipeline, JSON schema, math-consistency rules, and guardrails.",
+    "Preserve the blocking terminal-result gate and mandatory end-to-end completion gate in video-processor/SKILL.md verbatim.",
+    "Preserve audio-extractor, energy-calculator, segment-combiner, and report-generator SKILL.md and scripts unchanged — the hint does not implicate them.",
+    "Do not modify any .py script logic; only update SKILL.md documentation to align `threshold_ratio` semantics.",
+    "Keep the inclusive min-duration note and the 'preserve positive gaps / merge only on overlap' guidance intact."
+  ],
+  "confidence": 0.62,
+  "_usage": {
+    "input_tokens": 20327,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1568,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "iterations": [
+      {
+        "input_tokens": 20327,
+        "output_tokens": 1568,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "type": "message"
+      }
+    ]
+  }
+}

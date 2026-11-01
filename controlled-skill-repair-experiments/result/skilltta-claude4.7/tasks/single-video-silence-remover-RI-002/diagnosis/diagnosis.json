@@ -1,0 +1,70 @@
+{
+  "diagnoses": [
+    {
+      "id": "D1",
+      "summary": "segment-combiner does not merge overlapping or adjacent intervals",
+      "evidence": "segment-combiner/scripts/combine_segments.py only concatenates `segments` lists from inputs and sorts by `start`; it never checks for overlaps, never coalesces touching/near-touching intervals, and never recomputes `duration` from merged bounds. Yet skilltta-task-guidance/SKILL.md documents a half-open `[start,end)` convention with `GAP_EPS=0.2s` merging as the project-wide invariant, and the location hint explicitly points to 'segment-combiner/SKILL.md 的区间合并约定'. The combiner's SKILL.md also fails to state this convention, so the implementation and the task guidance disagree.",
+      "impact": "When the opening silence segment from silence-detector abuts or overlaps a pause segment from pause-detector (common when pause detection's `--start-time` is one second off the silence boundary, or when any two detected pauses are back-to-back), the combined output contains overlapping or touching intervals. Downstream `total_duration_seconds` is also wrong because it sums raw per-input durations instead of merged-interval lengths, so the eventual compression math (`original ≈ compressed + removed`) can fail."
+    },
+    {
+      "id": "D2",
+      "summary": "video-processor assumes non-overlapping sorted removal segments and does not validate or re-merge",
+      "evidence": "video-processor/scripts/process_video.py `calculate_keep_segments` iterates sorted remove segments and only emits a keep slice when `current_time < seg['start']`, then unconditionally advances `current_time = seg['end']`. If two incoming remove segments overlap (seg[i+1].start < seg[i].end), the function silently drops the overlap region twice; if they merely touch (seg[i+1].start == seg[i].end) under the inclusive convention it produces a zero-length `trim` filter which breaks ffmpeg's filter_complex. There is no clamp to `[0, total_duration]` and no assertion that `end > start` after merging. video-processor/SKILL.md's completion gate claims to check 'segments are sorted and non-overlapping' and 'original ≈ compressed + removed', but the script performs none of these checks before invoking ffmpeg or writing the report.",
+      "impact": "ffmpeg filter_complex can fail (empty trim range) or produce a compressed video whose duration disagrees with the arithmetic sum, so the report's consistency check (`original ≈ compressed + removed`) breaks. Also, if silence-detector's end lands beyond EOF or coincides exactly with a pause start, the resulting zero/negative keep slice is appended to the filter graph."
+    },
+    {
+      "id": "D3",
+      "summary": "Documentation of the half-open interval convention is not propagated into segment-combiner and video-processor SKILL.md",
+      "evidence": "Only skilltta-task-guidance/SKILL.md states the half-open `[start,end)` plus `GAP_EPS=0.2s` merging rule and the `MIN_REMOVE=2.0s` floor exception for the opening. segment-combiner/SKILL.md's 'Notes' only says 'Segments are sorted by start time'; video-processor/SKILL.md example shows a filter with `trim=start=600:end=610` directly after `trim=start=0:end=600` (adjacent) without clarifying whether `end` is exclusive, which can mislead future invocations and cross-skill contracts."
+    }
+  ],
+  "affected_files": [
+    "segment-combiner/scripts/combine_segments.py",
+    "segment-combiner/SKILL.md",
+    "video-processor/scripts/process_video.py",
+    "video-processor/SKILL.md"
+  ],
+  "repair_plan": [
+    "In segment-combiner/scripts/combine_segments.py, after loading and sorting segments: (1) coerce start/end to float, (2) clamp to [0, +inf) and drop invalid entries (end<=start), (3) walk sorted list and merge the next interval into the current one when `next.start - current.end <= GAP_EPS` (default 0.2s), (4) recompute `duration = end - start` on merged intervals, (5) recompute `total_duration_seconds` from merged list. Expose `--gap-eps` (default 0.2) as an argument and leave an optional `--min-duration` with no default so it does not silently drop the opening.",
+    "Update segment-combiner/SKILL.md to document the half-open `[start,end)` convention, the `GAP_EPS` adjacency merge, and that `duration` and `total_duration_seconds` are recomputed from merged intervals; add a Notes bullet that output is guaranteed sorted, non-overlapping, and strictly `end>start`.",
+    "In video-processor/scripts/process_video.py, add a pre-flight normalization step inside `load_segments` (or a new helper) that re-applies the same sort + GAP_EPS merge + clamp-to-[0,total_duration] used by segment-combiner, and asserts strict non-overlap and `end>start` before building the filter. Skip any resulting keep segment with `end - start <= 0` when constructing the ffmpeg filter_complex. After encoding, verify with ffprobe that `|measured_output_duration - sum(keep_durations)| <= 0.5s` and fail loudly otherwise so the caller can retune rather than ship inconsistent artifacts.",
+    "Update video-processor/SKILL.md completion gate to explicitly cite the half-open convention and the GAP_EPS merge, and clarify that the filter example uses exclusive `end`. Keep the existing RED/GREEN gating language and tool-call requirement unchanged."
+  ],
+  "preservation_constraints": [
+    "Do not change CLI names/paths of existing scripts or their required flags (`--video`, `--audio`, `--energies`, `--input`, `--output`, `--remove-segments`, etc.); only add optional flags with safe defaults.",
+    "Preserve the existing report schema produced by report-generator (`original_duration_seconds`, `compressed_duration_seconds`, `removed_duration_seconds`, `compression_percentage`, `segments_removed`).",
+    "Keep skilltta-task-guidance/SKILL.md's pipeline, schema, and pitfalls content intact; the repair aligns other skills to it rather than rewriting it.",
+    "Preserve the video-processor RED/GREEN blocking terminal-result gate and the mandatory end-to-end completion gate language.",
+    "Preserve audio-extractor, energy-calculator, silence-detector, pause-detector, and report-generator behavior and documentation; the hint and defects are localized to segment-combiner and video-processor."
+  ],
+  "confidence": 0.78,
+  "_usage": {
+    "input_tokens": 20238,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 2917,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 592
+    },
+    "iterations": [
+      {
+        "input_tokens": 20238,
+        "output_tokens": 2917,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "type": "message"
+      }
+    ]
+  }
+}

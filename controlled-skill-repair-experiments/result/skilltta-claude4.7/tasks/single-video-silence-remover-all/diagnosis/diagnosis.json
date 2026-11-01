@@ -1,0 +1,92 @@
+{
+  "diagnoses": [
+    {
+      "id": "D1",
+      "summary": "silence-detector uses mode='valid' convolution but reports index directly as seconds, causing a (smoothing_window-1)/2 second offset between detected index and true timestamp.",
+      "evidence": "detect_silence.py: smoothed = np.convolve(energies, np.ones(smoothing_window)/smoothing_window, mode='valid'); then silence_end = i (the smoothed index) is written as 'end' in seconds. With smoothing_window=30, the smoothed[0] corresponds to the center at second ~14-15, so silence_end underestimates the true opening end by ~W/2 seconds. SKILL.md does not warn consumers (video-processor) about this offset."
+    },
+    {
+      "id": "D2",
+      "summary": "segment-combiner does not merge overlapping/adjacent intervals or clamp to video duration; it only concatenates and sorts, so overlapping opening+pause segments or adjacent segments produce invalid removal lists for video-processor.",
+      "evidence": "combine_segments.py simply appends segments and sorts by start; no merge of overlaps, no gap tolerance, no clamp. SKILL.md documents only sort behavior. video-processor's calculate_keep_segments assumes non-overlapping sorted input (iterates current_time = seg['end']); overlapping segments cause negative keep ranges / wrong total removed duration. SKILL.md for video-processor does not require combiner merging as a precondition."
+    },
+    {
+      "id": "D3",
+      "summary": "pause-detector threshold_ratio semantics are ambiguous/under-documented and inconsistent with silence-detector's threshold definition; default 0.5 against a local uniform average is too aggressive for noisy openings and misses long pauses when local average is dragged down by the pause itself.",
+      "evidence": "detect_pauses.py: is_low_energy = energies < (local_avg * threshold_ratio) where local_avg = uniform_filter1d(energies, size=window_size, mode='nearest') — the window includes the pause itself, so during a long pause local_avg collapses toward the pause energy and the condition energies < 0.5*local_avg becomes false, prematurely ending the pause. SKILL.md says 'Ratio of local average' without specifying median vs mean, and silence-detector uses initial-window baseline multiplier — different reference, no shared definition. video-processor SKILL.md exposes no unified threshold flag."
+    },
+    {
+      "id": "D4",
+      "summary": "video-processor SKILL.md does not instruct callers to run segment-combiner (with merge+clamp) before process_video.py, and process_video.py itself does not merge/clamp, so the pipeline silently accepts invalid overlapping segment lists.",
+      "evidence": "video-processor/SKILL.md 'Mandatory end-to-end completion gate' step 4 says 'Combine, sort, clamp, and de-overlap' but neither segment-combiner nor process_video.py performs clamp/de-overlap; no check that sum(removed)+compressed≈original is enforced in code."
+    }
+  ],
+  "affected_files": [
+    "silence-detector/SKILL.md",
+    "silence-detector/scripts/detect_silence.py",
+    "segment-combiner/SKILL.md",
+    "segment-combiner/scripts/combine_segments.py",
+    "pause-detector/SKILL.md",
+    "pause-detector/scripts/detect_pauses.py",
+    "video-processor/SKILL.md"
+  ],
+  "repair_plan": [
+    {
+      "id": "R1",
+      "target": "silence-detector/scripts/detect_silence.py + SKILL.md",
+      "change": "Switch to mode='same' (center-aligned) convolution, or add offset = (smoothing_window-1)//2 to the detected index when writing silence_end. Document in SKILL.md that output timestamps are center-aligned seconds and must not be re-shifted by downstream consumers."
+    },
+    {
+      "id": "R2",
+      "target": "segment-combiner/scripts/combine_segments.py + SKILL.md",
+      "change": "After sort, merge intervals where next.start <= current.end + gap_tolerance (default 0.3s), recompute duration=end-start, and optionally clamp to [0, total_duration] when a --duration flag is supplied. Document half-open [start,end) convention and merge rule in SKILL.md."
+    },
+    {
+      "id": "R3",
+      "target": "pause-detector/SKILL.md + scripts/detect_pauses.py",
+      "change": "Clarify that threshold_ratio is a fraction of the local average RMS (document mean vs median choice). Switch local_avg to median-based or exclude currently-silent frames (e.g., use scipy median_filter or a wider window-size default like 60s) so a long pause does not pull its own threshold down. Lower default threshold_ratio (e.g., 0.3) and make min_duration comparison inclusive (>= min_duration already is). Mention in SKILL.md that silence-detector and pause-detector share the same threshold_ratio semantics."
+    },
+    {
+      "id": "R4",
+      "target": "video-processor/SKILL.md + scripts/process_video.py",
+      "change": "Add an explicit precondition step: always invoke segment-combiner (with merge+clamp) before process_video.py, and in process_video.py add a defensive merge+clamp pass plus an assertion that abs(original - (compressed+removed)) < 0.5s. Expose a single --threshold-ratio CLI note in SKILL.md referencing silence/pause detectors."
+    }
+  ],
+  "preservation_constraints": [
+    "Keep existing CLI flag names and defaults where not explicitly changed (audio-extractor, energy-calculator, report-generator unchanged).",
+    "Preserve the mandatory end-to-end completion gate and blocking terminal-result gate text in video-processor/SKILL.md.",
+    "Preserve skilltta-task-guidance/SKILL.md guidance content and the overall pipeline order.",
+    "Keep output JSON schemas (segments arrays with start/end/duration; compression_report fields) unchanged.",
+    "Keep script entry points (argparse main) and file paths intact so existing invocations continue to work."
+  ],
+  "confidence": 0.72,
+  "_usage": {
+    "input_tokens": 21162,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1998,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "iterations": [
+      {
+        "input_tokens": 21162,
+        "output_tokens": 1998,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "type": "message"
+      }
+    ]
+  }
+}

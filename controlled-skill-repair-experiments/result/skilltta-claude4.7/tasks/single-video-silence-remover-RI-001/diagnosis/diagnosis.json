@@ -1,0 +1,73 @@
+{
+  "diagnoses": [
+    {
+      "id": "D1",
+      "summary": "silence-detector uses np.convolve with mode='valid', which shortens the array by smoothing_window-1 samples, but the detected index is returned directly as seconds. This yields a silence_end that is off by up to (smoothing_window-1) seconds relative to the real audio timeline (with defaults, up to ~29 s early). The detector docstring claims the smoothed value is simply compared to a threshold and uses the index as time, with no shift correction.",
+      "evidence": "scripts/detect_silence.py: `smoothed = np.convolve(energies, np.ones(smoothing_window)/smoothing_window, mode='valid')` then `for i in range(len(smoothed)): if smoothed[i] > threshold: silence_end = i; break`, and later `segments.append({'start': 0, 'end': silence_end, 'duration': silence_end})`. With energies at 1-sec resolution and smoothing_window=30, index i in `smoothed` corresponds to original seconds ≈ i + (smoothing_window-1)/2 (center) or at least i (left edge), never aligned 1:1 to seconds."
+    },
+    {
+      "id": "D2",
+      "summary": "silence-detector/SKILL.md does not describe the index→time mapping for the smoothed signal nor warn about the window offset; it only lists smoothing_window as a tuning knob. This lets callers believe the returned `end` is already in seconds, propagating the alignment bug downstream.",
+      "evidence": "silence-detector/SKILL.md 'How It Works' and 'Parameters Tuning' sections never mention the index/time correspondence or the convolution mode."
+    },
+    {
+      "id": "D3",
+      "summary": "video-processor/SKILL.md documents its pipeline step 'Detect the non-teaching opening with the silence detector's result, then start long-pause detection at that returned boundary', but gives no guidance that the detector's `end` must be the opening cutoff in seconds on the original timeline. Combined with D1, the pause-detector is started at a too-early `--start-time`, so part of the opening leaks into pause detection or is missed entirely.",
+      "evidence": "video-processor/SKILL.md 'Mandatory end-to-end completion gate' step 3 and absence of any note about how silence-detector output is in seconds / how to pass it as --start-time."
+    },
+    {
+      "id": "D4",
+      "summary": "Secondary consequence of D1: because silence_end is under-reported, the opening segment `{start:0,end:silence_end}` emitted into segment-combiner is too short, so the opening is not fully removed; the removed_duration in the final report is systematically low and compression_percentage falls out of the expected range.",
+      "evidence": "Flow from detect_silence.py segments → segment-combiner → video-processor keep-set computation uses raw `silence_end` seconds."
+    }
+  ],
+  "affected_files": [
+    "silence-detector/scripts/detect_silence.py",
+    "silence-detector/SKILL.md",
+    "video-processor/SKILL.md"
+  ],
+  "repair_plan": [
+    "In detect_silence.py, change the smoothing to `mode='same'` (so smoothed[i] aligns with energies[i] and thus with second i), OR keep 'valid' and translate the found index to original-timeline seconds via `silence_end = i + (smoothing_window - 1) // 2` (center alignment) before building the segment. Choose one and keep it internally consistent; add a short inline comment stating the chosen convention.",
+    "After computing silence_end, clamp to `[0, total_seconds]` and guard against the pathological case where no crossing is found (currently silence_end stays 0, which is already safe but should be explicit).",
+    "Update silence-detector/SKILL.md 'How It Works' and 'Notes' to state: (a) energies are 1-second windows so index==seconds on the original timeline; (b) smoothing is applied with mode='same' (or with explicit center-offset) so the returned segment end is in seconds aligned to the audio timeline regardless of smoothing_window; (c) callers should pass this `end` directly as `--start-time` to pause-detector.",
+    "Update video-processor/SKILL.md pipeline step 3 to explicitly say: take `segments[0].end` from silence-detector output (seconds on original timeline) and pass it as `--start-time` to pause-detector; do not add or subtract any window offset.",
+    "No changes to pause-detector, energy-calculator, segment-combiner, report-generator, audio-extractor, or process_video.py are needed for this defect."
+  ],
+  "preservation_constraints": [
+    "Keep CLI parameter names, defaults, and output JSON schemas of all scripts unchanged (threshold_multiplier=1.5, initial_window=60, smoothing_window=30; segments list with start/end/duration).",
+    "Preserve the existing 'Blocking terminal-result gate' and 'Mandatory end-to-end completion gate' text in video-processor/SKILL.md; only add clarifying wording about silence-detector output being seconds-aligned.",
+    "Keep skilltta-task-guidance/SKILL.md and all unrelated skills (audio-extractor, energy-calculator, pause-detector, segment-combiner, report-generator) functionally intact.",
+    "Do not change pause-detector's inclusive min-duration behavior or segment-combiner's gap-preservation rule.",
+    "Repair must stay within Skill scope — do not embed task-specific thresholds or hardcode a target compression percentage."
+  ],
+  "confidence": 0.82,
+  "_usage": {
+    "input_tokens": 20530,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 2235,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 326
+    },
+    "iterations": [
+      {
+        "input_tokens": 20530,
+        "output_tokens": 2235,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "type": "message"
+      }
+    ]
+  }
+}
