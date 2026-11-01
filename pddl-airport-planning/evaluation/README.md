@@ -1,3 +1,7 @@
+# 注意：泛化性测试只在 group2 进行
+
+**当前泛化测试只在 `group_02` 进行；`group_01`、`group_03` 不再新增或重跑。两组输入和已有结果保留。**
+
 # 冻结后的同源输入评测
 
 原环境包含1—30题，全部排除于严格未见测试。上游IPC2004 Airport套件共50题，选定31/32、36/37、46/47三组，每组仍交两份计划。1—30的60个domain/problem与原环境已核对。
@@ -17,11 +21,11 @@
 从仓库根运行，目标目录必须不存在：
 
 ```bash
-python pddl-airport-planning/evaluation/prepare_task.py --group group_01 --output /tmp/pddl-airport-planning-group01
-python pddl-airport-planning/evaluation/score_results.py --group group_01 --actual /path/to/actual-output --report /tmp/pddl-airport-planning-group01-score.json
+python pddl-airport-planning/evaluation/prepare_task.py --group group_02 --output /tmp/pddl-airport-planning-group02
+python pddl-airport-planning/evaluation/score_results.py --group group_02 --actual /path/to/actual-output --report /tmp/pddl-airport-planning-group02-score.json
 ```
 
-同样支持group_02/03。actual为实际计划目录，文件名按对应inputs/problem.json。导出只含原题、原skill、选定组输入和评测侧verifier，不带diagnosis、oracle、其他组或策展参考程序。verifier在Agent结束后部署，不能把整个仓库作为Agent输入。
+工具仍支持三组，当前仅运行group_02，历史结果不改。actual为实际计划目录，文件名按对应inputs/problem.json。导出只含原题、原skill、选定组输入和评测侧verifier，不带diagnosis、oracle、其他组或策展参考程序。verifier在Agent结束后部署，不能把整个仓库作为Agent输入。
 
 采用[任务根说明](../README.md)中的item-accuracy-v1，时耗不加权、严格完成另存；正常评分错误按正确率计分，基础设施异常单列。每组分数单独报告，不把批内多个job当成独立Agent实验；跨批汇总和重复次数由正式协议确定。命令退出0只表示评分完成。
 
