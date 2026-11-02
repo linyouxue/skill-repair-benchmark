@@ -1,0 +1,109 @@
+BUILD FAILURE ANALYSIS
+======================
+
+Repository: google/auto  (path: /home/travis/build/failed/google/auto)
+Build command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end \
+      -Dsource.skip=true -Dmaven.javadoc.skip=true
+JDK: Oracle JDK 7 (also OpenJDK 7 per .travis.yml).
+
+Reactor result on first run:
+  Auto (Parent) .......... SUCCESS
+  Auto Common Libraries .. SUCCESS
+  AutoFactory ............ SUCCESS
+  AutoService ............ SUCCESS
+  AutoValue .............. FAILURE  <-- failure here
+  build-only ............. SUCCESS
+
+
+Original Travis failure (from /home/travis/build/101506036-orig.log)
+-------------------------------------------------------------------
+The failure captured by BugSwarm is in the `maven-invoker-plugin:run`
+phase on module auto-value: the "functional" invoker integration test
+fails to compile its test sources because `MoreObjects` cannot be
+resolved:
+
+  [ERROR] value/.../AutoValueTest.java:[20,30] cannot find symbol
+    symbol:   class MoreObjects
+    location: package com.google.common.base
+  [ERROR] value/.../AutoValueTest.java:[72,16] package MoreObjects
+    does not exist
+  [ERROR] value/.../AutoValueTest.java:[72,49] cannot find symbol
+    symbol:   variable MoreObjects
+
+`com.google.common.base.MoreObjects` was added in Guava 18.0.
+
+The functional invoker pom (value/src/it/functional/pom.xml) has NO
+<parent>, no <dependencyManagement>, and declares no direct
+`com.google.guava:guava` dependency. The Guava version is resolved
+transitively from two test-scope dependencies at depth 2:
+
+    truth 0.25         -> guava 17.0
+    guava-testlib 18.0 -> guava 18.0
+
+With `truth` declared BEFORE `guava-testlib` the first-declared-wins
+rule in Maven's conflict resolution picks guava 17.0, so `MoreObjects`
+isn't present on the compile classpath.
+
+Fix for this: add an explicit `com.google.guava:guava:18.0` test
+dependency in value/src/it/functional/pom.xml. Direct dependencies
+always beat transitive ones in Maven, so Guava 18.0 wins unconditionally.
+(The sibling invoker test `value/src/it/gwtserializer/pom.xml`
+already declares guava 18.0 explicitly - same pattern.)
+
+
+Additional failure uncovered in this local environment
+------------------------------------------------------
+On this local environment the JVM default encoding is
+ANSI_X3.4-1968 (ASCII), confirmed by `mvn --version`:
+    Default locale: en_US, platform encoding: ANSI_X3.4-1968
+
+That exposes two more problems that did not show on Travis (which
+defaulted to UTF-8):
+
+(a) The surefire test
+    com.google.auto.value.processor.AutoAnnotationCompilationTest#testMissingClass
+    runs the Java compiler in-process and asserts that the first
+    diagnostic contains "NotAutoAnnotation". When the surrounding JVM
+    uses ASCII encoding, the compiler emits a leading diagnostic
+    "unmappable character for encoding ASCII" caused by the non-ASCII
+    character "É" in `AutoAnnotationProcessor.java` ("@author ...
+    (Éamonn McManus)"), which pushes the expected "NotAutoAnnotation"
+    diagnostic out of position 0:
+      AssertionError: Not true that
+        <"unmappable character for encoding ASCII">
+        contains <"NotAutoAnnotation">
+    Fix: force the surefire-forked JVM to use UTF-8 by setting
+      <argLine>-Dfile.encoding=UTF-8</argLine>
+    in the parent pom's surefire pluginManagement. This matches the
+    project's existing intent (project.build.sourceEncoding is UTF-8).
+
+(b) The invoker-triggered compile of the functional test sources also
+    uses the platform (ASCII) encoding, which turns the non-ASCII "É"
+    in the `@author` headers of the test sources into errors once the
+    MoreObjects compile error is in play. Fix: set
+      <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    in the functional invoker pom so maven-compiler-plugin reads
+    sources as UTF-8. (This is why Maven kept printing
+    `File encoding has not been set, using platform encoding
+    ANSI_X3.4-1968`.)
+
+
+Fix plan
+--------
+Two patches, both minimal and build-config-only:
+
+  patch_1.diff  pom.xml (parent)
+                  Add maven-surefire-plugin to pluginManagement with
+                  <argLine>-Dfile.encoding=UTF-8</argLine>.
+
+  patch_2.diff  value/src/it/functional/pom.xml
+                  - Add <properties><project.build.sourceEncoding>
+                    UTF-8</project.build.sourceEncoding></properties>.
+                  - Add an explicit test-scope dependency on
+                    com.google.guava:guava:18.0 so the compile
+                    classpath includes MoreObjects.
+
+Apply order: patch_1, patch_2. Then re-run:
+  mvn -B -U -f build-pom.xml verify --fail-at-end \
+      -Dsource.skip=true -Dmaven.javadoc.skip=true
