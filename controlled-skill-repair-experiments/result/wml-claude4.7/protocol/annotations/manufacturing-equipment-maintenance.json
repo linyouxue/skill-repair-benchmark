@@ -1,0 +1,35 @@
+{
+  "id": "manufacturing-equipment-maintenance",
+  "RI-001": {
+    "tag": "skill_missing_guidance",
+    "skill_location": [
+      {
+        "skill_name": "reflow-profile-compliance-toolkit",
+        "skill_file": "skills/reflow-profile-compliance-toolkit/SKILL.md",
+        "skill_section": "Minimal end-to-end scaffold；Sanity checks before writing outputs",
+        "problematic_part": "原 Skill 给出了数据加载、计算、构造 JSON 和写入 /app/output 的 scaffold，也列出了写出前 sanity checks，但没有把五个题目要求的 q01.json 至 q05.json 全部存在、可解析且逐一核对提升为不可绕过的完成条件；因此 Agent 可以在理解任务或完成部分分析后提前结束，而没有形成全部可验证交付物。"
+      }
+    ],
+    "descrip_skill_error": "Original-Skill/早期人工修复阶段暴露出执行完成性缺口：领域公式并非主要阻断，但 Skill 没有明确规定只有五个要求的 JSON 文件全部真实写出、重新列目录确认、逐个解析并核对数量后才允许结束。该缺口允许模型把检查、计划或部分计算误当成任务完成，导致缺失输出时 verifier 无法正常评价五个问题。",
+    "gold_repair": "把任务交付物变成 blocking completion gate：开始执行后必须创建 /app/output/q01.json、q02.json、q03.json、q04.json、q05.json 五个文件；不得在只读取数据、检查 handbook、写计划、展示示例或只完成部分问题后结束。结束前必须重新列出 /app/output，验证五个精确文件名均存在，用 JSON parser 逐个成功解析，并明确计数为 5；任一文件缺失、不可解析或未完成时都必须继续执行而不是宣布完成。",
+    "validation_status": "agent-validated (1/1; jointly validated; guard-enabled)",
+    "validation_evidence": "Round 1 r001 已证明 completion gate 实际生效：五个要求的 JSON 均真实生成并可解析，官方 verifier 中 L0、Q01、Q03、Q04、Q05 和 minimal schema guards 共 6/7 通过，execution_ok=true、protocol_evidence_valid=true、trajectory_complete=true；唯一剩余失败转为 Q02 TAL 数值归约，而不再是交付不完整。随后包含 RI-001 与 RI-002 的同一完整 Round 1 candidate bundle 在 manufacturing-equipment-maintenance-round-1-r002 中正式通过 7/7、reward=1.0。该结果只联合验证完整 bundle，不构成 RI-001 的独立消融。",
+    "annotation": "../manufacturing-equipment-maintenance/annotation.md"
+  },
+  "RI-002": {
+    "tag": "skill_ambiguous_guidance",
+    "skill_location": [
+      {
+        "skill_name": "reflow-profile-compliance-toolkit",
+        "skill_file": "skills/reflow-profile-compliance-toolkit/SKILL.md",
+        "skill_section": "Deterministic thermocouple computation recipes > 4. Deterministic sensor selection (tie-breaks)",
+        "problematic_part": "原 Skill 只用一条通用规则说明 minimum metric（例如 coldest TAL 或 peak）取最小值，并给出通用 min(items) 示例；它没有把 Q02 的 run-level representative record 明确成无条件的全局最小 TAL，也没有声明当所有 TC 都高于 TAL 上界时仍必须取最小 TAL、不能切换为最大 TAL或所谓“最严重违规”TC。r001 因此在 R0001 上输出 159.57 s，而官方同一数据的最小 TAL 为 129.95 s。"
+      }
+    ],
+    "descrip_skill_error": "r001 已把五个交付物全部生成，官方 verifier 6/7；唯一失败是 Q02。Agent 对多热电偶 run 的 TAL 代表值采用了错误的状态相关归约，在 R0001 输出 159.57 s，而 oracle/verifier 依据所有有效 TC 的全局最小 TAL得到 129.95 s。原 Skill 虽原则性提到 coldest TAL 取 minimum，但对 Q02 的不变量、越界场景和 tie-break 约束不够显式，允许模型把“最严重违规”与代表传感器选择混淆。",
+    "gold_repair": "对 Q02 明确规定 run-level TAL 的唯一归约规则：先对该 run 的每个有效 thermocouple 使用其 solder liquidus threshold 独立计算插值 TAL，然后在全部有效 TC 中选择全局最小 TAL；TAL 完全相同时按字典序最小 tc_id 破同值。该选择与 TAL 是低于、位于还是高于 handbook window 无关；即使所有 TC 都高于上限，也禁止改取最大 TAL或另选“最严重违规”TC。最后仅根据这个已选 minimum-TAL record 与 handbook TAL window 比较得到 status。",
+    "validation_status": "agent-validated (1/1; jointly validated; guard-enabled)",
+    "validation_evidence": "r001 的 CTRF 对 ::test_Q02_tal_loose 给出唯一失败：TAL mismatch for run R0001，got=159.57、exp=129.95；其余 6/7 通过。加入 Q02 global-min invariant 后，manufacturing-equipment-maintenance-round-1-r002 在同一官方 verifier 下 7/7 全部通过，其中 ::test_Q02_tal_loose 通过；benchmark_result.json 记录 execution_ok=true、task_passed=true、reward=1.0、42/60 iterations、42 provider requests、termination_reason=end_turn，error/verifier_error/export_error 均为 null，protocol_evidence_valid、trajectory_complete、iteration_accounting_complete、skill_exposure_verified 均为 true。RI-001 与 RI-002 只在完整候选 bundle 上联合验证，未做逐项消融。",
+    "annotation": "../manufacturing-equipment-maintenance/annotation.md"
+  }
+}

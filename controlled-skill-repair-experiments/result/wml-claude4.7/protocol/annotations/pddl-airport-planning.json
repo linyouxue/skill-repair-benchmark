@@ -1,0 +1,25 @@
+{
+  "id": "pddl-airport-planning",
+  "RI-001": {
+    "tag": "skill_ambiguous_guidance",
+    "skill_location": [
+      {
+        "skill_name": "pddl-skills",
+        "skill_file": "skills/pddl-skills/SKILL.md",
+        "skill_section": "Plan Saving；Example Workflow",
+        "problematic_part": "原 SKILL.md 只笼统说明保存时使用 unified_planning.io.PDDLWriter，却把接口写成 save-plan(plan_object, output_path)，没有说明必须使用 problem-aware PDDLWriter(problem).write_plan(...)、没有给出 PDDLReader.parse_plan 可接受的一行一个 (action arg...) canonical syntax，也没有要求对写盘后的 exact artifact 做 parse/validate round trip。任务提示又给出了 drive(truck1, ...) 这类 function-call 风格示例，因此 Agent 在 Original-Skill 失败轮中把内存中已验证为 VALID 的 plan 用 str(ActionInstance) 写盘，最终无法被官方 verifier 解析。"
+      },
+      {
+        "skill_name": "save-plan",
+        "skill_file": "skills/pddl-skills/save_plan.skill",
+        "skill_section": "inputs",
+        "problematic_part": "结构化 save_plan.skill 的 Python 实现签名本来就是 skill(problem, plan, path)，并用 PDDLWriter(problem) 写盘，但 inputs schema 只声明了 plan 和 path，遗漏实际必需的 problem 输入；该 schema/documentation 不一致进一步弱化了 problem-aware serializer 契约。"
+      }
+    ],
+    "descrip_skill_error": "有效 Original-Skill 诊断轮已经用 pyperplan 正确求解 task01/task02，并在内存中由 sequential_plan_validator 判为 VALID；失败只发生在最终序列化。Agent 使用 lines = [str(a) for a in res.plan.actions] 写出 move_xxx(airplane) 风格文本，官方 TestOutputFilesExist 通过，但 TestNumericalCorrectness 在 PDDLReader.parse_plan 处抛出 Cannot interpret ...，最终 verifier 1/2、reward=0。原 Skill 缺少对 canonical IPC/PDDL serialization、problem-aware save API 与 exact-file round-trip validation 的明确 blocking contract。",
+    "gold_repair": "把保存契约统一为 save-plan(problem_object, plan_object, output_path)，并让结构化 save_plan.skill 显式声明 problem 输入。要求始终使用 PDDLWriter(problem).write_plan(plan, filename=output_path)，禁止用 str(ActionInstance) 或手写 move(a, b) 风格序列化；sequential plan 必须一行一个 (action-name arg1 ... argN)。保存后必须对 exact output file 执行 PDDLReader.parse_plan(problem, output_path)，再用 PlanValidator 验证 parsed plan；只有 round-trip VALID 才允许结束。",
+    "validation_status": "agent-validated (1/1; guard-enabled)",
+    "validation_evidence": "Round 1 fresh rollout pddl-airport-planning-round-1-r001 正式通过：execution_ok=true、task_passed=true、reward=1.0，官方 pytest verifier 2/2 通过。15/60 parent iterations、15 provider requests、13 tool calls，正常 end_turn；completion guard 启用并实际续跑 1 次。error/verifier_error/export_error 均为 null，protocol_evidence_valid、trajectory_complete、iteration_accounting_complete、skill_exposure_verified 均为 true；candidate expected/observed bundle digest 均为 sha256:8303d0c136b0f57ab33dcbcbd2616c42418f621b045ab67564daaae604888494。轨迹明确使用 PDDLWriter.write_plan 写盘，并对 task01.txt/task02.txt 执行 PDDLReader.parse_plan + PlanValidator，分别得到 VALID/8 actions 与 VALID/9 actions。Original guard 诊断轮的 protocol_evidence_valid=false/comparable=false 属于旧诊断协议元数据，Gold 因果证据主要来自其完整失败轨迹/官方 parse traceback 与本 fresh rollout 的标准协议 PASS。",
+    "annotation": "../pddl-airport-planning/annotation.md"
+  }
+}

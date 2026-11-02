@@ -1,0 +1,62 @@
+{
+  "diagnoses": [
+    {
+      "label": "Helper script invocation paths and per-quarter data path missing in holding_analysis flow",
+      "observable_evidence": "13f-analyzer/SKILL.md and fuzzy-name-search/SKILL.md document calls as `python3 scripts/...` (relative to skill dir), with no cwd/path convention stated; `holding_analysis.py` reads `f\"{data_root}/INFOTABLE.tsv\"` with no quarter subfolder, while data lives in `/root/2025-q2` and `/root/2025-q3`; `search_stock_cusip.py` is hardcoded to `/root/2025-q2/INFOTABLE.tsv` only. Task is executed from `/root` and must support Q3 for Q4's Palantir query.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "script invocation path convention and quarter-scoped data loading",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "SKILL.md usage sections for both bundles and the data-loading lines of holding_analysis.py / search_stock_cusip.py when a quarter is required",
+      "do_not_generalize_to": "search_fund.py and one_fund_analysis.py which already parameterize by quarter correctly; do not rewrite CLI argument semantics",
+      "target_file": "13f-analyzer/SKILL.md",
+      "target_section": "Overview examples / holding_analysis invocation and path convention",
+      "target_layer": "L1",
+      "recommended_direction": "State the invocation convention (where to run from and the skill-relative script path) and require quarter-scoped INFOTABLE paths for both holding_analysis and stock CUSIP search so Q3 Palantir top-holders works",
+      "confidence": "high"
+    },
+    {
+      "label": "Single-quarter holding count caliber not disambiguated between rows and unique CUSIPs",
+      "observable_evidence": "In one_fund_analysis.py, `stock_infotable.shape[0]` is printed as `Number of stock holdings` but no deduplication by CUSIP is applied before the count; the subsequent `groupby('CUSIP')` shows the intended unit of a stock is a unique CUSIP. Q2 asks `How many stocks are held by Renaissance`, which maps to distinct stock issuers, not raw row count.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "stock-holdings count caliber (unique CUSIP as the stock unit)",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "single-quarter summary stats inside read_one_quarter_data and the SKILL overview that promises `number of stock holdings`",
+      "do_not_generalize_to": "Total AUM / total stock AUM sums (value aggregation) and total raw holdings row count, which may legitimately include duplicates by class",
+      "target_file": "13f-analyzer/SKILL.md",
+      "target_section": "Analyze the holding summary of a particular fund in one quarter",
+      "target_layer": "L1",
+      "recommended_direction": "Specify that the stock count reported must be unique CUSIPs after filtering to stock title classes, and align the script's printed `Number of stock holdings` to that caliber",
+      "confidence": "high"
+    },
+    {
+      "label": "Cross-quarter Top Buys computation flow is incorrect (merge key and ranking semantics)",
+      "observable_evidence": "`read_one_quarter_data` returns a frame grouped by CUSIP (CUSIP in index), then `pd.merge(..., on='CUSIP')` is called, which does not merge on the index and loses CUSIP alignment; ABS_CHANGE is computed on raw VALUE including price drift, and the SKILL text calls this `Top Buys ranked by notional value` without specifying it is the Q3-vs-Q2 positive value delta restricted to the comparison universe. Q3 of the task requires `top 5 stocks received increased investment ... ranked by dollar value increase` and expects CUSIPs.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "cross-quarter holdings diff: align on CUSIP, compute per-CUSIP value delta, rank positive deltas",
+      "defect_relation": "weak",
+      "scope_boundary": "comparative branch of one_fund_analysis.py and the SKILL section describing change-of-holdings output",
+      "do_not_generalize_to": "Top Sells section's intent, the single-quarter summary branch, and holding_analysis.py's top-k holders aggregation",
+      "target_file": "13f-analyzer/SKILL.md",
+      "target_section": "Analyze the change of holdings of a particular fund in between two quarters",
+      "target_layer": "L1",
+      "recommended_direction": "Document and enforce: reset CUSIP to a column (or merge on index), outer-join Q3 and Q2 stock aggregates on CUSIP, fill missing with zero, compute ABS_CHANGE = Q3_VALUE - Q2_VALUE, filter ABS_CHANGE>0, sort descending, and emit CUSIPs usable as Top Buys answers",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "compute_or_transform",
+    "primary_anchor": "cross-quarter holdings diff with CUSIP-keyed aggregation",
+    "editor_direction": "strengthen",
+    "composition_issue": "Path/invocation ambiguity feeds the wrong INFOTABLE into downstream aggregations; the single-quarter count caliber and the cross-quarter diff both depend on a consistent CUSIP-unique stock aggregation, so they must be fixed together to keep Q2 counts and Q3 top-buys mutually consistent",
+    "preservation_constraints": [
+      "fuzzy fund-name search behavior and ranking output format in search_fund.py",
+      "stock title-class filtering intent used across scripts",
+      "top-k holders aggregation in holding_analysis.py beyond the data path fix",
+      "CLI argument names and SKILL.md descriptive wording for Top Sells"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All failure modes implicated by the hint are localized to SKILL.md guidance and the referenced helper scripts within the two bundles, with clear workflow nodes (input grounding, compute/transform) and no dependency on hidden gold data or external services"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "diagnoses": [
+    {
+      "label": "Missing build reproduction command and toolchain invocation",
+      "observable_evidence": "The 'Minimal diagnostic sequence' jumps from 'cd .../google/auto' directly to a comment numbered '# 3. If AutoValue's Invoker functional build fails...' with no step 1 or 2. There is no actual Maven invocation (e.g. 'mvn ... install' or 'mvn ... verify') that would reproduce the failure and surface the first real error that the rest of the Skill tells the agent to look for.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "failure-reproduction build command",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies when reproducing a Maven CI build failure before diagnosing the first real error in the reactor or in a nested Invoker build.",
+      "do_not_generalize_to": "Do not add build commands for non-Maven toolchains (Gradle, Bazel) or rewrite dependency-repair guidance already given in later sections.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Minimal diagnostic sequence",
+      "target_layer": "L2",
+      "recommended_direction": "Add the missing earlier steps: an explicit Maven reproduction command (e.g. a reactor build that triggers the Invoker integration tests) and a reactor-summary inspection step, so the numbered sequence actually begins at step 1 and the agent reproduces the failure before jumping to the nested POM.",
+      "confidence": "high"
+    },
+    {
+      "label": "Hardcoded repo path ignores task's <repo>/<id> convention",
+      "observable_evidence": "Task states the repo lives at '/home/travis/build/failed/<repo>/<id>', but the Skill's diagnostic sequence hardcodes 'cd /home/travis/build/failed/google/auto' and the artifact contract references '/home/travis/build/failed/google/auto/patch_1.diff' with only a parenthetical 'or the repository path given by the task'. There is no explicit convention for how to resolve <repo>/<id> from the task before issuing build commands.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "repository path resolution for build commands",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Applies to resolving the working directory for Maven invocation and the output path for patch_{i}.diff from the task's <repo>/<id> template.",
+      "do_not_generalize_to": "Do not remove the AutoValue-specific checkpoint content; only clarify how the path is derived from the task before using it in commands.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Minimal diagnostic sequence / Build-repair artifact contract",
+      "target_layer": "L2",
+      "recommended_direction": "State the path convention: derive <repo>/<id> from the task description, use that resolved path as the Maven working directory and as the parent of patch_{i}.diff; keep google/auto only as an example, not as the invariant path baked into the commands.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "input_grounding",
+    "primary_anchor": "failure-reproduction build command",
+    "editor_direction": "add",
+    "composition_issue": "Without an explicit Maven reproduction command grounded in a correctly resolved <repo>/<id> path, the downstream mechanisms (Invoker-nested-POM focus, dependency-drift repair, AutoValue functional-test checkpoint) fire against unverified assumptions instead of observed first-errors.",
+    "preservation_constraints": [
+      "Keep the 'Maven Invoker failures' guidance to debug the nested project rather than the reactor.",
+      "Keep the 'Missing library classes usually indicate dependency-version drift' discussion including the MoreObjects/Guava reasoning.",
+      "Keep the AutoValue functional integration-test checkpoint with its exact dependency set (jsr305 3.0.0 provided, junit 4.12, guava 19.0, guava-testlib 19.0, truth 0.28).",
+      "Keep the Build-repair artifact contract requiring failed_reasons.txt, a non-empty unified diff, patch application, and git-status verification.",
+      "Do not alter the companion skills maven-dependency-management/SKILL.md and maven-plugin-configuration/SKILL.md."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The observed defect is localized to the 'Minimal diagnostic sequence' and path-convention wording in maven-build-lifecycle/SKILL.md; adding an explicit reproduction command and clarifying <repo>/<id> resolution is sufficient without touching other skill files or unrelated sections."
+  }
+}

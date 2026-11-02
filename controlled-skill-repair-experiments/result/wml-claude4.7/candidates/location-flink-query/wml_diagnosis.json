@@ -1,0 +1,48 @@
+{
+  "diagnoses": [
+    {
+      "label": "Workflow 2 lacks job-completion event determination rule",
+      "observable_evidence": "Task requires producing output 'once the job has finished' using job event data joined with task events, but SKILL.md Workflow 2 (Build Real-Time Streaming Pipeline) only lists generic streaming steps (architecture selection, YAML config, Kafka/Flink scaffolding, monitoring) and never specifies how to recognize a terminal job event (FINISH/KILL/FAIL) nor how job_events gate task-event processing.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "job-completion event identification (binding 'job finished' to specific job_event types)",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies when a streaming/session job must condition per-key emission on a lifecycle event from a secondary stream (here: job_events signaling job termination for a given jobId).",
+      "do_not_generalize_to": "General stream processing where every event unconditionally produces output, or batch pipelines without a lifecycle/termination semantics.",
+      "target_file": "senior-data-engineer/SKILL.md",
+      "target_section": "Key Workflows > Workflow 2: Build Real-Time Streaming Pipeline (Steps list)",
+      "target_layer": "L2",
+      "recommended_direction": "Add an explicit mechanism step in Workflow 2 stating that when a secondary lifecycle stream (e.g., job_events) exists, the workflow must identify and enumerate terminal event types that mark a key as 'finished', and gate downstream aggregation/emission on those terminal events for the matching key.",
+      "confidence": "high"
+    },
+    {
+      "label": "Workflow 2 lacks result-output eligibility rule tying emission to finished keys only",
+      "observable_evidence": "Task specifies 'For each job, output a tuple ... once the job has finished', i.e., only finished jobs qualify for output, and exactly one tuple per finished jobId. Workflow 2's 'Expected Output' describes generic throughput/latency targets but states no rule for which keys/sessions are eligible to emit, nor the one-per-key cardinality, nor the ordering requirement that emission happens after job termination.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "output eligibility gating (emit per key only when lifecycle marks it complete; one record per completed key)",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies to sessionization / per-key aggregation workflows where results must be withheld until a termination signal arrives on a companion stream, then written exactly once per completed key.",
+      "do_not_generalize_to": "Continuous windowed aggregations that emit incrementally per window/trigger, or dashboards requiring interim updates before completion.",
+      "target_file": "senior-data-engineer/SKILL.md",
+      "target_section": "Key Workflows > Workflow 2: Build Real-Time Streaming Pipeline (Steps list and/or Expected Output)",
+      "target_layer": "L2",
+      "recommended_direction": "Add an explicit mechanism step/clause in Workflow 2 stating the output-eligibility rule: a per-key result is written to the sink only after the key's termination event is observed, exactly once per completed key, with upstream state (e.g., per-job stage counts) retained until that moment.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "target_binding",
+    "primary_anchor": "lifecycle-gated per-key emission (job-completion detection + output eligibility)",
+    "editor_direction": "add",
+    "composition_issue": "The two missing mechanisms are complementary: completion-event determination (target_binding) supplies the trigger condition that output-eligibility (writeback_or_delivery) consumes. Without the first, the second has no signal; without the second, the first does not translate into controlled sink behavior. Both must be added inside Workflow 2 so the chain input-stream -> termination-detection -> gated-emit is explicit.",
+    "preservation_constraints": [
+      "Workflow 1 (Build ETL Pipeline) content and steps",
+      "Workflow 2 generic streaming infrastructure guidance (architecture choice, YAML config, Kafka/Flink scaffolding references, monitoring)",
+      "Other SKILL.md sections (Core Capabilities, Overview, Quick Start, Core Workflows prose, Python Tools, Reference Documentation, Tech Stack, Best Practices, Performance Targets)",
+      "All other skill bundles (pdf/*) and unrelated senior-data-engineer files (HOW_TO_USE.md, references/*, scripts/*, assets/*)"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defects localize cleanly to a single section (Workflow 2 in senior-data-engineer/SKILL.md) and are expressible as reusable mechanism rules (lifecycle-triggered completion detection and gated per-key output) that are domain-general for sessionization/streaming lifecycle tasks. No private verifier logic or task-specific repair content is needed; strengthening the two L2 mechanism anchors in the Skill is sufficient and bounded."
+  }
+}

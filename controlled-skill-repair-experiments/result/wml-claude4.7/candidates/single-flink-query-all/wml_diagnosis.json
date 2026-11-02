@@ -1,0 +1,48 @@
+{
+  "diagnoses": [
+    {
+      "label": "Missing completion-event predicate in Semantic Contract Gate",
+      "observable_evidence": "In senior-data-engineer/SKILL.md, Workflow 2 'Semantic Contract Gate for Keyed Event Aggregations' states 'write down and preserve three separate predicates' and then enumerates only one bullet (Contributing-event predicate). The second predicate — which event types mark a key's lifecycle as finished/complete so that an aggregate becomes eligible for emission — is absent. The task explicitly requires acting only 'once the job has finished', which is exactly the missing predicate.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Semantic Contract Gate for Keyed Event Aggregations",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies to keyed streaming aggregations that mix activity events (e.g., task SUBMIT) with lifecycle events (e.g., job finished) where emission must wait for a lifecycle terminator; concretely, Workflow 2 of the senior-data-engineer skill covering stream pipelines joined with lifecycle event streams.",
+      "do_not_generalize_to": "Pure batch aggregations without a lifecycle terminator, unkeyed global windows, or workflows that emit continuously without a completion signal (e.g., real-time dashboards, Workflow 1 batch ETL).",
+      "target_file": "senior-data-engineer/SKILL.md",
+      "target_section": "Workflow 2 › Semantic Contract Gate for Keyed Event Aggregations (three-predicate list)",
+      "target_layer": "L2",
+      "recommended_direction": "Add the second predicate explicitly: a 'completion-event predicate' that names which event stream and event type(s) signal a key's terminal state, make clear it is distinct from the contributing-event predicate, and require it to be written down as a separate join/condition before implementation. Do not inline a specific job-event type; keep it mechanism-level.",
+      "confidence": "high"
+    },
+    {
+      "label": "Missing output-eligibility predicate in Semantic Contract Gate",
+      "observable_evidence": "The same 'three separate predicates' block in Workflow 2 of senior-data-engineer/SKILL.md omits the third predicate governing which keys are allowed to appear in the output. The downstream validation bullet only says 'a key with qualifying activity and the required completion event must be emitted' and warns about 'unexpected extra keys', but there is no stated rule that forbids emitting keys lacking the completion event. The task's 'For each job … once the job has finished' requirement makes this gating essential, and the hint flags 结果输出资格的规定 specifically.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "Semantic Contract Gate for Keyed Event Aggregations",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies to the sink/emission stage of keyed aggregations in Workflow 2: deciding which keys qualify to be written to the output, based on the conjunction of contributing-event presence and completion-event occurrence.",
+      "do_not_generalize_to": "Intermediate state updates, debug/metrics side outputs, or dead-letter queues; also does not apply to pipelines that intentionally emit partial/progressive results.",
+      "target_file": "senior-data-engineer/SKILL.md",
+      "target_section": "Workflow 2 › Semantic Contract Gate for Keyed Event Aggregations (three-predicate list, and the validation bullet referring to the output key set)",
+      "target_layer": "L2",
+      "recommended_direction": "Add the third predicate as an explicit 'output-eligibility predicate' stating that only keys satisfying BOTH the contributing-event predicate AND the completion-event predicate are emitted, and tie the existing 'investigate unexpected extra keys' validation bullet to this predicate as its enforcement check. Keep it as a mechanism-level rule, not code.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "operation_decision",
+    "primary_anchor": "Semantic Contract Gate for Keyed Event Aggregations",
+    "editor_direction": "add",
+    "composition_issue": "The three predicates form a single contract: contributing-event defines WHAT accumulates, completion-event defines WHEN a key becomes final, and output-eligibility defines WHO is allowed in the sink. With only the contributing-event predicate written, implementers can satisfy aggregation semantics while silently emitting unfinished keys or dropping finished-but-inactive keys. The two missing predicates must be added together and cross-referenced from the existing validation bullet so that positive-key emission and negative extra-key suppression are both enforced.",
+    "preservation_constraints": [
+      "Keep Workflow 1 (Build ETL Pipeline) unchanged.",
+      "Preserve all other Workflow 2 content: architecture selection, YAML config, Kafka/Flink generation steps, streaming patterns references, and the existing validation bullets on hand-checkable fixtures and key-set comparison.",
+      "Do not modify unrelated skill bundles (pdf/) or senior-data-engineer scripts, references, assets, or HOW_TO_USE.md.",
+      "Do not inject task-specific terminology (e.g., 'job finished', '10-minute gap', 'SUBMIT') — keep the predicates mechanism-level and reusable."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "Both defects localize to a single, well-bounded block in senior-data-engineer/SKILL.md (Workflow 2 Semantic Contract Gate), and the fix is a text-level addition of two named predicates plus a cross-reference to the existing validation bullet. No scripts, references, or other skill files need to change, and the hint cleanly maps to two mechanism anchors inside that section."
+  }
+}

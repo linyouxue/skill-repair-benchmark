@@ -1,0 +1,48 @@
+{
+  "diagnoses": [
+    {
+      "label": "13f-analyzer helper invocation uses bare relative script paths",
+      "observable_evidence": "SKILL.md shows commands like `python3 scripts/one_fund_analysis.py ...` and `python scripts/holding_analysis.py ...` with no indication of the working directory. The agent runs the task from /root (where the data lives), so `scripts/one_fund_analysis.py` and `scripts/holding_analysis.py` will not resolve to 13f-analyzer/scripts/*.py.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "helper script invocation path convention",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "All command examples in 13f-analyzer/SKILL.md that invoke scripts under 13f-analyzer/scripts/ (one_fund_analysis.py single-quarter and comparative modes, holding_analysis.py).",
+      "do_not_generalize_to": "Do not change the scripts' internal data_root path, CLI arguments, TITLEOFCLASS filter list, Top Buys/Sells semantics, or any other analysis guidance in the SKILL.",
+      "target_file": "13f-analyzer/SKILL.md",
+      "target_section": "Analyze the holding summary ... / Analyze the change of holdings ... / Analyze which funds hold a stock ... (all bash code fences)",
+      "target_layer": "L2",
+      "recommended_direction": "Make the invocation path resolve from the agent's working directory: prefix script paths with the skill directory (e.g. `python3 13f-analyzer/scripts/one_fund_analysis.py ...`) or explicitly state that the agent must run the helper from the 13f-analyzer skill root. Keep both the single-quarter and comparative examples consistent (also unify python/python3).",
+      "confidence": "high"
+    },
+    {
+      "label": "fuzzy-name-search helper invocation uses bare relative script paths",
+      "observable_evidence": "SKILL.md shows `python3 scripts/search_fund.py ...` and `python3 scripts/search_stock_cusip.py ...` without pinning the working directory. When the agent runs from /root, these relative paths do not point to fuzzy-name-search/scripts/*.py and the search_fund/search_stock_cusip helpers cannot be launched, blocking Q1/Q2/Q3/Q4 which all begin with a fuzzy fund or stock lookup.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "helper script invocation path convention",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "All command examples in fuzzy-name-search/SKILL.md that invoke scripts under fuzzy-name-search/scripts/ (fuzzy name search, exact accession-number search, fuzzy stock CUSIP search).",
+      "do_not_generalize_to": "Do not alter the fuzzy-match semantics, amendment filtering, CUSIP uppercasing, non-option disambiguation guidance, or per-quarter accession-number uniqueness instructions.",
+      "target_file": "fuzzy-name-search/SKILL.md",
+      "target_section": "Usage subsections: 'Fuzzy search a fund using its name', 'Exact search a fund using accession number', 'Fuzzy search a stock using its name' (all code fences)",
+      "target_layer": "L2",
+      "recommended_direction": "State the invocation path convention explicitly so commands run from the agent's working directory: prefix each example with the skill directory (e.g. `python3 fuzzy-name-search/scripts/search_fund.py ...`) or add a one-line precondition that the agent must cd into the skill root before running. Apply the same convention consistently to all three examples.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "operation_decision",
+    "primary_anchor": "helper script invocation path convention",
+    "editor_direction": "strengthen",
+    "composition_issue": "Both SKILL.md files share the same path-convention gap: documented command lines assume a working directory equal to each skill root, but the agent's working directory for the task is /root. Repairs must apply a single, consistent convention across both skills so cross-skill chaining (fuzzy lookup -> 13f-analyzer) works without ambiguity.",
+    "preservation_constraints": [
+      "Preserve all analysis semantics in 13f-analyzer/SKILL.md: AUM vs. holdings vs. stock-holdings field interpretation, the stock TITLEOFCLASS filter, the Top Buys ranking recipe, the 5-step comparative pipeline, and the top-k verification note.",
+      "Preserve fuzzy-name-search guidance on normalizing whitespace/case, preferring non-amendment filings, treating accession numbers as per-quarter identifiers, uppercasing CUSIPs, and selecting non-option common-equity CUSIPs.",
+      "Preserve all helper script source files unchanged (data_root, CLI arguments, filter lists, printing behavior).",
+      "Preserve YAML frontmatter (name/description) and overall section structure of both SKILL.md files."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The failing behavior is fully explained by documented invocation paths in the two SKILL.md files; adjusting the path convention (or adding an explicit working-directory precondition) in those SKILL.md files is sufficient to let the existing helper scripts run and produce the fields the task needs. No change to scripts, data, or external tools is required."
+  }
+}

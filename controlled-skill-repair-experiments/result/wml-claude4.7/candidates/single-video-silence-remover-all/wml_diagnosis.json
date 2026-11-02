@@ -1,0 +1,64 @@
+{
+  "diagnoses": [
+    {
+      "label": "silence-detector smoothed index not mapped back to original timeline",
+      "observable_evidence": "detect_silence.py uses np.convolve(..., mode=\"valid\"), then iterates `for i in range(len(smoothed))` and returns `silence_end = i` directly as seconds. With smoothing_window=30 and mode='valid', smoothed[i] corresponds to the mean of energies[i:i+smoothing_window], so index i in the smoothed array is shifted relative to the original per-second energy timeline; writing it back as `silence_end` (seconds) produces a boundary that is systematically off by ~smoothing_window/2 to smoothing_window seconds, which is then used verbatim as --start-time for pause-detector.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "smoothed-index to original-time mapping for silence boundary",
+      "defect_relation": "weak",
+      "scope_boundary": "silence-detector/scripts/detect_silence.py detect_initial_silence(), and the surrounding SKILL.md explanation of how smoothing_window interacts with the returned seconds; also video-processor/SKILL.md step 3 which chains silence_end into pause-detector --start-time",
+      "do_not_generalize_to": "energy-calculator window logic, pause-detector local uniform_filter1d (symmetric centered window), or any audio extraction/encoding behavior",
+      "target_file": "silence-detector/SKILL.md",
+      "target_section": "How It Works / Parameters (smoothing_window) and detect_initial_silence() in scripts/detect_silence.py",
+      "target_layer": "L2",
+      "recommended_direction": "Add a mechanism that converts the smoothed-array crossing index back to an original-timeline second (account for the mode='valid' offset, e.g. by using a centered equivalent or adding smoothing_window//2) and document in silence-detector SKILL.md and video-processor SKILL.md that the returned silence_end is on the original per-second timeline so it can be passed directly as pause-detector --start-time.",
+      "confidence": "high"
+    },
+    {
+      "label": "segment-combiner lacks overlap/adjacency merging contract",
+      "observable_evidence": "combine_segments.py only concatenates and sorts by start, with `total_duration = sum(s[\"duration\"] for s in segments)`; it never checks whether an initial-silence segment [0, silence_end] overlaps a pause segment starting before silence_end, nor merges touching intervals. video-processor/SKILL.md's completion gate asserts 'Combine, sort, clamp, and de-overlap all removal segments' and that 'segments are sorted and non-overlapping', but calculate_keep_segments() in process_video.py assumes non-overlap: `current_time = seg[\"end\"]` can move backward relative to a prior seg's end, producing wrong keep-ranges and double-counted removed_duration.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "canonical interval merge (sort + de-overlap + clamp) before writeback",
+      "defect_relation": "missing",
+      "scope_boundary": "segment-combiner/SKILL.md output contract and scripts/combine_segments.py combine_segments(); plus the matching precondition statement in video-processor/SKILL.md about what --remove-segments must satisfy",
+      "do_not_generalize_to": "re-detecting pauses, altering per-detector thresholds, or changing report-generator's duration math",
+      "target_file": "segment-combiner/SKILL.md",
+      "target_section": "Output Format / Notes, and combine_segments() in scripts/combine_segments.py; cross-referenced in video-processor/SKILL.md 'Mandatory end-to-end completion gate' step 4 and Input Segment Format",
+      "target_layer": "L2",
+      "recommended_direction": "Make the segment-combiner contract guarantee sorted, de-overlapped (merge when next.start <= current.end), optionally clamped segments, with total_duration computed on the merged intervals; and update video-processor SKILL.md to state it relies on this guarantee rather than re-asserting it as an external obligation.",
+      "confidence": "high"
+    },
+    {
+      "label": "pause-detector threshold_ratio tuning table inverted",
+      "observable_evidence": "detect_pauses.py marks `is_low_energy = energies < (local_avg * threshold_ratio)`, so a smaller threshold_ratio yields a stricter (smaller) cutoff and FEWER pause detections, i.e. more conservative. However pause-detector/SKILL.md's 'Parameters Tuning' table states: `threshold_ratio | Lower Value: More aggressive | Higher Value: More conservative`, which is the opposite direction. Silence-detector and video-processor also point users at these knobs without reconciling the inversion.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "parameter-direction semantics for low-energy threshold",
+      "defect_relation": "conflicting",
+      "scope_boundary": "pause-detector/SKILL.md Parameters Tuning table and Parameters section describing threshold_ratio; referenced tuning guidance in silence-detector/SKILL.md and video-processor/SKILL.md",
+      "do_not_generalize_to": "min-duration inclusivity rule (already correctly documented), window_size semantics, or silence-detector's threshold_multiplier (which has the opposite arithmetic relationship)",
+      "target_file": "pause-detector/SKILL.md",
+      "target_section": "Parameters Tuning table and Parameters list for threshold_ratio",
+      "target_layer": "L1",
+      "recommended_direction": "Align the documented direction with the implementation: lower threshold_ratio = stricter cutoff = more conservative (fewer/shorter pauses detected); higher threshold_ratio = more aggressive; and briefly cross-note in silence-detector and video-processor so operators tune ratio consistently when chaining opening + pause removal.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "compute_or_transform",
+    "primary_anchor": "pipeline-consistent timeline and interval contracts across silence→pause→combine→process",
+    "editor_direction": "strengthen",
+    "composition_issue": "The three defects compound along the pipeline: a shifted silence_end feeds a wrong --start-time into pause-detector, overlapping/adjacent segments from silence+pauses are then not de-overlapped by segment-combiner, and operators mis-tune threshold_ratio because of the inverted table, so the final compressed video and report systematically miscount removed_duration and may break the 'original ≈ compressed + removed' invariant that video-processor's gate requires.",
+    "preservation_constraints": [
+      "audio-extractor behavior (mono 16kHz PCM, ffmpeg flags, duration limit)",
+      "energy-calculator RMS-per-window computation and output schema",
+      "pause-detector min_duration inclusivity note (>= min_duration)",
+      "video-processor ffmpeg filter_complex construction, encoding settings, and the blocking terminal-result / end-to-end completion gates",
+      "report-generator JSON schema and ffprobe-based duration measurement",
+      "all unrelated SKILL.md narrative sections (Use Cases, Dependencies, Examples) not tied to the three defects"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All three defects localize cleanly to specific SKILL.md sections and small code regions in existing files (silence-detector smoothing/timestamp mapping, segment-combiner merge contract, pause-detector tuning table), with cross-references in video-processor SKILL.md. No new skills, external data, or hidden gold logic are required; the fixes are mechanism-level clarifications and a de-overlap step that keep the existing pipeline shape intact."
+  }
+}

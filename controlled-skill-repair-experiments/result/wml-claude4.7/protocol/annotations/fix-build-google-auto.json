@@ -1,0 +1,35 @@
+{
+  "id": "fix-build-google-auto",
+  "RI-001": {
+    "tag": "skill_missing_guidance",
+    "skill_location": [
+      {
+        "skill_name": "maven-build-lifecycle",
+        "skill_file": "skills/maven-build-lifecycle/SKILL.md",
+        "skill_section": "Debugging Builds；Common Pitfalls；CI/CD Integration",
+        "problematic_part": "原 Skill 只给出通用 Maven debug/CI 命令，没有要求在解释失败和修改项目之前先读取仓库 CI 配置、切换到 CI 声明的历史 JDK，并执行完全相同的 lifecycle command / 非默认 reactor POM。Original-Skill Agent 已读到 .travis.yml 明确声明 oraclejdk7/openjdk7，却仍在默认 OpenJDK 11 下运行 build-pom.xml verify，把不存在 tools.jar 等错配环境症状当成项目缺陷并沿错误方向修改多个模块。"
+      }
+    ],
+    "descrip_skill_error": "原 Skill 缺少 build-repair 的环境复现门：没有把“CI 声明的 JDK、Maven 入口 POM、完整 verify 命令必须先精确复现”设为 patch 前置条件，也没有明确 mvn test 成功不能替代 CI verify。Agent 因而在 Java 11 下追逐 tools.jar、javax.annotation.Generated 和现代 javac 行为，而真实任务的目标 CI 是 JDK 7。",
+    "gold_repair": "在任何项目修改前先读取 .travis.yml/workflow/wrapper/build POM，记录 java -version、javac -version、mvn -version，并切换到 CI 明确声明的 JDK；随后执行 CI 的原始完整命令（包括 -f build-pom.xml、verify、profile/flag）。错误 JDK 下出现的 tools.jar、模块系统、注解 API 等症状不得驱动迁移式修复。mvn test 或在错误 toolchain 下的绿色命令不能视为有效复现；只有目标 CI 环境中的剩余错误才进入根因分析。",
+    "validation_status": "agent-validated (1/1; jointly validated; guard-enabled)",
+    "validation_evidence": "Original-Skill r002 在读取 .travis.yml 后仍使用 OpenJDK 11，完整 verify 首先因 com.sun:tools:jar:11.0.27 / tools.jar 失败，随后进入 Java 11 兼容性旁路并在 60 iterations 达上限，官方要求的 diagnosis/patch artifacts 最终缺失、reward=0。Round 1 修复 Skill 强制先切换 OpenJDK 7 并运行同一 build-pom.xml verify；Agent 据此进入真实 Maven Invoker failure，最终 fix-build-google-auto-round-1-r001 正式通过：execution_ok=true、task_passed=true、reward=1.0、20/60 iterations、20 provider requests，官方 verifier 3/3；error/verifier_error/export_error 均为 null，protocol_evidence_valid/trajectory_complete/iteration_accounting_complete/skill_exposure_verified 均为 true。RI-001 与 RI-002 在同一 repaired Skill 中联合验证，未做独立消融。",
+    "annotation": "../fix-build-google-auto/annotation.md"
+  },
+  "RI-002": {
+    "tag": "skill_missing_guidance",
+    "skill_location": [
+      {
+        "skill_name": "maven-build-lifecycle",
+        "skill_file": "skills/maven-build-lifecycle/SKILL.md",
+        "skill_section": "Multi-Module Builds；Test Configuration；Debugging Builds",
+        "problematic_part": "原 Skill 介绍 reactor、Surefire/Failsafe 和常规 dependency debugging，却没有说明 maven-invoker-plugin 会从 src/it/*/pom.xml 启动独立嵌套 Maven project、该 POM 有自己的依赖解析/版本漂移，也没有要求在 Invoker 报告某个 nested pom 失败时追到其第一条 concrete compiler error。历史失败实际位于 value/src/it/functional/pom.xml：过期测试依赖组合使 Guava 17.0 被选中，而测试源码需要 MoreObjects。"
+      }
+    ],
+    "descrip_skill_error": "真实 JDK 7 CI 失败并不在顶层生产代码，而在 AutoValue 的 Maven Invoker functional integration-test POM。原 Skill 没有 nested-project 诊断模型，容易把 reactor/module 级现象当成根因，无法识别 functional POM 与主项目不同步造成的 Guava/Truth/testlib 版本漂移。",
+    "gold_repair": "当 maven-invoker-plugin 报告 */pom.xml 失败时，把该目录视为独立 Maven project：读取对应 nested POM 与 Invoker build.log，定位第一条具体 compiler/test error，并在同一目标 JDK 下检查其 dependency tree/effective dependency mediation；不要假设父 reactor 的依赖版本自动支配 Invoker POM。对 missing library API（本例 MoreObjects），先确认实际选中的库版本。对该 Google Auto 快照，应把 value/src/it/functional/pom.xml 的测试依赖作为一个同步单元修复：显式使用 Guava 19.0，并同步 guava-testlib 19.0、Truth 0.28、JUnit 4.12、jsr305 3.0.x；保持修改局限于 functional integration-test POM，最后重新执行 JDK 7 下完整 verify，包含所有 Invoker tests。",
+    "validation_status": "agent-validated (1/1; jointly validated; guard-enabled)",
+    "validation_evidence": "历史 BugSwarm failed/passed snapshot 与实际修复 commit aa772815912341ec0419b8a4bf98c1cd1257bb11 共同表明核心源码差异就是 value/src/it/functional/pom.xml 的 test dependency synchronization：增加 direct guava 19.0，并同步 guava-testlib 19.0、truth 0.28、junit 4.12、jsr305 3.0.0；失败日志的 concrete error 为 com.google.common.base.MoreObjects 不存在。Round 1 Agent 在 repaired Skill 引导下定位同一 nested POM，最终 patch 使用 guava 19.0、guava-testlib 19.0、truth 0.28、junit 4.12、jsr305 3.0.2，并额外加入 UTF-8 compiler encoding；完整 JDK 7 verify 成功，官方 verifier test_note_exists/test_diff_exists/test_build_success 3/3 PASS、reward=1.0。UTF-8 改动作为本轮额外加固记录，不单独视为历史 Gold 根因。",
+    "annotation": "../fix-build-google-auto/annotation.md"
+  }
+}

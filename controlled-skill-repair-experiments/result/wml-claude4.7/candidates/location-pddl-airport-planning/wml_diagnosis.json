@@ -1,0 +1,62 @@
+{
+  "diagnoses": [
+    {
+      "label": "save_plan inputs omit required 'problem' argument",
+      "observable_evidence": "pddl-skills/save_plan.skill declares inputs as [plan, path], but the script defines def skill(problem, plan, path) and constructs PDDLWriter(problem). The declared contract cannot bind the problem the implementation requires.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "skill-input-contract-matches-implementation",
+      "defect_relation": "conflicting",
+      "scope_boundary": "The inputs block of save_plan.skill, which defines the invocation contract for the plan-writing skill that depends on a problem-bound PDDLWriter.",
+      "do_not_generalize_to": "Other skills (load_problem, generate_plan, validate) whose declared inputs already match their script signatures; do not alter their contracts.",
+      "target_file": "pddl-skills/save_plan.skill",
+      "target_section": "inputs",
+      "target_layer": "L2",
+      "recommended_direction": "Reconcile the inputs declaration with the implementation by binding all three required arguments (problem, plan, path) in the declared order used by the script, so callers can supply the problem object needed by PDDLWriter.",
+      "confidence": "high"
+    },
+    {
+      "label": "Plan Saving documentation omits problem parameter",
+      "observable_evidence": "pddl-skills/SKILL.md section '3. Plan Saving' documents save-plan(plan_object, output_path) with Parameters listing only plan_object and output_path, and the example save_plan(plan, \"solution.plan\"); yet PDDLWriter requires a problem object to serialize a plan.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "plan-writer-requires-problem-context",
+      "defect_relation": "missing",
+      "scope_boundary": "The Plan Saving section's signature, Parameters list, and Example for the save-plan skill in SKILL.md.",
+      "do_not_generalize_to": "Load, Generate, and Validate sections, whose documented signatures already correspond to their skill contracts and should remain unchanged.",
+      "target_file": "pddl-skills/SKILL.md",
+      "target_section": "3. Plan Saving / save-plan",
+      "target_layer": "L1",
+      "recommended_direction": "Document the problem object as a required parameter of save-plan alongside plan_object and output_path, and update the usage example to pass it, matching the implementation's dependency on a problem-bound PDDLWriter.",
+      "confidence": "high"
+    },
+    {
+      "label": "Example Workflow call to save_plan missing problem argument",
+      "observable_evidence": "pddl-skills/SKILL.md 'Example Workflow' invokes save_plan(plan, \"task01.plan\") with only two arguments, but the save-plan implementation requires a problem argument to construct PDDLWriter(problem).",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "end-to-end-pipeline-threading-of-problem-object",
+      "defect_relation": "weak",
+      "scope_boundary": "The Example Workflow block that illustrates load -> generate -> validate -> save sequencing in SKILL.md.",
+      "do_not_generalize_to": "The load_problem, generate_plan, and validate call lines in the same workflow, which are already consistent with their skill contracts.",
+      "target_file": "pddl-skills/SKILL.md",
+      "target_section": "Example Workflow",
+      "target_layer": "L1",
+      "recommended_direction": "Thread the problem object through the save step in the example so the pipeline shows save_plan being called with the same problem bound at load time, matching the save-plan contract.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "target_binding",
+    "primary_anchor": "skill-input-contract-matches-implementation",
+    "editor_direction": "strengthen",
+    "composition_issue": "The implementation of save-plan requires a problem object, but the declared inputs, documented signature, and example invocation all omit it. The three defects compose: fixing only the inputs schema would still leave the SKILL.md guidance misleading; fixing only the docs would still leave the skill contract unbindable. All three must align on the same (problem, plan, path) shape.",
+    "preservation_constraints": [
+      "Keep load_problem, generate_plan, and validate skill files and their SKILL.md sections unchanged.",
+      "Preserve the overall four-section structure of SKILL.md (Load, Generate, Save, Validate) and the General Guidelines / Planner Behavior content.",
+      "Preserve the choice of pyperplan planner and the unified_planning library usage.",
+      "Do not alter plan_output path conventions or problem.json task format described in the task."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defect is localized to the save-plan contract and its documentation/example in SKILL.md; all affected locations are editable text in the existing skill bundle, and no external retrieval or hidden information is required to realign the inputs schema, documented signature, and workflow example with the implementation."
+  }
+}

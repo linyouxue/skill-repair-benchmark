@@ -1,0 +1,91 @@
+{
+  "method": "workflow-localized-mechanism-learning",
+  "trial_id": "single-video-silence-remover-RI-003",
+  "task_id": "video-silence-remover",
+  "repair_model": "Claude-Opus-4.7",
+  "provider": "Paratera",
+  "base_url": "https://llmapi.paratera.com/v1",
+  "wml_diagnosis": {
+    "diagnoses": [
+      {
+        "label": "Inverted threshold_ratio tuning semantics in pause-detector",
+        "observable_evidence": "pause-detector/SKILL.md 'Parameters Tuning' table lists `threshold_ratio` Lower=More aggressive, Higher=More conservative, but the code uses `is_low_energy = energies < (local_avg * threshold_ratio)`: a smaller ratio makes the inequality harder to satisfy (fewer, shorter pauses → more conservative), while a larger ratio flags more seconds as low-energy (more aggressive).",
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "threshold-ratio directional tuning guidance",
+        "defect_relation": "conflicting",
+        "scope_boundary": "Pause detection parameter guidance in pause-detector/SKILL.md and any cross-skill references to tuning pause threshold_ratio",
+        "do_not_generalize_to": "Do not change `--threshold-ratio` default (0.5), script logic in detect_pauses.py, min_duration/window_size semantics, or inclusive-threshold note at the bottom of the SKILL.",
+        "target_file": "pause-detector/SKILL.md",
+        "target_section": "Parameters Tuning table (threshold_ratio row)",
+        "target_layer": "L2",
+        "recommended_direction": "Align the directional wording with the implemented comparison: lower threshold_ratio → more conservative (fewer/shorter pauses); higher threshold_ratio → more aggressive (more/longer pauses). Keep the table shape and other rows untouched.",
+        "confidence": "high"
+      },
+      {
+        "label": "Ambiguous/inconsistent threshold directional language in silence-detector",
+        "observable_evidence": "silence-detector/SKILL.md 'Parameters Tuning' table labels `threshold_multiplier` Lower=More sensitive, Higher=More conservative. Code uses `smoothed[i] > initial_avg * threshold_multiplier` to mark end-of-silence: a lower multiplier triggers the transition earlier (less initial silence captured), a higher multiplier delays the transition (more initial silence captured). The 'sensitive/conservative' wording is inconsistent with the sibling pause-detector table and does not disambiguate whether 'sensitive' refers to transition detection or to silence-duration capture, which may mislead downstream `--start-time` wiring.",
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "threshold-multiplier directional tuning guidance",
+        "defect_relation": "ambiguous",
+        "scope_boundary": "Initial-silence detection parameter guidance in silence-detector/SKILL.md",
+        "do_not_generalize_to": "Do not alter default values, the time-alignment offset logic, the `valid` convolution behavior, or the note that the returned end should feed the pause detector's --start-time.",
+        "target_file": "silence-detector/SKILL.md",
+        "target_section": "Parameters Tuning table (threshold_multiplier row)",
+        "target_layer": "L2",
+        "recommended_direction": "Rephrase the row with the same directional vocabulary as pause-detector and tie it to observable effect on detected silence end: lower multiplier → earlier transition / shorter detected silence; higher multiplier → later transition / longer detected silence. Keep remaining rows and workflow notes intact.",
+        "confidence": "medium"
+      },
+      {
+        "label": "Missing cross-reference to threshold tuning in video-processor pipeline guidance",
+        "observable_evidence": "video-processor/SKILL.md's 'Mandatory end-to-end completion gate' orchestrates silence-detector and pause-detector but gives no guidance on how threshold_ratio / threshold_multiplier tuning direction affects the combined segment set, so an operator cannot resolve the pause-detector inversion from the orchestrator view.",
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "pipeline-level reference to detector threshold tuning direction",
+        "defect_relation": "weak",
+        "scope_boundary": "Pipeline guidance in video-processor/SKILL.md that references silence/pause detector parameters",
+        "do_not_generalize_to": "Do not modify the RED/GREEN gating logic, completion checks, ffmpeg filter examples, or output verification rules.",
+        "target_file": "video-processor/SKILL.md",
+        "target_section": "Mandatory end-to-end completion gate (steps 3–4)",
+        "target_layer": "L2",
+        "recommended_direction": "Add a short note referring operators to pause-detector and silence-detector tuning tables with the corrected directional wording (lower ratio = more conservative, higher = more aggressive), so pipeline-level reasoning is consistent with the detector docs.",
+        "confidence": "low"
+      }
+    ],
+    "overlay": {
+      "primary_node": "operation_decision",
+      "primary_anchor": "threshold-ratio directional tuning guidance",
+      "editor_direction": "strengthen",
+      "composition_issue": "pause-detector's inverted directional wording conflicts with its own code and with silence-detector's parallel table; video-processor's orchestration lacks any pointer, so an operator trusting the SKILL docs would tune threshold_ratio in the wrong direction and either under-remove or over-remove pauses while remaining within the pipeline gate.",
+      "preservation_constraints": [
+        "Keep all default parameter values and script behavior in detect_pauses.py, detect_silence.py, and process_video.py unchanged",
+        "Preserve the inclusive-threshold note at the end of pause-detector/SKILL.md",
+        "Preserve silence-detector's time-alignment note about feeding --start-time",
+        "Preserve video-processor's RED/GREEN completion gate and verification checks",
+        "Do not alter unrelated skills (audio-extractor, energy-calculator, segment-combiner, report-generator)"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The failure can be fully addressed by editing documentation tables and a small cross-reference in L2 SKILL.md files without touching scripts, defaults, binary assets, or workflow gating."
+    }
+  },
+  "wml_repair": {
+    "edits": [
+      {
+        "path": "pause-detector/SKILL.md",
+        "content": "---\nname: pause-detector\ndescription: Detect pauses and silence in audio using local dynamic thresholds. Use when you need to find natural pauses in lectures, board-writing silences, or breaks between sections. Uses local context comparison to avoid false positives from volume variation.\n---\n\n# Pause Detector\n\nDetects pauses and low-energy segments using local dynamic thresholds on pre-computed energy data. Unlike global threshold methods, this compares energy to surrounding context, avoiding false positives when speaker volume varies.\n\n## Use Cases\n\n- Detecting natural pauses in lectures\n- Finding board-writing silences\n- Identifying breaks between sections\n\n## Usage\n\n```bash\npython3 /root/.claude/skills/pause-detector/scripts/detect_pauses.py \\\n    --energies /path/to/energies.json \\\n    --output /path/to/pauses.json\n```\n\n### Parameters\n\n- `--energies`: Path to energy JSON file (from energy-calculator)\n- `--output`: Path to output JSON file\n- `--start-time`: Start analyzing from this second (default: 0)\n- `--threshold-ratio`: Ratio of local average for low energy (default: 0.5)\n- `--min-duration`: Minimum pause duration in seconds (default: 2)\n- `--window-size`: Local average window size (default: 30)\n\n### Output Format\n\n```json\n{\n  \"method\": \"local_dynamic_threshold\",\n  \"segments\": [\n    {\"start\": 610, \"end\": 613, \"duration\": 3},\n    {\"start\": 720, \"end\": 724, \"duration\": 4}\n  ],\n  \"total_segments\": 11,\n  \"total_duration_seconds\": 28,\n  \"parameters\": {\n    \"threshold_ratio\": 0.5,\n    \"window_size\": 30,\n    \"min_duration\": 2\n  }\n}\n```\n\n## How It Works\n\n1. Load pre-computed energy data\n2. Calculate local average using sliding window\n3. Mark seconds where energy < local_avg × threshold_ratio\n4. Group consecutive low-energy seconds into segments\n5. Filter segments by minimum duration\n\n## Dependencies\n\n- Python 3.11+\n- numpy\n- scipy\n\n## Example\n\n```bash\n# Detect pauses after opening (start at 221s)\npython3 /root/.claude/skills/pause-detector/scripts/detect_pauses.py \\\n    --energies energies.json \\\n    --start-time 221 \\\n    --output pauses.json\n\n# Result: Found 11 pauses totaling 28 seconds\n```\n\n## Parameters Tuning\n\nThe low-energy test is `energies < local_avg * threshold_ratio`, so a smaller ratio shrinks the low-energy threshold (fewer seconds qualify → fewer/shorter pauses, i.e. more conservative), and a larger ratio raises the threshold (more seconds qualify → more/longer pauses, i.e. more aggressive).\n\n| Parameter | Lower Value | Higher Value |\n|-----------|-------------|--------------|\n| `threshold_ratio` | More conservative (fewer/shorter pauses) | More aggressive (more/longer pauses) |\n| `min_duration` | Shorter pauses | Longer pauses only |\n| `window_size` | Local context | Broader context |\n\n## Notes\n\n- Requires energy data from energy-calculator skill\n- Use --start-time to skip detected opening\n- Local threshold adapts to varying speaker volume\n- Preserve pauses whose duration equals `--min-duration`; the threshold is inclusive\n"
+      }
+    ],
+    "repair_audit": {
+      "target_node": "operation_decision",
+      "target_anchor": "threshold-ratio directional tuning guidance",
+      "target_layer": "L2",
+      "edit_kind": "Rewrite the `threshold_ratio` row of pause-detector/SKILL.md's Parameters Tuning table to match the implemented comparison, and add a brief one-line rationale tying the direction to the code's inequality. Other rows, defaults, scripts, and the inclusive-threshold note are left untouched.",
+      "boundedness": "Positive scope: pause-detector/SKILL.md Parameters Tuning table and a single clarifying sentence immediately preceding it. Negative scope: no edits to detect_pauses.py or any other script, no change to the 0.5 default, no change to min_duration/window_size rows, no change to the inclusive-threshold note, and no edits to silence-detector, video-processor, or any other skill — the primary high-confidence mechanism is repaired in isolation so downstream orchestration semantics are unchanged.",
+      "verification_plan": "A downstream operator reading pause-detector/SKILL.md should now map lower `--threshold-ratio` (e.g. 0.3) to a more conservative run yielding fewer and shorter pause segments than default 0.5, and a higher ratio (e.g. 0.7) to a more aggressive run yielding more and longer segments; running `detect_pauses.py` on the same energies.json across ratios 0.3/0.5/0.7 should produce monotonically non-decreasing `total_segments` and `total_duration_seconds`, confirming documentation matches `energies < local_avg * threshold_ratio` behavior. Final video-processor completion checks (both artifacts present, duration math consistent) remain the end-to-end verifier.",
+      "no_edit_reason": ""
+    }
+  },
+  "changed_files": [
+    "pause-detector/SKILL.md"
+  ]
+}

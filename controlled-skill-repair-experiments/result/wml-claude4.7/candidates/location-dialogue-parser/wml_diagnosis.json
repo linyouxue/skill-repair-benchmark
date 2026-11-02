@@ -1,0 +1,63 @@
+{
+  "diagnoses": [
+    {
+      "label": "Adding Edges example lets 'End' be an undeclared target",
+      "observable_evidence": "SKILL.md 'Adding Edges' shows `graph.add_edge(Edge(source=\"Choices\", target=\"End\", text=\"1. Run away\"))` without any prior `add_node(Node(id=\"End\", ...))`, and no guidance states whether End must also exist as a node.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "edge_target_resolution_for_terminal_End",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Applies when authoring edges whose target is the terminal 'End' sink referenced by multiple paths in a parsed script.",
+      "do_not_generalize_to": "Non-terminal targets that happen to be unresolved typos or forward references; those should still error, not be auto-accepted.",
+      "target_file": "dialogue-graph/SKILL.md",
+      "target_section": "### 3. Adding Edges (and the End convention it implies)",
+      "target_layer": "L1",
+      "recommended_direction": "Make the End convention explicit at mechanism level: either (a) require users to `add_node(Node(id='End', type='line'))` before any edge targets it so reachability and target-existence both hold, or (b) document End as a declared implicit sink that still appears in exported nodes. The current example silently assumes (b) while the module only partially supports it.",
+      "confidence": "high"
+    },
+    {
+      "label": "Export section omits writeback to required artifact paths",
+      "observable_evidence": "SKILL.md '### 4. Export' only describes `graph.to_dict()` and `graph.to_json()` returning values. It never instructs writing to `/app/dialogue.json`, and the task mandates producing that file plus `/app/dialogue.dot`.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "serialize_then_persist_to_declared_paths",
+      "defect_relation": "weak",
+      "scope_boundary": "Applies to the final delivery step where a built Graph must be persisted as JSON (and companion DOT) at caller-specified file paths.",
+      "do_not_generalize_to": "In-memory use of to_dict()/to_json() by other callers (editors, tests) that do not require file output.",
+      "target_file": "dialogue-graph/SKILL.md",
+      "target_section": "### 4. Export",
+      "target_layer": "L1",
+      "recommended_direction": "Strengthen the Export mechanism so it covers both the JSON schema shape (`{\"nodes\":[...],\"edges\":[...]}` with the documented node/edge fields) and the writeback contract: compute the dict/json, then write to the caller's path. State that export must be preceded by validate() returning [] so delivered artifacts are schema-valid.",
+      "confidence": "high"
+    },
+    {
+      "label": "Visualization guidance produces PNG/SVG, not the DOT source required",
+      "observable_evidence": "SKILL.md '### 6. Visualization' describes `graph.visualize('dialogue_graph')` producing a PNG, and the implementation uses `dot.render(output_file, cleanup=True)` which deletes the intermediate .dot file. The task requires `/app/dialogue.dot` (DOT source), not an image.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "dot_source_emission_vs_rendered_image",
+      "defect_relation": "misrouted",
+      "scope_boundary": "Applies when the deliverable is a .dot graph source file for downstream tooling or human inspection.",
+      "do_not_generalize_to": "Cases where only a rendered PNG/SVG preview is wanted; the render path should remain available.",
+      "target_file": "dialogue-graph/SKILL.md",
+      "target_section": "### 6. Visualization (and the related Export convention for .dot)",
+      "target_layer": "L1",
+      "recommended_direction": "Add a documented path for emitting raw DOT source (e.g., writing `dot.source` to the requested `.dot` filepath, or using save without render+cleanup) and clarify that `.dot` is a separate deliverable from the rendered image. Keep the existing PNG/SVG render as a non-conflicting option.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "writeback_or_delivery",
+    "primary_anchor": "serialize_then_persist_to_declared_paths",
+    "editor_direction": "strengthen",
+    "composition_issue": "The ambiguous End convention upstream (target_binding) and the under-specified Export/Visualization writeback downstream compound: without declaring End as a node, exported JSON fails the 'all nodes reachable from first node' constraint; without an explicit DOT writeback path, the required `/app/dialogue.dot` artifact is never produced even if parsing is correct.",
+    "preservation_constraints": [
+      "Node/Edge/Graph API signatures and field names in dialogue_graph.py",
+      "`to_dict`/`to_json` output schema `{\"nodes\":[...],\"edges\":[...]}` with id/text/speaker/type and from/to/text",
+      "`from_file`/`from_dict`/`from_json` loader behavior",
+      "Existing speaker color map and shape conventions for visualization",
+      "Validation returning a list of error strings (do not change the return contract, only clarify End handling)"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All failures localize to documented mechanisms inside the Skill bundle (SKILL.md sections 'Adding Edges', 'Export', 'Visualization' plus the End convention they reference). No external retrieval or hidden gold is needed; strengthening these L1 mechanism descriptions is sufficient to restore valid writeback of both dialogue.json and dialogue.dot."
+  }
+}

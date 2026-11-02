@@ -1,0 +1,63 @@
+{
+  "diagnoses": [
+    {
+      "label": "Inverted threshold_ratio tuning semantics in pause-detector",
+      "observable_evidence": "pause-detector/SKILL.md 'Parameters Tuning' table lists `threshold_ratio` Lower=More aggressive, Higher=More conservative, but the code uses `is_low_energy = energies < (local_avg * threshold_ratio)`: a smaller ratio makes the inequality harder to satisfy (fewer, shorter pauses → more conservative), while a larger ratio flags more seconds as low-energy (more aggressive).",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "threshold-ratio directional tuning guidance",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Pause detection parameter guidance in pause-detector/SKILL.md and any cross-skill references to tuning pause threshold_ratio",
+      "do_not_generalize_to": "Do not change `--threshold-ratio` default (0.5), script logic in detect_pauses.py, min_duration/window_size semantics, or inclusive-threshold note at the bottom of the SKILL.",
+      "target_file": "pause-detector/SKILL.md",
+      "target_section": "Parameters Tuning table (threshold_ratio row)",
+      "target_layer": "L2",
+      "recommended_direction": "Align the directional wording with the implemented comparison: lower threshold_ratio → more conservative (fewer/shorter pauses); higher threshold_ratio → more aggressive (more/longer pauses). Keep the table shape and other rows untouched.",
+      "confidence": "high"
+    },
+    {
+      "label": "Ambiguous/inconsistent threshold directional language in silence-detector",
+      "observable_evidence": "silence-detector/SKILL.md 'Parameters Tuning' table labels `threshold_multiplier` Lower=More sensitive, Higher=More conservative. Code uses `smoothed[i] > initial_avg * threshold_multiplier` to mark end-of-silence: a lower multiplier triggers the transition earlier (less initial silence captured), a higher multiplier delays the transition (more initial silence captured). The 'sensitive/conservative' wording is inconsistent with the sibling pause-detector table and does not disambiguate whether 'sensitive' refers to transition detection or to silence-duration capture, which may mislead downstream `--start-time` wiring.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "threshold-multiplier directional tuning guidance",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Initial-silence detection parameter guidance in silence-detector/SKILL.md",
+      "do_not_generalize_to": "Do not alter default values, the time-alignment offset logic, the `valid` convolution behavior, or the note that the returned end should feed the pause detector's --start-time.",
+      "target_file": "silence-detector/SKILL.md",
+      "target_section": "Parameters Tuning table (threshold_multiplier row)",
+      "target_layer": "L2",
+      "recommended_direction": "Rephrase the row with the same directional vocabulary as pause-detector and tie it to observable effect on detected silence end: lower multiplier → earlier transition / shorter detected silence; higher multiplier → later transition / longer detected silence. Keep remaining rows and workflow notes intact.",
+      "confidence": "medium"
+    },
+    {
+      "label": "Missing cross-reference to threshold tuning in video-processor pipeline guidance",
+      "observable_evidence": "video-processor/SKILL.md's 'Mandatory end-to-end completion gate' orchestrates silence-detector and pause-detector but gives no guidance on how threshold_ratio / threshold_multiplier tuning direction affects the combined segment set, so an operator cannot resolve the pause-detector inversion from the orchestrator view.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "pipeline-level reference to detector threshold tuning direction",
+      "defect_relation": "weak",
+      "scope_boundary": "Pipeline guidance in video-processor/SKILL.md that references silence/pause detector parameters",
+      "do_not_generalize_to": "Do not modify the RED/GREEN gating logic, completion checks, ffmpeg filter examples, or output verification rules.",
+      "target_file": "video-processor/SKILL.md",
+      "target_section": "Mandatory end-to-end completion gate (steps 3–4)",
+      "target_layer": "L2",
+      "recommended_direction": "Add a short note referring operators to pause-detector and silence-detector tuning tables with the corrected directional wording (lower ratio = more conservative, higher = more aggressive), so pipeline-level reasoning is consistent with the detector docs.",
+      "confidence": "low"
+    }
+  ],
+  "overlay": {
+    "primary_node": "operation_decision",
+    "primary_anchor": "threshold-ratio directional tuning guidance",
+    "editor_direction": "strengthen",
+    "composition_issue": "pause-detector's inverted directional wording conflicts with its own code and with silence-detector's parallel table; video-processor's orchestration lacks any pointer, so an operator trusting the SKILL docs would tune threshold_ratio in the wrong direction and either under-remove or over-remove pauses while remaining within the pipeline gate.",
+    "preservation_constraints": [
+      "Keep all default parameter values and script behavior in detect_pauses.py, detect_silence.py, and process_video.py unchanged",
+      "Preserve the inclusive-threshold note at the end of pause-detector/SKILL.md",
+      "Preserve silence-detector's time-alignment note about feeding --start-time",
+      "Preserve video-processor's RED/GREEN completion gate and verification checks",
+      "Do not alter unrelated skills (audio-extractor, energy-calculator, segment-combiner, report-generator)"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The failure can be fully addressed by editing documentation tables and a small cross-reference in L2 SKILL.md files without touching scripts, defaults, binary assets, or workflow gating."
+  }
+}
