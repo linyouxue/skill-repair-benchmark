@@ -10,12 +10,24 @@ PDDL实际修复1轮，原生max-tokens停止后host只提交已有输出字节�
 
 | 阶段 | 第1次 | 第2次 | 第3次 | 均值 | 全对 |
 |---|---:|---:|---:|---:|---:|
-| original | 100.00% | 100.00% | — | **100.00%** | 2/2 |
+| original | 100.00% | 100.00% | 100.00% | **100.00%** | 3/3 |
 | group_01 | 0.00% | 0.00% | 0.00% | **0.00%** | 0/3 |
 | group_02 | 100.00% | 100.00% | 100.00% | **100.00%** | 3/3 |
 | group_03 | 0.00% | 0.00% | 0.00% | **0.00%** | 0/3 |
 
-上表original仅指冻结后追加原题2次；开发probe与确认结果分开，断点接续不另算独立样本。全部既定运行均保留，不挑最好一次；旧S0 binary0/连续分未知不冒充新baseline。最终测试不回流修复、调参或选版。候选真实变更见[evidence/repair/selected-skill.diff](evidence/repair/selected-skill.diff)，开发候选及选择依据见[原生轮次记录](evidence/repair/development-rounds.json)。Codex只接线、恢复与验收，未手写候选Skill；原输入/训练示例及方法新增规则原样保留，具体位置和作用由真实diff与会话披露，不据已有分数声称因果增益。
+上表original按最终选中轮次的开发执行1次＋冻结后追加确认2次统计。第1次为第1轮候选的开发probe，参与停止/选版；第2、3次为独立追加确认，三次不全是冻结后盲测。断点接续不另算独立样本。全部既定运行均保留，不挑最好一次；旧S0 binary0/连续分未知不冒充新baseline。最终测试不回流修复、调参或选版。候选真实变更见[evidence/repair/selected-skill.diff](evidence/repair/selected-skill.diff)，开发候选及选择依据见[原生轮次记录](evidence/repair/development-rounds.json)。Codex只接线、恢复与验收，未手写候选Skill；原输入/训练示例及方法新增规则原样保留，具体位置和作用由真实diff与会话披露，不据已有分数声称因果增益。
+
+## 原题三次运行与证据
+
+三次使用同一最终冻结Skill；每次原题执行上限60父迭代。第1次的已有[验收记录](evidence/repair/round-1/acceptance.json)核对冻结bundle与真实计划，原段1步＋checkpoint接续13步合计14步，只算一次执行。各次原始配置、结果及评分保留原身份，不为调整展示次序重命名或改写。
+
+| original次序 | 执行身份 | 原生run ID | 累计父步/60 | 配置、评分与轨迹 |
+|---|---|---|---:|---|
+| 第1次 | 第1轮选中候选开发执行 | `pddl-airport-planning-probe-0-0-d804f88f8a-checkpoint-01` | 14 | [开发运行](evidence/development_native/pddl-airport-planning-probe-0-0-d804f88f8a-checkpoint-01/) |
+| 第2次 | 冻结后追加确认r1 | `pddl-airport-planning-frozen-original-r1-03bafec3` | 27 | [确认运行r1](evidence/final_runs/run_01/) |
+| 第3次 | 冻结后追加确认r2 | `pddl-airport-planning-frozen-original-r2-11fcb2e9` | 23 | [确认运行r2](evidence/final_runs/run_02/) |
+
+第1次的完整LLM及评分前真实工作区已在下述原题与修复归档中，成员前缀为`native-runs/pddl-airport-planning-probe-0-0-d804f88f8a-checkpoint-01/`；真实两份计划位于其`artifacts/pre-verifier-workspace.tar.gz`内。原中断前段另以`native-runs/pddl-airport-planning-probe-0-0-d804f88f8a/`保留，不能把两段算成两次。
 
 完整修复原生Zstd会话/请求审计/harness日志、开发执行及追加原题全部保留段、LLM和真实/app tar见[原题与修复归档](https://github.com/linyouxue/skill-repair-benchmark/releases/download/pddl-flink-skillhone-gpt52-diagnosis-s0-20261101/pddl-airport-planning-skillhone-original-repair-20261101.tar.xz)；[成员/运行索引](evidence/native-run-index.json)定位native-runs和repair成员。Git内保留原始result/config/ACP/accuracy/CTRF/reward及实际文本产物；大JAR位于每次真实pre-verifier tar，见artifact-members.json，未重造。
 
