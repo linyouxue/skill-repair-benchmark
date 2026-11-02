@@ -1,0 +1,54 @@
+{
+  "id": "video-silence-remover",
+  "RI-001": {
+    "tag": "skill_incorrect_guidance",
+    "skill_location": [
+      {
+        "skill_name": "silence-detector",
+        "skill_file": "skills/silence-detector/SKILL.md",
+        "skill_section": "How It Works 中的 moving-average smoothing 与 threshold crossing，以及 Notes",
+        "problematic_part": "正文没有说明 valid moving-average 输出索引相对原始时间轴存在窗口偏移，也没有说明返回的 opening 边界是否已经完成时间对齐。"
+      },
+      {
+        "skill_name": "silence-detector",
+        "skill_file": "skills/silence-detector/scripts/detect_silence.py",
+        "skill_section": "detect_initial_silence() 中 moving-average threshold-crossing 的时间映射",
+        "problematic_part": "实现直接把 valid convolution 的 crossing index 当作原始秒级边界，遗漏平滑窗口中心偏移。"
+      }
+    ],
+    "descrip_skill_error": "silence-detector 把 valid moving-average 输出中的 threshold crossing 索引直接当成原始时间边界，没有补偿平滑窗口的时间对齐偏移，导致 opening 结束时间系统性提前。",
+    "gold_repair": "把 valid moving-average 的 crossing 映射到来源窗口中心，并在 Skill 中明确返回边界已经完成时间对齐，后续不得再次施加平滑窗口偏移。"
+  },
+  "RI-002": {
+    "tag": "skill_missing_guidance",
+    "skill_location": [
+      {
+        "skill_name": "segment-combiner",
+        "skill_file": "skills/segment-combiner/SKILL.md",
+        "skill_section": "Notes 中的 segment 排序与合并规则",
+        "problematic_part": "原文只说明对 segments 排序，没有明确所有正长度 gap 都是必须保留的内容，也没有限定只能合并 overlap 或 touch 的区间。"
+      },
+      {
+        "skill_name": "video-processor",
+        "skill_file": "skills/video-processor/SKILL.md",
+        "skill_section": "端到端流程中的 segment combination 与 completion checks",
+        "problematic_part": "组合、规范化与去重步骤没有把保留正长度 gap 写成端到端约束，Agent 因而可能跨短正间隔合并删除区间。"
+      }
+    ],
+    "descrip_skill_error": "原 Skill 没有明确要求保留检测区间之间的每个正长度间隔，Agent 因而可能跨一秒等短教学间隔合并删除区间，误删有效内容并降低 precision。",
+    "gold_repair": "明确所有正长度 gap 都应作为待保留内容；segment combiner 和 video processor 只允许合并 overlap 或 touch 的删除区间，不得跨正长度 gap 合并。"
+  },
+  "RI-003": {
+    "tag": "skill_incorrect_guidance",
+    "skill_location": [
+      {
+        "skill_name": "pause-detector",
+        "skill_file": "skills/pause-detector/SKILL.md",
+        "skill_section": "Parameters Tuning 中的 threshold_ratio 行，以及 Notes",
+        "problematic_part": "原参数表把 threshold_ratio 的调参方向写反：在 energy < local_avg × threshold_ratio 的判定式下，提高 ratio 会放宽低能量判定并增加删除，而不是使判定更保守；正文也没有要求从默认值出发并依据观测信号调参。"
+      }
+    ],
+    "descrip_skill_error": "pause-detector 正文对 threshold_ratio 的调参方向描述相反，可能诱导 Agent 在检测过多或过少时进一步向错误方向调整阈值。",
+    "gold_repair": "纠正 threshold_ratio 的调参方向；先运行文档默认值，只能根据实际观测信号做有依据的 sensitivity adjustment，不得凭猜测改动。"
+  }
+}

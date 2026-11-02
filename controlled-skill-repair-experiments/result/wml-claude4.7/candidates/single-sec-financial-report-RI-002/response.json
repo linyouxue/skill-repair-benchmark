@@ -1,0 +1,63 @@
+{
+  "method": "workflow-localized-mechanism-learning",
+  "trial_id": "single-sec-financial-report-RI-002",
+  "task_id": "sec-financial-report",
+  "repair_model": "Claude-Opus-4.7",
+  "provider": "Paratera",
+  "base_url": "https://llmapi.paratera.com/v1",
+  "wml_diagnosis": {
+    "diagnoses": [
+      {
+        "label": "Ambiguous stock-count caliber for single-quarter fund summary",
+        "observable_evidence": "SKILL.md describes the one-quarter summary as printing 'total number of holdings' and 'total number of stock holdings' without specifying whether 'stocks held' means raw filtered INFOTABLE row count (stock_infotable.shape[0]) or unique CUSIPs after grouping. Q2 asks 'How many stocks are held by Renaissance?' which requires a single integer, but the helper prints both a row-count field ('Number of stock holdings') and a grouped-by-CUSIP table; without a stated caliber the row count can double-count the same CUSIP reported across multiple INFOTABLE rows.",
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "single-quarter holdings count caliber (unique-CUSIP after stock TITLEOFCLASS filter)",
+        "defect_relation": "ambiguous",
+        "scope_boundary": "Interpreting 'how many stocks does fund X hold' for a single accession number in a single quarter via one_fund_analysis.py",
+        "do_not_generalize_to": "Total number of holdings (unfiltered INFOTABLE rows), AUM dollar values, cross-quarter change counts, or non-equity position counts",
+        "target_file": "13f-analyzer/SKILL.md",
+        "target_section": "### Analyze the holding summary of a particular fund in one quarter",
+        "target_layer": "L2",
+        "recommended_direction": "Add an explicit caliber statement that the count of stocks held for a fund in one quarter is the number of unique CUSIPs after the stock TITLEOFCLASS filter (i.e., the grouped stock table size), not the raw filtered INFOTABLE row count. Clarify which printed field corresponds to this caliber so answers like Q2 pick the deduplicated count.",
+        "confidence": "high"
+      }
+    ],
+    "overlay": {
+      "primary_node": "compute_or_transform",
+      "primary_anchor": "single-quarter holdings count caliber (unique-CUSIP after stock TITLEOFCLASS filter)",
+      "editor_direction": "strengthen",
+      "composition_issue": "The SKILL.md already documents stock-universe filtering and cross-quarter top-k calibers, but omits the single-quarter 'how many stocks' caliber. Without this anchor, downstream Q2-style questions may read the row-count field instead of the unique-CUSIP count that the stock-selection semantics imply.",
+      "preservation_constraints": [
+        "Absolute helper paths under /skills/13f-analyzer/scripts and the warning not to replace them",
+        "Stock TITLEOFCLASS universe and the instruction not to broaden it",
+        "Cross-quarter top-buys pipeline (filter, group by CUSIP, outer-join, ABS_CHANGE sort, take ordered top-k)",
+        "AUM reporting semantics and comparative-analysis instructions",
+        "Fuzzy-name-search SKILL and script behavior, including accession-number per-quarter rule"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The failure is localized to a documentation-level caliber in 13f-analyzer/SKILL.md's single-quarter summary section; the helper already computes grouped-by-CUSIP stock data, so clarifying which printed quantity to read is a reusable Skill-level fix without changing scripts or attachments."
+    }
+  },
+  "wml_repair": {
+    "edits": [
+      {
+        "path": "13f-analyzer/SKILL.md",
+        "content": "---\nname: 13f-analyzer\ndescription: Perform various data analysis on SEC 13-F and obtain some insights of fund activities such as number of holdings, AUM, and change of holdings between two quarters.\n---\n\n## Overview\n\nThe helper programs are installed under `/skills/13f-analyzer/scripts`. Run them\nfrom that absolute path; the task workspace is normally `/root`, so\n`scripts/...` and `/root/scripts/...` are not equivalent paths. If a helper\ncannot be found, check `/skills/13f-analyzer/scripts` before writing a replacement\nanalysis pipeline.\n\nThe helpers define the stock-selection and aggregation semantics for this skill.\nDo not silently broaden their stock universe when reproducing their results.\n\n### Analyze the holding summary of a particular fund in one quarter:\n\n```bash\npython3 /skills/13f-analyzer/scripts/one_fund_analysis.py \\\n    --accession_number ... \\\n    --quarter 2025-q2 \\\n```\n\nThis script will print out several basic information of a given fund on 2025-q2, including total number of holdings, AUM, total number of stock holdings, etc.\n\n**Caliber for \"how many stocks does fund X hold\" in a single quarter.**\nThe answer is the number of **unique CUSIPs after the stock `TITLEOFCLASS`\nfilter** — i.e., the size of the grouped stock table the helper builds\ninternally (`stock_infotable.groupby(\"CUSIP\")`), *not* the raw filtered\n`INFOTABLE` row count. A single CUSIP can be reported across multiple\n`INFOTABLE` rows (e.g., split across accounts or sub-advisers), so the printed\n`Number of stock holdings` line, which reports the pre-group row count, can\nover-count stocks held. For questions phrased as \"how many stocks are held by\n<fund>\", deduplicate by CUSIP first (equivalently, read the row count of the\ngrouped stock table) and report that integer. Do **not** use:\n\n- `Total number of holdings` (unfiltered `INFOTABLE` rows, includes non-stock positions),\n- `Total AUM` / `Total stock AUM` (dollar values, not counts),\n- the raw `Number of stock holdings` row count when it exceeds the unique-CUSIP count.\n\nIf you need the unique-CUSIP count directly, you can derive it from the\nhelper's own pipeline by counting distinct CUSIPs in the stock-filtered\n`INFOTABLE` slice for that `ACCESSION_NUMBER` in that quarter.\n\n### Analyze the change of holdings of a particular fund in between two quarters:\n\n```bash\npython3 /skills/13f-analyzer/scripts/one_fund_analysis.py \\\n    --quarter 2025-q3 \\\n    --accession_number <accession number assigned in q3> \\\n    --baseline_quarter 2025-q2 \\\n    --baseline_accession_number <accession number assigned in q2>\n```\n\nThis script will print out the dynamic changes of holdings from 2025-q2 to 2025-q3. Such as newly purchased stocks ranked by notional value, and newly sold stocks ranked by notional value.\n\nFor a request ranked by dollar-value increase, take the requested number of\nCUSIPs from the beginning of the helper's `Top Buys` output, preserving order.\nDo not rank by share-count change, percentage change, or an unfiltered\n`INFOTABLE`.\n\nIf the comparison must be reproduced in custom code, preserve the helper's\npipeline exactly:\n\n1. In each quarter, select the requested accession number and apply the same\n   stock `TITLEOFCLASS` filter used by the helper.\n2. Group each filtered quarter by `CUSIP` and sum `VALUE`.\n3. Outer-join the two quarters and fill missing current/baseline values with 0.\n4. Compute `ABS_CHANGE = current VALUE - baseline VALUE`.\n5. Keep positive changes and sort `ABS_CHANGE` descending.\n\nBefore returning an answer, verify that the requested top-k contains exactly k\nunique CUSIP strings in the printed order.\n\n\n### Analyze which funds hold a stock to the most extent\n\n```bash\npython3 /skills/13f-analyzer/scripts/holding_analysis.py \\\n    --cusip <stock cusip> \\\n    --quarter 2025-q3 \\\n    --topk 10\n```\n\nThis script will print out the top 10 hedge funds who hold a particular stock with highest notional value.\n"
+      }
+    ],
+    "repair_audit": {
+      "target_node": "compute_or_transform",
+      "target_anchor": "single-quarter holdings count caliber (unique-CUSIP after stock TITLEOFCLASS filter)",
+      "target_layer": "L2",
+      "edit_kind": "Insert an explicit caliber paragraph in the one-quarter summary section of 13f-analyzer/SKILL.md stating that 'how many stocks does fund X hold' resolves to the number of unique CUSIPs after the stock TITLEOFCLASS filter (i.e., the grouped stock table size), and warn that the printed 'Number of stock holdings' is a pre-group row count that can over-count.",
+      "boundedness": "Positive scope: single-quarter 'how many stocks' question for a fund via one_fund_analysis.py in the 'Analyze the holding summary of a particular fund in one quarter' section. Negative scope: does not alter helper scripts, the stock TITLEOFCLASS universe list, the cross-quarter top-buys/sells pipeline, AUM reporting semantics, holding_analysis.py top-k-managers behavior, or any fuzzy-name-search SKILL/script content (including the per-quarter accession-number rule and CUSIP normalization).",
+      "verification_plan": "For a single-quarter fund (e.g., Renaissance in 2025-q3), run one_fund_analysis.py and separately compute the number of distinct CUSIPs in the stock-filtered INFOTABLE slice for that ACCESSION_NUMBER. The reported 'how many stocks' answer must equal that distinct-CUSIP count (grouped stock table size), which is less than or equal to the printed 'Number of stock holdings' row count. Confirm the answer is an integer and that the same filter list used by the helper is applied before deduplication.",
+      "no_edit_reason": ""
+    }
+  },
+  "changed_files": [
+    "13f-analyzer/SKILL.md"
+  ]
+}

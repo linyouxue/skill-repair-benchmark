@@ -1,0 +1,49 @@
+{
+  "diagnoses": [
+    {
+      "label": "segment-combiner lacks interval merge/de-overlap convention",
+      "observable_evidence": "segment-combiner/SKILL.md documents only sorting ('Segments are sorted by start time') and combine_segments.py sorts by start without merging adjacent/overlapping intervals or clamping to [0, duration]. Output format shows a plain segments array with no normalization guarantee, yet it is advertised as 'Compatible with video-processor --remove-segments input'.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "interval_union_normalization",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies when combining removal segments produced by independent detectors (silence-detector initial opening + pause-detector pauses) before they are fed to the video processor.",
+      "do_not_generalize_to": "Do not rewrite detector-specific semantics (threshold tuning, start-time handoff, min-duration inclusivity) or alter segment schema fields beyond the merge/clamp invariants.",
+      "target_file": "segment-combiner/SKILL.md",
+      "target_section": "Output Format / Notes (interval-merge convention and post-conditions of combine_segments)",
+      "target_layer": "L2",
+      "recommended_direction": "Specify in the skill contract that combined output must be a normalized interval union: sorted by start, with overlapping or touching intervals merged into one, each segment's duration recomputed as end - start, and all intervals clamped into the valid video timeline. Make this an explicit post-condition the downstream video-processor can rely on.",
+      "confidence": "high"
+    },
+    {
+      "label": "video-processor does not enforce non-overlap precondition before computing keep segments",
+      "observable_evidence": "video-processor/SKILL.md's completion gate asserts segments must be 'sorted and non-overlapping' and that 'original ≈ compressed + removed', but process_video.py's calculate_keep_segments only does `current_time = seg['end']` per segment. If an overlapping or out-of-order pair survives from segment-combiner, current_time can regress or produce zero/negative keep spans, breaking the invariant. The SKILL also instructs to 'Combine, sort, clamp, and de-overlap all removal segments' without binding that duty to a specific skill or check.",
+      "workflow_node": "verification",
+      "mechanism_anchor": "removal_segments_precondition_check",
+      "defect_relation": "weak",
+      "scope_boundary": "Applies to the invocation of video-processor after segment-combiner, specifically the pre-ffmpeg validation that incoming removal segments honor the combiner's normalization contract.",
+      "do_not_generalize_to": "Do not change the ffmpeg filter_complex construction, encoding parameters, or the final report schema produced by report-generator.",
+      "target_file": "video-processor/SKILL.md",
+      "target_section": "Mandatory end-to-end completion gate / Notes on removal-segment preconditions and checks",
+      "target_layer": "L2",
+      "recommended_direction": "Tie the 'combine, sort, clamp, de-overlap' responsibility explicitly to segment-combiner's normalization contract and require video-processor's invocation step to verify sorted, non-overlapping, clamped segments before building keep segments; on violation, re-run the combiner rather than silently proceeding.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "compute_or_transform",
+    "primary_anchor": "interval_union_normalization",
+    "editor_direction": "add",
+    "composition_issue": "silence-detector's opening segment and pause-detector's segments both flow through segment-combiner into video-processor. The combiner only sorts, so overlapping or touching intervals (e.g., opening ending at 221 with a pause beginning at 221 or earlier) can reach calculate_keep_segments, which assumes a disjoint, monotonic sequence. Without a merge/clamp contract at the combiner and a matching precondition check at the processor, downstream math (original ≈ compressed + removed) and the task's compression_report become inconsistent.",
+    "preservation_constraints": [
+      "silence-detector time-alignment and its handoff of segment end as pause-detector --start-time",
+      "pause-detector local-dynamic-threshold defaults and min-duration inclusivity",
+      "video-processor ffmpeg filter_complex construction and encoding parameters",
+      "report-generator schema and ffprobe-based duration measurement",
+      "video-processor's RED/GREEN terminal-result gate and completion checklist"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defect lives in the reusable Skill contracts and the invocation checks between segment-combiner and video-processor. Clarifying the combiner's interval-union post-condition and tightening the processor's precondition verification is a localized, mechanism-level repair within the existing SKILL.md files, without needing changes to detectors, ffmpeg logic, or the task-level report schema."
+  }
+}

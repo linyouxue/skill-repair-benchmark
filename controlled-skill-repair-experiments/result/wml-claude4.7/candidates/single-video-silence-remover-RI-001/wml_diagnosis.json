@@ -1,0 +1,63 @@
+{
+  "diagnoses": [
+    {
+      "label": "Valid-mode smoothed index emitted as silence-end timestamp without window offset",
+      "observable_evidence": "In silence-detector/scripts/detect_silence.py the smoothing step uses np.convolve(..., mode=\"valid\"), producing an array of length len(energies)-smoothing_window+1 whose index i corresponds to energies[i:i+smoothing_window]. The subsequent loop assigns silence_end = i directly and later writes {\"start\": 0, \"end\": silence_end, \"duration\": silence_end}, treating a convolution index as a per-second timestamp. With the documented default smoothing_window=30 this systematically shifts the opening boundary earlier by roughly a full window, so pause-detector --start-time (set from this silence_end) begins inside the opening instead of after it.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "smoothing-window-to-timestamp-alignment",
+      "defect_relation": "weak",
+      "scope_boundary": "Only the index-to-second conversion inside detect_initial_silence after valid-mode convolution; the baseline, threshold-multiplier, and segment-dict schema remain correct.",
+      "do_not_generalize_to": "Do not alter pause-detector thresholding, energy-calculator windowing, or the general output schema of silence-detector; do not change the default parameter values themselves.",
+      "target_file": "silence-detector/scripts/detect_silence.py",
+      "target_section": "detect_initial_silence (crossing search + silence_end return)",
+      "target_layer": "L2",
+      "recommended_direction": "Make the returned silence_end correspond to a real second in the original energies timeline by compensating for the valid-mode convolution offset (e.g., map crossing index i back to i + smoothing_window - 1 or i + smoothing_window//2, with a clear, documented convention). Preserve the empty-segment fallback when no crossing is found and when len(energies) < smoothing_window.",
+      "confidence": "high"
+    },
+    {
+      "label": "Silence-detector SKILL.md omits smoothing/timestamp invariant used downstream",
+      "observable_evidence": "silence-detector/SKILL.md 'How It Works' says 'Find where smoothed energy exceeds baseline x multiplier' and lists --smoothing-window, but never states what the returned end timestamp represents relative to the smoothing window. The Output Format shows end=120 as if it were an absolute second, giving no contract to callers about the index-to-second mapping that the script actually implements.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "silence-detector-output-contract",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "The silence-detector SKILL.md sections describing How It Works, Output Format, and Notes.",
+      "do_not_generalize_to": "Do not restate or alter pause-detector or segment-combiner contracts; do not change parameter defaults or add tuning targets based on desired compression totals.",
+      "target_file": "silence-detector/SKILL.md",
+      "target_section": "How It Works / Output Format / Notes",
+      "target_layer": "L2",
+      "recommended_direction": "Document the invariant that the emitted segment end is an absolute second in the original audio timeline and explain how the smoothing window relates to that timestamp (so the script and callers agree on the alignment convention being enforced in detect_silence.py).",
+      "confidence": "medium"
+    },
+    {
+      "label": "video-processor pipeline step uses silence boundary without stating alignment expectation",
+      "observable_evidence": "video-processor/SKILL.md step 3 says 'Detect the non-teaching opening with the silence detector's result, then start long-pause detection at that returned boundary.' It passes that boundary straight into pause-detector --start-time with no note that the boundary must be a real second (not a convolution-array index), so a mis-aligned silence_end silently propagates into pause detection and the keep/remove math.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "opening-boundary-handoff",
+      "defect_relation": "weak",
+      "scope_boundary": "The 'Mandatory end-to-end completion gate' step that hands silence_end into pause-detector.",
+      "do_not_generalize_to": "Do not weaken the blocking terminal-result gate, the completion checks, or the gap-preservation rule for segment combination.",
+      "target_file": "video-processor/SKILL.md",
+      "target_section": "Mandatory end-to-end completion gate (step 3)",
+      "target_layer": "L2",
+      "recommended_direction": "State explicitly that the value passed as --start-time is the silence-detector's absolute-second boundary and must correspond to the same timeline used by pause-detector and process_video, so callers know to rely on the aligned timestamp rather than a raw array index.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "compute_or_transform",
+    "primary_anchor": "smoothing-window-to-timestamp-alignment",
+    "editor_direction": "strengthen",
+    "composition_issue": "The script-level alignment bug and the two SKILL docs form one chain: detect_silence.py emits a convolution index as if it were a second, silence-detector/SKILL.md never pins the output to the audio timeline, and video-processor/SKILL.md consumes that value as --start-time. Fixing only the script without clarifying the contracts leaves the mis-interpretation latent; fixing docs without the script keeps the numerical defect.",
+    "preservation_constraints": [
+      "Keep audio-extractor, energy-calculator, pause-detector, segment-combiner, report-generator, and video-processor script logic unchanged.",
+      "Preserve default parameter values (threshold_multiplier=1.5, initial_window=60, smoothing_window=30, pause threshold_ratio=0.5, min_duration=2, window_size=30).",
+      "Preserve the blocking terminal-result gate, mandatory end-to-end completion gate, gap-preservation rule, and 'defaults first, tune from signal' guidance.",
+      "Preserve the empty-segment behavior when no energy crossing is found and when len(energies) < smoothing_window.",
+      "Preserve the existing JSON output schemas across all skills."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All identified defects live inside the supplied Skill files (silence-detector/scripts/detect_silence.py, silence-detector/SKILL.md, video-processor/SKILL.md). They concern the mapping between the smoothing-window convolution index and the audio timestamp, plus the contracts documenting that mapping — all editable at the skill layer without external tools or hidden state."
+  }
+}

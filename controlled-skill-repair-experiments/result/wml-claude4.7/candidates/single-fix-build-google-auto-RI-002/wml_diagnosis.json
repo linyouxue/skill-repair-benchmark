@@ -1,0 +1,49 @@
+{
+  "diagnoses": [
+    {
+      "label": "Missing guidance for nested Maven Invoker test project dependency resolution and modification scope",
+      "observable_evidence": "maven-build-lifecycle/SKILL.md mentions 'Maven Invoker integration tests' and requires the full reactor including Invoker steps to succeed, but gives no mechanism for (a) distinguishing a failure located inside an Invoker nested test project (e.g. src/it/<case>/pom.xml, invoker.properties, local-repo artifacts) from a failure in the main reactor module, (b) resolving dependencies the Invoker child build pulls from its own local-repo, nor (c) deciding whether the patch must land in the nested test project vs the parent module. The artifact contract hardcodes patch_1.diff at the repo root (/home/travis/build/failed/google/auto/) and does not acknowledge that a repair for an Invoker-level failure must often edit files inside the nested project directory.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "nested-invoker-test-project-scope-resolution",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies when the failing reactor step is a Maven Invoker integration test (maven-invoker-plugin) whose nested project has its own pom.xml and local-repo; the mechanism should classify where the error surfaces (parent build vs invoked child), how the child resolves its dependencies, and which path the patch must target.",
+      "do_not_generalize_to": "Do not apply to ordinary multi-module reactor failures that do not involve maven-invoker-plugin, and do not override the historical-JDK reproduction rule — the nested-project triage still runs under the declared JDK.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract / Minimal diagnostic sequence (add a 'Nested Invoker test projects' subsection)",
+      "target_layer": "L2",
+      "recommended_direction": "Add an explicit mechanism that (1) detects whether the failure originates in a maven-invoker-plugin child build, (2) locates the nested project (e.g. src/it/*/pom.xml and its invoker.properties/local-repo), (3) explains that the child's dependency resolution uses the invoker-provided local repository and may require edits to the nested pom.xml or invoker properties rather than the parent, and (4) widens the artifact contract so patch_{i}.diff targets the correct file inside the nested test project when appropriate, while preserving the historical-JDK reproduction rule.",
+      "confidence": "high"
+    },
+    {
+      "label": "Artifact contract target path is over-specified and biased toward root module",
+      "observable_evidence": "The 'Build-repair artifact contract' step 2 names '/home/travis/build/failed/google/auto/patch_1.diff' as the canonical patch location and step 4 only checks that 'the intended project file' changed, without clarifying that for a nested Invoker test failure the intended file lives under a child project directory. This conflicts with the hint that modification scope for nested test projects must be reasoned about.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "patch-target-path-binding",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Applies to Step 2 of the task (writing patch_{i}.diff) whenever the failing unit is a nested Invoker project rather than the top-level module.",
+      "do_not_generalize_to": "Do not remove the general requirement to produce a non-empty unified diff and to apply it; only the implicit assumption that the diff edits root-module files should be relaxed.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract",
+      "target_layer": "L2",
+      "recommended_direction": "Strengthen the contract to state that patch_{i}.diff paths and the files touched must correspond to the actual failing unit — for nested Invoker test projects, the diff should edit files inside the nested project (its pom.xml, invoker.properties, or sources) rather than defaulting to the parent module, while keeping the general diff/apply/verify checklist intact.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "operation_decision",
+    "primary_anchor": "nested-invoker-test-project-scope-resolution",
+    "editor_direction": "add",
+    "composition_issue": "The missing nested-Invoker mechanism (primary) causes the existing artifact-contract mechanism to point at the wrong file scope; both must compose so that triage first classifies failure locus (parent reactor vs nested Invoker child) and then the patch-path binding follows that classification. The historical-JDK reproduction rule must remain upstream of both so classification is done under the correct toolchain.",
+    "preservation_constraints": [
+      "Keep the 'reproduce the target CI before changing the project' core rule and the JDK switcher procedure unchanged.",
+      "Keep the 'Do not modernize away historical-JDK symptoms' prohibitions.",
+      "Keep the minimal diagnostic sequence commands (java -version, mvn -version, build-pom.xml verify invocation).",
+      "Keep maven-dependency-management/SKILL.md and maven-plugin-configuration/SKILL.md unchanged — the defect is localized to maven-build-lifecycle/SKILL.md.",
+      "Preserve the overall diff/apply/verify-under-JDK7 contract; only clarify path scoping for nested Invoker cases."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defect is a missing/ambiguous mechanism inside an existing Skill file (maven-build-lifecycle/SKILL.md) that already owns the Maven Invoker reactor requirement. Adding a nested-Invoker triage subsection and tightening the artifact-contract path binding are mechanism-level edits within the Skill bundle's control; no external verifier or hidden gold is required."
+  }
+}

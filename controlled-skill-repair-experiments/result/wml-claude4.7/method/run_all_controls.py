@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Evaluate the 33 controls, retrying only invalid infrastructure attempts."""
+
+from __future__ import annotations
+
+import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import threading
+
+
+ROOT = Path(os.environ.get("CONTROL_WORK_ROOT", Path(__file__).resolve().parent))
+PREPARED = ROOT / "control-prepared"
+RUNS = ROOT / "control-runs"
+RUNNER = Path("/Users/king/Downloads/skill-repair-controlled-datasets-20261020/tools/runner.py")
+BENCH_SHIM = Path(os.environ.get("CONTROL_BENCH_SHIM", ROOT / "bench_paratera.sh"))
+ENV_FILE = Path("/Users/king/Documents/Codex/2026-09-18/skillaxe-20-17-skillaxe-39-48-2/claudeapikey.env")
+METHOD = "CONTROL-Paratera-Claude47-20261030"
+MODEL = "openai/Claude-Opus-4.7"
+LOCK = threading.Lock()
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_key() -> str:
+    for raw in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip().removeprefix("export ").strip() == "API_KEY":
+            return value.strip().strip('"').strip("'")
+    raise RuntimeError("API_KEY not found")
+
+
+def result_files(attempt: Path) -> list[Path]:
+    return sorted(attempt.glob("jobs/*/*/result.json"))
+
+
+def valid_result(attempt: Path) -> dict | None:
+    files = result_files(attempt)
+    valid: list[tuple[Path, float]] = []
+    for result_file in files:
+        try:
+            data = json.loads(result_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if any(data.get(key) for key in ("error", "verifier_error", "exception", "exception_info", "error_message")):
+            continue
+        if data.get("partial_trajectory") or data.get("execution_ok") is False:
+            continue
+        rewards = data.get("rewards")
+        reward = rewards.get("reward") if isinstance(rewards, dict) else None
+        if isinstance(reward, bool):
+            reward = float(reward)
+        if isinstance(reward, (int, float)) and 0 <= reward <= 1:
+            valid.append((result_file, float(reward)))
+    # BenchFlow may retain failed internal rollout retries beside the single
+    # successful final rollout.  They are audit history, not extra task results.
+    if len(valid) != 1:
+        return None
+    result_file, reward = valid[0]
+    return {"reward": reward, "result_file": str(result_file), "valid": True}
+
+
+def existing_valid(control_id: str) -> dict | None:
+    for attempt in reversed(sorted(RUNS.glob(f"{control_id}-attempt-*"))):
+        result = valid_result(attempt)
+        if result:
+            return {**result, "attempt_dir": str(attempt)}
+    return None
+
+
+def next_attempt(control_id: str) -> tuple[int, Path]:
+    indexes = []
+    for path in RUNS.glob(f"{control_id}-attempt-*"):
+        try:
+            indexes.append(int(path.name.rsplit("-", 1)[1]))
+        except ValueError:
+            pass
+    index = max(indexes, default=0) + 1
+    return index, RUNS / f"{control_id}-attempt-{index:03d}"
+
+
+def run_control(prepared: Path, key: str, retries: int) -> dict:
+    control_id = prepared.name
+    old = existing_valid(control_id)
+    if old:
+        return {"control_id": control_id, "status": "pass" if old["reward"] == 1 else "fail", **old, "new_attempts": 0}
+    env = dict(os.environ)
+    env.update({
+        "OPENAI_API_KEY": key,
+        "OPENAI_BASE_URL": "https://llmapi.paratera.com/v1",
+        "NO_PROXY": "127.0.0.1,localhost,host.docker.internal",
+        "no_proxy": "127.0.0.1,localhost,host.docker.internal",
+    })
+    failures = []
+    for retry in range(1, retries + 1):
+        index, attempt = next_attempt(control_id)
+        command = [
+            sys.executable,
+            str(RUNNER),
+            "eval",
+            "--prepared",
+            str(prepared),
+            "--jobs",
+            str(attempt),
+            "--agent",
+            "openhands",
+            "--model",
+            MODEL,
+            "--method",
+            METHOD,
+            "--bench",
+            str(BENCH_SHIM),
+        ]
+        completed = subprocess.run(command, cwd=str(ROOT), env=env, capture_output=True, text=True)
+        result = valid_result(attempt)
+        if result:
+            status = "pass" if result["reward"] == 1 else "fail"
+            with LOCK:
+                print(f"VALID {control_id} status={status} reward={result['reward']:.3f} attempt={index}", flush=True)
+            return {
+                "control_id": control_id,
+                "status": status,
+                **result,
+                "attempt_dir": str(attempt),
+                "new_attempts": retry,
+            }
+        failures.append({
+            "attempt": index,
+            "returncode": completed.returncode,
+            "stdout_tail": completed.stdout[-1000:],
+            "stderr_tail": completed.stderr[-1000:],
+        })
+        with LOCK:
+            print(f"INVALID {control_id} attempt={index}; retry={retry < retries}", flush=True)
+    return {"control_id": control_id, "status": "invalid", "valid": False, "new_attempts": retries, "failures": failures}
+
+
+def write_summary(rows: list[dict]) -> None:
+    value = {
+        "method": METHOD,
+        "executor_agent": "openhands",
+        "executor_model": MODEL,
+        "base_url": "https://llmapi.paratera.com/v1",
+        "total": len(list(PREPARED.iterdir())),
+        "valid": sum(row.get("valid") is True for row in rows),
+        "passes": sum(row.get("status") == "pass" for row in rows),
+        "failures": sum(row.get("status") == "fail" for row in rows),
+        "invalid": sum(row.get("status") == "invalid" for row in rows),
+        "controls": sorted(rows, key=lambda row: row["control_id"]),
+        "updated_at": now(),
+    }
+    temp = ROOT / "control_eval_summary.json.tmp"
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp.replace(ROOT / "control_eval_summary.json")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--retries", type=int, default=2)
+    parser.add_argument("--controls", nargs="*", help="Optional control IDs to run")
+    args = parser.parse_args()
+    RUNS.mkdir(parents=True, exist_ok=True)
+    key = load_key()
+    selected = set(args.controls or ())
+    prepared = sorted(
+        path for path in PREPARED.iterdir()
+        if path.is_dir() and (not selected or path.name in selected)
+    )
+    missing = selected.difference(path.name for path in prepared)
+    if missing:
+        parser.error(f"unknown control IDs: {', '.join(sorted(missing))}")
+    rows: list[dict] = []
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        futures = {pool.submit(run_control, path, key, args.retries): path.name for path in prepared}
+        for future in as_completed(futures):
+            try:
+                rows.append(future.result())
+            except Exception as error:
+                rows.append({"control_id": futures[future], "status": "invalid", "valid": False, "error": repr(error)})
+            write_summary(rows)
+    write_summary(rows)
+    return 1 if any(row.get("status") == "invalid" for row in rows) else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

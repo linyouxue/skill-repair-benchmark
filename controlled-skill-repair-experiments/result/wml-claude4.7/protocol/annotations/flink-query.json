@@ -1,0 +1,35 @@
+{
+  "id": "flink-query",
+  "RI-001": {
+    "tag": "skill_missing_guidance",
+    "skill_location": [
+      {
+        "skill_name": "senior-data-engineer",
+        "skill_file": "skills/senior-data-engineer/SKILL.md",
+        "skill_section": "Key Workflows / Workflow 2: Build Real-Time Streaming Pipeline",
+        "problematic_part": "原 Skill 只给出流处理架构选择、配置、脚手架与监控的通用流程，没有要求分别、精确声明 contributing-event predicate 与 completion-event predicate，也没有禁止把任务指定的结束状态扩展为其他 terminal state。"
+      }
+    ],
+    "descrip_skill_error": "Original-Skill 生成的 Flink 作业把任务指定的 FINISH completion predicate 扩展为 FINISH 或 KILL；虽然 644 个期望输出全部存在，但额外输出了 259 个由 KILL 触发的 job 结果。",
+    "gold_repair": "实现前分别声明 contributing-event predicate 与精确的 completion-event predicate；任务指定某一结束状态时，除非规范明确声明等价，否则不得把其他 terminal state 纳入完成条件。",
+    "validation_status": "jointly-agent-validated (1/1; guard-enabled)",
+    "validation_evidence": "RI-001 与 RI-002 联合构成的 Round 3 bundle 在 flink-query-round-3-guard-r001 中通过：execution_ok=true、task_passed=true、reward=1.0、官方 verifier 3/3；运行 42/60 iterations 后正常 end_turn。该轮验证联合修复，不构成逐项消融。",
+    "annotation": "../flink-query/annotation.md"
+  },
+  "RI-002": {
+    "tag": "skill_missing_guidance",
+    "skill_location": [
+      {
+        "skill_name": "senior-data-engineer",
+        "skill_file": "skills/senior-data-engineer/SKILL.md",
+        "skill_section": "Key Workflows / Workflow 2: Build Real-Time Streaming Pipeline",
+        "problematic_part": "原 Skill 没有把 qualifying activity 写成每条输出路径的必要前置条件，也没有说明 null aggregate 表示无活动而不是数值 0；因此 completion event 可以让没有任何贡献事件的 key 合成并输出零值结果。"
+      }
+    ],
+    "descrip_skill_error": "在 RI-001 已消除 KILL-only 输出后，Round 1 仍额外输出 54 个有 FINISH、但没有 SUBMIT 的 lifecycle-only job；代码把 null aggregate 转换为 0 后无条件 collect。",
+    "gold_repair": "只允许 contributing event 建立 output eligibility；每条 collect、emit 或 sink 路径都必须先检查该资格或等价的非空 aggregate 证据；null aggregate 必须表示无活动并且不输出；提交前用 lifecycle-only 负例和 unexpected-extra-key 检查验证该约束。",
+    "validation_status": "jointly-agent-validated (1/1; guard-enabled)",
+    "validation_evidence": "RI-001 与 RI-002 联合构成的 Round 3 bundle 在 flink-query-round-3-guard-r001 中通过：execution_ok=true、task_passed=true、reward=1.0、官方 verifier 3/3；最终实现仅在 maxStageCount 非空时输出，实际结果与期望集合完全一致。该轮验证联合修复，不构成逐项消融。",
+    "annotation": "../flink-query/annotation.md"
+  }
+}

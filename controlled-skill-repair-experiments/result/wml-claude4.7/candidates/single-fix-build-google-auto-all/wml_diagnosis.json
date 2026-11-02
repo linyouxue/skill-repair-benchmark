@@ -1,0 +1,61 @@
+{
+  "diagnoses": [
+    {
+      "label": "Hardcoded repo path overrides task-provided placeholder",
+      "observable_evidence": "SKILL.md hardcodes `/home/travis/build/failed/google/auto/patch_1.diff` and `cd /home/travis/build/failed/google/auto` even though the task template specifies `/home/travis/build/failed/failed/<repo>/<id>` with `<repo>` and `<id>` placeholders.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "repository_path_resolution",
+      "defect_relation": "misrouted",
+      "scope_boundary": "Resolving the working directory and patch-output directory for the current failed build from the task's `<repo>/<id>` template.",
+      "do_not_generalize_to": "Fixed paths like google/auto; the skill must not pin a specific repository identifier.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract / Minimal diagnostic sequence",
+      "target_layer": "L1",
+      "recommended_direction": "Replace hardcoded `google/auto` with explicit instructions to derive the path from the task's `<repo>/<id>` variables and apply them consistently to both `cd` and the `patch_i.diff` output location.",
+      "confidence": "high"
+    },
+    {
+      "label": "Missing failure reproduction and build-tool selection commands",
+      "observable_evidence": "The 'Minimal diagnostic sequence' code block contains only a `cd` and no `mvn` command; the 'General Maven lifecycle reminders' section is empty. There is no guidance on choosing the build toolchain (mvn/mvnw) or reproducing the failing build to capture errors.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "build_toolchain_selection_and_failure_reproduction",
+      "defect_relation": "missing",
+      "scope_boundary": "Selecting the correct Maven invocation (local `./mvnw` vs system `mvn`) and running a reproducible build to obtain the real error signal before diagnosing.",
+      "do_not_generalize_to": "Running arbitrary non-Maven commands or rewriting unrelated CI scripts.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Minimal diagnostic sequence / General Maven lifecycle reminders",
+      "target_layer": "L2",
+      "recommended_direction": "Add explicit guidance to prefer the project's `./mvnw` wrapper when present, otherwise `mvn`, and to run a reproducing command (e.g., `mvn -B -e -fae clean verify` or equivalent) capturing output to drive diagnosis in `failed_reasons.txt`.",
+      "confidence": "high"
+    },
+    {
+      "label": "No guidance for nested Invoker IT projects — dependency resolution and edit scope",
+      "observable_evidence": "The frontmatter advertises support for 'Maven Invoker integration tests' and 'legacy multi-module builds', yet the body has no rules for nested `src/it/*` projects: how their POMs resolve dependencies from the outer build and which POM to edit when the failure originates in an invoker sub-project.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "nested_invoker_project_scope",
+      "defect_relation": "missing",
+      "scope_boundary": "Multi-module Maven builds with `maven-invoker-plugin` IT projects under `src/it/`, where failing sub-projects inherit versions/plugins from the main build.",
+      "do_not_generalize_to": "Flat single-module projects or unrelated Gradle/sbt builds; do not blindly modify outer parent POM when the fault is isolated to a nested invoker POM.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "General Maven lifecycle reminders (new subsection on nested test projects)",
+      "target_layer": "L2",
+      "recommended_direction": "Add a rule that distinguishes outer-module vs nested `src/it/<project>/pom.xml` edits: locate the actual failing POM from the Invoker log, check how it resolves versions/plugins from the parent, and restrict the patch to the smallest POM whose change fixes the error.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "input_grounding",
+    "primary_anchor": "repository_path_resolution",
+    "editor_direction": "add",
+    "composition_issue": "Hardcoded paths currently block the workflow before the diagnostic/target-binding mechanisms can run; adding path parameterization enables the newly added reproduction command and nested-project scoping to apply to any failed `<repo>/<id>`, so all three fixes compose on the same shared variables.",
+    "preservation_constraints": [
+      "Keep the three-artifact contract (failed_reasons.txt analysis, patch_i.diff, applied changes verified via git).",
+      "Preserve the maven-dependency-management and maven-plugin-configuration SKILLs unchanged — the defect is localized to maven-build-lifecycle/SKILL.md.",
+      "Preserve the YAML frontmatter name/description of maven-build-lifecycle."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All diagnosed defects are localized to maven-build-lifecycle/SKILL.md sections (artifact contract, diagnostic sequence, lifecycle reminders) that already exist and can be strengthened by adding path parameterization, reproduction commands, and nested-Invoker scoping without changing the task harness or other skills."
+  }
+}

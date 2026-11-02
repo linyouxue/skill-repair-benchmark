@@ -1,0 +1,35 @@
+{
+  "diagnoses": [
+    {
+      "label": "Missing completion-event predicate in Semantic Contract Gate",
+      "observable_evidence": "In SKILL.md under 'Semantic Contract Gate for Keyed Event Aggregations' the enumerated predicate list jumps from '1. Contributing-event predicate' directly to '3. Output-eligibility predicate', with no item 2. The surrounding prose repeatedly references a 'completion event' / 'required completion event' / 'lifecycle event' as something that triggers finalization, yet the predicate that formally defines which event types count as the completion/finalization trigger (and from which stream) is never specified. The hint explicitly flags Workflow 2 '完成事件判定的规定' (rules for determining completion events) as the problem zone, matching the task's requirement to finalize per-job stage counting only once the job has finished (i.e., a job-event lifecycle signal, distinct from task SUBMIT activity).",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Semantic Contract Gate for Keyed Event Aggregations — Completion-event predicate",
+      "defect_relation": "missing",
+      "scope_boundary": "Workflow 2 keyed Flink/streaming aggregations that combine an activity event stream (e.g., task SUBMIT events) with a separate lifecycle event stream (e.g., job FINISH/KILL/FAIL events), where finalization and emission must be driven by the lifecycle event rather than by the activity event itself.",
+      "do_not_generalize_to": "Pure single-stream windowed aggregations with no external lifecycle/completion signal; batch ETL pipelines; the top-level 'Non-negotiable Flink Emission Gate' (which is about the output-eligibility invariant, not about naming which event types constitute completion); PDF skill or unrelated workflows.",
+      "target_file": "senior-data-engineer/SKILL.md",
+      "target_section": "Workflow 2 > 'Semantic Contract Gate for Keyed Event Aggregations' — the enumerated predicate list (currently items 1 and 3)",
+      "target_layer": "L2",
+      "recommended_direction": "Add the missing predicate #2 as an explicit 'Completion/Finalization-event predicate' that the engineer must write down before implementation: which event type(s) and which source stream constitute 'the key is finished' (e.g., job-level FINISH/KILL/FAIL in job_events), and state that such events (a) trigger finalization and emission for keys that already satisfy the contributing-event predicate, (b) do not themselves contribute to the aggregate value, and (c) do not by themselves make a key output-eligible — deferring the code-level invariant to the existing top-level Emission Gate. Do not rewrite unrelated predicates, the negative-fixture guidance, or the emission-gate code block.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "operation_decision",
+    "primary_anchor": "Semantic Contract Gate for Keyed Event Aggregations — Completion-event predicate",
+    "editor_direction": "add",
+    "composition_issue": "The top-level 'Non-negotiable Flink Emission Gate' already enforces an output-eligibility invariant (do not emit without prior qualifying activity), and the Semantic Contract Gate already names predicates 1 (contributing) and 3 (output-eligibility). Without an explicit predicate 2 identifying the completion/finalization event type and source stream, these two mechanisms float: the engineer may route finalization off the wrong stream (e.g., trigger on task events, or synthesize per-key state purely from job-event keys), producing extra keys or missed emissions even while textually complying with the emission gate. Adding predicate 2 ties the activity-stream predicate (1) and the output-eligibility invariant (3 + Emission Gate) into a single consistent contract.",
+    "preservation_constraints": [
+      "Preserve the top-level 'Non-negotiable Flink Emission Gate' code block and wording verbatim.",
+      "Preserve existing predicates 1 and 3 and the negative/positive fixture validation guidance.",
+      "Preserve all unrelated Workflow 2 steps, tooling references (stream_processor.py, kafka_config_generator.py, streaming_quality_validator.py), and streaming/batch framework references.",
+      "Preserve the entire pdf/ skill bundle and other senior-data-engineer scripts and reference docs unchanged.",
+      "Preserve YAML front matter, versioning, and formatting conventions of SKILL.md."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defect is localized to a single, named subsection in senior-data-engineer/SKILL.md (Workflow 2's 'Semantic Contract Gate for Keyed Event Aggregations'), is structurally visible (a numbered list that skips item 2), and is directly addressable by inserting a missing reusable mechanism (the completion-event predicate) without touching code artifacts, scripts, templates, or the unrelated pdf skill. The repair is a mechanism-level textual addition at L2, well within the Skill's controllable surface."
+  }
+}

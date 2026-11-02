@@ -1,0 +1,63 @@
+{
+  "diagnoses": [
+    {
+      "label": "Missing in-shape text label (ticker overlay) guidance",
+      "observable_evidence": "SKILL.md documents tooltip, click selection, and interactive patterns, but has no section on rendering text labels on top of marks (e.g., ticker symbols inside bubbles). The task explicitly requires 'Each bubble should be labeled by its ticker symbol inside', and the location hint flags the '覆盖文字层' (overlay text layer) acceptance area.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "overlay-text-label-on-mark",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies when a mark (circle/rect) must carry an in-situ textual identifier anchored to the mark's center coordinates, updated on each simulation tick alongside the mark.",
+      "do_not_generalize_to": "Axis tick labels, external legends, or tooltip content; do not force text labels onto marks whose radius is too small to read.",
+      "target_file": "d3-visualization/SKILL.md",
+      "target_section": "Interactive features / add a new 'In-shape label overlay' subsection",
+      "target_layer": "L2",
+      "recommended_direction": "Add a mechanism describing: (a) append a parallel <text> selection bound to the same data, (b) set text-anchor='middle' / dominant-baseline='central', (c) update x/y on each simulation 'tick' using d.x/d.y, (d) apply pointer-events: none to the text layer so underlying circle click/hover still fire, (e) size font relative to radius and skip labels when radius is below a legibility threshold.",
+      "confidence": "high"
+    },
+    {
+      "label": "Bidirectional chart↔table selection sync not specified",
+      "observable_evidence": "SKILL.md 'Click handlers for selection/highlighting' only shows one-way selection inside a single SVG selection (`.bar.selected`). It never describes how a click in one view (bubble) propagates highlight to another view (table row) and vice versa. The task mandates 'when user clicks a bubble, its row should be at the same time highlighted in the table, and vice versa', and the hint calls out '双向联动验收' (bidirectional linkage acceptance).",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "bidirectional-cross-view-selection",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies when two or more views (chart marks and tabular rows) share a stable key (e.g., ticker) and both must reflect the same selected entity after a click in either view.",
+      "do_not_generalize_to": "Hover-only highlighting, multi-select patterns, or unrelated views that do not share a key; do not couple non-selection state (filters, sorts) through the same channel.",
+      "target_file": "d3-visualization/SKILL.md",
+      "target_section": "Interactive features / Click handlers for selection/highlighting (extend with a 'Cross-view selection' subsection)",
+      "target_layer": "L2",
+      "recommended_direction": "Add a mechanism specifying: (a) choose one stable key (e.g., ticker) as the shared selection id, (b) implement two symmetric handlers—`selectFromChart(key)` and `selectFromTable(key)`—each of which (i) clears prior `.selected` on both selections and (ii) sets `.selected` on both the matching bubble and matching tbody row, (c) wire bubble `click` to `selectFromChart` and row `click` to `selectFromTable`, (d) define CSS for `.selected` on both circles and rows, (e) note that the two scripts in scripts/ already provide `highlightTableRow`/`highlightBubble` and must be invoked symmetrically rather than only one direction.",
+      "confidence": "high"
+    },
+    {
+      "label": "Clickable-graphic hit-area ambiguity when overlay text covers mark",
+      "observable_evidence": "SKILL.md's click/tooltip examples bind handlers to `circle`/`.bar`, but with the required ticker text drawn over each bubble (per task + hint '可点击图形'), clicks landing on the <text> node would miss the underlying circle. The SKILL.md pattern never addresses this interaction between the overlay text layer and clickable marks.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "clickable-mark-hit-area-under-overlay",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Applies whenever an overlay layer (text, icon) is drawn on top of a clickable/hoverable mark in the same SVG.",
+      "do_not_generalize_to": "Marks without overlays, or overlays that must themselves be interactive (e.g., close buttons).",
+      "target_file": "d3-visualization/SKILL.md",
+      "target_section": "Interactive features / within the new 'In-shape label overlay' subsection or alongside Click handlers",
+      "target_layer": "L2",
+      "recommended_direction": "State explicitly that overlay text/label layers used purely for annotation must set `pointer-events: none` (CSS or attribute) so click/mouseover events continue to be dispatched to the underlying mark, preserving the single source of truth for selection and tooltip triggering.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "operation_decision",
+    "primary_anchor": "bidirectional-cross-view-selection",
+    "editor_direction": "add",
+    "composition_issue": "The in-shape label overlay and the clickable mark must coexist without the overlay intercepting events; the selection mechanism must then be symmetric across chart and table. Fixing only one of the three (text layer, hit-area transparency, bidirectional sync) will leave acceptance failing. Edits should be composed so the overlay text is pointer-transparent AND click handlers route through a shared key-based selection function used by both views.",
+    "preservation_constraints": [
+      "Existing tooltip pattern using .visible class and pointer-events:none on #tooltip",
+      "Determinism rules (fixed width/height, no randomness, pinned D3 version)",
+      "Offline/vendored D3 guidance and recommended project layout section",
+      "Existing conditional-tooltip rule that suppresses tooltips for ETF/incomplete-data entries",
+      "Unrelated scripts/ example files and their current APIs"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All diagnosed defects localize to specific, named subsections of d3-visualization/SKILL.md (Interactive features: in-shape labels, click handlers for selection/highlighting). The reusable mechanisms (overlay text layer with pointer-events, symmetric cross-view selection by shared key) are generic D3 patterns that can be documented at L2 without encoding task-specific data or verifier details, and the scripts/ helpers already expose the primitives (`highlightTableRow`, `highlightBubble`) needed to realize the direction."
+  }
+}
