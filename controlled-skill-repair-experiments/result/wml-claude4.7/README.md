@@ -25,6 +25,10 @@ retroactively invented here.
   final counts and supplied method/model identity.
 - `evidence/runs/`: exact selected native `result.json` and `RUN_RECORD.json`.
   [Evidence index](evidence/SELECTED_EVIDENCE_INDEX.json) maps the source members.
+- `eval-runs/` and `control-runs/`: complete native trajectories, logs,
+  verifier outputs and available artifacts for all 55 selected runs.
+  `prepared/` and `control-prepared/` contain their execution inputs.
+  [Full evidence index](evidence/FULL_EVIDENCE_INDEX.json) maps every run.
 - `candidates/`: all 22 complete supplied WML candidates and native repair/usage
   records. `inputs/`, `method/` and `protocol/` preserve the supplied small
   input bundles, method code and protocol metadata.
@@ -37,11 +41,12 @@ retroactively invented here.
   or missing; only the explicit 55 entries in the final source manifest are
   selected for the table and evidence above.
 
-Prepared task environments/assets, complete trajectories and old attempts are
-retained in the original source ZIP rather than duplicated into Git. The source
-README documents an earlier credential redaction in trajectory copies; those
-full trajectories are not published here. No keys or authorization headers are
-added. Existing repository READMEs and other methods are unchanged.
+Complete trajectories, corresponding prepared task environments/assets and
+available execution artifacts for the 55 selected runs are published from the
+supplied ZIP. Superseded and infrastructure-failed attempts are excluded from
+the measured results. The source README documents the earlier credential
+redaction in trajectory copies, which is preserved. No keys or authorization
+headers are added. Other methods and repository READMEs are unchanged.
 
 ## Selected records
 

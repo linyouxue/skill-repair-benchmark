@@ -1,0 +1,108 @@
+Failed build analysis: google/auto (BugSwarm id 484f5ae)
+========================================================
+
+Repository: /home/travis/build/failed/google/auto
+Build driver: `mvn -B -U -f build-pom.xml verify --fail-at-end
+               -Dsource.skip=true -Dmaven.javadoc.skip=true`
+Travis JDK:   openjdk7 / oraclejdk7
+
+Reactor:
+  Auto (Parent)             (pom.xml)
+  Auto Common Libraries     (common/pom.xml)
+  AutoFactory               (factory/pom.xml)
+  AutoService               (service/pom.xml)
+  AutoValue                 (value/pom.xml)
+
+Environment vs build:
+  The host runs OpenJDK 11 by default (java-11-openjdk-amd64). The project
+  (via the published parent `com.google.auto:auto-parent:3` and via the
+  transitive test dep `com.google.testing.compile:compile-testing:0.6/0.7/0.8`)
+  declares a system-scoped dependency `com.sun:tools:${java.version}` whose
+  `systemPath` is `${java.home}/../lib/tools.jar`. That file does not exist on
+  Java 9+. The repository ships OpenJDK 7 at `/usr/lib/jvm/java-7-openjdk-amd64`,
+  which is what the original Travis build used. Running the build with
+  `JAVA_HOME=/usr/lib/jvm/java-7-openjdk-amd64` resolves this and all four
+  main modules compile successfully.
+
+Actual code/config error (the one that caused the real Travis failure):
+----------------------------------------------------------------------
+Module AutoValue invokes `maven-invoker-plugin` which forks a second Maven
+build for each Integration Test project under `value/src/it/*`:
+
+  * `value/src/it/gwtserializer`  → PASSES
+  * `value/src/it/functional`     → FAILS at `testCompile`
+
+Error excerpt (value/target/it/functional/build.log):
+
+  [ERROR] .../AutoValueTest.java:[50,33] unmappable character for encoding ASCII
+  [ERROR] .../AutoValueTest.java:[50,34] unmappable character for encoding ASCII
+  [ERROR] .../SimpleValueTypeTest.java:[26,33] unmappable character ...
+  [ERROR] .../enums/MyEnum.java:[19,33] ...
+  [ERROR] .../PackagelessValueTypeTest.java:[25,33] ...
+  [ERROR] AutoValueTest.java:[20,30] cannot find symbol class MoreObjects
+  [ERROR] AutoValueTest.java:[72,16] package MoreObjects does not exist
+
+Diagnosis — Problem 1 (encoding):
+  * Several sources in `value/src/it/functional/src/{main,test}/java/**` are
+    UTF-8 encoded and contain accented characters, e.g. the JavaDoc
+    `@author emcmanus@google.com (Éamonn McManus)` at line 50 of
+    AutoValueTest.java. Hex of that line:
+      "... (" 303 211 "amonn McManus)"            # 0xC3 0x89 = U+00C9 'É'
+  * The container's locale is `LANG=C` / `LC_ALL=C`, so the forked javac
+    defaults to US-ASCII and rejects those bytes.
+  * The root cause is that `value/src/it/functional/pom.xml` does NOT set
+    `project.build.sourceEncoding` and does NOT pass `<encoding>UTF-8</encoding>`
+    to the `maven-compiler-plugin`. The gwtserializer IT contains only
+    ASCII sources, so it is not affected.
+
+Diagnosis — Problem 2 (missing symbol `MoreObjects`):
+  * `AutoValueTest.java` imports `com.google.common.base.MoreObjects`,
+    added in commit 317dcc8 ("Migrate users from c.g.c.base.Objects to
+    MoreObjects.").
+  * `MoreObjects` was introduced in Guava 18.0. The AutoValue main module
+    uses `guava:18.0`, but the functional IT project does NOT depend on
+    guava directly. Its tree is:
+       functional
+       +- auto-value:1.2-SNAPSHOT       (shaded, so its Guava is relocated
+       |                                 to `autovalue.shaded.com.google.*`
+       |                                 and invisible to the test code)
+       +- jsr305:1.3.9                  (provided)
+       +- junit:4.11                    (test) -> hamcrest-core:1.3
+       +- truth:0.25                    (test) -> guava:17.0 (test)
+       \- guava-testlib:18.0            (test) -> guava:18.0 (test)
+  * Maven dependency mediation at equal depth favours the first-declared
+    path. `truth:0.25` is listed before `guava-testlib:18.0`, so
+    `guava:17.0` wins. Guava 17.0 does NOT contain `MoreObjects`
+    (confirmed by inspecting `guava-17.0.jar`), hence
+    `cannot find symbol class MoreObjects`.
+  * This is a real dependency bug exposed by the migration commit, not a
+    side effect of the encoding problem (although both errors appear in
+    the same compiler run).
+
+Fix plan:
+---------
+Patch `value/src/it/functional/pom.xml` to:
+  a) Add a `<properties>` block that sets `project.build.sourceEncoding`
+     and `project.reporting.outputEncoding` to UTF-8. This makes
+     `maven-compiler-plugin` and `maven-resources-plugin` honour UTF-8
+     regardless of the system locale, matching the convention used by
+     the rest of the Google Auto project.
+  b) Also add explicit `<encoding>UTF-8</encoding>` entries inside both
+     `<configuration>` blocks (default build and the `eclipse` profile)
+     for `maven-compiler-plugin`. The invoker-run build runs the default
+     profile first, then re-runs with the `eclipse` profile (see
+     `invoker.properties`), and both must compile the UTF-8 sources.
+  c) Add an explicit `com.google.guava:guava:18.0` (`<scope>test</scope>`)
+     dependency so Maven picks Guava 18.0 (where `MoreObjects` lives)
+     over the 17.0 pulled in transitively via `truth:0.25`.
+
+  Nothing else needs code changes. Build execution still requires JDK 7
+  (used by the original Travis job) because of the pre-existing
+  `com.sun:tools` system dependency transitive from `compile-testing`.
+
+Verification:
+  * `JAVA_HOME=/usr/lib/jvm/java-7-openjdk-amd64 PATH=$JAVA_HOME/bin:$PATH
+     mvn -B -U -f build-pom.xml verify --fail-at-end
+         -Dsource.skip=true -Dmaven.javadoc.skip=true`
+  * Both IT projects (`gwtserializer`, `functional`) should PASS,
+    and the full reactor should finish with BUILD SUCCESS.

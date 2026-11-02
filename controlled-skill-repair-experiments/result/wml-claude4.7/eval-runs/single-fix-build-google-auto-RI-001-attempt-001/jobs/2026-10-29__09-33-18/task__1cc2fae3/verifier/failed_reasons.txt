@@ -1,0 +1,103 @@
+Analysis of build failure for google/auto
+==========================================
+
+Repository: /home/travis/build/failed/google/auto
+Build command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end \
+      -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Maven in this sandbox reports:
+  Default locale: en_US, platform encoding: ANSI_X3.4-1968
+
+That is a plain-ASCII platform encoding. All of the failures observed are
+triggered by that fact; none of them are defects in the project's Java code.
+
+========================================================================
+Failure 1 - unit test in `auto-value` surefire run
+========================================================================
+
+Failing test:
+  com.google.auto.value.processor.AutoAnnotationCompilationTest#testMissingClass
+
+Assertion that fails:
+  java.lang.AssertionError:
+    Not true that <"unmappable character for encoding ASCII">
+    contains <"NotAutoAnnotation">
+  at AutoAnnotationCompilationTest.doTestMissingClass(...:401)
+
+Root cause:
+  * The test builds a Java source via `JavaFileObjects.forSourceLines`
+    (com.google.testing.compile:compile-testing:0.6) and compiles it with
+    ToolProvider.getSystemJavaCompiler().
+  * compile-testing serialises the source bytes with the platform default
+    charset. On an ASCII platform those bytes include unmappable UTF-8
+    characters, so javac emits "unmappable character for encoding ASCII"
+    as the FIRST diagnostic.
+  * The assertion checks that `diagnostics.get(0)` contains
+    "NotAutoAnnotation" - but the first diagnostic is now the encoding
+    message, not the expected missing-annotation message.
+
+Verification: running the exact same test with LC_ALL=C.UTF-8 passes.
+Build-configuration problem, not a code bug.
+
+Fix (patch_1.diff):
+  Edit `/home/travis/build/failed/google/auto/pom.xml` (the auto-parent
+  POM). Add a `maven-surefire-plugin` entry to `<build><plugins>` that
+  passes `-Dfile.encoding=UTF-8` via `<argLine>`. All child modules
+  (common, factory, service, value) inherit this and run their unit
+  tests with UTF-8.
+
+========================================================================
+Failure 2 - maven-invoker-plugin IT `value/src/it/functional`
+========================================================================
+
+Observed after fix 1 was applied. The gwtserializer IT already passes;
+only the functional IT fails. It fails for TWO independent reasons:
+
+(2a) Encoding in the IT compile
+     The functional IT is a separate Maven invocation launched by
+     maven-invoker-plugin. Its own pom.xml does not declare
+     `project.build.sourceEncoding`, so maven-compiler-plugin falls
+     back to the platform encoding (ASCII). Several IT sources contain
+     non-ASCII characters (e.g. "Éamonn" in a JavaDoc @author tag),
+     which javac rejects as:
+         unmappable character for encoding ASCII
+
+(2b) Guava version mediation
+     `mvn dependency:tree` on the generated functional IT shows:
+         truth:0.25:test
+           \- guava:17.0:test             <-- MoreObjects NOT present
+         guava-testlib:18.0:test
+           \- guava:18.0:test             <-- MoreObjects present
+     Maven picks guava:17.0 because `truth` is declared before
+     `guava-testlib` in the pom.xml and Maven's conflict resolution
+     prefers the first-declared dependency at the same depth. The
+     installed auto-value POM is a reduced POM (maven-shade-plugin with
+     minimizeJar), so it no longer contributes a direct guava:18
+     dependency, leaving stale guava:17 to win.
+     AutoValueTest.java uses `com.google.common.base.MoreObjects`,
+     introduced in Guava 18, so compilation fails with:
+         cannot find symbol
+           symbol:   class MoreObjects
+           location: package com.google.common.base
+
+Both are build-configuration problems in the IT pom.xml.
+
+Fix (patch_2.diff):
+  Edit `/home/travis/build/failed/google/auto/value/src/it/functional/pom.xml`:
+    * Add `<properties><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>`
+      so the IT compiler reads sources as UTF-8.
+    * Add an explicit top-level `com.google.guava:guava:18.0` test
+      dependency, declared BEFORE truth, so Maven mediation keeps
+      Guava 18 and MoreObjects resolves.
+
+========================================================================
+Summary of patches
+========================================================================
+
+patch_1.diff - parent pom.xml: pin surefire JVM to -Dfile.encoding=UTF-8.
+patch_2.diff - value/src/it/functional/pom.xml:
+                 * declare project.build.sourceEncoding=UTF-8;
+                 * declare explicit guava:18.0 test dep ahead of truth.
+
+No Java source file is modified. The fixes are build-configuration only.
