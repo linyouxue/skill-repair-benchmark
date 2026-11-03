@@ -1,0 +1,43 @@
+Repository: /home/travis/build/failed/google/auto
+
+Target CI configuration (.travis.yml)
+- JDK: oraclejdk7 / openjdk7
+- Build command:
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Failure reproduction
+- Running the CI build command under Java 7 fails in module :auto-value.
+- The failure happens inside maven-invoker-plugin (integration-test).
+- The invoker project that fails is value/src/it/functional (copied to value/target/it/functional).
+
+Observed errors (functional invoker project)
+1) javac testCompile fails with:
+   "unmappable character for encoding ASCII"
+   Maven reports platform encoding ANSI_X3.4-1968 (ASCII). The invoker POM does not set
+   project.build.sourceEncoding, so the compiler plugin uses the platform default.
+
+2) javac testCompile also fails with:
+   "cannot find symbol: class MoreObjects" (com.google.common.base.MoreObjects)
+   dependency:tree shows:
+     com.google.truth:truth:0.25 -> com.google.guava:guava:17.0
+   Guava 17.0 does not contain MoreObjects, but the test sources import it.
+
+Root cause
+- This is a build/test configuration issue in the invoker integration test templates.
+- Production code modules build successfully; the invoker project resolves the wrong Guava version
+  and uses the wrong source-file encoding.
+
+Fix plan
+- value/src/it/functional/pom.xml
+  - Add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>.
+  - Add an explicit dependency on com.google.guava:guava:18.0 (test scope) to override Truth's
+    transitive guava:17.0 and provide MoreObjects.
+
+- value/src/it/gwtserializer/pom.xml
+  - Add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding> to prevent the same
+    encoding issue in that invoker project.
+
+Verification
+- Re-run:
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+  under Java 7 and confirm all invoker builds pass.
