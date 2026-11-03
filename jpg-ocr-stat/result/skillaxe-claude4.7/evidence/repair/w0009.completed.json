@@ -1,0 +1,89 @@
+{
+  "window_id": "w0009",
+  "attempt": 3,
+  "diagnoses": [
+    {
+      "prediction_id": "074.jpg/total_amount",
+      "description": "Total selection failure driven by OCR digit-flip outlier on a high-priority keyword line. The receipt contains multiple strong anchors (Subtotal / Total incl GST / Total Amt Rounded / Payment) that agree, but one OCR pass produced a spurious 702.00 and the pipeline selected it.",
+      "evidence": "Allowed feedback: 074.jpg amount_correct=false while date_correct=true; prediction total_amount=\"702.00\". Visual inspection of 074.jpg shows Total incl. of GST 102.00, Total Amt Rounded 102.00, Payment 102.00, and an item line amount 102.00; 702.00 is not consistent with the receipt’s internal totals and is a classic OCR 1→7 digit flip. This indicates selection logic over-trusted a single OCR line/variant and lacked a strict anchor-consistency override.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Anchor-driven outlier rejection (critical for OCR digit flips like 102.00→702.00)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "077.jpg/total_amount",
+      "description": "Rounding precedence failure: the extractor selected the pre-rounding inclusive total (23.26) instead of the final payable TOTAL after rounding adjustment (23.25).",
+      "evidence": "Allowed feedback: 077.jpg amount_correct=false while date_correct=true; prediction total_amount=\"23.26\". Visual inspection of 077.jpg shows 'Total (Inclusive of GST): 23.26', 'Rounding Adj: -0.01', then a bold final 'TOTAL: 23.25'. Exact-match scoring makes this a hard failure unless the rule 'final total after rounding wins' is enforced mechanically.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Rounding handling (common exact-match failure) — HARD RULE"
+        }
+      ]
+    },
+    {
+      "prediction_id": "078.jpg/total_amount",
+      "description": "Schema/normalization + header-triggered fallback failure: total_amount was emitted as an empty string, and this receipt layout contains an 'Amount' column header that can incorrectly trigger split-line fallback to an item amount unless explicitly excluded. Also, the total can appear as 'Grand Total' with OCR punctuation variants and the amount may be mis-OCRed as 92:80.",
+      "evidence": "Allowed feedback: 078.jpg amount_correct=false; prediction total_amount=\"\" (empty string) violates task requirement (must be null on failure). Visual inspection of 078.jpg shows a table header 'Description Qty Price Amount' and later summary lines 'Total: 92.80' and 'Grand Total: 92.80' plus 'Cash Received: 100.00' and 'Change: 7.20'. Without explicit exclusion of header lines containing AMOUNT and strict gating of split-line fallback, an extractor can grab an item amount. Additionally, OCR can render 92.80 as 92:80 and 'Grand Total' as 'GrandTota.'/'GrandTotal.'; normalization and tolerant keyword matching are required.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Split keyword/amount across lines (tight trigger)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Amount string normalization (critical for exact-match scoring)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "034.jpg/date",
+      "description": "Date disambiguation failure on a dense invoice with multiple date-like strings: the pipeline selected a secondary date-like token (or an OCR-corrupted label line) instead of the primary header Date field.",
+      "evidence": "Allowed feedback: 034.jpg date_correct=false while amount_correct=true; prediction date=\"2018-08-09\". Visual inspection of 034.jpg shows a clear header block with 'Date: 09/03/2018' and also other date-like tokens/fields (e.g., time, receipt metadata) that can be misread or swapped by OCR. This indicates the date selector needs stronger header-block + label-tolerant prioritization and should not rely on first regex match.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Date extraction (reduce false positives)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.62,
+      "rationale": "The current candidate image-ocr skill already incorporates the key repairs implied by the historical failures: (1) anchor-driven outlier rejection to defeat 102→702 digit flips (074), (2) an explicit hard rule to prefer final totals after rounding (077), (3) strict null/2dp normalization with an explicit empty-string guard plus decimal-separator normalization (92:80→92.80) and cash-payment exclusions (078), and (4) label-tolerant, header-preferential date ranking (034). Given the evidence, additional changes risk overfitting; the main remaining improvement would be implementation adherence rather than further skill text."
+    },
+    "trigger_precision": {
+      "score": 0.86,
+      "rationale": "The candidate’s added rules are narrowly scoped to receipt OCR and only trigger under specific conditions (e.g., split-line fallback only when keyword line has no digits; anchor override only when multiple anchors agree; header-line exclusion only for clear table headers)."
+    },
+    "instruction_compliance": {
+      "score": 0.93,
+      "rationale": "Diagnoses are based only on permitted field-level correctness feedback and visual inspection of provided images; no oracle values are referenced. No repository/tool instructions are executed. No unnecessary skill files are modified."
+    },
+    "solution_path_coverage": {
+      "score": 0.84,
+      "rationale": "Covers all observed failure classes in the run: wrong date among multiple candidates (034), wrong total due to OCR digit flip/outlier (074), wrong total due to rounding precedence (077), and schema/normalization + header-triggered fallback issues (078)."
+    },
+    "overall_rationale": "This packet’s historical evidence aligns with the already-updated image-ocr candidate: the failures are selection/normalization issues under OCR noise, not missing OCR capability. The candidate skill text already encodes the minimal, transferable heuristics needed (baseline OCR pass, header/date ranking, total keyword priority with exclusions, rounding precedence, anchor-consistency override, header-line exclusion, and strict null/2dp normalization). Therefore, no further SKILL.md edits are recommended in this iteration."
+  },
+  "iteration_summary": "Diagnosed the four incorrect fields (034 date; 074/077/078 totals) using allowed feedback and the provided images. The current candidate image-ocr skill already addresses these failure modes with targeted, receipt-specific heuristics and strict output normalization, so no additional skill file updates are proposed.",
+  "request_audit": "w0009__attempt-03.request-audit.json",
+  "response_record": "w0009__attempt-03.response.json"
+}

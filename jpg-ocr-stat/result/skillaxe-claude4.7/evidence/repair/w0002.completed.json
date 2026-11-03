@@ -1,0 +1,75 @@
+{
+  "window_id": "w0002",
+  "attempt": 1,
+  "diagnoses": [
+    {
+      "prediction_id": "034.jpg/date",
+      "description": "Date extraction likely mis-parsed a labeled dd/mm/yyyy date due to OCR noise and/or ambiguous numeric tokens; the receipt has an explicit 'Date:' field but OCR can corrupt separators or swap digits, and a robust extractor should prioritize labeled date lines and validate plausibility.",
+      "evidence": "Allowed feedback shows 034.jpg date_correct=false while amount_correct=true. The OCR snippet in the run shows a labeled line 'Salesperson: Data: 09/08/2018' (label misspelled as Data), and the image itself shows a clear 'Date: 09/03/2018' in the header block. This is a classic ambiguity: multiple date-like strings can appear (or OCR can mutate one), so selection must prioritize explicit labels and sanity-check formats.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Date extraction (reduce false positives)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "074.jpg/total_amount",
+      "description": "Total amount extraction likely selected the wrong numeric value because multiple 'Total' variants exist (subtotal, total incl GST, rounded total, payment), and OCR can misread 102.00 as 702.00; extraction should prefer 'Total Amt Rounded'/'Total Rounded' when present and apply plausibility checks against nearby totals.",
+      "evidence": "Allowed feedback shows 074.jpg amount_correct=false while date_correct=true. The OCR text contains 'Subtotal : 102.00', 'Total incl. of GST 702.00' (likely OCR error), and 'Total Amt Rounded ... 102.00'. The image shows totals around 102.00. A robust rule should prioritize the rounded total line and also reject outliers that contradict subtotal/rounded totals on the same receipt.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "077.jpg/total_amount",
+      "description": "Total amount extraction likely chose the 'Total (Inclusive of GST)' value instead of the final payable 'TOTAL:' after rounding adjustment; extractor should explicitly prefer the final bold TOTAL line when a rounding adjustment exists and the final total differs.",
+      "evidence": "Allowed feedback shows 077.jpg amount_correct=false while date_correct=true. The image shows 'Total (Inclusive of GST): 23.26' and then 'Rounding Adj: -0.01' followed by a bold 'TOTAL: 23.25'. The run prediction used 23.26, indicating the pipeline did not apply a 'final total after rounding' preference.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "078.jpg/total_amount",
+      "description": "Output normalization failure: total_amount was emitted as an empty string instead of null or a 2-decimal string; the task requires null on failure and exact two-decimal formatting on success.",
+      "evidence": "Allowed feedback shows 078.jpg amount_correct=false; predictions table shows total_amount as \"\" (empty string). Task spec: if extraction fails set to null; otherwise must be a string with exactly two decimal places. This indicates missing post-processing/validation at the field level.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Amount string normalization (critical for exact-match scoring)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "image-ocr/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.76,
+      "rationale": "Improves the three observed failure modes: (1) date ambiguity on 034 by strengthening label-tolerant date selection; (2) total selection on 074/077 by explicitly prioritizing rounded/final totals and adding a plausibility cross-check to catch OCR digit flips; (3) formatting failure on 078 by reiterating None vs empty string and adding punctuation normalization (92:80→92.80). Likely increases exact-match accuracy without changing successful cases."
+    },
+    "trigger_precision": {
+      "score": 0.8,
+      "rationale": "All added guidance is scoped to receipt OCR field extraction (date/total) and post-processing; it does not prescribe a single OCR configuration globally and avoids unrelated document OCR advice."
+    },
+    "instruction_compliance": {
+      "score": 0.9,
+      "rationale": "Uses only permitted evidence (field-level correctness + visible OCR outputs/images) and does not reference oracle values. Provides complete replacement content only for the changed existing SKILL.md file and preserves unrelated sections."
+    },
+    "solution_path_coverage": {
+      "score": 0.78,
+      "rationale": "Covers: labeled-date disambiguation, rounding-vs-inclusive total conflicts, OCR digit flip/outlier detection, and strict null/format handling. Does not fully address extreme skew/region-cropping, but those were not implicated by the provided failures."
+    },
+    "overall_rationale": "The current candidate already added receipt heuristics, but the historical failures show two additional gaps: (a) OCR label corruption (DATE→DATA) causing wrong date selection, and (b) OCR digit flips producing implausible totals (102→702) that should be rejected when a rounded total is present. Adding label-tolerant matching, explicit rounded-total priority, and a lightweight plausibility cross-check is a minimal, transferable improvement."
+  },
+  "iteration_summary": "Refined the image-ocr skill to better handle (1) labeled date lines with OCR-corrupted labels, (2) totals with rounding/final-payable lines, and (3) OCR digit/punctuation errors via plausibility checks and decimal-separator normalization. Returned a full replacement for environment/skills/image-ocr/SKILL.md only.",
+  "request_audit": "w0002__attempt-01.request-audit.json",
+  "response_record": "w0002__attempt-01.response.json"
+}

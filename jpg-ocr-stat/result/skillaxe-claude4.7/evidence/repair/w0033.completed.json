@@ -1,0 +1,89 @@
+{
+  "window_id": "w0033",
+  "attempt": 1,
+  "diagnoses": [
+    {
+      "prediction_id": "034.jpg/date",
+      "description": "Date disambiguation failure: the original pipeline returns the first regex-matching date anywhere in the OCR text, so it can pick a secondary date-like token (or an OCR-corrupted label line like DATE→DATA) instead of the primary header Date field.",
+      "evidence": "Source code excerpt (atif_steps s0008) shows extract_date() iterates lines top-to-bottom and returns immediately on first match, with no label/context ranking. Prior history and OCR snippets indicate competing header-adjacent date-like strings (e.g., “Salesperson: Data: …”) exist on 034.jpg; allowed feedback shows date_correct=false while amount_correct=true.",
+      "locations": [
+        {
+          "file": "diagnosis/records/atif_steps.jsonl",
+          "section": "s0008: extract_date() returns first match; no ranking"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Date extraction (reduce false positives)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "074.jpg/total_amount",
+      "description": "Total selection failure due to OCR digit-flip outlier and weak candidate selection: the original pipeline prefers the last matching TOTAL-like line and lacks anchor-consistency override, so a corrupted ‘Total incl… 702.00’ can dominate despite Subtotal/Payment anchors.",
+      "evidence": "OCR debug for 074.jpg shows both anchors (“Subtotal : 102.00”, “Payment : 102.00”) and an outlier “Total inel. of GBT 702.00” (atif_steps s0010 / m0032). The extraction logic in s0008 explicitly “Prefer the LAST candidate line” and then uses split-line fallback, with no anchor-consistency check. Allowed feedback: 074.jpg amount_correct=false; prediction total_amount=702.00.",
+      "locations": [
+        {
+          "file": "diagnosis/records/atif_steps.jsonl",
+          "section": "s0008: extract_total prefers last candidate; no anchor override"
+        },
+        {
+          "file": "diagnosis/records/atif_steps.jsonl",
+          "section": "s0010: OCR lines include 702.00 vs 102.00 anchors"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Anchor-driven outlier rejection"
+        }
+      ]
+    },
+    {
+      "prediction_id": "077.jpg/total_amount",
+      "description": "Rounding precedence failure: receipt contains both an inclusive total and a final payable TOTAL after a rounding adjustment; naive ‘TOTAL’ selection can pick the wrong one unless a hard rounding precedence rule is applied.",
+      "evidence": "077.jpg image shows “Rounding Adj: -0.01” followed by bold “TOTAL: 23.25”, while an earlier line shows “Total (Inclusive of GST): 23.26”. Allowed feedback: 077.jpg amount_correct=false; prediction total_amount=23.26. This is consistent with selection not enforcing ‘final total after rounding wins’.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Rounding handling (common exact-match failure) — HARD RULE"
+        }
+      ]
+    },
+    {
+      "prediction_id": "078.jpg/total_amount",
+      "description": "Schema/normalization failure: total_amount was emitted as an empty string instead of null. Additionally, this receipt layout includes an AMOUNT column header that can trigger split-line fallback to an item amount unless explicitly excluded; OCR may also corrupt decimal separators (92:80) and GRAND TOTAL spacing/punctuation.",
+      "evidence": "Predictions table shows 078.jpg total_amount=\"\" (empty string) while task requires null on failure. The source-run trace (prior history) shows matching on “Description Qty Price Amount” and split-line fallback to an item amount; OCR variants include “92:80” and “GrandTota.”. These are exactly the failure modes addressed by strict schema guard + header-line exclusion + decimal normalization.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Amount string normalization (critical for exact-match scoring)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Total amount extraction (avoid subtotals/cash/change) / exclude column headers + tight split-line fallback"
+        }
+      ]
+    }
+  ],
+  "updated_files": [],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.61,
+      "rationale": "No skill text changes proposed because the current candidate image-ocr skill already encodes the missing behaviors evidenced in the source run (header/label-tolerant date ranking; rounding precedence; anchor-consistency override; header-line exclusion; decimal normalization; empty-string→null guard). The dominant gap in the historical run is implementation adherence (the original code used first-match date and last-match total), not missing guidance."
+    },
+    "trigger_precision": {
+      "score": 0.86,
+      "rationale": "By not expanding or altering skill triggers further, we avoid over-broad heuristics that could regress correct cases. The candidate’s existing rules are already tightly gated (e.g., split-line fallback only when keyword line has no digits and is not a header; anchor override only when multiple anchors agree)."
+    },
+    "instruction_compliance": {
+      "score": 0.94,
+      "rationale": "Uses only permitted evidence (field-level correctness feedback, predictions, and source-run code/OCR outputs) and does not reference oracle values. Preserves the source run and termination metadata. Provides no unnecessary file modifications."
+    },
+    "solution_path_coverage": {
+      "score": 0.84,
+      "rationale": "Diagnoses cover all four incorrect fields and tie them to concrete failure mechanisms visible in the source run (first-match date; last-match total; missing rounding precedence; missing schema guard). The current candidate skill already covers these mechanisms, so additional skill edits are not required for coverage."
+    },
+    "overall_rationale": "The historical failures are explained by the original extraction code’s simplistic selection rules (first regex date; last TOTAL-like line; weak exclusions; no anchor/rounding precedence; empty-string output). The current candidate image-ocr skill already documents the minimal, transferable heuristics needed to prevent these errors. Therefore, this iteration recommends no further SKILL.md changes; the next improvement would be ensuring downstream implementations follow the documented rules."
+  },
+  "iteration_summary": "Diagnosed the four incorrect fields (034 date; 074/077/078 totals) and linked each to specific source-run selection/normalization behaviors. No skill file updates proposed because the current candidate image-ocr SKILL.md already addresses these failure modes; remaining risk is implementation adherence rather than missing guidance.",
+  "request_audit": "w0033__attempt-01.request-audit.json",
+  "response_record": "w0033__attempt-01.response.json"
+}
