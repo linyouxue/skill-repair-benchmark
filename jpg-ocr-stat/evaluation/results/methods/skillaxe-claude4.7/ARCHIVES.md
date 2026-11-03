@@ -18,3 +18,5 @@
 冻结 Skill：本提交的 [`jpg-ocr-stat/result/skillaxe-claude4.7/skills/`](../../../../result/skillaxe-claude4.7/skills/)，原任务与泛化目录在同一 Git 提交中冻结。
 
 另保留 `incomplete_runs/group02_run_01-missing-excel/` 的真实记录；该次缺少原 Excel，未计入三次交付均值。
+
+最终 Skill 的固定提交：[`4d34efb82a68654b5ba7b04620fc089919462120`](https://github.com/linyouxue/skill-repair-benchmark/tree/4d34efb82a68654b5ba7b04620fc089919462120/jpg-ocr-stat/result/skillaxe-claude4.7/skills/)。
