@@ -1,0 +1,42 @@
+Toolchain
+- java: openjdk version "11.0.27" 2025-04-15 (no tools.jar present under $JAVA_HOME)
+- maven: Apache Maven 3.6.3
+
+Reproduction
+- repo: /home/travis/build/failed/google/auto
+- command: mvn -e -DtrimStackTrace=false -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+- first failing module: common (com.google.auto:auto-common)
+
+First real error
+- Failed to execute goal on project auto-common: Could not resolve dependencies
+- Could not find artifact com.sun:tools:jar:11.0.27 at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause hypothesis
+- The test dependency com.google.testing.compile:compile-testing (0.6/0.7/0.8 used across modules) declares a system-scoped dependency:
+  com.sun:tools:${java.version} with <systemPath>${toolsjar}</systemPath>.
+- compile-testing’s POM activates a profile named default-profile with <activeByDefault>true</activeByDefault> and sets:
+  toolsjar=${java.home}/../lib/tools.jar.
+- On JDK 9+ (including JDK 11 in this environment) tools.jar no longer exists, so Maven fails during dependency resolution.
+- This is a build/dependency configuration issue (not a Java source-code compilation failure).
+
+Planned fix
+- In each module that depends on compile-testing (common, factory, service, value), add an <exclusions> block to the compile-testing dependency to exclude:
+  <groupId>com.sun</groupId><artifactId>tools</artifactId>
+- Rationale: on JDK 9+ the compiler implementation classes are provided by the JDK itself (jdk.compiler/java.compiler modules), so we should not require tools.jar.
+- After patching, rerun the same Maven verify command to confirm the reactor completes.
+
+Additional failures after excluding com.sun:tools
+- common: VisibilityTest.effectiveClassVisibility fails on JDK 9+.
+  Assertion: expected PUBLIC but got DEFAULT.
+  Cause: Element.getEnclosingElement() chain is now: type -> package -> module -> null.
+  Visibility.effectiveVisibilityOfElement currently continues past the package and treats the module
+  element as DEFAULT (no modifiers), which incorrectly reduces the effective visibility.
+- factory: compilation fails because javax.annotation.Generated is missing on JDK 9+.
+  Error: cannot find symbol class Generated (package javax.annotation)
+
+Extended fix plan
+- common: stop effectiveVisibilityOfElement traversal once we reach the PACKAGE element.
+- factory + value: add dependency javax.annotation:javax.annotation-api so javax.annotation.Generated
+  is available at compile/test time on JDK 9+.
+- Re-run: mvn -f build-pom.xml verify (same flags) until reactor succeeds.
+

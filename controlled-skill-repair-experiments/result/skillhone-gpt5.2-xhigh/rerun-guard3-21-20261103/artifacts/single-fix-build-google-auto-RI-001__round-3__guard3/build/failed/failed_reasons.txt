@@ -1,0 +1,32 @@
+Toolchain
+- java: openjdk version "11.0.27" (Ubuntu), JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+- maven: Apache Maven 3.6.3
+
+Reproduction
+- repo: /home/travis/build/failed/google/auto
+- command: mvn -e -DtrimStackTrace=false -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+- first failing module: common (auto-common) (reactor also reports factory/service failures)
+
+First real error
+- Failed to execute goal on project auto-common: Could not resolve dependencies
+  Could not find artifact com.sun:tools:jar:11.0.27 at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Where it comes from
+- auto-* modules depend (test scope) on com.google.testing.compile:compile-testing:0.7.
+- compile-testing:0.7 declares a system-scoped dependency:
+    com.sun:tools:${java.version} (systemPath=${toolsjar})
+  and sets toolsjar=${java.home}/../lib/tools.jar via an always-active profile.
+- On Java 9+ there is no tools.jar, so Maven dependency resolution fails before any compilation.
+
+Root cause hypothesis
+- Outdated compile-testing (0.7) assumes a JDK<=8 layout (tools.jar).
+- Current environment runs Java 11, so tools.jar is missing.
+- (Likely follow-on) The environment currently lacks javac/jar binaries, so a full JDK will be needed to compile/test locally.
+
+Planned fix
+1) Remove the tools.jar requirement by updating our module POMs:
+   - Add an exclusion for com.sun:tools on the compile-testing dependency, OR
+   - Upgrade compile-testing to a modern version that supports Java 9+.
+2) If tests hit module-access issues on Java 11, add Surefire argLine flags:
+   --add-modules jdk.compiler (and add-exports/add-opens as needed).
+3) Re-run: mvn -e -DtrimStackTrace=false -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true

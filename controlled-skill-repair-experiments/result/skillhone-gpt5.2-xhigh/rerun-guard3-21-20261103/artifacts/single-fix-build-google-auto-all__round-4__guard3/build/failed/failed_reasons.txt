@@ -1,0 +1,26 @@
+Repo: /home/travis/build/failed/google/auto
+Toolchain: Java 11.0.27, Maven 3.6.3
+
+Repro
+- mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure
+- Modules auto-common, auto-factory, auto-service fail during dependency resolution:
+  "Could not find artifact com.sun:tools:jar:11.0.27 at specified path ${java.home}/../lib/tools.jar"
+
+Root cause
+- common/factory/service/value module POMs declare parent:
+    com.google.auto:auto-parent:3
+- The repository root parent POM is:
+    com.google.auto:auto-parent:4-SNAPSHOT
+  so Maven cannot use the local parent via ../pom.xml (version mismatch) and downloads
+  auto-parent:3 from Maven Central instead.
+- auto-parent:3 brings in a system-scoped dependency on tools.jar (com.sun:tools).
+  tools.jar was removed in Java 9+, so on Java 11 the build fails before compilation.
+
+Plan
+1) Make modules use the repository’s parent POM by updating their <parent><version>
+   from 3 -> 4-SNAPSHOT (so ../pom.xml is used and no tools.jar dependency is inherited).
+2) Update the root parent’s <java.version> from 1.6 -> 1.7 because javac in Java 11
+   no longer supports -source/-target 1.6.
+3) Re-run the same Maven verify command and fix any follow-up issues until green.

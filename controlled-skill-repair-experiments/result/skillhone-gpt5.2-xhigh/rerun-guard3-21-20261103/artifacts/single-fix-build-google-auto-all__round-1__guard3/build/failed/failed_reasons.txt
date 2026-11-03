@@ -1,0 +1,30 @@
+Repository: /home/travis/build/failed/google/auto
+
+Toolchain in this environment
+- java: OpenJDK 11.0.27
+- maven: 3.6.3
+
+How to reproduce the failure
+- Command (matches .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure
+- Reactor fails early in dependency resolution for modules auto-common, auto-factory, auto-service.
+- Error:
+  Could not resolve dependencies ... Could not find artifact com.sun:tools:jar:11.0.27 at specified path
+  /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause
+- This is a build/dependency configuration issue (not a Java source code error).
+- The test dependency com.google.testing.compile:compile-testing (versions 0.6/0.7/0.8 used across modules)
+  declares a system-scoped dependency on com.sun:tools with systemPath ${java.home}/../lib/tools.jar.
+- On Java 9+ there is no tools.jar, so Maven fails while resolving the transitive dependency.
+
+Plan
+1) Update each module that depends on compile-testing (common, factory, service, value) to exclude the
+   transitive dependency com.sun:tools from compile-testing.
+   - This prevents Maven from trying to resolve tools.jar.
+   - Java 11 already contains the compiler implementation in the JDK modules.
+2) Re-run the same Maven verify command.
+3) If any follow-up Java 9+ module-access issues appear in tests (IllegalAccessError), add the minimal
+   surefire argLine (--add-exports / --add-opens) required for jdk.compiler packages.

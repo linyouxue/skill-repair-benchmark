@@ -1,0 +1,43 @@
+Build failure summary (repo: /home/travis/build/failed/google/auto)
+
+Environment
+- Java: OpenJDK 11.0.27
+- Maven: 3.6.3
+
+How to reproduce
+- cd /home/travis/build/failed/google/auto
+- mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed error
+- Maven fails very early while resolving project dependencies:
+  "Could not find artifact com.sun:tools:jar:11.0.27 at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar"
+
+Root cause
+- The failing dependency is NOT declared in this repo’s POMs directly.
+- It comes transitively from the test dependency com.google.testing.compile:compile-testing (versions 0.6/0.7/0.8 used by modules common/factory/service/value).
+- Those old compile-testing POMs declare a system-scoped dependency:
+    com.sun:tools:${java.version}
+    systemPath: ${toolsjar} (defaults to ${java.home}/../lib/tools.jar via an always-on profile)
+- On Java 9+ there is no tools.jar, so Maven cannot resolve that system dependency and the build aborts.
+
+Plan
+1) In each module that depends on compile-testing, add an exclusion for com.sun:tools:
+   <exclusions>
+     <exclusion>
+       <groupId>com.sun</groupId>
+       <artifactId>tools</artifactId>
+     </exclusion>
+   </exclusions>
+   Files:
+   - common/pom.xml (compile-testing 0.7)
+   - factory/pom.xml (compile-testing 0.8)
+   - service/pom.xml (compile-testing 0.6)
+   - value/pom.xml (compile-testing 0.6)
+
+2) Re-run the CI-equivalent build:
+   mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Contingency
+- If tests fail due to JPMS access to the compiler on Java 11, add Surefire argLine to include the compiler module:
+  --add-modules jdk.compiler
+  (only if needed; try exclusions-only first).
