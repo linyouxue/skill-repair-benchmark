@@ -29,30 +29,54 @@ controls, model calls or verifier calls were added for publication.
 A pass is official reward 1. These task outcomes do not independently establish
 semantic defect repair or causal improvement. The two groups have different tasks.
 
-| Input | Round rewards | Final |
-|---|---|---|
-| [location-dialogue-parser](final/location-dialogue-parser/skills) | 0.833 → 1 | Pass |
-| [location-data-to-d3](final/location-data-to-d3/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [location-flink-query](final/location-flink-query/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-flink-query-all](final/single-flink-query-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-flink-query-RI-001](final/single-flink-query-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-flink-query-RI-002](final/single-flink-query-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [location-manufacturing-equipment-maintenance](final/location-manufacturing-equipment-maintenance/skills) | 1 | Pass |
-| [single-manufacturing-equipment-maintenance-all](final/single-manufacturing-equipment-maintenance-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-manufacturing-equipment-maintenance-RI-001](final/single-manufacturing-equipment-maintenance-RI-001/skills) | 1 | Pass |
-| [single-manufacturing-equipment-maintenance-RI-002](final/single-manufacturing-equipment-maintenance-RI-002/skills) | 0 → 0 → 0 → 0 → 1 | Pass |
-| [location-pddl-airport-planning](final/location-pddl-airport-planning/skills) | 1 | Pass |
-| [single-video-silence-remover-all](final/single-video-silence-remover-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-video-silence-remover-RI-001](final/single-video-silence-remover-RI-001/skills) | 0 → 1 | Pass |
-| [single-video-silence-remover-RI-002](final/single-video-silence-remover-RI-002/skills) | 0 → 1 | Pass |
-| [single-video-silence-remover-RI-003](final/single-video-silence-remover-RI-003/skills) | 1 | Pass |
-| [single-sec-financial-report-all](final/single-sec-financial-report-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-sec-financial-report-RI-001](final/single-sec-financial-report-RI-001/skills) | 0 → 1 | Pass |
-| [single-sec-financial-report-RI-002](final/single-sec-financial-report-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-sec-financial-report-RI-003](final/single-sec-financial-report-RI-003/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-fix-build-google-auto-all](final/single-fix-build-google-auto-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-fix-build-google-auto-RI-001](final/single-fix-build-google-auto-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-fix-build-google-auto-RI-002](final/single-fix-build-google-auto-RI-002/skills) | 0 → 1 | Pass |
+## Independent frozen-candidate rerun (guard3)
+
+The completed **rerun** `controlled-skillhone-guard3-rerun21-20261103` executes
+21 selected source-round candidates from 11 inputs once each, with **zero new
+SkillHone/DSH repairs**. The candidates are unchanged. Text-only continuations
+have a total limit of 3 and still share the 60-root-iteration budget.
+
+| Rerun inputs | Independent execution slots | Full-score executions | Zero-score executions | New repairs |
+|---:|---:|---:|---:|---:|
+| 11 | 21 | 3 (14.29%) | 18 | 0 |
+
+The rerun column below identifies each selected source round; a dash means
+that input was not rerun. Original round rewards and final outcomes remain the
+79-round primary results. Do not add the 3 rerun passes to the primary 10/22
+rate. All three rerun passes used only 0 or 1 continuation, so these extra
+single executions do not establish an effect of raising the guard limit.
+
+See [the rerun report](rerun-guard3-21-20261103/RERUN_RESULTS.md) for all 21
+slot scores, actual iterations/guard counts, products, usage and limitations.
+Eight native API resumptions retain partial trajectories and are not training
+ready; D3 browser-binary equivalence and four Flink slots' exact-body
+observability remain limited. Google RI001 source R5 includes the authorized
+sudo interruption and scoring-only recovery without a model rerun.
+
+| Input | Original round rewards | Original final | Frozen-candidate rerun (source round: reward) |
+|---|---|---|---|
+| [location-dialogue-parser](final/location-dialogue-parser/skills) | 0.833 → 1 | Pass | — |
+| [location-data-to-d3](final/location-data-to-d3/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R3: 1, R4: 0 |
+| [location-flink-query](final/location-flink-query/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R2: 0, R3: 0, R4: 0 |
+| [single-flink-query-all](final/single-flink-query-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail | — |
+| [single-flink-query-RI-001](final/single-flink-query-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R1: 0 |
+| [single-flink-query-RI-002](final/single-flink-query-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail | — |
+| [location-manufacturing-equipment-maintenance](final/location-manufacturing-equipment-maintenance/skills) | 1 | Pass | — |
+| [single-manufacturing-equipment-maintenance-all](final/single-manufacturing-equipment-maintenance-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail | — |
+| [single-manufacturing-equipment-maintenance-RI-001](final/single-manufacturing-equipment-maintenance-RI-001/skills) | 1 | Pass | — |
+| [single-manufacturing-equipment-maintenance-RI-002](final/single-manufacturing-equipment-maintenance-RI-002/skills) | 0 → 0 → 0 → 0 → 1 | Pass | R2: 0 |
+| [location-pddl-airport-planning](final/location-pddl-airport-planning/skills) | 1 | Pass | — |
+| [single-video-silence-remover-all](final/single-video-silence-remover-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R1: 0, R5: 0 |
+| [single-video-silence-remover-RI-001](final/single-video-silence-remover-RI-001/skills) | 0 → 1 | Pass | — |
+| [single-video-silence-remover-RI-002](final/single-video-silence-remover-RI-002/skills) | 0 → 1 | Pass | — |
+| [single-video-silence-remover-RI-003](final/single-video-silence-remover-RI-003/skills) | 1 | Pass | — |
+| [single-sec-financial-report-all](final/single-sec-financial-report-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail | — |
+| [single-sec-financial-report-RI-001](final/single-sec-financial-report-RI-001/skills) | 0 → 1 | Pass | R1: 1 |
+| [single-sec-financial-report-RI-002](final/single-sec-financial-report-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R1: 0, R2: 0 |
+| [single-sec-financial-report-RI-003](final/single-sec-financial-report-RI-003/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R4: 0 |
+| [single-fix-build-google-auto-all](final/single-fix-build-google-auto-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R1: 0, R3: 0, R4: 0 |
+| [single-fix-build-google-auto-RI-001](final/single-fix-build-google-auto-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail | R2: 0, R3: 0, R4: 0, R5: 0 |
+| [single-fix-build-google-auto-RI-002](final/single-fix-build-google-auto-RI-002/skills) | 0 → 1 | Pass | R1: 1 |
 
 ## Evidence and complete candidates
 
