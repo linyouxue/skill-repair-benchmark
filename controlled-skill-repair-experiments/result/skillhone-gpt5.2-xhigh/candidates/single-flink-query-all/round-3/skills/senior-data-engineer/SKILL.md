@@ -109,13 +109,12 @@ verified: true
 **Steps:**
 1. Select streaming architecture (Kappa vs Lambda) based on requirements
 2. Configure streaming pipeline YAML (sources, processing, sinks, quality)
-3. For any keyed aggregation (especially when you have both session/window boundaries and an entity lifecycle), write down the semantic contract **before coding**:
-   - **Contributing events:** what counts toward the aggregate (and what explicitly does *not*).
-   - **Completion event(s):** what “finished” means for the entity per the task/docs (don’t infer completion from inactivity unless the task says to).
-   - **Emission eligibility:** which keys should be output, whether to emit a default/neutral value when an entity completes with no activity, and how you guarantee **exactly one** final emission per key.
-   - **Important:** keep “session end” separate from “entity completion.”
-4. Generate Kafka configurations with `kafka_config_generator.py`
-5. Generate Flink/Spark job scaffolding with `stream_processor.py`
+3. Generate Kafka configurations with `kafka_config_generator.py`
+4. Generate Flink/Spark job scaffolding with `stream_processor.py`
+5. For any keyed aggregation that mixes “activity” events with “lifecycle/completion” events, write down a semantic contract:
+   - **Contributing-event predicate**: what counts toward the aggregate (be explicit about what is excluded).
+   - **Completion-event predicate**: what *proves* the key is finished/terminal. Avoid treating “no activity for some interval” as completion unless the task explicitly defines completion as a timeout/expiry (inactivity is often used only to segment sessions/stages *within* an ongoing key).
+   - **Output-eligibility predicate**: when it is valid to emit results. Treat end-of-input/watermarks as a *lateness barrier* ("no earlier contributing events can still arrive"), not a completion substitute unless the task says so. Default to emitting **exactly one final** record per key unless intermediate updates are explicitly required.
 6. Deploy and monitor with `streaming_quality_validator.py`
 
 **Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, and real-time quality monitoring
@@ -289,21 +288,20 @@ python scripts/streaming_quality_validator.py \
 
 #### Semantic Contract Gate for Keyed Event Aggregations
 
-Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve **three separate predicates**. Keep them independent (don’t mix “what counts” with “when to emit”):
+Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve three separate predicates:
 
-1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate.
-2. **Completion-event predicate:** which event types (or lifecycle records) mark the end/terminal state for the entity (e.g., job finished) and therefore close the aggregate.
-   - If the task defines “finished” indirectly, **name the exact event(s)/field(s)** you will treat as terminal and justify why.
-   - Do **not** treat “no activity for X minutes” as completion unless the task explicitly says so; inactivity is typically a *session/window boundary*, not a lifecycle end.
-3. **Emission-eligibility predicate:** which keys are allowed (and required) to be output.
-   - Prefer emitting results only for keys that have the required completion event.
-   - Decide whether entities that complete with **zero contributing events** should be emitted with a neutral value (e.g., 0) or omitted; follow the task spec/tests and document the choice.
-   - Ensure the pipeline produces **exactly one** final record per key (avoid duplicates from retries/reprocessing where applicable).
+1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate (e.g., only “activity” events; exclude lifecycle-only updates).
+2. **Completion-event predicate:** which events prove the key is finished/terminal, and whether different terminal states should be treated the same. Do **not** infer completion from inactivity unless the task explicitly defines completion as a timeout/expiry. (In many problems, inactivity is a *session/stage boundary* inside an otherwise ongoing entity.)
+3. **Output-eligibility predicate:** the exact condition under which it is valid to emit (or finalize) results for a key. Typically: "has ≥1 contributing event" AND "(either) has the required completion predicate OR the task allows end-of-input as a valid completion" AND "we have advanced far enough in event time (or reached end-of-input) that no earlier contributing events can still arrive." Decide whether you emit **only final** results or allow intermediate updates; default to **exactly one final output per key** unless the task explicitly asks for streaming updates.
+
+Keep these predicates separate in your design notes and code review; most streaming correctness bugs come from mixing them together.
+
+
+
 
 Before declaring the job complete, validate both positive and negative semantics with small hand-checkable fixtures:
 
-- a key with qualifying activity **and** the required completion event must be emitted;
-- a key with activity but **no** completion event must **not** be emitted (unless the task explicitly wants partial results);
+- a key with qualifying activity and the required completion event must be emitted;
 - compare the output key set as well as aggregate values, and investigate unexpected extra keys even when all expected keys are present.
 
 ## Python Tools

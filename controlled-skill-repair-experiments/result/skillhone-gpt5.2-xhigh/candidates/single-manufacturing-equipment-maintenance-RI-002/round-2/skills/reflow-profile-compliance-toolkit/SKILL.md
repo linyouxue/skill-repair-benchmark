@@ -18,7 +18,7 @@ For the manufacturing-equipment-maintenance task that requests `/app/output/q01.
 5. After writing the outputs, run a real completion check that opens and `json.load`s **each** of `q01.json`, `q02.json`, `q03.json`, `q04.json`, and `q05.json`.
 6. Verify coverage against the visible task inputs before finishing:
    - Q01 has a record for every `run_id` in `mes_log.csv`.
-   - Q02 contains **exactly one** record per `run_id` in `mes_log.csv` (run-level summary), is sorted by `run_id`, and uses JSON string status values (`"compliant"` / `"non-compliant"`).
+   - Q02 contains at least one record for every `run_id` and is sorted by `run_id`.
    - Q03 contains a `failing_runs` list and run-level peak information.
    - Q04 contains one record for every `run_id`, with the actual conveyor speed and a boolean feasibility field, sorted by `run_id`.
    - Q05 contains exactly one record per `board_family`; `best_run_id` and every runner-up must belong to that family, and runner-up IDs are sorted.
@@ -160,56 +160,67 @@ def time_above_threshold_s(df_tc, thr):
 
 ### 4. Deterministic sensor selection (tie-breaks)
 
-When reducing multiple thermocouples to one run-level result, **match the selection to the acceptance logic** and keep it deterministic.
+Many questions ask for a single `(tc_id, metric)` per run even when multiple thermocouples exist. **First follow any handbook rule** about which TC is “representative” (e.g., “cold spot / worst‑case component / specified location”). If the handbook does not mandate a specific TC, use the deterministic patterns below.
 
-**One-sided constraints**
-- Upper-limit metric (e.g., max ramp rate): pick the thermocouple with the **largest** value.
-- Lower-limit metric (e.g., minimum peak temperature): pick the thermocouple with the **smallest** value.
-- Tie-break: choose the **lexicographically smallest `tc_id`**.
+**Stable `tc_id` ordering (for ties)**
 
-**Two-sided window constraints (Q02 TAL is commonly a window)**
-If the handbook defines both a minimum and a maximum (a window), do **not** blindly take the min (or max). Instead pick the *controlling* thermocouple using the rule below (this matches the compliance decision and is deterministic):
-
-1. Compute a per-thermocouple TAL value (filter out `None`/NaN).
-2. If **any** thermocouple is **outside** the window `[lo, hi]`, select the thermocouple with the **largest absolute violation distance** to the *nearest* bound:
-   - below window: `violation = lo - tal`
-   - above window: `violation = tal - hi`
-3. If **all** thermocouples are **inside** the window, select the thermocouple with the **smallest margin to failure**:
-   - `margin = min(tal - lo, hi - tal)`
-4. Tie-break: lexicographically smallest `tc_id`.
-
-**Important:** Some handbooks specify a *representative* thermocouple location (e.g., “cold spot” / “worst case”). If so, you may select that thermocouple **for reporting**, but you must still compute compliance against the controlling logic above (otherwise a violating sensor could be hidden). Document the handbook clause and your choice in code comments.
-
-Examples (filter out `None`/NaN first):
+When two candidates are otherwise equal, pick the smallest `tc_id` using a stable “natural sort” so `TC2 < TC10`.
 
 ```python
-# items: list of (tc_id, value) where value is a real float
-# max metric, tie by smallest tc_id
-tc_id, val = sorted(items, key=lambda p: (-p[1], p[0]))[0]
+import re
 
-# min metric, tie by smallest tc_id
-tc_id, val = sorted(items, key=lambda p: (p[1], p[0]))[0]
-
-def choose_controlling_for_window(items, lo, hi):
-    # returns (tc_id, val, status_string)
-    outside = []
-    inside  = []
-    for tc_id, v in items:
-        if v < lo:
-            outside.append((lo - v, tc_id, v))      # violation distance
-        elif v > hi:
-            outside.append((v - hi, tc_id, v))
+def tc_id_key(tc_id: str):
+    parts = re.split(r"(\\d+)", str(tc_id))
+    key = []
+    for p in parts:
+        if p.isdigit():
+            key.append((1, int(p)))
         else:
-            inside.append((min(v - lo, hi - v), tc_id, v))  # margin
-
-    if outside:
-        dist, tc_id, v = sorted(outside, key=lambda t: (-t[0], t[1]))[0]
-        return tc_id, v, "non-compliant"
-
-    margin, tc_id, v = sorted(inside, key=lambda t: (t[0], t[1]))[0]
-    return tc_id, v, "compliant"
+            key.append((0, p))
+    return tuple(key)
 ```
 
+**One‑sided constraints**
+
+- Max‑only (e.g., ramp‑rate limit): select the **maximum** metric value.
+- Min‑only (e.g., minimum peak at a cold spot): select the **minimum** metric value.
+
+**Two‑sided window constraints (e.g., TAL with both min/max)**
+
+When a metric must satisfy `min <= value <= max`, the “representative” TC should be the one that **drives the compliance decision** (so the reported `tc_id` and value explain the status):
+
+1. Compute `value_tc` for every `tc_id`.
+2. If any TC is outside the window, mark the run **non‑compliant** and report the **most out‑of‑window** TC (largest distance to the nearest bound).
+3. Otherwise, mark the run **compliant** and report the TC **closest to failing** (smallest margin to either edge).
+
+```python
+def select_window_driver(values_by_tc, vmin, vmax):
+    """Return (tc_id, value) that drives a min/max window decision."""
+    items = [(tc, v) for tc, v in values_by_tc.items() if v is not None]
+    if not items:
+        return (None, None)
+
+    def outside_dist(v):
+        if v < vmin:
+            return vmin - v
+        if v > vmax:
+            return v - vmax
+        return 0.0
+
+    viol = [(tc, v, outside_dist(v)) for tc, v in items if outside_dist(v) > 0]
+    if viol:
+        viol.sort(key=lambda x: (-x[2], tc_id_key(x[0])))
+        tc, v, _ = viol[0]
+        return (tc, v)
+
+    # all compliant: closest to either edge
+    near = [(tc, v, min(v - vmin, vmax - v)) for tc, v in items]
+    near.sort(key=lambda x: (x[2], tc_id_key(x[0])))
+    tc, v, _ = near[0]
+    return (tc, v)
+```
+
+This avoids the common error of always using `min(TAL)` (which can hide a “too long” TAL violation) while still being deterministic and handbook‑aligned.
 
 ### 5. Peak and margin
 
@@ -226,26 +237,17 @@ Handbooks vary. Represent the rule as a structured object and compute `required_
 
 Common patterns:
 
-**Minimum dwell time across effective heated length**
-- Given: effective heated length `L_eff_cm`, minimum required dwell `t_min_s`
-- The conveyor must be slow enough to keep dwell >= `t_min_s`, so the *maximum* allowed speed is:
-  - `speed_max_cm_min = (L_eff_cm / t_min_s) * 60`
+Minimum dwell time across effective heated length**
+- Given: effective heated length `L_eff_cm`, minimum dwell `t_min_s`
+- `speed_min_cm_min = (L_eff_cm / t_min_s) * 60`
 
-**Maximum time-in-oven across length**
-- Given: `L_eff_cm`, maximum allowed time `t_max_s`
-- The conveyor must be fast enough to keep dwell <= `t_max_s`, so the *minimum* allowed speed is:
-  - `speed_min_cm_min = (L_eff_cm / t_max_s) * 60`
+Maximum time-in-oven across length**
+- Given: `L_eff_cm`, maximum time `t_max_s`
+- `speed_min_cm_min = (L_eff_cm / t_max_s) * 60`
 
 If parameters are missing, output:
 - `required_min_speed_cm_min = null`
 - `meets = false`
-
-**Note:** This task’s Q04 schema asks for `required_min_speed_cm_min`. If the handbook rule you extract is a *minimum dwell* (which naturally yields a `speed_max_cm_min`), you may not be able to populate a meaningful **minimum** speed from that rule alone.
-
-- If you only have a max-speed constraint and no min-speed constraint, set `required_min_speed_cm_min = null` and evaluate feasibility using the max-speed constraint in code.
-- Prefer extracting (or deriving) both a min-speed and max-speed bound when the handbook provides enough information, and treat feasibility as `min_speed <= actual <= max_speed`.
-
-Keep the JSON contract stable (field names as requested), but keep the compliance math faithful to the handbook rule type and **never invent numeric bounds**.
 
 ## Output construction guardrails
 

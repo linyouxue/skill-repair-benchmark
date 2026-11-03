@@ -26,8 +26,8 @@ is newer, switch to the declared JDK *before* patching project files. A failure
 caused only by running an old project on a modern JDK is not evidence that the
 project should be migrated.
 
-For environments that provide the BugSwarm JDK switcher, a Travis build that
-pins an older JDK can be reproduced with (example for JDK 7):
+For environments that provide the BugSwarm JDK switcher, a JDK 7 Travis build
+can be reproduced with:
 
 ```bash
 source /opt/jdk_switcher/jdk_switcher.sh
@@ -36,14 +36,51 @@ export TRAVIS_JDK_VERSION=openjdk7
 java -version
 ```
 
-Then run the **exact** CI build command. If CI uses a non-default reactor POM
-(`-f ...`) or extra properties, include them.
-
-Example pattern (do **not** copy blindly; take the real command from CI):
+Then run the exact CI build command, including any non-default reactor POM and
+flags:
 
 ```bash
-mvn -B -U -f <reactor-pom>.xml verify --fail-at-end
+# Example only — replace `-f ...` and flags with the repository's CI command.
+mvn -Dhttps.protocols=TLSv1.2 -B -U -f <reactor-pom.xml> verify --fail-at-end
 ```
+
+## Maven Invoker integration tests (nested projects)
+
+Some Maven builds run integration tests via `maven-invoker-plugin` (often during
+`verify`). These tests execute Maven in *nested sample projects* (commonly under
+`src/it/**`), which changes how you should interpret dependency failures.
+
+Key implications:
+
+- **Dependency resolution is scoped to the nested project.** `dependencyManagement`,
+  `pluginManagement`, and `<repositories>` from the main build do not apply unless
+  the nested project's `pom.xml` explicitly inherits them.
+- **Invoker runs may use an isolated local repository** under `target/**`. A missing
+  artifact can mean it was never installed into the invoker repo, not that the
+  main reactor failed to build it.
+
+When a nested project fails to resolve an artifact/plugin:
+
+1. Identify which invoker project failed (from CI logs or `target/invoker-reports/`).
+2. Inspect the **source-controlled template** under `src/it/...` and any invoker
+   `settings.xml` / `invoker.properties` used for those runs.
+3. Check the invoker configuration in the real build POM for how it seeds the local
+   repo (e.g. `invoker:install`, `installArtifacts`, setup goals) and which settings
+   file/repositories it uses.
+
+To iterate faster, many invoker setups support running a single project and
+streaming logs, for example:
+
+```bash
+mvn -pl <module-running-invoker> -Dinvoker.test=<project-pattern> -Dinvoker.streamLogs=true verify
+```
+
+Modification scope rule for invoker tests:
+
+- **Never edit `target/**`** (cloned test projects, invoker local repositories, or
+  generated reports). Those directories are regenerated; fixes must be made in the
+  real module POM(s) and/or under `src/it/**` templates so they are captured in
+  patches and version control.
 
 ### Do not modernize away historical-JDK symptoms
 
@@ -65,84 +102,42 @@ CI environment should drive the repair.
 This benchmark requires both a diagnosis artifact and an applicable patch.
 Before finishing:
 
-1. Write your analysis and plan to the path requested by the task (often
+1. Write your diagnosis and plan to the task-specified notes file (commonly
    `/home/travis/build/failed/failed_reasons.txt`).
-2. Create at least one non-empty standard unified diff at the path requested by
-   the task (e.g. `/home/travis/build/failed/<repo>/<id>/patch_1.diff`) containing
-   the intended source/configuration change.
+2. Create at least one non-empty standard unified diff at the task-specified patch
+   path (commonly `<repo_path>/patch_1.diff`) containing the intended
+   source/configuration change.
 3. Apply that patch to the failed repository.
-4. Check `git diff`/`git status` and ensure the intended project file—not only
-   the patch artifact—was changed.
-5. Re-run the exact historical CI verification command under the declared
-   JDK/toolchain.
-6. Do not finish until the full reactor, including Maven Invoker integration
-   tests, succeeds.
+4. Check `git diff`/`git status` and ensure the intended project file—not only the
+   patch artifact—was changed.
+5. Re-run the exact CI verification command under the CI-declared toolchain/JDK.
+6. Do not finish until the full reactor, including Maven Invoker integration tests,
+   succeeds.
 
 ## Minimal diagnostic sequence
 
 ```bash
-cd /home/travis/build/failed/<repo>/<id>  # use the path given by the task
+REPO=/home/travis/build/failed/<repo>/<id>
+cd "$REPO"
 
 # 1. Establish target CI and toolchain.
 sed -n '1,220p' .travis.yml
-
-# If CI pins an older JDK and the environment provides jdk_switcher, switch
-# before patching project files. Example:
-source /opt/jdk_switcher/jdk_switcher.sh
-jdk_switcher use openjdk7
-export TRAVIS_JDK_VERSION=openjdk7
-
 java -version
+javac -version
 mvn -version
 
-# 2. Reproduce the real CI command (copy it from CI config).
-# Example pattern:
-mvn -B -U -f <reactor-pom>.xml verify --fail-at-end
+# If CI declares a specific JDK and a switcher is available, switch first.
+if [ -f /opt/jdk_switcher/jdk_switcher.sh ]; then
+  source /opt/jdk_switcher/jdk_switcher.sh
+  jdk_switcher use <ci-jdk>   # e.g., openjdk7
+  export TRAVIS_JDK_VERSION=<ci-jdk>
+fi
+java -version
+
+# 2. Reproduce the real CI command (replace with the actual command/flags).
+mvn -B -U -f <reactor-pom.xml> verify --fail-at-end
+
 ```
-
-## Maven Invoker integration tests: nested IT projects and dependency scope
-
-If the build runs Maven Invoker integration tests (`maven-invoker-plugin`),
-Maven will execute additional Maven builds against nested “IT projects” (often
-under `src/it/**`), sometimes using a dedicated local repository and/or settings
-file.
-
-Key implications:
-
-- A dependency resolution error during an invoker run is often coming from the
-  nested IT project's own `pom.xml` (plus any invoker `settings.xml`), not the
-  root reactor POM.
-- Invoker commonly clones IT projects into `target/**` (e.g. `target/it`,
-  `target/invoker`, `target/invoker-reports`) before running Maven. Do **not**
-  edit the cloned copies under `target/` — they are generated and will be
-  wiped/recreated. Patch the source IT project under the configured
-  `projectsDirectory` (commonly `src/it/`) instead.
-
-Checklist:
-
-1. Find the invoker configuration in the reactor (`pom.xml`):
-   - locate `<artifactId>maven-invoker-plugin</artifactId>`
-   - note `<projectsDirectory>`, `<cloneProjectsTo>`, `<localRepositoryPath>`,
-     `<settingsFile>`, `<filterPropertiesFile>`, and any `invoker.properties`
-     conventions
-2. When the invoker run fails, identify the failing IT project:
-   - the console output and/or `target/invoker-reports/**` usually include the
-     failing project directory and the Maven command it ran
-   - map any `target/.../<it-project>` path back to the source directory under
-     `<projectsDirectory>`
-3. Reproduce the failing IT build in isolation (faster iteration):
-   - run Maven from the IT project's *source* directory using the same
-     goals/profiles
-   - if invoker uses a dedicated local repo/settings, pass them explicitly
-     (`-Dmaven.repo.local=...` and `-s ...`) so dependency resolution matches the
-     invoker environment
-4. Apply the fix at the correct layer:
-   - missing dependency/plugin repo only in the IT project → edit that IT
-     project's `pom.xml` / `settings.xml` / `invoker.properties`
-   - IT projects cannot resolve artifacts built in the main reactor → ensure
-     those artifacts are available to the repository the invoker run uses
-     (commonly by making sure the build installs them into the invoker local repo
-     before `invoker:run`)
 
 ## General Maven lifecycle reminders
 
@@ -150,6 +145,3 @@ Checklist:
   integration-test and Invoker steps that `test` never reaches.
 - A green command run under the wrong JDK is not sufficient evidence of a
   valid CI repair.
-- When diagnosing invoker failures, prefer the per-project logs under
-  `target/invoker-reports/` (or the directory configured by the plugin) over
-  guessing based on the top-level reactor output.

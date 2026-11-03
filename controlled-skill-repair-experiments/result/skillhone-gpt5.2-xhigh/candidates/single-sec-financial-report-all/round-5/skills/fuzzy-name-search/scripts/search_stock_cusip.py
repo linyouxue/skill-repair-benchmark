@@ -1,173 +1,205 @@
 #!/usr/bin/env python3
+"""Fuzzy search a stock CUSIP by issuer name.
 
-"""Fuzzy search stock CUSIPs by issuer name in INFOTABLE.tsv.
+This tool searches issuer names in the SEC 13F INFOTABLE and prints candidate
+CUSIPs.
 
-Dependency-light (standard library only).
+Dataset layout:
+  ${DATA_ROOT}/${QUARTER}/INFOTABLE.tsv
 
-Inputs are expected as TSV files under:
-  <DATA_ROOT>/<quarter>/INFOTABLE.tsv
+By default, it prefers common-equity (non-option) rows based on TITLEOFCLASS and
+PUTCALL/SHRSORPRN when those columns exist.
 
-Where DATA_ROOT defaults to /root and can be overridden with SEC_13F_DATA_ROOT.
-
-The script:
-- Filters to common-equity rows by TITLEOFCLASS heuristics
-- Excludes options when the PUTCALL column exists
-- De-duplicates by CUSIP
-- Fuzzy matches NAMEOFISSUER against the query
+Implementation note:
+  Avoids third-party dependencies (rapidfuzz/pandas) for portability.
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
 import os
-from typing import Dict, List, Tuple
+import re
+from typing import Dict, Iterable, List, Optional, Tuple
 
-# Dataset root. By default the tasks place quarterly folders under /root/<quarter>/
-DATA_ROOT = os.environ.get("SEC_13F_DATA_ROOT", "/root")
+DEFAULT_DATA_ROOT = "/root"
 
-TITLE_CLASS_OF_STOCKS = {
+# Keep aligned with 13f-analyzer.
+COMMON_STOCK_TITLE_CLASSES = {
     "com",
     "common stock",
-    "cl a",
-    "com new",
-    "class a",
-    "stock",
     "common",
+    "stock",
+    "com new",
     "com cl a",
     "com shs",
+    "cl a",
+    "class a",
+    "cl a com",
+    "class a com",
+    "cl a new",
+    "cl b",
+    "cl b new",
+    "cmn",
+    "ord shs",
+    "foreign stock",
+    "cap stk cl a",
+    "cap stk cl c",
+    "comm stk",
     "sponsored adr",
     "sponsored ads",
     "adr",
     "equity",
-    "cmn",
-    "cl b",
-    "ord shs",
-    "cl a com",
-    "class a com",
-    "cap stk cl a",
-    "comm stk",
-    "cl b new",
-    "cap stk cl c",
-    "cl a new",
-    "foreign stock",
     "shs cl a",
 }
 
 
-def get_args():
-    parser = argparse.ArgumentParser(description="Fuzzy search stock CUSIP by issuer name")
-    parser.add_argument("--keywords", type=str, required=True, help="Issuer name / keywords to search for")
-    parser.add_argument("--quarter", type=str, required=True, help="Quarter to search in, e.g. 2025-q3")
-    parser.add_argument("--topk", type=int, default=10, help="The maximum number of results to return")
-    return parser.parse_args()
+def normalize_title(value: Optional[str]) -> str:
+    text = (value or "").lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", "", text)
+    return text
 
 
-def _read_tsv(path: str) -> List[Dict[str, str]]:
+def normalize_text(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def token_set_ratio(a: str, b: str) -> float:
+    a_tokens = set(normalize_text(a).split())
+    b_tokens = set(normalize_text(b).split())
+    if not a_tokens and not b_tokens:
+        return 100.0
+    if not a_tokens or not b_tokens:
+        return 0.0
+    return 100.0 * (len(a_tokens & b_tokens) / len(a_tokens | b_tokens))
+
+
+def normalize_cusip(value: Optional[str]) -> str:
+    return (value or "").upper().strip()
+
+
+def iter_tsv_rows(path: str) -> Iterable[Dict[str, str]]:
     with open(path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
-        return list(reader)
+        for row in reader:
+            yield {k: (v if v is not None else "") for k, v in row.items()}
 
 
-def _normalize(s: str) -> str:
-    s = (s or "").lower().strip()
-    out = []
-    prev_space = False
-    for ch in s:
-        if ch.isalnum():
-            out.append(ch)
-            prev_space = False
-        else:
-            if not prev_space:
-                out.append(" ")
-                prev_space = True
-    return "".join(out).strip()
-
-
-def _levenshtein(a: str, b: str) -> int:
-    if a == b:
-        return 0
-    if not a:
-        return len(b)
-    if not b:
-        return len(a)
-    if len(a) > len(b):
-        a, b = b, a
-    prev = list(range(len(a) + 1))
-    for i, cb in enumerate(b, start=1):
-        cur = [i]
-        for j, ca in enumerate(a, start=1):
-            ins = cur[j - 1] + 1
-            delete = prev[j] + 1
-            sub = prev[j - 1] + (0 if ca == cb else 1)
-            cur.append(min(ins, delete, sub))
-        prev = cur
-    return prev[-1]
-
-
-def _similarity(a: str, b: str) -> float:
-    a_n = _normalize(a)
-    b_n = _normalize(b)
-    if not a_n and not b_n:
-        return 100.0
-    if not a_n or not b_n:
-        return 0.0
-    dist = _levenshtein(a_n, b_n)
-    max_len = max(len(a_n), len(b_n))
-    return 100.0 * (1.0 - dist / max_len) if max_len else 100.0
-
-
-def _is_common_equity_row(row: Dict[str, str]) -> bool:
-    title = (row.get("TITLEOFCLASS") or "").strip().lower()
-    if title and title not in TITLE_CLASS_OF_STOCKS:
+def is_common_stock_row(row: Dict[str, str]) -> bool:
+    title_ok = normalize_title(row.get("TITLEOFCLASS")) in COMMON_STOCK_TITLE_CLASSES
+    if not title_ok:
         return False
 
-    if "PUTCALL" in row:
-        pc = (row.get("PUTCALL") or "").strip().upper()
-        if pc:
-            return False
+    putcall = row.get("PUTCALL", "").strip()
+    if putcall:
+        return False
+
+    shrsorprn = row.get("SHRSORPRN", "").strip().upper()
+    if shrsorprn and shrsorprn != "SH":
+        return False
 
     return True
 
 
-def _load_common_equity_cusips(quarter: str) -> Dict[str, str]:
-    """Return mapping CUSIP -> normalized issuer name (lowercase)."""
-    path = os.path.join(DATA_ROOT, quarter, "INFOTABLE.tsv")
-    rows = _read_tsv(path)
+def get_args():
+    parser = argparse.ArgumentParser(description="Fuzzy search stock CUSIP by issuer name")
+    parser.add_argument("--keywords", type=str, required=True, help="Issuer name / keywords to search (fuzzy)")
+    parser.add_argument(
+        "--quarter",
+        type=str,
+        default=None,
+        help=(
+            "Quarter folder (e.g. 2025-q3). If omitted, scans all quarter folders under data_root "
+            "that match YYYY-qN."
+        ),
+    )
+    parser.add_argument("--topk", type=int, default=10, help="Maximum number of results to return")
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        default=DEFAULT_DATA_ROOT,
+        help=f"Dataset root directory (default: {DEFAULT_DATA_ROOT})",
+    )
+    return parser.parse_args()
 
-    m: Dict[str, str] = {}
-    for r in rows:
-        if not _is_common_equity_row(r):
-            continue
-        cusip = (r.get("CUSIP") or "").strip().upper()
-        if not cusip:
-            continue
-        if cusip in m:
-            continue
-        name = (r.get("NAMEOFISSUER") or "").strip().lower()
-        m[cusip] = name
-    return m
+
+def list_infotable_paths(data_root: str, quarter: Optional[str]) -> List[str]:
+    if quarter:
+        path = os.path.join(data_root, quarter, "INFOTABLE.tsv")
+        return [path]
+
+    paths: List[str] = []
+    if not os.path.isdir(data_root):
+        return paths
+
+    for name in sorted(os.listdir(data_root)):
+        if re.fullmatch(r"\d{4}-q[1-4]", name):
+            p = os.path.join(data_root, name, "INFOTABLE.tsv")
+            if os.path.exists(p):
+                paths.append(p)
+    return paths
 
 
-def search_stock_by_name(keywords: str, quarter: str, topk: int = 10):
-    stocks = _load_common_equity_cusips(quarter)
-    if not stocks:
-        print(f"No stock rows found in quarter {quarter}")
+def load_stock_universe(data_root: str, quarter: Optional[str]) -> Dict[str, str]:
+    """Return mapping: issuer_name(lower) -> CUSIP (uppercase).
+
+    Keeps one CUSIP per distinct issuer name; multiple issuer names may map to
+    the same CUSIP.
+    """
+
+    paths = list_infotable_paths(data_root, quarter)
+    if not paths:
+        raise SystemExit(
+            "No INFOTABLE.tsv files found. Provide --quarter or ensure data_root contains quarter folders."
+        )
+
+    mapping: Dict[str, str] = {}
+    for p in paths:
+        if not os.path.exists(p):
+            continue
+        for row in iter_tsv_rows(p):
+            if not is_common_stock_row(row):
+                continue
+            cusip = normalize_cusip(row.get("CUSIP"))
+            name = normalize_text(row.get("NAMEOFISSUER", ""))
+            if not cusip or not name:
+                continue
+            if name not in mapping:
+                mapping[name] = cusip
+    return mapping
+
+
+def search_stock_by_name(data_root: str, keywords: str, quarter: Optional[str], topk: int = 10):
+    universe = load_stock_universe(data_root, quarter)
+    if not universe:
+        print("No stock universe available after filtering.")
         return
 
-    scored: List[Tuple[str, str, float]] = []
-    # (cusip, name, score)
-    for cusip, name in stocks.items():
-        scored.append((cusip, name, _similarity(keywords, name)))
+    scored: List[Tuple[float, str]] = []
+    for name in universe.keys():
+        score = token_set_ratio(keywords, name)
+        scored.append((score, name))
 
-    scored.sort(key=lambda x: x[2], reverse=True)
+    scored.sort(key=lambda t: t[0], reverse=True)
+    best = scored[: max(topk, 0)]
 
     print("Search Results:")
-    for idx, (cusip, name, score) in enumerate(scored[:topk], start=1):
+    for idx, (score, name) in enumerate(best, start=1):
         print(f"** Rank {idx} (score = {score:.3f}) **")
         print(f"  Name: {name}")
-        print(f"  CUSIP: {cusip}")
+        print(f"  CUSIP: {universe[name]}")
         print()
 
 
-if __name__ == "__main__":
+def main():
     args = get_args()
-    search_stock_by_name(args.keywords, quarter=args.quarter, topk=args.topk)
+    search_stock_by_name(args.data_root, args.keywords, args.quarter, topk=args.topk)
+
+
+if __name__ == "__main__":
+    main()

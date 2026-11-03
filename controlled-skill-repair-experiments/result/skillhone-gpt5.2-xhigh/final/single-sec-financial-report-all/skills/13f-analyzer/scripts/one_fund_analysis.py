@@ -1,222 +1,312 @@
 #!/usr/bin/env python3
+"""Analyze SEC 13F holdings for one fund in one quarter.
 
-"""Analyze a single 13F manager's holdings.
+This script works on the SkillHone-style dataset layout:
+  ${DATA_ROOT}/${QUARTER}/INFOTABLE.tsv
 
-This script is intentionally dependency-light (standard library only) so it can
-run in minimal environments.
+It prints:
+  - Total positions (INFOTABLE rows)
+  - Total distinct CUSIPs
+  - Total reported VALUE
+  - Common-stock positions and holdings (distinct CUSIPs)
 
-Inputs are expected as TSV files under:
-  <DATA_ROOT>/<quarter>/INFOTABLE.tsv
+Optionally, it compares two quarters (same manager across filings) and prints
+Top Buys / Top Sells ranked by VALUE change at the CUSIP level.
 
-Where DATA_ROOT defaults to /root and can be overridden with SEC_13F_DATA_ROOT.
-
-It supports:
-- One-quarter summary (row counts, AUM proxy, and unique common-equity CUSIPs)
-- Two-quarter comparison (Top Buys / Top Sells by VALUE change)
-
-Notes on definitions:
-- "How many stocks" is interpreted as number of unique common-equity CUSIPs
-  (not raw INFOTABLE row count).
-- Options are excluded when the INFOTABLE has a PUTCALL column.
+Implementation note:
+  The script intentionally avoids third-party dependencies (e.g., pandas) so it
+  can run in minimal Python environments.
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
 import os
-from collections import defaultdict
-from typing import Dict, Iterable, List, Optional, Tuple
+import re
+from typing import Any, Dict, Iterable, Optional, Tuple
 
-# Dataset root. By default the tasks place quarterly folders under /root/<quarter>/
-DATA_ROOT = os.environ.get("SEC_13F_DATA_ROOT", "/root")
+DEFAULT_DATA_ROOT = "/root"
 
-# Common equity / stock-like TITLEOFCLASS values observed in 13F filings.
-TITLE_CLASS_OF_STOCKS = {
+# Pragmatic allowlist of TITLEOFCLASS values that commonly indicate common
+# equity. We normalize strings before comparison.
+COMMON_STOCK_TITLE_CLASSES = {
     "com",
     "common stock",
-    "cl a",
-    "com new",
-    "class a",
-    "stock",
     "common",
+    "stock",
+    "com new",
     "com cl a",
     "com shs",
+    "cl a",
+    "class a",
+    "cl a com",
+    "class a com",
+    "cl a new",
+    "cl b",
+    "cl b new",
+    "cmn",
+    "ord shs",
+    "foreign stock",
+    "cap stk cl a",
+    "cap stk cl c",
+    "comm stk",
     "sponsored adr",
     "sponsored ads",
     "adr",
     "equity",
-    "cmn",
-    "cl b",
-    "ord shs",
-    "cl a com",
-    "class a com",
-    "cap stk cl a",
-    "comm stk",
-    "cl b new",
-    "cap stk cl c",
-    "cl a new",
-    "foreign stock",
     "shs cl a",
 }
 
 
-def get_args():
-    parser = argparse.ArgumentParser(description="Analyze SEC 13F holdings for one manager")
-    parser.add_argument(
-        "--accession_number",
-        type=str,
-        required=True,
-        help="The accession number of the fund/filing to analyze",
-    )
-    parser.add_argument(
-        "--quarter",
-        type=str,
-        required=True,
-        help="The quarter to analyze, e.g. 2025-q3",
-    )
-
-    parser.add_argument(
-        "--baseline_quarter",
-        type=str,
-        default=None,
-        required=False,
-        help="Baseline quarter for comparison, e.g. 2025-q2",
-    )
-    parser.add_argument(
-        "--baseline_accession_number",
-        type=str,
-        default=None,
-        required=False,
-        help="Baseline accession number for comparison",
-    )
-    return parser.parse_args()
+def normalize_title(value: Optional[str]) -> str:
+    text = (value or "").lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", "", text)
+    return text
 
 
-def _read_tsv(path: str) -> List[Dict[str, str]]:
-    with open(path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        return list(reader)
+def normalize_cusip(value: Optional[str]) -> str:
+    return (value or "").upper().strip()
 
 
-def _safe_float(x: str) -> float:
+def parse_float(value: Optional[str]) -> float:
     try:
-        return float(x)
-    except Exception:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
         return 0.0
 
 
-def _is_common_equity_row(row: Dict[str, str]) -> bool:
-    title = (row.get("TITLEOFCLASS") or "").strip().lower()
-    if title and title not in TITLE_CLASS_OF_STOCKS:
+def iter_tsv_rows(path: str) -> Iterable[Dict[str, str]]:
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            # DictReader returns None for missing columns; normalize to "".
+            yield {k: (v if v is not None else "") for k, v in row.items()}
+
+
+def is_common_stock_row(row: Dict[str, str]) -> bool:
+    title_ok = normalize_title(row.get("TITLEOFCLASS")) in COMMON_STOCK_TITLE_CLASSES
+    if not title_ok:
         return False
 
-    # Exclude options when present.
-    if "PUTCALL" in row:
-        pc = (row.get("PUTCALL") or "").strip().upper()
-        if pc:  # CALL/PUT
-            return False
+    # Exclude option legs when column exists.
+    putcall = row.get("PUTCALL", "").strip()
+    if putcall:
+        return False
+
+    # Prefer share positions if SHRSORPRN is present.
+    shrsorprn = row.get("SHRSORPRN", "").strip().upper()
+    if shrsorprn and shrsorprn != "SH":
+        return False
 
     return True
 
 
-def _load_infotable_rows(accession_number: str, quarter: str) -> List[Dict[str, str]]:
-    path = os.path.join(DATA_ROOT, quarter, "INFOTABLE.tsv")
-    rows = _read_tsv(path)
-    return [r for r in rows if (r.get("ACCESSION_NUMBER") or "") == accession_number]
+def get_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Analyze SEC 13F INFOTABLE for one fund in one quarter, optionally "
+            "comparing against a baseline quarter."
+        )
+    )
+    parser.add_argument("--accession_number", type=str, required=True, help="Fund accession number")
+    parser.add_argument("--quarter", type=str, required=True, help='Quarter folder, e.g. "2025-q3"')
+
+    parser.add_argument("--baseline_quarter", type=str, default=None, help="Baseline quarter folder")
+    parser.add_argument("--baseline_accession_number", type=str, default=None, help="Baseline accession number")
+
+    parser.add_argument("--topk", type=int, default=10, help="Top-K to print for buys/sells")
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        default=DEFAULT_DATA_ROOT,
+        help=f"Dataset root directory (default: {DEFAULT_DATA_ROOT})",
+    )
+    return parser.parse_args()
 
 
-def _aggregate_common_equity_by_cusip(rows: Iterable[Dict[str, str]]) -> Dict[str, Dict[str, object]]:
-    """Aggregate common-equity rows by CUSIP.
-
-    Returns mapping:
-      cusip -> {"name": str, "title": str, "value": float}
-    """
-    agg: Dict[str, Dict[str, object]] = {}
-    for r in rows:
-        if not _is_common_equity_row(r):
-            continue
-        cusip = (r.get("CUSIP") or "").strip().upper()
-        if not cusip:
-            continue
-        if cusip not in agg:
-            agg[cusip] = {
-                "name": (r.get("NAMEOFISSUER") or "").strip(),
-                "title": (r.get("TITLEOFCLASS") or "").strip(),
-                "value": 0.0,
-            }
-        agg[cusip]["value"] = float(agg[cusip]["value"]) + _safe_float(r.get("VALUE") or "0")
-    return agg
-
-
-def read_one_quarter_data(accession_number: str, quarter: str) -> Tuple[List[Dict[str, str]], Dict[str, Dict[str, object]]]:
-    """Load one quarter's data for an accession number.
+def read_one_quarter_stock_holdings(
+    data_root: str,
+    accession_number: str,
+    quarter: str,
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+    """Read and aggregate holdings for one accession number in one quarter.
 
     Returns:
-      (raw_rows, common_equity_agg_by_cusip)
+      (holdings_by_cusip, summary)
+
+    holdings_by_cusip maps CUSIP -> {name, title, value}
+    summary contains printed stats.
     """
-    rows = _load_infotable_rows(accession_number, quarter)
-    if not rows:
-        raise SystemExit(f"ERROR: No INFOTABLE rows found for ACCESSION_NUMBER={accession_number} in {quarter}")
 
-    total_rows = len(rows)
-    total_value = sum(_safe_float(r.get("VALUE") or "0") for r in rows)
+    infotable_path = os.path.join(data_root, quarter, "INFOTABLE.tsv")
+    if not os.path.exists(infotable_path):
+        raise SystemExit(f"INFOTABLE.tsv not found: {infotable_path}")
 
-    common_equity_rows = [r for r in rows if _is_common_equity_row(r)]
-    common_equity_value = sum(_safe_float(r.get("VALUE") or "0") for r in common_equity_rows)
-    common_equity_by_cusip = _aggregate_common_equity_by_cusip(common_equity_rows)
+    total_rows = 0
+    total_value = 0.0
+    all_cusips: set[str] = set()
 
-    print(f"Summary stats for quarter: {quarter}, accession_number: {accession_number}")
-    print(f"- Total number of rows (positions): {total_rows}")
-    print(f"- Total AUM (sum of VALUE): {total_value:.2f}")
-    print(f"- Number of common-equity rows: {len(common_equity_rows)}")
-    print(f"- Number of common-equity stocks (unique CUSIPs): {len(common_equity_by_cusip)}")
-    print(f"- Total common-equity AUM (sum of VALUE): {common_equity_value:.2f}")
+    stock_rows = 0
+    stock_value = 0.0
+    stock_cusips: set[str] = set()
 
-    if not common_equity_by_cusip:
+    agg: Dict[str, Dict[str, Any]] = {}
+
+    for row in iter_tsv_rows(infotable_path):
+        if row.get("ACCESSION_NUMBER") != accession_number:
+            continue
+
+        total_rows += 1
+
+        cusip = normalize_cusip(row.get("CUSIP"))
+        if cusip:
+            all_cusips.add(cusip)
+
+        value = parse_float(row.get("VALUE"))
+        total_value += value
+
+        if not is_common_stock_row(row):
+            continue
+
+        stock_rows += 1
+        stock_value += value
+
+        if not cusip:
+            # Skip grouping when CUSIP is missing.
+            continue
+
+        stock_cusips.add(cusip)
+        entry = agg.get(cusip)
+        if entry is None:
+            entry = {
+                "CUSIP": cusip,
+                "NAMEOFISSUER": row.get("NAMEOFISSUER", ""),
+                "TITLEOFCLASS": row.get("TITLEOFCLASS", ""),
+                "VALUE": 0.0,
+            }
+            agg[cusip] = entry
+        entry["VALUE"] = float(entry["VALUE"]) + value
+
+    if total_rows == 0:
         raise SystemExit(
-            f"ERROR: No common-equity rows found for ACCESSION_NUMBER={accession_number} in quarter {quarter}"
+            f"No INFOTABLE rows found for ACCESSION_NUMBER={accession_number} in quarter {quarter} "
+            f"(checked {infotable_path})"
         )
 
-    return rows, common_equity_by_cusip
+    summary = {
+        "total_rows": total_rows,
+        "total_value": total_value,
+        "distinct_cusips": len(all_cusips),
+        "stock_rows": stock_rows,
+        "stock_value": stock_value,
+        "stock_distinct_cusips": len(stock_cusips),
+    }
+
+    print(f"Summary stats for quarter: {quarter}, accession_number: {accession_number}")
+    print(f"- Total positions (rows): {summary['total_rows']}")
+    print(f"- Total distinct CUSIPs: {summary['distinct_cusips']}")
+    print(f"- Total reported value (sum of VALUE): {summary['total_value']:.2f}")
+    print(f"- Common stock positions (rows): {summary['stock_rows']}")
+    print(f"- Common stock holdings (distinct CUSIPs): {summary['stock_distinct_cusips']}")
+    print(f"- Common stock reported value: {summary['stock_value']:.2f}")
+
+    if summary["stock_rows"] == 0:
+        raise SystemExit(
+            "No common-stock rows found after filtering. "
+            "(If you need options/bonds too, inspect raw INFOTABLE rows.)"
+        )
+
+    return agg, summary
 
 
 def one_fund_analysis(
+    data_root: str,
     accession_number: str,
     quarter: str,
     baseline_accession_number: Optional[str],
     baseline_quarter: Optional[str],
+    topk: int = 10,
 ):
-    _, cur = read_one_quarter_data(accession_number, quarter)
+    current, _ = read_one_quarter_stock_holdings(data_root, accession_number, quarter)
 
-    if baseline_accession_number is None or baseline_quarter is None:
+    if not baseline_accession_number or not baseline_quarter:
         return
 
-    print(f"Performing comparative analysis using baseline quarter {baseline_quarter}")
-    _, base = read_one_quarter_data(baseline_accession_number, baseline_quarter)
+    print(f"\nPerforming comparative analysis using baseline quarter {baseline_quarter}")
+    baseline, _ = read_one_quarter_stock_holdings(data_root, baseline_accession_number, baseline_quarter)
 
-    all_cusips = set(cur.keys()) | set(base.keys())
+    cusips = set(current.keys()) | set(baseline.keys())
 
-    changes: List[Tuple[str, float, float, float, str]] = []
-    # (cusip, cur_value, base_value, abs_change, name)
-    for cusip in all_cusips:
-        cur_val = float(cur.get(cusip, {}).get("value", 0.0))
-        base_val = float(base.get(cusip, {}).get("value", 0.0))
-        name = str(cur.get(cusip, {}).get("name") or base.get(cusip, {}).get("name") or "")
-        abs_change = cur_val - base_val
-        changes.append((cusip, cur_val, base_val, abs_change, name))
+    deltas = []
+    for cusip in cusips:
+        cur_entry = current.get(cusip)
+        base_entry = baseline.get(cusip)
 
-    # Top buys: positive change, descending by abs_change.
-    buys = sorted([c for c in changes if c[3] > 0], key=lambda x: x[3], reverse=True)[:10]
-    print(f"Top 10 Buys from {baseline_quarter} to {quarter}:")
-    for idx, (cusip, _cur, _base, abs_change, name) in enumerate(buys, start=1):
-        print(f"[{idx}] CUSIP: {cusip}, Name: {name} | Abs change: {abs_change:.2f}")
+        cur_value = float(cur_entry.get("VALUE", 0.0)) if cur_entry else 0.0
+        base_value = float(base_entry.get("VALUE", 0.0)) if base_entry else 0.0
+        abs_change = cur_value - base_value
 
-    # Top sells: negative change, ascending (most negative first).
-    sells = sorted([c for c in changes if c[3] < 0], key=lambda x: x[3])[:10]
-    print(f"\nTop 10 Sells from {baseline_quarter} to {quarter}:")
-    for idx, (cusip, _cur, _base, abs_change, name) in enumerate(sells, start=1):
-        print(f"[{idx}] CUSIP: {cusip}, Name: {name} | Abs change: {abs_change:.2f}")
+        name = ""
+        if cur_entry and cur_entry.get("NAMEOFISSUER"):
+            name = str(cur_entry.get("NAMEOFISSUER"))
+        elif base_entry and base_entry.get("NAMEOFISSUER"):
+            name = str(base_entry.get("NAMEOFISSUER"))
+
+        pct_change: Optional[float]
+        if base_value != 0:
+            pct_change = abs_change / base_value
+        else:
+            pct_change = None
+
+        deltas.append(
+            {
+                "CUSIP": cusip,
+                "NAMEOFISSUER": name,
+                "VALUE": cur_value,
+                "VALUE_base": base_value,
+                "ABS_CHANGE": abs_change,
+                "PCT_CHANGE": pct_change,
+            }
+        )
+
+    buys = [d for d in deltas if d["ABS_CHANGE"] > 0]
+    buys.sort(key=lambda d: float(d["ABS_CHANGE"]), reverse=True)
+
+    print(f"Top {topk} Buys (VALUE increase) from {baseline_quarter} to {quarter}:")
+    for idx, row in enumerate(buys[:topk], start=1):
+        pct = "n/a" if row["PCT_CHANGE"] is None else f"{row['PCT_CHANGE']:.2%}"
+        print(
+            f"[{idx}] CUSIP: {row['CUSIP']}, Name: {row['NAMEOFISSUER']} | "
+            f"Base: {row['VALUE_base']:.2f} -> Now: {row['VALUE']:.2f} | "
+            f"Abs change: {row['ABS_CHANGE']:.2f} | Pct change: {pct}"
+        )
+
+    sells = [d for d in deltas if d["ABS_CHANGE"] < 0]
+    sells.sort(key=lambda d: float(d["ABS_CHANGE"]))
+
+    print(f"\nTop {topk} Sells (VALUE decrease) from {baseline_quarter} to {quarter}:")
+    for idx, row in enumerate(sells[:topk], start=1):
+        pct = "n/a" if row["PCT_CHANGE"] is None else f"{row['PCT_CHANGE']:.2%}"
+        print(
+            f"[{idx}] CUSIP: {row['CUSIP']}, Name: {row['NAMEOFISSUER']} | "
+            f"Base: {row['VALUE_base']:.2f} -> Now: {row['VALUE']:.2f} | "
+            f"Abs change: {row['ABS_CHANGE']:.2f} | Pct change: {pct}"
+        )
+
+
+def main():
+    args = get_args()
+    one_fund_analysis(
+        data_root=args.data_root,
+        accession_number=args.accession_number,
+        quarter=args.quarter,
+        baseline_accession_number=args.baseline_accession_number,
+        baseline_quarter=args.baseline_quarter,
+        topk=args.topk,
+    )
 
 
 if __name__ == "__main__":
-    args = get_args()
-    one_fund_analysis(args.accession_number, args.quarter, args.baseline_accession_number, args.baseline_quarter)
+    main()

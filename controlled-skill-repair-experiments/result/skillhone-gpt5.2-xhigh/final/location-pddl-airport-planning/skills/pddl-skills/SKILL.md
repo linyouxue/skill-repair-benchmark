@@ -34,7 +34,7 @@ Loads a PDDL domain file and problem file into a unified planning problem object
 - `problem_path` (str): Path to PDDL problem file.
 
 **Returns**:
-- `problem`: A `unified_planning.model.Problem` instance.
+- `problem_object`: A `unified_planning.model.Problem` instance.
 
 **Example**:
 ```python
@@ -47,18 +47,18 @@ problem = load_problem("domain.pddl", "task01.pddl")
 - Raises an error if parsing fails.
 
 ## 2. Plan Generation
-### `generate-plan(problem)`
+### `generate-plan(problem_object)`
 
 **Description**:
 Generates a plan for the given planning problem using a classical planner.
 
 **Parameters**:
 
-- `problem`: A unified planning problem instance.
+- `problem_object`: A unified planning problem instance.
 
 **Returns**:
 
-- `plan`: A sequential plan.
+- `plan_object`: A sequential plan.
 
 **Example**:
 
@@ -73,17 +73,15 @@ plan = generate_plan(problem)
 - If no plan exists, returns None.
 
 ## 3. Plan Saving
-### `save-plan(problem, plan, output_path)`
+### `save-plan(problem_object, plan_object, output_path)`
 
 **Description**:
-Writes a plan object to disk in standard PDDL plan format.
+Writes a plan to disk in a line-based PDDL plan format.
 
 **Parameters**:
 
-- `problem`: The planning problem (needed by the writer to serialize actions).
-
-- `plan`: A unified planning plan.
-
+- `problem_object`: The planning problem (used by some writers).
+- `plan_object`: A plan object (or plan text / list of action lines).
 - `output_path` (str): Output file path.
 
 **Example**:
@@ -93,20 +91,20 @@ save_plan(problem, plan, "solution.plan")
 
 **Notes**:
 
-- Uses `unified_planning.io.PDDLWriter`.
-- Output is a text plan file.
-- If `plan` is `None`, an empty plan file is written.
+- Creates the parent directory for `output_path` if needed.
+- Uses `unified_planning.io.PDDLWriter` when available.
+- Falls back to writing action lines / string content for broader compatibility.
 
 ## 4. Plan Validation
-### `validate(problem, plan)`
+### `validate(problem_object, plan_object)`
 
 **Description**:
 Validates that a plan correctly solves the given PDDL problem.
 
 **Parameters**:
 
-- `problem`: The planning problem.
-- `plan`: The generated plan.
+- `problem_object`: The planning problem.
+- `plan_object`: The generated plan.
 
 **Returns**:
 
@@ -119,7 +117,7 @@ ok = validate(problem, plan)
 
 **Notes**:
 
-- Uses `unified_planning.shortcuts.SequentialPlanValidator`.
+- Uses `unified_planning.shortcuts.SequentialPlanValidator` when available.
 - Ensures goal satisfaction and action correctness.
 
 # Example Workflow
@@ -137,6 +135,7 @@ if not validate(problem, plan):
 # Save plan
 save_plan(problem, plan, "task01.plan")
 ```
+
 # Notes
 
 - This skill set enables reproducible planning pipelines.

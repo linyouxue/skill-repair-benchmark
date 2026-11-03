@@ -1,176 +1,174 @@
 #!/usr/bin/env python3
 """segment-combiner
 
-Merge multiple segment JSON files into a single *normalized* removal list.
+Merge multiple segment JSON files into a single, normalized removal list.
 
-Why normalization matters
-------------------------
-Downstream video processing typically assumes removal segments are:
+This skill is designed to sit between detectors (opening / pause / silence) and the
+video processor.
 
-- sorted by start time
-- non-overlapping
-- expressed as half-open time ranges: [start, end) in seconds
+Supported input JSON shapes:
 
-Detector outputs (or multiple detector sources) may overlap or contain adjacent
-ranges. This script merges overlaps/adjacent segments and recomputes durations
-so that downstream processors can safely invert the removal list into keep
-segments.
+1) {"segments": [ {"start": ..., "end": ..., "duration": ...?}, ... ]}
+2) [ {"start": ..., "end": ..., "duration": ...?}, ... ]
+3) {"start": ..., "end": ..., "duration": ...?}
 
-Input flexibility
------------------
-Each input file may be either:
+The output always uses the dict-with-"segments" shape and guarantees:
+- segments are sorted by (start, end)
+- segments are non-overlapping (overlaps/adjacent gaps are merged)
+- every segment has numeric start/end/duration with duration == end - start
 
-- {"segments": [ ... ]}
-- a raw JSON list: [ {"start": ..., "end": ...}, ... ]
-- a single segment object: {"start": ..., "end": ...}
-
-Only start/end are required; duration is recomputed as end - start.
+Time convention: seconds on the original timeline, with half-open intervals:
+[start, end). (start is inclusive, end is exclusive)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 
-_EPS = 1e-9
+def _load_segments(path: str) -> List[Dict[str, Any]]:
+    """Load a list of segment dicts from a JSON file."""
+    with open(path) as f:
+        data = json.load(f)
+
+    if isinstance(data, dict) and "segments" in data:
+        segments = data["segments"]
+    elif isinstance(data, list):
+        segments = data
+    elif isinstance(data, dict) and "start" in data and "end" in data:
+        segments = [data]
+    else:
+        raise ValueError(
+            f"{path}: unsupported segment JSON format. Expected a dict with 'segments', "
+            "a list of segments, or a single segment dict with 'start'/'end'."
+        )
+
+    if not isinstance(segments, list):
+        raise ValueError(f"{path}: 'segments' must be a JSON array")
+
+    out: List[Dict[str, Any]] = []
+    for i, seg in enumerate(segments):
+        if not isinstance(seg, dict):
+            raise ValueError(f"{path}: segment #{i} is not an object")
+        out.append(seg)
+
+    return out
 
 
-def _as_float(value: Any) -> float:
-    """Best-effort numeric coercion."""
+def _coerce_float(value: Any, *, path: str, field: str) -> float:
+    """Coerce numeric JSON values to float with a helpful error."""
     if isinstance(value, (int, float)):
         return float(value)
-    if isinstance(value, str):
-        return float(value.strip())
-    raise TypeError(f"Unsupported numeric value: {value!r}")
+    raise ValueError(f"{path}: segment field '{field}' must be a number; got {type(value).__name__}")
 
 
-def _clean_number(x: float) -> int | float:
-    """Prefer ints when very close; otherwise round for stability."""
-    if abs(x - round(x)) <= 1e-6:
-        return int(round(x))
-    # millisecond precision is plenty for ffmpeg trim/atrim use
-    return round(float(x), 3)
+def _normalize_segment(
+    seg: Dict[str, Any],
+    *,
+    path: str,
+    clamp_end: Optional[float],
+) -> Optional[Dict[str, Any]]:
+    """Normalize a single segment.
 
+    - clamps start to >= 0
+    - optionally clamps end to <= clamp_end
+    - drops invalid/empty segments
+    - recomputes duration as end - start
 
-def _iter_segments(payload: Any) -> Iterable[Dict[str, Any]]:
-    """Yield raw segment dicts from supported JSON payload shapes."""
-    if isinstance(payload, dict) and "segments" in payload:
-        segs = payload.get("segments")
-        if isinstance(segs, list):
-            for seg in segs:
-                if isinstance(seg, dict):
-                    yield seg
-        return
+    Returns None if the segment becomes invalid.
+    """
+    start = _coerce_float(seg.get("start"), path=path, field="start")
+    end = _coerce_float(seg.get("end"), path=path, field="end")
 
-    if isinstance(payload, list):
-        for seg in payload:
-            if isinstance(seg, dict):
-                yield seg
-        return
+    # Clamp to valid timeline bounds.
+    start = max(0.0, start)
+    if clamp_end is not None:
+        end = min(clamp_end, end)
 
-    if isinstance(payload, dict) and "start" in payload and "end" in payload:
-        yield payload
-
-
-def _normalize_segment(seg: Dict[str, Any]) -> Dict[str, float]:
-    """Normalize a segment to {start,end,duration} floats (seconds)."""
-    start = _as_float(seg["start"])
-    end = _as_float(seg["end"])
-
-    # Treat as half-open: [start, end). Require strictly positive duration.
     if end <= start:
-        raise ValueError(f"Invalid segment (end <= start): start={start}, end={end}")
+        return None
 
-    return {"start": start, "end": end, "duration": end - start}
+    # Preserve any extra fields (e.g., detector metadata), but ensure the required
+    # numeric fields are canonical.
+    normalized = {k: v for k, v in seg.items() if k not in {"start", "end", "duration"}}
+    normalized.update({"start": start, "end": end, "duration": end - start})
+    return normalized
 
 
-def _merge_sorted_segments(segments: List[Dict[str, float]], merge_gap: float = 0.0) -> List[Dict[str, float]]:
+def _merge_segments(segments: List[Dict[str, Any]], *, merge_gap: float) -> List[Dict[str, Any]]:
     """Merge overlapping/adjacent segments.
 
-    Segments are treated as half-open [start,end). We merge when:
-      next.start <= current.end + merge_gap
+    Two segments are merged when next.start <= current.end + merge_gap.
 
-    merge_gap exists mainly to absorb floating-point rounding differences.
+    merge_gap=0 merges touching segments (e.g., [0,1) + [1,2) -> [0,2)).
     """
     if not segments:
         return []
 
-    merged: List[Dict[str, float]] = [dict(segments[0])]
+    merged: List[Dict[str, Any]] = [segments[0]]
     for seg in segments[1:]:
-        cur = merged[-1]
-        if seg["start"] <= cur["end"] + merge_gap + _EPS:
-            cur["end"] = max(cur["end"], seg["end"])
-            cur["duration"] = cur["end"] - cur["start"]
-        else:
-            merged.append(dict(seg))
+        prev = merged[-1]
+        if seg["start"] <= prev["end"] + merge_gap:
+            prev["end"] = max(prev["end"], seg["end"])
+            prev["duration"] = prev["end"] - prev["start"]
+            continue
+        merged.append(seg)
 
     return merged
 
 
-def combine_segments(segment_files: List[str], merge_gap: float = 0.0) -> Dict[str, Any]:
-    """Combine and normalize segments from multiple detection files."""
-    raw_segments: List[Dict[str, float]] = []
-    skipped: List[Tuple[str, str]] = []
+def combine_segments(
+    segment_files: Iterable[str],
+    *,
+    merge_gap: float = 0.0,
+    clamp_end: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Combine and normalize segments from multiple files."""
+    collected: List[Dict[str, Any]] = []
 
     for filepath in segment_files:
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        for seg in _load_segments(filepath):
+            normalized = _normalize_segment(seg, path=filepath, clamp_end=clamp_end)
+            if normalized is not None:
+                collected.append(normalized)
 
-        for seg in _iter_segments(data):
-            try:
-                raw_segments.append(_normalize_segment(seg))
-            except Exception as e:  # noqa: BLE001 - intentional best-effort ingestion
-                skipped.append((filepath, str(e)))
+    collected.sort(key=lambda s: (s["start"], s["end"]))
+    merged = _merge_segments(collected, merge_gap=merge_gap)
 
-    raw_segments.sort(key=lambda x: (x["start"], x["end"]))
-    merged_segments = _merge_sorted_segments(raw_segments, merge_gap=merge_gap)
+    total_duration = sum(float(s["duration"]) for s in merged)
 
-    # Clean numeric formatting for stable JSON and downstream expectations.
-    cleaned_segments: List[Dict[str, Any]] = []
-    for seg in merged_segments:
-        start = float(seg["start"])
-        end = float(seg["end"])
-        cleaned_segments.append(
-            {
-                "start": _clean_number(start),
-                "end": _clean_number(end),
-                "duration": _clean_number(end - start),
-            }
-        )
-
-    total_duration = sum(float(s["duration"]) for s in cleaned_segments)
-
-    result: Dict[str, Any] = {
-        "segments": cleaned_segments,
-        "total_segments": len(cleaned_segments),
-        "total_duration_seconds": _clean_number(total_duration),
-        "parameters": {"merge_gap_seconds": merge_gap},
+    return {
+        "segments": merged,
+        "total_segments": len(merged),
+        "total_duration_seconds": total_duration,
+        "parameters": {
+            "merge_gap": merge_gap,
+            "clamp_end": clamp_end,
+        },
         "source_files": list(segment_files),
     }
-
-    if skipped:
-        result["skipped"] = [
-            {
-                "file": file,
-                "reason": reason,
-            }
-            for file, reason in skipped
-        ]
-
-    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Combine and normalize segment detection results")
-    parser.add_argument("--segments", nargs="+", required=True, help="Segment JSON file(s) to combine")
+    parser.add_argument("--segments", nargs="+", required=True, help="Segment JSON files to combine")
     parser.add_argument("--output", required=True, help="Path to output combined segments JSON")
     parser.add_argument(
         "--merge-gap",
         type=float,
         default=0.0,
-        help="Merge segments with gaps <= this many seconds (default: 0)",
+        help=(
+            "Merge segments whose gap is <= this many seconds (default: 0). "
+            "Use a small value like 0.01 to absorb rounding artifacts."
+        ),
+    )
+    parser.add_argument(
+        "--clamp-end",
+        type=float,
+        default=None,
+        help="Optional maximum timestamp to clamp segment ends (e.g., the video duration).",
     )
 
     args = parser.parse_args()
@@ -178,18 +176,14 @@ def main() -> None:
     print("Combining segments...")
     for f in args.segments:
         print(f"  Input: {f}")
-    if args.merge_gap:
-        print(f"  Merge gap tolerance: {args.merge_gap}s")
 
-    result = combine_segments(args.segments, merge_gap=args.merge_gap)
+    result = combine_segments(args.segments, merge_gap=args.merge_gap, clamp_end=args.clamp_end)
 
-    with open(args.output, "w", encoding="utf-8") as f:
+    with open(args.output, "w") as f:
         json.dump(result, f, indent=2)
 
-    print(f"\nCombined {result['total_segments']} segment(s)")
-    print(f"Total duration to remove: {result['total_duration_seconds']}s")
-    if result.get("skipped"):
-        print(f"Skipped {len(result['skipped'])} invalid segment(s)")
+    print(f"\nCombined into {result['total_segments']} segment(s)")
+    print(f"Total duration to remove: {result['total_duration_seconds']:.2f}s")
     print(f"Results saved to: {args.output}")
 
 

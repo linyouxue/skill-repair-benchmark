@@ -11,30 +11,58 @@ import numpy as np
 
 
 def detect_initial_silence(energies, threshold_multiplier=1.5, initial_window=60, smoothing_window=30):
-    """Detect initial silence using energy threshold method."""
+    """Detect initial silence using an energy threshold and optional smoothing.
 
-    energies = np.array(energies)
+    The input `energies` is expected to be an array-like sequence where index `i`
+    corresponds to the energy for second `i` (i.e., `window_seconds=1` from the
+    energy-calculator default).
 
-    # Calculate initial average (baseline from silent period)
-    initial_avg = np.mean(energies[: min(initial_window, len(energies))])
+    When smoothing is enabled, we compute a moving-average with `mode="valid"`.
+    The resulting smoothed value at index `i` summarizes the window
+    `energies[i : i + smoothing_window]`. To map this back to a timestamp on the
+    original timeline, we use the *center* of that window.
+    """
+
+    energies = np.asarray(energies, dtype=float)
+    if energies.size == 0:
+        return 0, {"initial_avg": 0.0, "threshold": 0.0, "smoothing_offset": 0}
+
+    # Calculate initial average (baseline from likely-silent period)
+    baseline_n = min(max(int(initial_window), 1), int(energies.size))
+    initial_avg = float(np.mean(energies[:baseline_n]))
 
     # Calculate threshold
-    threshold = initial_avg * threshold_multiplier
+    threshold = float(initial_avg * threshold_multiplier)
 
-    # Apply moving average to smooth
-    if len(energies) >= smoothing_window:
-        smoothed = np.convolve(energies, np.ones(smoothing_window) / smoothing_window, mode="valid")
+    # Apply moving average to smooth.
+    # NOTE: With mode="valid", the smoothed series is shorter than the original.
+    # We therefore track a timestamp offset so indices can be interpreted as
+    # seconds on the original timeline.
+    smoothing_offset = 0
+    if smoothing_window and int(smoothing_window) > 1 and energies.size >= int(smoothing_window):
+        w = int(smoothing_window)
+        kernel = np.ones(w, dtype=float) / float(w)
+        smoothed = np.convolve(energies, kernel, mode="valid")
+        # Map smoothed index -> original seconds using window center.
+        smoothing_offset = w // 2
     else:
         smoothed = energies
 
-    # Find where smoothed energy exceeds threshold (end of silence)
+    # Find where smoothed energy exceeds threshold (end of initial silence)
     silence_end = 0
-    for i in range(len(smoothed)):
-        if smoothed[i] > threshold:
-            silence_end = i
+    for i, value in enumerate(smoothed):
+        if float(value) > threshold:
+            silence_end = int(i + smoothing_offset)
             break
 
-    return silence_end, {"initial_avg": float(initial_avg), "threshold": float(threshold)}
+    # Clamp to a valid boundary on the original timeline.
+    silence_end = max(0, min(silence_end, int(energies.size)))
+
+    return silence_end, {
+        "initial_avg": initial_avg,
+        "threshold": threshold,
+        "smoothing_offset": int(smoothing_offset),
+    }
 
 
 def main():

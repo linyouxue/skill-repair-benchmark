@@ -22,15 +22,13 @@ python3 /skills/13f-analyzer/scripts/one_fund_analysis.py \
     --quarter 2025-q2 \
 ```
 
-This script will print basic information for a given fund in one quarter.
+This script prints several single-quarter summary statistics for the given filing.
 
-**Count semantics (important):**
-- **Total number of holdings**: the number of **unique CUSIPs** reported for the fund in that quarter (i.e., positions after collapsing multiple line items for the same CUSIP).
-- **Total number of holdings (line items)**: the raw number of rows in `INFOTABLE.tsv` for that accession (useful for debugging; do not treat this as the holdings count).
-- **Number of stock holdings**: the number of **unique CUSIPs** after applying the helper's equity-like `TITLEOFCLASS` filter.
-- **Number of stock holding line items**: the raw row count after that filter.
+Use the *correct* printed metric for the question you are answering:
 
-AUM values are computed by summing `VALUE` across the relevant rows (all rows for Total AUM; filtered rows for Total stock AUM).
+- **AUM / total reported value of the filing**: use `- Total AUM` (the sum of `VALUE` across all `INFOTABLE` rows for that accession number in that quarter).
+- **“How many stocks are held” / number of stock positions**: use `- Unique stock CUSIPs (TITLEOFCLASS-filtered)`.
+  This is the count of **distinct CUSIPs after applying the helper’s conservative `TITLEOFCLASS` stock filter and grouping by CUSIP**. Do **not** use the raw `INFOTABLE` line count, since filings can contain multiple rows per issuer (and non-stock/option lines) that would inflate the “number of stocks”.
 
 ### Analyze the change of holdings of a particular fund in between two quarters:
 

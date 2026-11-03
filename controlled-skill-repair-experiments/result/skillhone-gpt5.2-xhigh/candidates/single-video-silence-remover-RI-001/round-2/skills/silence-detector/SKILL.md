@@ -27,7 +27,7 @@ python3 /root/.claude/skills/silence-detector/scripts/detect_silence.py \
 - `--output`: Path to output JSON file
 - `--threshold-multiplier`: Energy threshold multiplier (default: 1.5)
 - `--initial-window`: Seconds for baseline calculation (default: 60)
-- `--smoothing-window`: Moving average window (default: 30)
+- `--smoothing-window`: Moving average window in seconds/energy-bins (default: 30). When smoothing is enabled, the detector aligns the threshold-crossing time to the *center* of the smoothing window so the returned timestamp matches the original per-second energy timeline.
 
 ### Output Format
 
@@ -52,7 +52,7 @@ python3 /root/.claude/skills/silence-detector/scripts/detect_silence.py \
 1. Load pre-computed energy data
 2. Calculate baseline from first N seconds (likely silent)
 3. Apply smoothing with moving average
-4. Find where smoothed energy exceeds baseline x multiplier
+4. Find where smoothed energy exceeds baseline × multiplier (and map the smoothed index back to an original timestamp using the smoothing-window center)
 
 ## Dependencies
 

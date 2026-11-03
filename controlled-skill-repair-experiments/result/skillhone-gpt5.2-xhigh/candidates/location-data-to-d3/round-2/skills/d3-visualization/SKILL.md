@@ -72,8 +72,8 @@ To keep results stable across runs and machines:
 
 ### Offline + dependency determinism
 - Do **not** load D3 from a CDN.
-- Pin D3 to a specific version (default: **d3@7.9.0**).
-- Prefer vendoring a minified D3 bundle (e.g., `vendor/d3.v7.9.0.min.js`) or bundling with a lockfile.
+- Pin D3 to a specific version that matches the task requirement (default: **D3 v6**, e.g. **d3@6.7.0**).
+- Prefer vendoring a minified D3 bundle (e.g., `vendor/d3.v6.min.js` or `vendor/d3.v6.7.0.min.js`) or bundling with a lockfile.
 
 ### File determinism
 - Stable SVG output:
@@ -94,8 +94,72 @@ dist/
   chart.svg         # exported SVG (optional but nice)
   chart.png         # rasterized (optional)
 vendor/
-  d3.v7.9.0.min.js  # pinned D3 library
+  d3.v6.min.js      # pinned D3 v6 library (or d3.v6.x.y.min.js)
 ```
+
+---
+
+## Legends (categorical color scales)
+
+Tasks that color marks by a categorical field (e.g., sector, category, group) should include a **legend that lists every category present in the bound data**.
+
+### Legend rules for correctness + determinism
+
+- Build the legend entries from the **same domain** used by your color scale (usually `colorScale.domain()`).
+- Ensure the domain includes **all rows**, including items that may have missing values for other fields (e.g., points without a size metric still have a category and should still be shown in the legend).
+- Make the domain order deterministic:
+  - `Array.from(new Set(values)).sort(d3.ascending)`
+- If the number of categories exceeds a fixed palette (e.g., 10), use a palette generator (e.g., `d3.quantize(d3.interpolateRainbow, n)`) so the legend can still list all categories.
+
+### Minimal categorical legend pattern
+
+Use stable class names so downstream checks/tests can reliably locate the legend.
+
+```js
+// categories MUST match the color scale domain exactly.
+const categories = colorScale.domain();
+
+const legend = svg.append('g')
+  .attr('class', 'legend')
+  .attr('transform', 'translate(20,20)');
+
+legend.append('text')
+  .attr('class', 'legend-title')
+  .attr('x', 0)
+  .attr('y', 0)
+  .attr('dy', '0.8em')
+  .style('font-weight', '600')
+  .text('Category');
+
+const items = legend.selectAll('g.legend-item')
+  .data(categories, d => d)
+  .join('g')
+  .attr('class', 'legend-item')
+  .attr('transform', (d, i) => `translate(0, ${20 + i * 16})`);
+
+items.append('rect')
+  .attr('class', 'legend-swatch')
+  .attr('width', 12)
+  .attr('height', 12)
+  .attr('rx', 2)
+  .attr('ry', 2)
+  .attr('fill', d => colorScale(d));
+
+items.append('text')
+  .attr('class', 'legend-label')
+  .attr('x', 16)
+  .attr('y', 6)
+  .attr('dy', '0.35em')
+  .style('font-size', '12px')
+  .text(d => d);
+```
+
+#### Legend acceptance checklist (manual)
+
+- The legend exists and is visible without scrolling the page.
+- The legend has **one entry per unique category in the data** (no “top N” truncation).
+- Categories are not accidentally dropped because other fields are missing.
+- The swatch color matches the marks’ fill color.
 
 ---
 
@@ -171,76 +235,77 @@ CSS for highlighting:
 }
 ```
 
-### Clickable marks with overlaid text (labels)
+#### Composite marks (e.g., bubble + label): keep clicks/hover working
 
-When you place a `<text>` label on top of a clickable shape (e.g., bubble labels inside circles), the text can **steal mouse events** and make the underlying shape feel “unclickable”. Use one (or both) of these patterns:
+If you draw a **shape** (e.g., `<circle>`) and then a **text label** on top, the text can accidentally block mouse events.
 
-**Pattern A — attach handlers to a parent `<g>` node (recommended):**
+Two safe patterns:
 
-```js
+**Pattern A — disable pointer events on overlay text** (simple and common):
+```javascript
+node.append('text')
+  .text(d => d.label)
+  .attr('text-anchor', 'middle')
+  .attr('dy', '0.35em')
+  .style('pointer-events', 'none'); // critical: let the circle receive clicks
+```
+
+**Pattern B — attach handlers to the parent `<g>`** (works even if text receives events):
+```javascript
 const node = svg.selectAll('g.node')
-  .data(data, d => d.key)
-  .join(enter => {
-    const g = enter.append('g').attr('class', 'node');
-    g.append('circle').attr('class', 'bubble');
-    g.append('text')
-      .attr('class', 'label')
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .style('pointer-events', 'none'); // label never blocks hover/click
-    return g;
-  });
+  .data(data, d => d.id)
+  .join('g')
+  .attr('class', 'node')
+  .style('cursor', 'pointer');
 
-node.on('click', (event, d) => setSelected(d.key));
+node.on('click', (event, d) => setSelected(d.id));
 ```
 
-**Pattern B — keep handlers on the shape, but disable pointer events on text:**
+Tip: prefer `mouseenter`/`mouseleave` on the interactive target to avoid tooltip flicker when moving between child elements.
 
-```css
-.label { pointer-events: none; user-select: none; }
-```
+#### Two-way linking (chart ↔ table) with a single selection state
 
-This prevents “dead zones” where only the circle edge is clickable.
+When a task requires **bidirectional selection** (click bubble → highlight row, click row → highlight bubble), use **one shared selection key** and update both views from one place.
 
-### Bidirectional linking (chart ↔ table) for selection/highlighting
+Minimal pattern:
+```javascript
+let selectedId = null;
 
-For tasks that require a chart and a table to stay in sync (click a mark highlights its row, and clicking a row highlights its mark), avoid ad-hoc cross-calls like `highlightBubble()` vs `selectBubble()`.
-
-Use a **single source of truth** for selection and update both views from it.
-
-A simple, robust pattern is `d3.dispatch`:
-
-```js
-const dispatch = d3.dispatch('select');
-
-function setSelected(key) {
-  dispatch.call('select', null, key);
+function setSelected(id) {
+  selectedId = id;
+  bubbles.classed('selected', d => d.id === selectedId);
+  rows.classed('selected', d => d.id === selectedId);
 }
 
-dispatch.on('select.chart', key => {
-  svg.selectAll('g.node').classed('selected', d => d.key === key);
-});
-
-dispatch.on('select.table', key => {
-  d3.selectAll('#data-table tbody tr').classed('selected', d => d.key === key);
-});
-
-// Hook both UI sources into the SAME setter
-nodes.on('click', (event, d) => setSelected(d.key));
-rows.on('click', (event, d) => setSelected(d.key));
+bubbles.on('click', (event, d) => setSelected(d.id));
+rows.on('click', (event, d) => setSelected(d.id));
 ```
 
-**Implementation notes:**
-- Use a stable key (`ticker`, `id`, etc.) and bind it consistently in both components.
-- Prefer one CSS class (`.selected`) for the synced state.
-- If you render labels, ensure the label layer doesn’t break interaction (see section above).
+Event-bus pattern (useful when chart and table live in different files):
+```javascript
+const SELECTION_EVENT = 'd3vis:selected'; // shared event type across files (declare with `var` in non-module scripts to avoid redeclare errors)
 
-### Acceptance checklist for interactive selection
+function emitSelect(id) {
+  window.dispatchEvent(new CustomEvent(SELECTION_EVENT, { detail: { id } }));
+}
 
-Before finishing, manually verify:
-- Clicking a mark selects/highlights **both** the mark and its table row.
-- Clicking a table row selects/highlights **both** the row and its chart mark.
-- Clicking directly on the **label text** still triggers the same selection.
+window.addEventListener(SELECTION_EVENT, (e) => {
+  const id = e.detail?.id;
+  bubbles.classed('selected', d => d.id === id);
+  rows.classed('selected', d => d.id === id);
+});
+
+bubbles.on('click', (event, d) => emitSelect(d.id));
+rows.on('click', (event, d) => emitSelect(d.id));
+```
+
+#### Interactivity acceptance checklist (manual)
+
+Before shipping, verify these behaviors in the browser:
+- Clicking **the shape or its label text** selects the item (label overlay must not block clicks).
+- Exactly one item is selected at a time (previous selection clears).
+- Selecting in the chart highlights the corresponding table row **immediately**, and selecting in the table highlights the corresponding chart mark.
+- Interactive marks use `cursor: pointer` and selection styling is visible (e.g., stroke on bubbles, background on rows).
 
 ### Conditional interactivity
 

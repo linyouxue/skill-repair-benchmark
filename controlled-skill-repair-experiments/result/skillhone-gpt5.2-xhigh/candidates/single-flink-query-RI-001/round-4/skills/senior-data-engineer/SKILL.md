@@ -135,14 +135,7 @@ Missing aggregate state means no output row, not a zero-valued row. The implemen
 2. Configure streaming pipeline YAML (sources, processing, sinks, quality)
 3. Generate Kafka configurations with `kafka_config_generator.py`
 4. Generate Flink/Spark job scaffolding with `stream_processor.py`
-5. **Define completion semantics and emission contract** for every keyed aggregation (especially when lifecycle events arrive on a separate stream):
-   - contributing-event predicate (what adds observations),
-   - segmentation/boundary predicate(s) (e.g., an event-time inactivity gap that closes a session/stage and updates intermediate state; this does **not** automatically imply final emission),
-   - completion-event predicate (what authorizes final emission; prefer explicit terminal lifecycle events when provided—do not treat end-of-input as completion unless the spec says so),
-   - output-eligibility predicate (whether a key with no contributing observations is allowed to emit).
-   Be explicit about which terminal states count as completion (e.g., success/failure/cancel), handle duplicate/late lifecycle events idempotently, and if there are multiple layers (e.g., per-session/stage boundary vs overall entity completion) name them separately and ensure only the top-level completion path can write to the sink.
-   If completion can arrive before an inactivity timer/window closes, "force-close" any in-progress segment on completion so the last segment is counted before emitting.
-   Apply the top-level **Non-negotiable Flink Emission Gate** and validate both positive + lifecycle-only negative fixtures.
+5. Define completion-event semantics (what constitutes a terminal lifecycle event), and ensure you **emit exactly once per key only after completion**. If activity and lifecycle streams are ingested independently, treat completion as an event-time boundary: persist completion state and register an **event-time timer** at the completion timestamp; emit from `onTimer` only after the watermark has passed completion. Apply the top-level `Non-negotiable Flink Emission Gate` so lifecycle-only keys do not produce output.
 6. Deploy and monitor with `streaming_quality_validator.py`
 
 **Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, and real-time quality monitoring
@@ -316,22 +309,21 @@ python scripts/streaming_quality_validator.py \
 
 #### Semantic Contract Gate for Keyed Event Aggregations
 
-Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve these separate predicates (do **not** conflate segmentation with completion):
+Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve three separate predicates:
 
 1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate.
-2. **Segmentation/boundary predicate(s):** how activity is split into sub-aggregates (sessions/stages/windows), e.g., an event-time inactivity gap; boundaries typically update intermediate state but do not necessarily authorize final emission.
-3. **Completion-event predicate:** what authorizes **final** emission for the key (prefer explicit terminal lifecycle status when available). Use end-of-input only if the spec explicitly defines it as completion. Use an inactivity timeout as completion only when the output contract is per-segment and the boundary itself is the final result.
-4. **Output-eligibility predicate:** whether a key with no contributing observations is allowed to produce a result.
+2. **Completion-event predicate:** which event type(s) indicate a key is terminal and may be finalized (e.g., job finished, session closed). This must be defined from the input contract/dataset; do not guess. If completion can arrive before contributing events, store completion state and **defer finalization using an event-time timer** at the completion timestamp; only emit once the watermark has passed completion.
+3. **Output-eligibility predicate:** whether a key with no contributing observations is allowed to produce a result.
 
 Likewise, receiving a completion event does not by itself create an aggregate: do not synthesize a zero-count group for a key with no qualifying activity unless zero-valued output is explicitly required.
-If completion can arrive while a segment is still “open”, flush/close that in-progress segment into your aggregate before emitting so the last segment is not dropped.
 
 For the code-level output-eligibility invariant and completion criterion, apply the top-level `Non-negotiable Flink Emission Gate`.
 
 Before declaring the job complete, validate both positive and negative semantics with small hand-checkable fixtures:
 
-- a key with qualifying activity and the required completion event must be emitted;
+- a key with qualifying activity and the required completion event must be emitted exactly once;
 - a key with the required completion event but no qualifying activity must not be emitted unless the contract explicitly requires an empty aggregate;
+- completion arriving before activity (out-of-order) must not create output. If later qualifying activity occurs, it may only be emitted if you intentionally re-finalize (e.g., a second completion) or you used the completion’s **event-time timer** approach that waits for watermarks before finalization;
 - compare the output key set as well as aggregate values, and investigate unexpected extra keys even when all expected keys are present.
 
 ## Python Tools

@@ -71,7 +71,6 @@ Similarly, you can fuzzy search a stock information, such as CUSIP, by its name 
 ```python
 python3 /skills/fuzzy-name-search/scripts/search_stock_cusip.py \
     --keywords palantir \
-    --quarter 2025-q3 \
     --topk 10
 ```
 

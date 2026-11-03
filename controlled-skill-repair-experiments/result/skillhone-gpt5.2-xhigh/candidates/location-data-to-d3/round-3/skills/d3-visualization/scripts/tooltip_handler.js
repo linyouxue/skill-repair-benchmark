@@ -33,8 +33,11 @@ class TooltipHandler {
      * @param {Object} data - Data point
      */
     show(event, data) {
-        // Check if tooltip should be shown for this data
+        // Check if tooltip should be shown for this data.
+        // IMPORTANT: If we should NOT show, also hide any currently-visible tooltip
+        // so excluded items don't leave stale tooltips on screen.
         if (!this.shouldShow(data)) {
+            this.hide();
             return;
         }
 

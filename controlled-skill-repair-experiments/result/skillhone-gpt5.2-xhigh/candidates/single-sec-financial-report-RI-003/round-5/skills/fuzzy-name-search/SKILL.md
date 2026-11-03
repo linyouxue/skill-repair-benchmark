@@ -5,7 +5,10 @@ description: This skill includes search capability in 13F, such as fuzzy search 
 
 ## Overview
 
-This tool is essentially a search engine that provides you the ability to search a fund or stock meta information with a name. Note that you don't have to provide the accurate name since this tool has built-in fuzzy string search algorithms based on Levinsteins.
+This tool is essentially a search engine that provides you the ability to search a fund or stock meta information with a name. Note that you don't have to provide the accurate name since this tool has built-in fuzzy string search algorithms.
+
+The helpers are dependency-free (standard library only). They read TSV files under
+`$SEC13F_DATA_ROOT/<quarter>/` (default: `/root/<quarter>/`).
 
 The search helpers are installed under `/skills/fuzzy-name-search/scripts`,
 while filing data lives under `/root/<quarter>`. Run the helpers from their
@@ -71,17 +74,16 @@ Similarly, you can fuzzy search a stock information, such as CUSIP, by its name 
 ```python
 python3 /skills/fuzzy-name-search/scripts/search_stock_cusip.py \
     --keywords palantir \
-    --quarter 2025-q3 \
     --topk 10
 ```
 
 ```
-Search Results:
+Search Results (quarters scanned: 2025-q3):
 ** Rank 1 (score = 90.000) **
   Name: palantir technologies inc
   CUSIP: 69608A108
 
-** Rank 2 (score = 90.000) **
+** Rank 2 (score = 88.000) **
   Name: palantir technologies inc
   CUSIP: 69608A108
 ...

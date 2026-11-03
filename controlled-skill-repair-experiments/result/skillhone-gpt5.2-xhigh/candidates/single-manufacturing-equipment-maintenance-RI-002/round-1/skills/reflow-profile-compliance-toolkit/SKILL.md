@@ -160,51 +160,67 @@ def time_above_threshold_s(df_tc, thr):
 
 ### 4. Deterministic sensor selection (tie-breaks)
 
-When reducing multiple thermocouples to one run-level result, **match the selection to the acceptance logic** and keep it deterministic.
+Many questions ask for a single `(tc_id, metric)` per run even when multiple thermocouples exist. **First follow any handbook rule** about which TC is “representative” (e.g., “cold spot / worst‑case component / specified location”). If the handbook does not mandate a specific TC, use the deterministic patterns below.
 
-**One-sided constraints**
-- Upper-limit metric (e.g., max ramp rate): pick the thermocouple with the **largest** value.
-- Lower-limit metric (e.g., minimum peak temperature): pick the thermocouple with the **smallest** value.
-- Tie-break: choose the **lexicographically smallest `tc_id`**.
+**Stable `tc_id` ordering (for ties)**
 
-**Two-sided window constraints (Q02 TAL is commonly a window)**
-If the handbook defines both a minimum and a maximum (a window), do **not** blindly take the min (or max). Instead pick the *controlling* thermocouple:
-- If any thermocouple is **outside** the window: select the one with the **largest violation distance** to the nearest bound.
-- If all thermocouples are **inside** the window: select the one with the **smallest margin** to either bound (closest to failing).
-- Tie-break: lexicographically smallest `tc_id`.
-
-If the handbook explicitly names a representative location (e.g., “cold spot thermocouple”), follow that instruction and document it in code comments.
-
-Examples (filter out `None`/NaN first):
+When two candidates are otherwise equal, pick the smallest `tc_id` using a stable “natural sort” so `TC2 < TC10`.
 
 ```python
-# items: list of (tc_id, value) where value is a real float
-# max metric, tie by smallest tc_id
-tc_id, val = sorted(items, key=lambda p: (-p[1], p[0]))[0]
+import re
 
-# min metric, tie by smallest tc_id
-tc_id, val = sorted(items, key=lambda p: (p[1], p[0]))[0]
-
-def choose_controlling_for_window(items, lo, hi):
-    # returns (tc_id, val, status_string)
-    outside = []
-    inside  = []
-    for tc_id, v in items:
-        if v < lo:
-            outside.append((lo - v, tc_id, v))      # violation distance
-        elif v > hi:
-            outside.append((v - hi, tc_id, v))
+def tc_id_key(tc_id: str):
+    parts = re.split(r"(\\d+)", str(tc_id))
+    key = []
+    for p in parts:
+        if p.isdigit():
+            key.append((1, int(p)))
         else:
-            inside.append((min(v - lo, hi - v), tc_id, v))  # margin
-
-    if outside:
-        dist, tc_id, v = sorted(outside, key=lambda t: (-t[0], t[1]))[0]
-        return tc_id, v, "non-compliant"
-
-    margin, tc_id, v = sorted(inside, key=lambda t: (t[0], t[1]))[0]
-    return tc_id, v, "compliant"
+            key.append((0, p))
+    return tuple(key)
 ```
 
+**One‑sided constraints**
+
+- Max‑only (e.g., ramp‑rate limit): select the **maximum** metric value.
+- Min‑only (e.g., minimum peak at a cold spot): select the **minimum** metric value.
+
+**Two‑sided window constraints (e.g., TAL with both min/max)**
+
+When a metric must satisfy `min <= value <= max`, the “representative” TC should be the one that **drives the compliance decision** (so the reported `tc_id` and value explain the status):
+
+1. Compute `value_tc` for every `tc_id`.
+2. If any TC is outside the window, mark the run **non‑compliant** and report the **most out‑of‑window** TC (largest distance to the nearest bound).
+3. Otherwise, mark the run **compliant** and report the TC **closest to failing** (smallest margin to either edge).
+
+```python
+def select_window_driver(values_by_tc, vmin, vmax):
+    """Return (tc_id, value) that drives a min/max window decision."""
+    items = [(tc, v) for tc, v in values_by_tc.items() if v is not None]
+    if not items:
+        return (None, None)
+
+    def outside_dist(v):
+        if v < vmin:
+            return vmin - v
+        if v > vmax:
+            return v - vmax
+        return 0.0
+
+    viol = [(tc, v, outside_dist(v)) for tc, v in items if outside_dist(v) > 0]
+    if viol:
+        viol.sort(key=lambda x: (-x[2], tc_id_key(x[0])))
+        tc, v, _ = viol[0]
+        return (tc, v)
+
+    # all compliant: closest to either edge
+    near = [(tc, v, min(v - vmin, vmax - v)) for tc, v in items]
+    near.sort(key=lambda x: (x[2], tc_id_key(x[0])))
+    tc, v, _ = near[0]
+    return (tc, v)
+```
+
+This avoids the common error of always using `min(TAL)` (which can hide a “too long” TAL violation) while still being deterministic and handbook‑aligned.
 
 ### 5. Peak and margin
 

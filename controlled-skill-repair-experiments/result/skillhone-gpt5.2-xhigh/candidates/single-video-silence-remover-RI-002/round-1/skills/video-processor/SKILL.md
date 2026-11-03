@@ -54,12 +54,9 @@ python3 /root/.claude/skills/video-processor/scripts/process_video.py \
 
 - `--input`: Path to input video file
 - `--output`: Path to output video file
-- `--remove-segments`: One or more JSON file(s) containing segments to remove
-- `--merge-gap`: Merge removal segments with gaps ≤ this many seconds (default: 0). Useful when segments come from different detectors and have tiny floating-point gaps.
+- `--remove-segments`: JSON file containing segments to remove
 
 ### Input Segment Format
-
-Segments are interpreted as half-open ranges **[start, end)** in seconds.
 
 ```json
 {
@@ -79,11 +76,9 @@ python3 /root/.claude/skills/video-processor/scripts/process_video.py \
     --remove-segments opening.json pauses.json
 ```
 
-This tool will sort, clamp, and merge the combined removal list to ensure it is non-overlapping before processing.
-
 ### Output
 
-Creates the processed video and a lightweight processing report JSON alongside it (this is *not* the task-format `compression_report.json`; use `report-generator` for that):
+Creates the processed video and a report JSON:
 
 ```json
 {
@@ -99,11 +94,10 @@ Creates the processed video and a lightweight processing report JSON alongside i
 ## How It Works
 
 1. **Load removal segments** from JSON file(s)
-2. **Normalize**: sort, clamp to the video duration, and de-overlap/merge adjacent segments
-3. **Calculate keep segments** (inverse of the normalized removal list)
-4. **Build ffmpeg filter** to trim and concatenate
-5. **Process video** using CRF x264/aac encoding
-6. **Generate a lightweight processing report** with statistics
+2. **Calculate keep segments** (inverse of removal segments)
+3. **Build ffmpeg filter** to trim and concatenate
+4. **Process video** using hardware-accelerated encoding
+5. **Generate report** with statistics
 
 ### FFmpeg Filter Example
 

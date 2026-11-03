@@ -2,7 +2,8 @@ import argparse
 
 import pandas as pd
 
-DATA_ROOT = "/root"
+# Filing data is expected under /root/<quarter>/
+data_root = "/root"
 
 
 def get_args():
@@ -17,48 +18,53 @@ def get_args():
 def topk_managers(cusip: str, quarter: str, topk: int):
     """Find top-k fund managers holding the given stock CUSIP in the specified quarter.
 
-    Prints manager names (from COVERPAGE) alongside accession numbers.
+    The result is ranked by total reported holding VALUE for that CUSIP in the
+    selected quarter.
     """
-    cusip = cusip.upper()
 
-    infotable = pd.read_csv(f"{DATA_ROOT}/{quarter}/INFOTABLE.tsv", sep="\t", dtype=str)
+    cusip = cusip.strip().upper()
+
+    infotable = pd.read_csv(f"{data_root}/{quarter}/INFOTABLE.tsv", sep="\t", dtype=str)
+    if "VALUE" not in infotable.columns:
+        raise SystemExit(f"ERROR: Missing VALUE column in {data_root}/{quarter}/INFOTABLE.tsv")
+
     infotable["VALUE"] = pd.to_numeric(infotable["VALUE"], errors="coerce").fillna(0.0)
-    infotable["CUSIP"] = infotable["CUSIP"].astype(str).str.upper()
+    infotable["CUSIP"] = infotable["CUSIP"].fillna("").astype(str).str.upper().str.strip()
 
-    holding_details = infotable[infotable["CUSIP"] == cusip]
+    holding_details = infotable[infotable["CUSIP"] == cusip].copy()
     if holding_details.empty:
-        print(f"ERROR: No holdings found for CUSIP {cusip} in quarter {quarter}")
-        raise SystemExit(1)
+        print(f"No holdings found for CUSIP {cusip} in quarter {quarter}")
+        return
 
     ranked = (
-        holding_details.groupby("ACCESSION_NUMBER")
-        .agg(
-            TOTAL_VALUE=("VALUE", "sum"),
-        )
+        holding_details.groupby("ACCESSION_NUMBER", as_index=False)
+        .agg(TOTAL_VALUE=("VALUE", "sum"))
         .sort_values("TOTAL_VALUE", ascending=False)
         .head(topk)
     )
 
-    # Enrich with manager names from COVERPAGE where possible.
-    try:
-        coverpage = pd.read_csv(f"{DATA_ROOT}/{quarter}/COVERPAGE.tsv", sep="\t", dtype=str)
-        coverpage = coverpage[coverpage["ACCESSION_NUMBER"].isin(ranked.index)].copy()
-        if "ISAMENDMENT" in coverpage.columns:
-            non_amend = coverpage[coverpage["ISAMENDMENT"] == "N"]
-            if not non_amend.empty:
-                coverpage = non_amend
-        coverpage = coverpage.drop_duplicates(subset=["ACCESSION_NUMBER"])
-        name_map = coverpage.set_index("ACCESSION_NUMBER")["FILINGMANAGER_NAME"].to_dict()
-    except Exception:
-        name_map = {}
+    # Map accession numbers to manager names via COVERPAGE.
+    coverpage = pd.read_csv(f"{data_root}/{quarter}/COVERPAGE.tsv", sep="\t", dtype=str)
+    coverpage = coverpage[coverpage["ACCESSION_NUMBER"].isin(ranked["ACCESSION_NUMBER"])].copy()
+
+    # Prefer non-amendment rows when available.
+    if "ISAMENDMENT" in coverpage.columns:
+        coverpage["_is_amendment"] = coverpage["ISAMENDMENT"].fillna("").astype(str).str.upper()
+        coverpage = coverpage.sort_values(by=["ACCESSION_NUMBER", "_is_amendment"])
+
+    manager_name_by_acc = (
+        coverpage.groupby("ACCESSION_NUMBER")["FILINGMANAGER_NAME"].first().to_dict()
+        if "FILINGMANAGER_NAME" in coverpage.columns
+        else {}
+    )
 
     print(f"Top-{ranked.shape[0]} fund managers holding CUSIP {cusip} in quarter {quarter}:")
-    for idx, (accession_number, row) in enumerate(ranked.iterrows(), start=1):
-        total_value = row["TOTAL_VALUE"]
-        manager_name = name_map.get(accession_number, "")
-        manager_part = f", Manager = {manager_name}" if manager_name else ""
+    for idx, row in enumerate(ranked.itertuples(index=False), start=1):
+        accession_number = row.ACCESSION_NUMBER
+        total_value = row.TOTAL_VALUE
+        manager_name = manager_name_by_acc.get(accession_number, "(unknown manager)")
         print(
-            f"Rank {idx}: accession number = {accession_number}{manager_part}, Holding value = {total_value:.2f}"
+            f"Rank {idx}: {manager_name} | accession number = {accession_number}, Holding value = {total_value:.2f}"
         )
 
 

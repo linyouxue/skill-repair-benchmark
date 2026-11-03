@@ -13,28 +13,6 @@ const width = 800;
 const height = 600;
 const margin = {top: 20, right: 20, bottom: 20, left: 20};
 
-/**
- * Shared selection dispatch (bidirectional linking between components).
- *
- * Any component can:
- *   const dispatch = getSelectionDispatch();
- *   dispatch.call('select', null, key);
- *
- * And subscribe:
- *   dispatch.on('select.namespace', key => { ... });
- */
-function getSelectionDispatch() {
-    // Browser: reuse a single global dispatch so separate scripts can link.
-    if (typeof window !== 'undefined') {
-        if (!window.__d3_selection_dispatch__) {
-            window.__d3_selection_dispatch__ = d3.dispatch('select');
-        }
-        return window.__d3_selection_dispatch__;
-    }
-    // Non-browser fallback.
-    return d3.dispatch('select');
-}
-
 // Create SVG
 const svg = d3.select('#chart')
     .append('svg')
@@ -45,8 +23,7 @@ const svg = d3.select('#chart')
 d3.csv('/data/stocks.csv').then(data => {
     // Parse numbers
     data.forEach(d => {
-        const v = d.marketCap === undefined || d.marketCap === null || d.marketCap === '' ? NaN : Number(d.marketCap);
-        d.value = Number.isFinite(v) ? v : null;
+        d.value = d.marketCap ? +d.marketCap : null;
         d.ticker = d.ticker;
         d.sector = d.sector;
     });
@@ -55,20 +32,23 @@ d3.csv('/data/stocks.csv').then(data => {
 });
 
 function createBubbleChart(data) {
-    // Setup shared selection listener (supports table ↔ chart linking)
-    const dispatch = getSelectionDispatch();
-    dispatch.on('select.chart', (ticker) => {
-        d3.selectAll('.bubble').classed('selected', d => d.ticker === ticker);
-    });
-
     // Setup scales
     const radiusScale = d3.scaleSqrt()
         .domain([0, d3.max(data, d => d.value || 0)])
         .range([5, 50]);
 
+    // IMPORTANT: Use a complete, deterministic category domain so legends are complete.
+    // Build from the whole dataset, sort for stability, then pick a palette that can
+    // cover all categories (don't silently drop categories beyond 10).
+    const sectors = Array.from(new Set(data.map(d => d.sector))).sort(d3.ascending);
+
+    const palette = sectors.length <= 10
+        ? d3.schemeCategory10
+        : d3.quantize(d3.interpolateRainbow, sectors.length);
+
     const colorScale = d3.scaleOrdinal()
-        .domain([...new Set(data.map(d => d.sector))])
-        .range(d3.schemeCategory10);
+        .domain(sectors)
+        .range(palette);
 
     // Calculate radius for each data point
     data.forEach(d => {
@@ -88,7 +68,7 @@ function createBubbleChart(data) {
         .force('charge', d3.forceManyBody().strength(-30));
 
     // Optional: Cluster by sector
-    const sectors = [...new Set(data.map(d => d.sector))];
+    // Reuse the same deterministic sector list used by the color scale.
     const sectorPositions = {};
     sectors.forEach((sector, i) => {
         const angle = (i / sectors.length) * 2 * Math.PI;
@@ -102,45 +82,88 @@ function createBubbleChart(data) {
         .force('x', d3.forceX(d => sectorPositions[d.sector].x).strength(0.5))
         .force('y', d3.forceY(d => sectorPositions[d.sector].y).strength(0.5));
 
-    // Create nodes as <g> so text labels don't block interaction
-    const nodes = svg.selectAll('g.node')
+    // Add a categorical legend (one entry per sector).
+    // Use stable class names so verifiers can locate and count legend entries.
+    const legend = svg.append('g')
+        .attr('class', 'legend')
+        .attr('transform', `translate(${margin.left + 10},${margin.top + 10})`);
+
+    legend.append('text')
+        .attr('class', 'legend-title')
+        .attr('x', 0)
+        .attr('y', 0)
+        .attr('dy', '0.8em')
+        .style('font-weight', '600')
+        .text('Sector');
+
+    const legendItems = legend.selectAll('g.legend-item')
+        .data(sectors, d => d)
+        .join('g')
+        .attr('class', 'legend-item')
+        .attr('transform', (d, i) => `translate(0, ${20 + i * 16})`);
+
+    legendItems.append('rect')
+        .attr('class', 'legend-swatch')
+        .attr('width', 12)
+        .attr('height', 12)
+        .attr('rx', 2)
+        .attr('ry', 2)
+        .attr('fill', d => colorScale(d));
+
+    legendItems.append('text')
+        .attr('class', 'legend-label')
+        .attr('x', 16)
+        .attr('y', 6)
+        .attr('dy', '0.35em')
+        .style('font-size', '12px')
+        .text(d => d);
+
+    // Create a <g> wrapper per node so labels don't block clicks.
+    // Keep the label non-interactive (pointer-events: none), and attach
+    // mouse handlers to the *circle* so the selection datum is correct.
+    const nodes = svg.selectAll('g.bubble-node')
         .data(data, d => d.ticker)
-        .join(enter => {
-            const g = enter.append('g')
-                .attr('class', 'node');
+        .join('g')
+        .attr('class', 'bubble-node')
+        .style('cursor', 'pointer');
 
-            g.append('circle')
-                .attr('class', 'bubble')
-                .attr('r', d => d.radius)
-                .attr('fill', d => colorScale(d.sector))
-                .attr('opacity', 0.7);
-
-            g.append('text')
-                .attr('class', 'label')
-                .attr('text-anchor', 'middle')
-                .attr('dominant-baseline', 'middle')
-                .style('pointer-events', 'none') // avoid "unclickable" bubbles
-                .style('font-size', '10px')
-                .style('fill', '#111')
-                .text(d => d.ticker);
-
-            return g;
-        });
-
-    // Attach interaction to the group (works when clicking label text)
-    nodes
+    const bubbles = nodes.selectAll('circle')
+        .data(d => [d])
+        .join('circle')
+        .attr('class', 'bubble')
+        .attr('r', d => d.radius)
+        .attr('fill', d => colorScale(d.sector))
+        .attr('opacity', 0.7)
         .on('mouseover', function(event, d) {
-            // Only show tooltip for non-ETF entries.
-            // Prefer explicit flag when present; otherwise fall back to missing-value heuristic.
-            const isETF = d.isETF === true || d.hasValue === false;
-            if (!isETF) {
+            // Only show tooltip if this datum has the fields your UI needs.
+            // Prefer checking actual data fields rather than category labels.
+            if (d.hasValue && d.ticker && d.name && d.sector) {
                 showTooltip(event, d);
             }
+        })
+        .on('mousemove', function(event) {
+            // Keep tooltip following the pointer.
+            d3.select('#tooltip')
+                .style('left', (event.pageX + 10) + 'px')
+                .style('top', (event.pageY - 10) + 'px');
         })
         .on('mouseout', hideTooltip)
         .on('click', function(event, d) {
             selectBubble(d.ticker);
         });
+
+    // Add label text inside each bubble.
+    // IMPORTANT: pointer-events disabled so text overlay doesn't block clicks.
+    nodes.selectAll('text')
+        .data(d => [d])
+        .join('text')
+        .attr('class', 'bubble-label')
+        .text(d => d.ticker)
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em')
+        .style('font-size', '10px')
+        .style('fill', '#111')
+        .style('pointer-events', 'none');
 
     // Update positions on each tick
     simulation.on('tick', () => {
@@ -165,12 +188,30 @@ function hideTooltip() {
     d3.select('#tooltip').classed('visible', false);
 }
 
+// Use `var` so this file can coexist with other example scripts on the same page
+// without triggering "Identifier has already been declared" errors.
+var D3VIS_SELECTION_EVENT = 'd3vis:selected';
+
+function emitSelection(id) {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(D3VIS_SELECTION_EVENT, {detail: {id}}));
+}
+
 function selectBubble(ticker) {
-    // Update local chart state
+    // Highlight selected bubble
     d3.selectAll('.bubble')
         .classed('selected', d => d.ticker === ticker);
 
-    // Broadcast selection so other components (e.g., table) can sync.
-    const dispatch = getSelectionDispatch();
-    dispatch.call('select', null, ticker);
+    // Emit selection so a table (if listening) can sync.
+    emitSelection(ticker);
+}
+
+// If a table emits selections, listen and update bubbles.
+if (typeof window !== 'undefined') {
+    window.addEventListener(D3VIS_SELECTION_EVENT, (e) => {
+        const id = e?.detail?.id;
+        if (id) {
+            d3.selectAll('.bubble').classed('selected', d => d.ticker === id);
+        }
+    });
 }

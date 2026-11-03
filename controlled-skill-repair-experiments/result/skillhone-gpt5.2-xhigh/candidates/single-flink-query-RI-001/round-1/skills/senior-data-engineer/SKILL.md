@@ -135,12 +135,7 @@ Missing aggregate state means no output row, not a zero-valued row. The implemen
 2. Configure streaming pipeline YAML (sources, processing, sinks, quality)
 3. Generate Kafka configurations with `kafka_config_generator.py`
 4. Generate Flink/Spark job scaffolding with `stream_processor.py`
-5. **Define completion semantics and emission contract** for every keyed aggregation (especially when lifecycle events arrive on a separate stream):
-   - contributing-event predicate (what adds observations),
-   - completion-event predicate (what makes results final: terminal state transition, end-of-input, or event-time inactivity timeout),
-   - output-eligibility predicate (whether a key with no contributing observations is allowed to emit).
-   Be explicit about which terminal states count as completion (e.g., success/failure/cancel), handle duplicate/late lifecycle events idempotently, and if there are multiple “completion” layers (e.g., per-session boundary vs overall entity completion) name them separately.
-   Apply the top-level **Non-negotiable Flink Emission Gate** and validate both positive + lifecycle-only negative fixtures.
+5. Define completion-event semantics (what constitutes a terminal lifecycle event), and ensure you **emit exactly once per key only after completion**. Apply the top-level `Non-negotiable Flink Emission Gate` so lifecycle-only keys do not produce output.
 6. Deploy and monitor with `streaming_quality_validator.py`
 
 **Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, and real-time quality monitoring
@@ -317,7 +312,7 @@ python scripts/streaming_quality_validator.py \
 Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve three separate predicates:
 
 1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate.
-2. **Completion-event predicate:** which event (or condition) makes results final and triggers emission (e.g., explicit terminal status, end-of-input, or an event-time inactivity timeout).
+2. **Completion-event predicate:** which event type(s) indicate a key is terminal and may be finalized (e.g., job finished, session closed). This must be defined from the input contract/dataset; do not guess.
 3. **Output-eligibility predicate:** whether a key with no contributing observations is allowed to produce a result.
 
 Likewise, receiving a completion event does not by itself create an aggregate: do not synthesize a zero-count group for a key with no qualifying activity unless zero-valued output is explicitly required.
@@ -326,8 +321,9 @@ For the code-level output-eligibility invariant and completion criterion, apply 
 
 Before declaring the job complete, validate both positive and negative semantics with small hand-checkable fixtures:
 
-- a key with qualifying activity and the required completion event must be emitted;
+- a key with qualifying activity and the required completion event must be emitted exactly once;
 - a key with the required completion event but no qualifying activity must not be emitted unless the contract explicitly requires an empty aggregate;
+- completion arriving before activity (out-of-order) must not create output unless later qualifying activity occurs and a subsequent completion triggers finalization;
 - compare the output key set as well as aggregate values, and investigate unexpected extra keys even when all expected keys are present.
 
 ## Python Tools

@@ -110,18 +110,30 @@ verified: true
 1. Select streaming architecture (Kappa vs Lambda) based on requirements
 2. Configure streaming pipeline YAML (sources, processing, sinks, quality)
 3. Generate Kafka configurations with `kafka_config_generator.py`
-4. Generate Flink/Spark job scaffolding with `stream_processor.py`, then **make two explicit design decisions before implementing business logic**:
-   - **Completion signal (完成事件判定):** how do you know an entity/session is *done*?
-     - Prefer an **explicit terminal/lifecycle event** on a control stream (e.g., “job finished”, “order closed”). Treat *any terminal state* that should stop counting as completion (success/failure/cancel) and document which ones qualify.
-     - **Event-time correctness:** seeing a terminal event in *processing order* does not guarantee completeness. With out-of-order inputs, earlier-timestamped activity can arrive later. Define completion in terms of **event time + watermarks** (or bounded end-of-input): only finalize when the watermark has passed the terminal timestamp (+ allowed lateness/grace) or when the bounded source has fully finished.
-     - If completion is defined by **inactivity**, implement it with **event-time** (session windows or event-time timers) so it aligns with watermarks/out-of-order data. Avoid inferring completion from processing-time silence unless requirements explicitly say so.
-     - If the source is **bounded** (files/batch replay), end-of-input can act as a *global finalization signal* (watermarks advance to max). You may still need per-key terminal semantics (e.g., “only finished entities”) — model that explicitly and don’t confuse it with end-of-input.
-   - **Output eligibility (结果输出资格):** when are results allowed to be emitted?
-     - For **final-only outputs** (common in offline scoring and batch-style evaluations), emit **exactly once per key** only when you are confident the key is complete **and** no earlier-timestamped events will still arrive (i.e., after the relevant **event-time timer/window has finalized**, after watermark passes completion time, or at bounded end-of-input).
-     - Do **not** emit immediately upon seeing a terminal event unless requirements guarantee ordering; instead, **delay emission** with an **event-time timer** at `completion_time (+ allowed_lateness)` or perform a **global flush at end-of-input**.
-     - Only clear per-key state after emission *and* after you have passed the finalization boundary you chose (watermark/timer/end-of-input), otherwise late events can corrupt results.
-     - For **continuous metrics**, decide whether you want early/late updates; configure allowed lateness, late-data handling, and sink semantics accordingly.
-5. Deploy and monitor with `streaming_quality_validator.py` (lag, freshness, late data, DLQ), and validate that completion/output rules behave correctly under out-of-order and late events.
+4. Generate Flink/Spark job scaffolding with `stream_processor.py`
+5. Deploy and monitor with `streaming_quality_validator.py`
+
+**Critical Notes (event-time correctness + final outputs):**
+
+- **Completion event determination (完成事件判定):**
+  - Prefer an **explicit lifecycle/terminal signal** for the entity you’re computing per-key results for (e.g., a status/event that means *this key will not produce more relevant events*).
+  - Treat **inactivity gaps** as *session/stage boundaries* only; do **not** assume “no events for N minutes ⇒ entity is complete” unless the requirements explicitly define completion that way.
+  - If events can arrive **out of order**, don’t act on the first terminal signal immediately by processing time:
+    - Record the **terminal event-time**.
+    - Gate “completion” until the **watermark** has passed `terminal_time + allowed_lateness` (or until the source is known-bounded and has ended), so late activity cannot change the result.
+
+- **Result output eligibility (结果输出资格):**
+  - Emit the **final** result for a key only when both are true:
+    1. You have observed the key’s **terminal/completion** signal, and
+    2. You have closed/flushed any **open window/session/stage** state that could still affect the metric.
+  - Ensure **exactly-once / idempotent** final emission:
+    - Maintain a keyed `hasEmittedFinal` flag (or write to an upsert/changelog sink).
+    - Output **one record per key** to the “final” sink; send interim metrics to monitoring sinks only.
+
+- **Implementation pattern (generic):** use keyed state + event-time timers.
+  - Track `currentSessionCount`, `maxSessionCount`, `lastActivityEventTime`, and `terminalEventTime`.
+  - On activity: update counts and (re)schedule a timer at `lastActivityEventTime + inactivity_gap` to close the session.
+  - On terminal signal: flush the current session into max, mark terminal time, and only emit once the watermark confirms no late data remains.
 
 **Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, and real-time quality monitoring
 

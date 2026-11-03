@@ -69,4 +69,4 @@ python3 /root/.claude/skills/energy-calculator/scripts/calc_energy.py \
 
 - RMS energy correlates with perceived loudness
 - Higher values = louder audio, lower values = quieter/silence
-- Output can be used by silence-detector (opening/pre-roll) and pause-detector skills
+- Output can be used by opening-detector and pause-detector skills

@@ -8,22 +8,19 @@
  * - Click to sort columns
  */
 
+// Simple event-bus for bidirectional linking (chart ↔ table).
+// Either view can emit a selection; both views listen and update.
+// Use `var` so this file can coexist with other example scripts on the same page
+// without triggering "Identifier has already been declared" errors.
+var D3VIS_SELECTION_EVENT = 'd3vis:selected';
+
+function emitSelection(id) {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(D3VIS_SELECTION_EVENT, {detail: {id}}));
+}
+
 function createInteractiveTable(data) {
     const container = d3.select('#table-container');
-
-    // Shared selection dispatch to support chart ↔ table linking.
-    // This matches bubble_chart_example.js's getSelectionDispatch() behavior.
-    function getSelectionDispatch() {
-        if (typeof window !== 'undefined') {
-            if (!window.__d3_selection_dispatch__) {
-                window.__d3_selection_dispatch__ = d3.dispatch('select');
-            }
-            return window.__d3_selection_dispatch__;
-        }
-        return d3.dispatch('select');
-    }
-
-    const dispatch = getSelectionDispatch();
 
     // Create table structure
     const table = container.append('table')
@@ -57,9 +54,10 @@ function createInteractiveTable(data) {
         const rows = tbody.selectAll('tr')
             .data(data, d => d.ticker)  // Key function for stable updates
             .join('tr')
+            .style('cursor', 'pointer')
             .on('click', function(event, d) {
-                // Broadcast selection so chart can sync.
-                dispatch.call('select', null, d.ticker);
+                // Emit selection so the chart (if listening) can sync.
+                emitSelection(d.ticker);
             });
 
         rows.selectAll('td')
@@ -73,10 +71,15 @@ function createInteractiveTable(data) {
 
     renderTable(data);
 
-    // When an external component selects a ticker, update table highlight.
-    dispatch.on('select.table', (ticker) => {
-        selectRow(ticker);
-    });
+    // Listen for selection events from the chart and highlight the matching row.
+    if (typeof window !== 'undefined') {
+        window.addEventListener(D3VIS_SELECTION_EVENT, (e) => {
+            const id = e?.detail?.id;
+            if (id) {
+                highlightTableRow(id);
+            }
+        });
+    }
 
     // Sorting function
     let sortAscending = true;
@@ -115,17 +118,10 @@ function createInteractiveTable(data) {
     };
 }
 
-function selectRow(ticker) {
-    // Highlight row
+function highlightTableRow(ticker) {
+    // Keep a single visual state for selection.
     d3.selectAll('#data-table tbody tr')
         .classed('selected', function(d) {
-            return d && d.ticker === ticker;
-        });
-}
-
-function highlightTableRow(ticker) {
-    d3.selectAll('#data-table tbody tr')
-        .classed('highlighted', function(d) {
             return d && d.ticker === ticker;
         });
 }
@@ -134,26 +130,22 @@ function highlightTableRow(ticker) {
 function formatNumber(num) {
     if (num === null || num === undefined || num === '') return '-';
 
-    const n = Number(num);
-    if (!Number.isFinite(n)) return '-';
-
-    const sign = n < 0 ? '-' : '';
-    const absNum = Math.abs(n);
-
+    const absNum = Math.abs(num);
     let formatted;
+
     if (absNum >= 1e12) {
-        formatted = (absNum / 1e12).toFixed(2) + 'T';
+        formatted = (num / 1e12).toFixed(2) + 'T';
     } else if (absNum >= 1e9) {
-        formatted = (absNum / 1e9).toFixed(2) + 'B';
+        formatted = (num / 1e9).toFixed(2) + 'B';
     } else if (absNum >= 1e6) {
-        formatted = (absNum / 1e6).toFixed(2) + 'M';
+        formatted = (num / 1e6).toFixed(2) + 'M';
     } else if (absNum >= 1e3) {
-        formatted = (absNum / 1e3).toFixed(2) + 'K';
+        formatted = (num / 1e3).toFixed(2) + 'K';
     } else {
-        formatted = absNum.toFixed(2);
+        formatted = num.toFixed(2);
     }
 
-    return sign + formatted;
+    return num < 0 ? '-' + formatted : formatted;
 }
 
 // CSS for table styling
@@ -186,13 +178,10 @@ tr:hover {
     background: #f9f9f9;
 }
 
-tr.selected {
+tr.selected,
+tr.highlighted {
     background: #e3f2fd !important;
     border-left: 3px solid #2196f3;
-}
-
-tr.highlighted {
-    background: #fff9c4 !important;
 }
 </style>
 `;

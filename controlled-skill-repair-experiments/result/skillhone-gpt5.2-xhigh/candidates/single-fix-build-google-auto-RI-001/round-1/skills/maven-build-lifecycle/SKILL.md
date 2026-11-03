@@ -1,136 +1,102 @@
 ---
 name: maven-build-lifecycle
-description: Use when reproducing and repairing Maven CI build failures, including multi-module reactors and Maven Invoker integration-test builds under src/it.
+description: Use when reproducing and repairing Maven CI build failures, especially legacy multi-module builds and Maven Invoker integration tests.
 ---
 
 # Maven Build Lifecycle — CI Repair Workflow
 
-## 0) Pick the build toolchain (wrapper > system Maven)
+## Toolchain selection (Maven + JDK)
 
-- If the repo contains `./mvnw` (or `.mvn/`), prefer it to match the project’s
-  expected Maven version.
-- Otherwise, use the system `mvn`.
-- Record tool versions in your notes:
-  - `java -version`
-  - `./mvnw -v` or `mvn -v`
+1. Prefer the Maven Wrapper (`./mvnw`) if present; it pins a Maven version closer to what CI used.
+2. Otherwise use system Maven (`mvn`).
+3. Record the toolchain in your diagnosis notes:
+   - `./mvnw -v` or `mvn -v`
+   - `java -version`
 
-Avoid upgrading Java/Maven unless the failure is clearly caused by an
-incompatible toolchain *and* the task permits toolchain changes. For most build
-repairs, the fix belongs in POMs/source, not the environment.
+If you see errors like **"invalid target release"**, **"unsupported major.minor version"**, or bytecode/version mismatches, align the Java version with what the project/CI expects (check the CI config and `maven-compiler-plugin` configuration).
 
-## 1) Reproduce the failure exactly, then minimize
+## Reproduce the failure the same way CI does
 
-1. Run the same goal/phase CI runs (often `test` or `verify`). If the exact CI
-   command is unknown, start with `verify`:
+- Start from the repository root path provided by the task (commonly `/home/travis/build/failed/<repo>/<id>`).
+- Mirror CI goals/profiles first; then narrow down once you know the first failing module.
 
-   ```bash
-   ./mvnw -B -e -V verify
-   # or, if there is no wrapper:
-   mvn -B -e -V verify
-   ```
+Suggested baseline reproduction command (use wrapper if present, include stack traces):
 
-   Add `-DtrimStackTrace=false` when the root error is being suppressed.
+```bash
+REPO=/home/travis/build/failed/<repo>/<id>
+cd "$REPO"
+MVN=./mvnw; [ -x "$MVN" ] || MVN=mvn
 
-2. In multi-module builds, use the Reactor Summary to find the *first* failing
-   module; later failures are often cascading.
+$MVN -e -DtrimStackTrace=false clean verify
+```
 
-3. Narrow scope once reproduced:
+Once you have the first failing module, rerun more narrowly to iterate faster:
 
-   - `-pl <module> -am` to focus on one module while still building its
-     dependencies.
-   - `-DskipTests` / `-DskipITs` (if supported by the project) to separate
-     compilation failures from test failures.
+```bash
+$MVN -e -DtrimStackTrace=false -pl :<artifactId> -am test
+```
 
-## 2) Maven Invoker plugin: the failure may be inside `src/it/*`
+## Maven Invoker failures: debug the nested project, not just the reactor
 
-`maven-invoker-plugin` can launch independent Maven builds from integration-test
-projects (commonly under `src/it/**/pom.xml`). These nested builds have their own
-resolved dependency graph and can fail even when the main reactor passes.
+`maven-invoker-plugin` can launch independent Maven builds from integration test projects such as `src/it/*/pom.xml`. Those nested builds have their own dependency mediation and can fail even when the parent module's normal unit tests pass.
 
-If Maven prints output similar to:
+If Maven reports output similar to:
 
 ```text
 The following builds failed:
-* <it-project>/pom.xml
+*  <it-project>/pom.xml
 ```
 
-then debug the nested build:
+then:
 
-1. Locate the integration-test project directory and its `pom.xml`.
-2. Read the corresponding Invoker log (often under `target/it/**/build.log`) or
-   the CI output around the failure.
-3. Identify the *first concrete* compiler/test error inside that nested build
-   (ignore later cascade errors).
-4. Compare the nested POM’s dependencies/plugins to the parent module:
+1. Locate the exact integration-test POM named by the Invoker (often under `.../src/it/<name>/pom.xml`).
+2. Read the corresponding Invoker `build.log` and/or `invoker-reports` output (commonly under `target/it/...`).
+3. Identify the *first concrete compiler/test error* inside that nested build.
+4. Inspect the nested POM's direct dependencies and resolved versions.
+   - Run `mvn help:effective-pom` and `mvn dependency:tree` inside the nested build directory if needed.
+5. Repair the nested dependency/configuration drift instead of broad-editing unrelated top-level modules.
 
-   - Does it inherit from the expected parent?
-   - Is it missing dependency/version alignment that the main reactor gets from
-     `<dependencyManagement>`?
-   - Are test-only dependencies declared with the right `<scope>`?
+Do not assume versions declared in the parent reactor automatically govern an Invoker integration-test POM. Some IT POMs are copied or maintained separately and can become stale.
 
-Do not assume versions declared in the parent automatically govern an Invoker
-integration-test POM—those POMs are frequently copied and can drift.
+## Dependency-drift signals in nested builds
 
-## 3) “Cannot find symbol / ClassNotFound”: suspect dependency drift first
+Common symptoms that point to nested-build dependency/version drift:
 
-Compiler errors like:
+- "cannot find symbol" for a class/method that exists in newer versions of a library
+- test-only artifacts that are designed to be version-coupled (e.g., `<lib>` and `<lib>-testlib`) resolving to different versions
+- `NoSuchMethodError` / `ClassNotFoundException` during tests even though the main reactor compiles
 
-```text
-cannot find symbol: class MoreObjects
-location: package com.google.common.base
-```
+Prefer aligning versions/configuration in the nested POM (or via a BOM/import that the nested POM actually inherits) rather than rewriting valid source code to avoid an API.
 
-usually indicate “the classpath selected an incompatible dependency version,”
-not that the source is wrong.
+## Build-repair artifact contract (SkillHone tasks)
 
-Checklist:
+This task family requires both a diagnosis artifact and one or more patch artifacts.
 
-- Determine the *actual* resolved version in the failing build:
+Before finishing:
 
-  ```bash
-  mvn -DskipTests dependency:tree -Dincludes=<groupId>:<artifactId>
-  ```
+1. Write `/home/travis/build/failed/failed_reasons.txt` with:
+   - the toolchain used (JDK + Maven/wrapper),
+   - the exact failing command and module or nested IT project path,
+   - the first real error, and
+   - the root cause you believe fixes it.
+2. Create at least one non-empty standard unified diff:
+   - `/home/travis/build/failed/<repo>/<id>/patch_1.diff` (and `patch_2.diff`, … if needed).
+3. Apply your patch file(s) to the repository (e.g., with `git apply`) and verify the intended project files changed.
 
-  For Invoker tests, run dependency analysis inside the nested project (or read
-  its `build.log`).
-
-- For version-coupled libraries (for example, `guava` ↔ `guava-testlib`), keep
-  versions synchronized.
-- Prefer fixing POM dependency versions/scopes/exclusions over rewriting valid
-  source to avoid missing APIs.
-
-## 4) Output/patch conventions (for SkillHone-style repair tasks)
-
-Many tasks require you to produce both a diagnosis note and patch artifacts in
-fixed locations. Follow the task prompt exactly; a common contract is:
-
-1. Write `/home/travis/build/failed/failed_reasons.txt` containing:
-
-   - toolchain (`java -version`, `mvn -v`)
-   - the exact command used to reproduce
-   - the first real error message + file/module
-   - your root-cause analysis and plan
-
-2. Create one or more unified diffs at:
-
-   - `/home/travis/build/failed/<repo>/<id>/patch_{i}.diff`
-
-3. Apply the patch(es) to the repository and verify the project files changed
-   (not just the diff artifacts).
-
-## 5) Minimal command template (fill in the repo path)
+## Minimal diagnostic sequence
 
 ```bash
-REPO="/home/travis/build/failed/<repo>/<id>"
+REPO=/home/travis/build/failed/<repo>/<id>
 cd "$REPO"
+MVN=./mvnw; [ -x "$MVN" ] || MVN=mvn
 
-# Toolchain snapshot (include in failed_reasons.txt)
-java -version
-./mvnw -v || mvn -v
+$MVN -v
+$MVN -e -DtrimStackTrace=false clean verify
 
-# Reproduce (adjust goals/profiles to match CI)
-./mvnw -B -e -V verify || mvn -B -e -V verify
-
-# If Invoker is involved, look for nested build logs
-find . -path "*target/it*" -name "build.log" -print
+# If Invoker is involved, inspect common log locations:
+find . \( -path "*/target/it/*/build.log" -o -path "*/target/invoker-reports/*" \) -print
 ```
+
+## General Maven lifecycle reminders
+
+- In multi-module projects, use the reactor summary to identify the first genuinely failing module, then inspect that module's own integration steps.

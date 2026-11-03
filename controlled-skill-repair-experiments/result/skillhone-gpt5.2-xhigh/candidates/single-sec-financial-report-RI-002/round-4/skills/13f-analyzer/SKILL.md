@@ -22,17 +22,15 @@ python3 /skills/13f-analyzer/scripts/one_fund_analysis.py \
     --quarter 2025-q2 \
 ```
 
-This script will print basic information for a given fund in one quarter.
+This script prints several single-quarter summary statistics for the given filing.
 
-**Count semantics (important — choose the right count):**
+Use the *correct* printed metric for the question you are answering:
 
-The helper prints both **position counts** (unique CUSIPs) and **line-item counts** (raw rows). For questions phrased like **“how many stocks does the fund hold?”**, use the **stock position count**, not the first number you see.
+- **AUM / total reported value of the filing**: use `- Total AUM` (the sum of `VALUE` across all `INFOTABLE` rows for that accession number in that quarter).
+- **“How many stocks are held” / number of stock positions**: use `- Unique stock CUSIPs (TITLEOFCLASS-filtered)`.
+  This is the count of **distinct CUSIPs after applying the helper’s conservative `TITLEOFCLASS` stock filter, excluding option rows where `PUTCALL` is set, and grouping by CUSIP**. Do **not** use the raw `INFOTABLE` line count, since filings can contain multiple rows per issuer (and non-stock/option lines) that would inflate the “number of stocks”.
 
-- **Number of stock holdings** (**use for “how many stocks”**): the count of **unique normalized CUSIPs** among rows whose `TITLEOFCLASS` passes the helper’s equity-like filter and (when present) whose `PUTCALL` is blank/NA (options excluded).
-- **Total number of holdings** (all securities): the count of **unique normalized CUSIPs** across the entire filing’s `INFOTABLE.tsv` for that accession (may include options and non-common-equity classes; blank CUSIPs are ignored).
-- **… (line items)**: raw row counts before/after the stock filter. Use these only when explicitly asked for **“line items/rows”** or for debugging.
-
-AUM values are computed by summing `VALUE` across the relevant rows (all rows for Total AUM; filtered rows for Total stock AUM). Keep units exactly as in `INFOTABLE.tsv` (do not rescale unless the dataset documentation explicitly says to).
+  If you explicitly need to include option rows, rerun the helper with `--include_options` and use that output instead.
 
 ### Analyze the change of holdings of a particular fund in between two quarters:
 

@@ -5,7 +5,7 @@ description: This skill includes search capability in 13F, such as fuzzy search 
 
 ## Overview
 
-This tool is essentially a search engine that provides you the ability to search a fund or stock meta information with a name. Note that you don't have to provide the accurate name since this tool has built-in fuzzy string search algorithms based on Levinsteins.
+This tool is essentially a search engine that provides the ability to search a fund or stock meta information by name. You do not need to provide the exact name: the helpers implement lightweight fuzzy matching (no external packages required).
 
 The search helpers are installed under `/skills/fuzzy-name-search/scripts`,
 while filing data lives under `/root/<quarter>`. Run the helpers from their

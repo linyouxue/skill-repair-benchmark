@@ -26,7 +26,7 @@ python3 /root/.claude/skills/pause-detector/scripts/detect_pauses.py \
 - `--energies`: Path to energy JSON file (from energy-calculator)
 - `--output`: Path to output JSON file
 - `--start-time`: Start analyzing from this second (default: 0)
-- `--threshold-ratio`: Low-energy cutoff as a fraction of the local average: mark low energy when `energy <= local_avg × threshold_ratio`. **Higher** values detect/remove more pauses; **lower** values detect fewer (default: 0.5).
+- `--threshold-ratio`: Low-energy threshold as a fraction of the local average (default: 0.5). A second is marked “low energy” when `energy < local_avg × threshold_ratio`. Higher values remove more content (more aggressive).
 - `--min-duration`: Minimum pause duration in seconds (default: 2)
 - `--window-size`: Local average window size (default: 30)
 
@@ -53,7 +53,7 @@ python3 /root/.claude/skills/pause-detector/scripts/detect_pauses.py \
 
 1. Load pre-computed energy data
 2. Calculate local average using sliding window
-3. Mark seconds where energy <= local_avg × threshold_ratio
+3. Mark seconds where energy < local_avg × threshold_ratio
 4. Group consecutive low-energy seconds into segments
 5. Filter segments by minimum duration
 
@@ -79,9 +79,9 @@ python3 /root/.claude/skills/pause-detector/scripts/detect_pauses.py \
 
 | Parameter | Lower Value | Higher Value |
 |-----------|-------------|--------------|
-| `threshold_ratio` | More conservative (fewer pauses detected) | More aggressive (more pauses detected) |
-| `min_duration` | Shorter pauses | Longer pauses only |
-| `window_size` | Local context | Broader context |
+| `threshold_ratio` | More conservative (fewer pauses flagged) | More aggressive (more pauses flagged) |
+| `min_duration` | More aggressive (removes shorter pauses too) | More conservative (keeps more short pauses) |
+| `window_size` | More sensitive to local changes (can be noisier) | Smoother baseline (more stable) |
 
 ## Notes
 

@@ -108,13 +108,12 @@ verified: true
 
 **Steps:**
 1. Select streaming architecture (Kappa vs Lambda) based on requirements
-2. Define the **output contract** for each keyed aggregate (contributing events vs completion predicate; incremental vs final emission)
-3. Configure streaming pipeline YAML (sources, processing, sinks, quality)
-4. Generate Kafka configurations with `kafka_config_generator.py`
-5. Generate Flink/Spark job scaffolding with `stream_processor.py`
-6. Deploy and monitor with `streaming_quality_validator.py`
+2. Configure streaming pipeline YAML (sources, processing, sinks, quality)
+3. Generate Kafka configurations with `kafka_config_generator.py`
+4. Generate Flink/Spark job scaffolding with `stream_processor.py`
+5. Deploy and monitor with `streaming_quality_validator.py`
 
-**Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, real-time quality monitoring, and an explicit output-eligibility rule (final results emitted only when the completion predicate is satisfied)
+**Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, and real-time quality monitoring
 
 
 World-class data engineering for production-grade data systems, scalable pipelines, and enterprise data platforms.
@@ -285,18 +284,27 @@ python scripts/streaming_quality_validator.py \
 
 #### Semantic Contract Gate for Keyed Event Aggregations
 
-Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve three separate predicates:
+Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve these predicates (keep them explicit in code comments/tests):
 
 1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate.
-2. **Completion-event predicate:** the exact event type that authorizes final output.
+2. **Segmentation / boundary predicate:** how observations are grouped into windows/stages/sessions (e.g., inactivity gaps in *event time*, watermark/allowed-lateness rules, timer behavior).
+3. **Output-eligibility (completion) predicate:** the exact lifecycle condition that authorizes final output for a key. In most real systems this is **not** “end of input” — it is an explicit lifecycle transition (often a *set* of terminal states).
 
-Treat event labels as distinct states, even when several of them are terminal in an operational sense. If a specification says to emit after a `FINISH` event, do not broaden that condition to `KILL`, `CANCEL`, `FAIL`, or another terminal event unless the specification explicitly declares them equivalent.
+Treat event labels as distinct states, even when several of them are terminal operationally. Map the **spec wording** to the **source system’s state machine** and write the mapping down:
 
+- If the spec names a **specific** state (e.g., `FINISH`, `COMPLETED_SUCCESS`), emit only after that state — do not broaden it to other terminal states (`KILL`, `CANCEL`, `FAIL`, …) unless the spec/contract explicitly declares them equivalent.
+- If the spec uses **“finished/completed”** but does **not** say “regardless of outcome”, and the source has a dedicated *successful completion* label (commonly `FINISH`/`COMPLETED`), default to that success label.
+- If the spec says **“ended/terminated/finished regardless of outcome”**, define the full terminal set (success + failure/kill/cancel/lost) and emit after any of them.
+
+When a separate lifecycle stream exists, missing a qualifying completion event for a key means the key is **not output-eligible** (do not flush it just because windows close or the bounded input ends).
+
+Segmentation boundaries (e.g., a stage/session closing) often produce **intermediate** facts. If the spec requires **one final record per key** only after the key’s lifecycle completes, keep intermediate aggregates in keyed state and emit only when the output-eligibility predicate is satisfied.
 
 Before declaring the job complete, validate both positive and negative semantics with small hand-checkable fixtures:
 
-- a key with qualifying activity and the required completion event must be emitted;
-- a key with qualifying activity but a different terminal event must not be emitted;
+- a key with qualifying activity and a qualifying completion condition must be emitted;
+- a key with qualifying activity but **no** qualifying completion condition must not be emitted;
+- if your completion predicate excludes some terminal states, include a fixture proving those states do **not** trigger output;
 - compare the output key set as well as aggregate values, and investigate unexpected extra keys even when all expected keys are present.
 
 ## Python Tools
