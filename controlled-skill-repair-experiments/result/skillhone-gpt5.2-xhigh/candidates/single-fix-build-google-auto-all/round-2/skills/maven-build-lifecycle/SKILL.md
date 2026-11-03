@@ -3,216 +3,173 @@ name: maven-build-lifecycle
 description: Use when reproducing and repairing Maven CI build failures, especially legacy multi-module builds and Maven Invoker integration tests.
 ---
 
-# Maven Build Lifecycle — CI Repair Workflow
+# Maven Build Lifecycle - CI Repair Workflow (Legacy + Multi-Module + Invoker ITs)
 
-Use this skill to **reproduce** a failing Maven build locally, **isolate** the failing module/phase, and **apply** a minimal fix while producing the artifacts required by the task prompt.
+## Build-repair artifact contract (required)
 
-## 0) Benchmark contract: repo location + required artifacts (do this first)
+This benchmark expects **(a) a diagnosis note**, **(b) at least one patch file**, and **(c) the patch applied to the repository**.
 
-Many tasks in this benchmark require both a diagnosis note and a patch artifact at **specific absolute paths**. The grader typically checks these paths exactly.
+Before finishing the task:
 
-Common prompt conventions:
+1. **Write analysis + plan** to:
+   - `/home/travis/build/failed/failed_reasons.txt`
 
-- Repository directory: `/home/travis/build/failed/<repo>/<id>`
-- Diagnosis note: `/home/travis/build/failed/failed_reasons.txt`
-- Patch diffs: `/home/travis/build/failed/<repo>/<id>/patch_1.diff` (and `patch_2.diff`, …)
+2. **Create at least one non-empty standard unified diff** inside the failed repository directory:
+   - `patch_1.diff` (and optionally `patch_2.diff`, …)
+   - The repository path is provided by the task, typically:
+     `/home/travis/build/failed/<repo>/<id>`
 
-### Set paths from the prompt (keep them parameterized)
+3. **Apply the patch(es)** so the *actual project files* (e.g., `pom.xml`, `src/**`) are changed, not only the patch artifact.
 
-Do **not** hard-code a specific `<repo>` or `<id>` value; copy the repo path from the prompt.
+4. **Verify** with `git diff`/`git status` and re-run the Maven build.
+
+**Do not hard-code** a repository name/id in commands. Always use the repository path given by the task.
+
+### Suggested patch workflow that matches the prompt
+
+The prompt separates “write patch” and “apply patch”. A safe way to follow that contract:
 
 ```bash
-REPO_DIR="/home/travis/build/failed/<repo>/<id>"   # copy from the prompt
-FAILED_ROOT="/home/travis/build/failed"
-DIAG_FILE="$FAILED_ROOT/failed_reasons.txt"
-PATCH_FILE="$REPO_DIR/patch_1.diff"
-
+# 0) Set this from the task instructions
+REPO_DIR=/home/travis/build/failed/<repo>/<id>
 cd "$REPO_DIR"
+
+# 1) Make edits in the working tree (never edit generated target/** copies)
+
+# 2) Stage the intended changes (avoid accidentally staging the patch artifacts)
+git add -A
+# If patch_*.diff already exists from a previous attempt, unstage it:
+git reset -- patch_*.diff 2>/dev/null || true
+
+# 3) Export a non-empty patch artifact
+#    (Use --cached so the patch includes staged changes, including new files.)
+git diff --cached --binary > patch_1.diff
+# Guardrail: ensure the patch is not empty
+test -s patch_1.diff
+
+# 4) Sanity-check the patch applies cleanly
+git apply --check patch_1.diff
+
+# 5) (Optional) If you need strict step ordering:
+#    reset and re-apply from the patch artifact
+# git reset --hard
+# git apply patch_1.diff
 ```
 
-### Write the diagnosis note early (and keep it updated)
+## Toolchain selection (Java + Maven)
 
-Create the file as soon as you have a baseline failure and update it as you learn more.
+Legacy Maven builds are sensitive to toolchain drift. Establish the toolchain *before* making changes.
+
+1. **Prefer Maven Wrapper** when present:
+   - If `./mvnw` exists, use `./mvnw` for all commands.
+   - Otherwise, use `mvn`.
+
+2. **Record versions** (useful for `failed_reasons.txt`):
 
 ```bash
-mkdir -p "$(dirname "$DIAG_FILE")"
-cat > "$DIAG_FILE" <<'EOF'
-Observed failure:
-- (copy key error lines)
-
-Likely cause:
-- ...
-
-Plan:
-1) ...
-2) ...
-EOF
+java -version
+mvn -version  # or: ./mvnw -version
 ```
 
-### Produce at least one **non-empty unified diff** patch file
+3. **Infer required Java version from the build**:
+   - Look for `maven-compiler-plugin`, `maven.compiler.release`, `maven.compiler.source/target`, or `<java.version>`.
+   - Check for `maven-enforcer-plugin` rules enforcing Java/Maven versions.
 
-After you make code/build changes in the repository, generate the patch diff at the required path.
+4. **When the required Java level and environment disagree**:
+   - Prefer fixing the project configuration/code to work with the available toolchain.
+   - Avoid assumptions like “install a new JDK” unless the environment explicitly supports it.
 
-```bash
-# If you created any new files, make them appear in git diff:
-#   git add -N path/to/new-file
+## Failure reproduction: run the same thing CI runs
 
-git diff > "$PATCH_FILE"
+1. **Find the CI entrypoint** (common locations):
+   - `.github/workflows/*.yml`, `.travis.yml`, `Jenkinsfile`, `pom.xml` profiles referenced by CI.
 
-# The patch must be non-empty
-test -s "$PATCH_FILE"
-```
+2. **Re-run the matching Maven goals and flags**.
 
-If you regenerate the patch multiple times, a quick sanity check (optional) is:
-
-```bash
-# Succeeds when the patch corresponds to changes already present
-git apply --reverse --check "$PATCH_FILE"
-```
-
-Before finishing, confirm:
-
-- `test -s /home/travis/build/failed/failed_reasons.txt`
-- `test -s /home/travis/build/failed/<repo>/<id>/patch_1.diff`
-
-## 1) Choose the correct Maven command and Java toolchain
-
-### Prefer the Maven Wrapper when present
-
-From the repository root, check for a wrapper:
-
-- `./mvnw` (Unix)
-- `.mvn/wrapper/maven-wrapper.properties`
-
-If the wrapper exists, use it (it pins a Maven distribution compatible with the project).
+Recommended baseline commands (use Maven Wrapper when present):
 
 ```bash
-# Ensure it is executable when checked out without +x
-[ -f ./mvnw ] && chmod +x ./mvnw || true
+# Choose the correct Maven entrypoint
+MVN=./mvnw
+[ -x "$MVN" ] || MVN=mvn
 
-if [ -x "./mvnw" ]; then
-  MVN="./mvnw"
-else
-  MVN="mvn"
-fi
+# Fast feedback (build without executing tests):
+$MVN -B -e -DskipTests install
 
-$MVN -v
-```
-
-Use `$MVN …` consistently for all commands in this task.
-
-### Confirm the Java version requirements
-
-Build failures often come from a **Java/Maven mismatch** rather than code.
-
-Checklist:
-
-- Look for `maven-compiler-plugin` configuration (`<source>`, `<target>`, `<release>`), `maven-toolchains-plugin`, or `maven-enforcer-plugin` rules like `requireJavaVersion`.
-- Confirm the JDK Maven is using via `$MVN -v`.
-- Avoid “fixing” by globally changing toolchains unless the project explicitly requires it.
-
-## 2) Reproduce the failure (baseline commands)
-
-Start with a command that matches Maven’s standard lifecycle and produces useful logs.
-
-```bash
-# Fast signal: compile + unit tests
-$MVN -B -e test
-
-# Full build signal (includes integration-test/verify where configured)
+# Full verification (unit + integration tests if configured):
 $MVN -B -e verify
 ```
 
-Conventions:
+Notes:
+- `-DskipTests` skips *execution* but still compiles tests; `-Dmaven.test.skip=true` skips compiling tests too.
+- If logs are too terse, add `-DtrimStackTrace=false` and/or rerun with `-X` after you have a minimal reproducer.
 
-- Use `-B` (batch) to reduce interactive noise.
-- Add `-e` to include exception stack traces.
-- Only use `-X` (debug) after you’ve narrowed the failing area.
+3. **Capture a minimal, actionable diagnosis** in `/home/travis/build/failed/failed_reasons.txt`:
+   - the first failing module and goal (e.g., “Failed to execute goal … on project …”)
+   - the root error (exception message / compilation error)
+   - the exact command to reproduce
+   - a small plan (what file(s) to change and why)
 
-If the project is multi-module, run from the **root aggregator POM** (the one listing `<modules>`).
+## Efficient iteration in multi-module reactors
 
-## 3) Isolate the failing module, phase, or test
-
-### Identify the failing module
-
-When Maven prints “Reactor Summary” it shows which module failed.
-
-Common narrowing patterns:
+Large multi-module builds benefit from narrowing scope while iterating:
 
 ```bash
-# Build only one module and whatever it depends on
-$MVN -B -e -pl :<artifactId> -am test
+# Choose the correct Maven entrypoint
+MVN=./mvnw
+[ -x "$MVN" ] || MVN=mvn
 
-# Resume from a failing module
-$MVN -B -e -rf :<artifactId> test
+# Build only one module (+ dependencies) by artifactId
+$MVN -pl :<artifactId> -am -DskipTests install
+
+# Re-run a single test
+$MVN -Dtest=<TestClassOrPattern> test
 ```
 
-### Separate compilation from tests
+Always return to the full CI command (`test`/`verify`) before declaring the fix complete.
 
-To decide whether you’re dealing with compilation vs tests vs packaging:
+## Maven Invoker / nested integration-test projects (common pitfall)
+
+Some repositories run **integration tests by invoking Maven builds of nested sample projects** (often via `maven-invoker-plugin`). These projects commonly live under directories like:
+- `src/it/**`, `src/it-projects/**`, `it/**`, or under `src/test/resources/**`
+
+Key conventions:
+
+1. **Generated copies are not the source of truth**
+   - Invoker-style tests frequently copy projects to `target/it/**` (or similar) and run Maven there.
+   - **Never edit `target/**`**. Edits will be overwritten on the next run.
+   - Always edit the original fixture sources under `src/it/**` (or the configured directory).
+
+2. **Fixture POMs often use filtered placeholders**
+   - You may see placeholders like `@project.version@`, `${project.version}`, or `${revision}` in fixture `pom.xml` files.
+   - Preserve placeholders when possible; avoid replacing them with a one-off literal version.
+
+3. **Dependency resolution for nested projects**
+   - Nested builds typically resolve the “build under test” artifacts from the **local Maven repository**.
+   - If nested projects fail to resolve your project’s artifacts, ensure the main reactor has produced and installed them:
 
 ```bash
-# Compilation only
-$MVN -B -e -DskipTests compile
+# Choose the correct Maven entrypoint
+MVN=./mvnw
+[ -x "$MVN" ] || MVN=mvn
 
-# Run a single test (Surefire)
-$MVN -B -e -Dtest=<TestClass> test
+# Typical two-step reproducer
+$MVN -DskipTests install
+$MVN verify
 ```
 
-Use skipping flags only as **diagnostic tools** unless the prompt explicitly allows skipping.
+4. **Modification scope**
+   - Acceptable fixes may involve:
+     - parent POM / plugin configuration that controls Invoker execution
+     - fixture project `pom.xml` / `invoker.properties` / scripts under `src/it/**`
+   - Avoid fixes that depend on changing global state outside the repo (e.g., editing `~/.m2/settings.xml`).
 
-## 4) Special case: Maven Invoker / nested test projects
+## Final verification checklist
 
-Legacy plugin builds frequently use `maven-invoker-plugin` to run integration tests that build **nested sample projects**.
+Before finishing:
 
-### How to recognize it
-
-Look for `maven-invoker-plugin` in the root POM (or a plugin module POM) and directories such as:
-
-- `src/it/...`
-- `src/it/projects/...`
-- `src/it/<test-name>/pom.xml`
-
-Invoker will typically copy templates into a generated directory under `target/` (for example `target/it` or `target/invoker`).
-
-### Key rule: edit the *checked-in* templates, not generated copies
-
-- Do **not** patch generated copies under `target/`.
-- Patch the checked-in sources under `src/it/` (or the invoker `cloneProjectsTo` directory configured in the POM).
-
-### Dependency resolution in nested projects
-
-A nested project is usually built by a **separate Maven process**, which means it may not automatically “see” the current reactor unless the build is configured to make artifacts available.
-
-If a nested project fails because it can’t resolve dependencies/plugins (common symptoms: “Could not find artifact …”, missing SNAPSHOTs, missing plugin prefix):
-
-- Determine whether it should resolve artifacts from the **current build output** (reactor) or from a local/remote repository.
-- Prefer fixes that keep builds reproducible:
-  - make nested POMs inherit/align versions via properties
-  - avoid adding ad-hoc remote repositories unless the build already depends on them
-- Keep the scope of changes minimal:
-  - If only integration test templates are broken, change `src/it/**`.
-  - If the main build must publish artifacts for invoker to consume, prefer a lifecycle/config fix that ensures the needed artifacts are available before invoker runs (for example via install-to-local-repo behavior configured by the build).
-
-## 5) Apply a minimal fix and validate
-
-After implementing a change:
-
-1. Re-run the smallest command that demonstrates the fix (often `-pl … -am test`).
-2. Re-run the broader lifecycle phase that originally failed (`test` or `verify`).
-3. Re-generate the patch file at the required location:
-   `git diff > /home/travis/build/failed/<repo>/<id>/patch_1.diff`
-4. Ensure no unintended files changed (avoid committing `target/`, downloaded artifacts, IDE files).
-
-If the failure is build-configuration related, consider reviewing:
-
-- `dependencyManagement` alignment (see skill: `maven-dependency-management`)
-- plugin versions/config (`maven-plugin-configuration`)
-- enforcer rules and toolchains
-
-## Troubleshooting quick hits
-
-- **Maven can’t find a parent POM / wrong module directory**: ensure you’re in the correct root and not a submodule.
-- **Wrong Maven selected**: if a wrapper exists, ensure you’re using `./mvnw` consistently.
-- **Tests are flaky or environment-dependent**: isolate with `-Dtest=...` and confirm whether the failure is deterministic.
-- **Invoker failures**: inspect invoker reports/logs under `target/` (the exact directory is configurable by the plugin) and ensure you’re editing templates, not copied projects.
+- [ ] `/home/travis/build/failed/failed_reasons.txt` exists and explains root cause + plan.
+- [ ] `patch_1.diff` exists in the failed repo directory and is non-empty.
+- [ ] `git apply --check patch_1.diff` succeeds.
+- [ ] The patch is applied: `git status --porcelain` shows intended project file changes.
+- [ ] The full Maven command used by CI (`test` or `verify`) succeeds.

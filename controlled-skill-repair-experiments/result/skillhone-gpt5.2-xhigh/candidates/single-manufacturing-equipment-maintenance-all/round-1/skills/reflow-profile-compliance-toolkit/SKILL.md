@@ -15,25 +15,6 @@ This skill is designed to make the agent:
 - retrieve the right definitions from the handbook, and
 - compute metrics with predictable tie-breaks and interpolation.
 
-## Deliverables & definition of done
-
-This toolkit is commonly used in tasks that require writing structured JSON artifacts (not just prose) derived from `/app/data/*` and grounded in `handbook.pdf`.
-
-You are **not done** until **all task-requested artifacts are written to disk** and match the prompt schemas. Example for a 5-question compliance task:
-
-- `/app/output/q01.json` — ramp-rate limit and per-run max preheat ramp (with representative `tc_id`).
-- `/app/output/q02.json` — per-run TAL (time above liquidus) and compliance against the handbook TAL window.
-- `/app/output/q03.json` — per-run peak temperature compliance (fail if missing TC data, per prompt).
-- `/app/output/q04.json` — per-run conveyor speed feasibility.
-- `/app/output/q05.json` — per-board-family best run selection plus runner-ups.
-
-Definition-of-done checklist:
-- Every required output file exists and is valid JSON.
-- Lists/dicts are sorted as requested; floats rounded to 2 decimals; never emit NaN/Inf (use `null`).
-- Every numeric limit / region / window / margin is explicitly retrieved from the handbook (keep page/section references in your working notes).
-- “Representative thermocouple” selection follows the handbook’s placement guidance; otherwise use the deterministic fallback rules below.
-- No guessing: if the data does not support a value, output `null` and mark compliance conservatively (usually failing/non-compliant unless the prompt/handbook allows otherwise).
-
 ## Handbook “where to look” checklist
 
 Search the handbook for these common sections/tables:
@@ -141,33 +122,41 @@ def time_above_threshold_s(df_tc, thr):
     return total
 ```
 
-### 4. Deterministic sensor selection (tie-breaks)
+### 4. Deterministic representative thermocouple selection (tie-breaks)
 
-When reducing multiple thermocouples to one run-level result, use these stable rules:
+Many handbook checks require reporting **one** thermocouple per run even when multiple sensors exist.
+Do **not** guess: first extract from the handbook how to pick the “representative” / “worst-case” sensor for the metric.
 
-- If selecting maximum metric (e.g., ramp): choose `(max_value, smallest_tc_id)`.
-- If selecting minimum metric (e.g., “coldest” peak): choose `(min_value, smallest_tc_id)`.
+Common handbook patterns (apply the one the handbook actually states):
 
-### TAL (Q02) representative thermocouple selection
+1) **Cold-spot sensor rule (very common for TAL / peak)**
+   - Identify the cold spot TC as the one with the **lowest peak temperature** in the run.
+   - Compute TAL / peak (and any other reflow-region metrics the handbook ties to the cold spot) on **that same TC**.
+   - Tie-break: smallest `tc_id`.
 
-For **time-above-liquidus (TAL)**, the typical intent is to ensure **the coldest location still achieves sufficient wetting time**.
+2) **Metric-extreme rule**
+   - For metrics with a maximum-allowed limit (e.g., ramp rate limit): report the TC with the **maximum** value.
+   - For metrics with a minimum-required limit (e.g., minimum TAL): report the TC with the **minimum** value.
+   - Tie-break: smallest `tc_id`.
 
-1. **Prefer the handbook-defined “representative / worst-case / cold-spot” thermocouple** if the handbook describes how to choose it (e.g., “coldest TC”, “largest thermal mass location”, “shadowed side”, etc.). Apply that guidance first.
-2. If the handbook does **not** specify a placement-based representative TC, use a deterministic fallback that is conservative for compliance:
-   - Compute `tal_s` for every available `tc_id` in the run.
-   - Select the TC with the **minimum** `tal_s` (the coldest / least time above liquidus).
-   - Tie-break by **smallest `tc_id`**.
+3) **All-sensors-must-pass rule**
+   - If the handbook says every TC must meet the window, evaluate **all** TCs.
+   - Run status is compliant only if **all** TCs are compliant.
+   - If the output schema forces a single `tc_id`, pick the “most critical” TC deterministically:
+     - If any TC is non-compliant: choose the TC with the **largest violation distance** to the nearest bound.
+     - Else (all compliant): choose the TC with the **smallest margin** to the nearest bound.
+     - Tie-break: smallest `tc_id`.
 
-Rationale: TAL compliance is limited by the least-heated location; using the maximum TAL would overstate compliance.
-
-Examples:
+Deterministic tie-break code patterns:
 
 ```python
-# max metric (e.g., ramp)
-best = max(items, key=lambda x: (x.value, -int(x.tc_id)))  # if tc_id is numeric-like; otherwise sort strings then take first
-# min metric (e.g., coldest peak or coldest TAL)
-best = min(items, key=lambda x: (x.value, x.tc_id))
+# items: [{"tc_id": "...", "value": <float>}, ...] with value not None
+best_max = sorted(items, key=lambda x: (-x["value"], x["tc_id"]))[0]
+best_min = sorted(items, key=lambda x: (x["value"], x["tc_id"]))[0]
 ```
+
+**Q02 (TAL) note:** When the prompt requests a single `tc_id` and `tal_s`, prefer the handbook’s stated selection rule.
+If the handbook is silent, default to the conservative “cold spot” interpretation (min peak → TAL on that TC) rather than averaging across sensors.
 
 ### 5. Peak and margin
 
@@ -196,13 +185,21 @@ If parameters are missing, output:
 - `required_min_speed_cm_min = null`
 - `meets = false`
 
-## Output construction guardrails
+## Output construction & deliverables guardrails
 
-### 1. Sorting
+### 1. Deliverables (when the task asks for files)
+
+If the task requires writing JSON outputs (e.g., `/app/output/q01.json` …), the completion condition is:
+
+- Create **all required files** at the specified paths.
+- Each file must be valid JSON matching the exact schema in the task prompt.
+- Do not print the full JSON to the chat if the task explicitly requires writing files.
+
+### 2. Sorting
 - Lists: sort by primary ID (run_id / board_family) lexicographically.
 - Dicts keyed by ID: emit in sorted key order.
 
-### 2. Rounding and NaNs
+### 3. Rounding and NaNs
 - Round floats to 2 decimals.
 - Never emit NaN/Inf; use `null`.
 
@@ -215,7 +212,7 @@ def r2(x):
     return float(round(float(x), 2))
 ```
 
-### 3. Missing thermocouple data
+### 4. Missing thermocouple data
 
 If a run has no TC records (or no valid segments for a metric), set numeric outputs to `null`, and avoid claiming “pass” unless explicitly allowed.
 

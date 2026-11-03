@@ -43,36 +43,20 @@ graph.add_node(Node(id="Choices", type="choice"))
 Connect nodes (transitions).
 
 ```python
-# Simple transition (no label)
+# Simple transition
 graph.add_edge(Edge(source="Start", target="Choices"))
 
-# Choice transition (label stored on the edge)
+# Choice transition (with text)
 graph.add_edge(Edge(source="Choices", target="End", text="1. Run away"))
 ```
-
-**Terminal "End" convention**
-
-Many script formats use a special terminal node id `"End"`. This library treats
-it as an *implicit* terminal:
-
-- You may create edges that target `"End"` without adding a `Node(id="End")`.
-- Export does **not** inject an `End` node by default.
-- Validation allows edges to point to `"End"`, but prevents edges *from* `"End"`.
-
-If you need an explicit node for downstream tools, pass `include_end=True` when
-exporting.
 
 ### 4. Export
 Serialize to JSON format for the engine.
 
 ```python
-# Default export (no implicit End injection)
 data = graph.to_dict()
+# returns {"nodes": [...], "edges": [...]}
 json_str = graph.to_json()
-
-# Optional: include an explicit End node if referenced by edges
-data_with_end = graph.to_dict(include_end=True)
-json_with_end = graph.to_json(include_end=True)
 ```
 
 ### 5. Validation
@@ -84,21 +68,7 @@ errors = graph.validate()
 ```
 
 ### 6. Visualization
-
-#### A) Export DOT (no dependencies)
-
-Most tasks only require a valid `.dot` file. You can generate one without
-installing any extra packages:
-
-```python
-# Writes output.dot
-path = graph.visualize('output', format='dot')
-```
-
-#### B) Render PNG/SVG (optional)
-
-If you want an image, install the `graphviz` Python package *and* the Graphviz
-system binary:
+Generate a PNG/SVG graph diagram.
 
 ```python
 # Requires: pip install graphviz

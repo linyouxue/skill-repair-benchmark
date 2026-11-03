@@ -41,51 +41,13 @@ If details are missing, **make reasonable defaults** and document them in commen
 
 ## Outputs you should produce
 
-Always follow the task’s **required output paths**. If the user provides an output contract (exact filenames/locations), create **those files exactly**.
+Prefer producing **all of** the following when feasible:
 
-Common deliverable patterns:
+1. `dist/chart.html` — standalone HTML that renders the visualization
+2. `dist/chart.svg` — exported SVG (stable and diff-friendly)
+3. (Optional) `dist/chart.png` — if the task explicitly needs a raster image
 
-1) **Single-page web app (offline)**
-- `index.html`
-- `js/…` (your visualization logic, plus a locally vendored D3 bundle)
-- `css/…`
-- `data/…` (a copy of the provided input data when the task requires “offline” / “no network”)
-
-2) **Static artifacts (when requested)**
-- `chart.svg` — exported SVG (stable and diff-friendly)
-- `chart.png` — rasterized (only if explicitly requested)
-
-If the task does **not** specify a structure, default to a predictable folder like `dist/` and keep all referenced assets relative to the HTML file.
-
-### Output-contract checklist (single-page web app)
-
-When the user asks for an offline single-page web app with specific required paths, double-check you produced **all** required files and folders.
-
-A common required layout looks like:
-
-```
-OUTPUT_ROOT/
-  index.html
-  js/
-    d3.v6.min.js
-    visualization.js
-  css/
-    style.css
-  data/
-    … copied input data files …
-```
-
-**Notes:**
-- Use **relative URLs** in `index.html` (e.g., `js/visualization.js`, not absolute `/js/…`) unless the task explicitly requires absolute paths.
-- If the task requires copying input data into `OUTPUT_ROOT/data/`, copy it **byte-for-byte** (no reformatting) and load from that location.
-- If the task requires a specific D3 version, ensure the vendored file path and `<script src>` match it exactly (e.g., `js/d3.v6.min.js`).
-- If your repo/skill bundle already includes a vendored D3 file, **copy it verbatim** into the required output path instead of downloading from the network (example: `skills/d3-visualization/vendor/d3.v6.min.js` → `OUTPUT_ROOT/js/d3.v6.min.js`).
-
-### Browser file:// loading caveat
-
-Many browsers block `fetch()`/`d3.csv()` when opening `index.html` via `file://…`.
-- If the task environment serves files over HTTP, runtime loading via `d3.csv('data/…')` is fine.
-- If the task must work by double-clicking `index.html`, consider **embedding parsed data** into `visualization.js` at build time (while still copying the original data files if required).
+Always keep outputs in a predictable folder (default: `dist/`), unless the task specifies paths.
 
 ---
 
@@ -110,8 +72,8 @@ To keep results stable across runs and machines:
 
 ### Offline + dependency determinism
 - Do **not** load D3 from a CDN.
-- Pin D3 to the version the task asks for. If unspecified, choose and document a pinned version.
-- Prefer vendoring a minified D3 bundle (e.g., `vendor/d3.v6.min.js` or `js/d3.v6.min.js` under the app output) or bundling with a lockfile.
+- Pin D3 to a specific version that matches the task requirement (default: **D3 v6**, e.g. **d3@6.7.0**).
+- Prefer vendoring a minified D3 bundle (e.g., `vendor/d3.v6.min.js` or `vendor/d3.v6.7.0.min.js`) or bundling with a lockfile.
 
 ### File determinism
 - Stable SVG output:
@@ -132,8 +94,75 @@ dist/
   chart.svg         # exported SVG (optional but nice)
   chart.png         # rasterized (optional)
 vendor/
-  d3.v6.min.js      # pinned D3 library (or the version requested by the task)
+  d3.v6.min.js      # pinned D3 v6 library (or d3.v6.x.y.min.js)
 ```
+
+---
+
+## Legends (categorical color scales)
+
+Tasks that color marks by a categorical field (e.g., sector, category, group) should include a **legend that lists every category present in the bound data**.
+
+### Legend rules for correctness + determinism
+
+- Build the legend entries from the **same domain** used by your color scale (usually `colorScale.domain()`).
+- Derive the categorical domain from the **full dataset** (before filtering for size/tooltip/visibility). Example pitfall: if you size bubbles only for rows with `marketCap`, you must still include rows without `marketCap` when computing the sector list so the legend stays complete.
+- Ensure the domain includes **all rows**, including items that may have missing values for other fields (e.g., points without a size metric still have a category and should still be shown in the legend).
+- If some rows have missing/blank category values, map them to a stable placeholder (e.g., `"Unknown"`) so they still render deterministically and are accounted for.
+- Make the domain order deterministic:
+  - `Array.from(new Set(values)).sort(d3.ascending)`
+- If the number of categories exceeds a fixed palette (e.g., 10), use a palette generator (e.g., `d3.quantize(d3.interpolateRainbow, n)`) so the legend can still list all categories.
+- Keep legend labels as the **raw category strings** (avoid adding counts or abbreviations) unless the task explicitly asks for that.
+
+### Minimal categorical legend pattern
+
+Use stable class names so downstream checks/tests can reliably locate the legend.
+
+```js
+// categories MUST match the color scale domain exactly.
+const categories = colorScale.domain();
+
+const legend = svg.append('g')
+  .attr('class', 'legend')
+  .attr('transform', 'translate(20,20)');
+
+legend.append('text')
+  .attr('class', 'legend-title')
+  .attr('x', 0)
+  .attr('y', 0)
+  .attr('dy', '0.8em')
+  .style('font-weight', '600')
+  .text('Category');
+
+const items = legend.selectAll('g.legend-item')
+  .data(categories, d => d)
+  .join('g')
+  .attr('class', 'legend-item')
+  .attr('transform', (d, i) => `translate(0, ${20 + i * 16})`);
+
+items.append('rect')
+  .attr('class', 'legend-swatch')
+  .attr('width', 12)
+  .attr('height', 12)
+  .attr('rx', 2)
+  .attr('ry', 2)
+  .attr('fill', d => colorScale(d));
+
+items.append('text')
+  .attr('class', 'legend-label')
+  .attr('x', 16)
+  .attr('y', 6)
+  .attr('dy', '0.35em')
+  .style('font-size', '12px')
+  .text(d => d);
+```
+
+#### Legend acceptance checklist (manual)
+
+- The legend exists and is visible without scrolling the page.
+- The legend has **one entry per unique category in the data** (no “top N” truncation).
+- Categories are not accidentally dropped because other fields are missing.
+- The swatch color matches the marks’ fill color.
 
 ---
 
@@ -209,85 +238,96 @@ CSS for highlighting:
 }
 ```
 
-### Clickable marks with overlaid text (labels)
+#### Composite marks (e.g., bubble + label): keep clicks/hover working
 
-When you place a `<text>` label on top of a clickable shape (e.g., bubble labels inside circles), the text can **steal mouse events** and make the underlying shape feel “unclickable”. Use one (or both) of these patterns:
+If you draw a **shape** (e.g., `<circle>`) and then a **text label** on top, the label can accidentally block mouse events **or** become unclickable depending on how you handle pointer events.
 
-**Pattern A — attach handlers to a parent `<g>` node (recommended):**
+Prefer solutions that make **both** the shape and the label reliably interactive (this matters for automated checks that click the label element).
 
-```js
+Two safe patterns:
+
+**Pattern A — attach the same handlers to both shape and label** (max compatibility):
+```javascript
+function onSelect(event, d) {
+  setSelected(d.id);
+}
+
 const node = svg.selectAll('g.node')
-  .data(data, d => d.key)
-  .join(enter => {
-    const g = enter.append('g').attr('class', 'node');
-    g.append('circle').attr('class', 'bubble');
-    g.append('text')
-      .attr('class', 'label')
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .style('pointer-events', 'none'); // label never blocks hover/click
-    return g;
-  });
+  .data(data, d => d.id)
+  .join('g')
+  .attr('class', 'node')
+  .style('cursor', 'pointer');
 
-node.on('click', (event, d) => setSelected(d.key));
+node.append('circle')
+  .attr('r', d => d.r)
+  .on('click', onSelect);
+
+node.append('text')
+  .text(d => d.label)
+  .attr('text-anchor', 'middle')
+  .attr('dy', '0.35em')
+  .on('click', onSelect);
 ```
 
-**Pattern B — keep handlers on the shape, but disable pointer events on text:**
+**Pattern B — attach handlers to the parent `<g>`** (clean) and keep the label clickable:
+```javascript
+const node = svg.selectAll('g.node')
+  .data(data, d => d.id)
+  .join('g')
+  .attr('class', 'node')
+  .style('cursor', 'pointer');
 
-```css
-.label { pointer-events: none; user-select: none; }
+// Use bubbling events like click/mouseover so events from the circle/text reach the <g>.
+node.on('click', (event, d) => setSelected(d.id));
 ```
 
-This prevents “dead zones” where only the circle edge is clickable.
+If you use `mouseenter`/`mouseleave` (which do **not** bubble), attach them to the actual interactive element(s) (e.g., the circle and text) or use `mouseover`/`mouseout` on the parent `<g>`.
 
-### Bidirectional linking (chart ↔ table) for selection/highlighting
+Avoid relying solely on `pointer-events: none` for labels when the requirement says “click the label”, because some test runners will attempt to click the label element directly.
 
-For tasks that require a chart and a table to stay in sync (click a mark highlights its row, and clicking a row highlights its mark), avoid ad-hoc cross-calls like `highlightBubble()` vs `selectBubble()`.
+#### Two-way linking (chart ↔ table) with a single selection state
 
-Use a **single source of truth** for selection and update both views from it.
+When a task requires **bidirectional selection** (click bubble → highlight row, click row → highlight bubble), use **one shared selection key** and update both views from one place.
 
-A simple, robust pattern is `d3.dispatch`, with a **shared dispatch instance** so separate scripts/components can communicate.
+Minimal pattern:
+```javascript
+let selectedId = null;
 
-```js
-// Create once (global) so chart.js and table.js can share it.
-function getSelectionDispatch() {
-  if (!window.__d3_selection_dispatch__) {
-    window.__d3_selection_dispatch__ = d3.dispatch('select');
-  }
-  return window.__d3_selection_dispatch__;
+function setSelected(id) {
+  selectedId = id;
+  bubbles.classed('selected', d => d.id === selectedId);
+  rows.classed('selected', d => d.id === selectedId);
 }
 
-const dispatch = getSelectionDispatch();
-
-function setSelected(key) {
-  dispatch.call('select', null, key);
-}
-
-dispatch.on('select.chart', key => {
-  svg.selectAll('g.node').classed('selected', d => d.key === key);
-});
-
-dispatch.on('select.table', key => {
-  d3.selectAll('#data-table tbody tr').classed('selected', d => d.key === key);
-});
-
-// Hook both UI sources into the SAME setter
-nodes.on('click', (event, d) => setSelected(d.key));
-rows.on('click', (event, d) => setSelected(d.key));
+bubbles.on('click', (event, d) => setSelected(d.id));
+rows.on('click', (event, d) => setSelected(d.id));
 ```
 
-**Implementation notes:**
-- Use a stable key (`ticker`, `id`, etc.) and bind it consistently in both components.
-- Prefer one CSS class (`.selected`) for the synced state.
-- If you render labels, ensure the label layer doesn’t break interaction (see section above).
+Event-bus pattern (useful when chart and table live in different files):
+```javascript
+var SELECTION_EVENT = 'd3vis:selected'; // shared event type across files (use `var` in non-module scripts to avoid redeclare errors)
 
-### Acceptance checklist for interactive selection
+function emitSelect(id) {
+  window.dispatchEvent(new CustomEvent(SELECTION_EVENT, { detail: { id } }));
+}
 
-Before finishing, manually verify:
-- Clicking a mark selects/highlights **both** the mark and its table row.
-- Clicking a table row selects/highlights **both** the row and its chart mark.
-- Clicking directly on the **label text** still triggers the same selection.
-- Selecting from either view does **not** require two clicks (no “toggle only” behavior).
+window.addEventListener(SELECTION_EVENT, (e) => {
+  const id = e.detail?.id;
+  bubbles.classed('selected', d => d.id === id);
+  rows.classed('selected', d => d.id === id);
+});
+
+bubbles.on('click', (event, d) => emitSelect(d.id));
+rows.on('click', (event, d) => emitSelect(d.id));
+```
+
+#### Interactivity acceptance checklist (manual)
+
+Before shipping, verify these behaviors in the browser:
+- Clicking **the shape or its label text** selects the item (label overlay must not block clicks).
+- Exactly one item is selected at a time (previous selection clears).
+- Selecting in the chart highlights the corresponding table row **immediately**, and selecting in the table highlights the corresponding chart mark.
+- Interactive marks use `cursor: pointer` and selection styling is visible (e.g., stroke on bubbles, background on rows).
 
 ### Conditional interactivity
 

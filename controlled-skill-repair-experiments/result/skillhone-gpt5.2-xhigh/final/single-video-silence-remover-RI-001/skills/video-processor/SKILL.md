@@ -19,7 +19,7 @@ For a silence-removal task, treat the available audio and video skills as one or
 
 1. Extract the input video's audio.
 2. Calculate the audio-energy sequence.
-3. Detect the non-teaching opening with the silence detector's result, then start long-pause detection at that returned boundary. Run the documented detector defaults before considering any tuning.
+3. Detect the non-teaching opening with the silence detector's result, then start long-pause detection at that returned boundary. The silence-detector aligns the returned boundary to the *center* of its smoothing window; treat that value as a second index on the original per-second energy timeline. Run the documented detector defaults before considering any tuning.
 4. Combine, sort, clamp, and de-overlap all removal segments. Preserve every positive gap; merge only overlapping or touching intervals.
 5. Process the original video with the combined segments to create the compressed video.
 6. Generate the task-format compression report from the actual original video, compressed video, and final segment list.

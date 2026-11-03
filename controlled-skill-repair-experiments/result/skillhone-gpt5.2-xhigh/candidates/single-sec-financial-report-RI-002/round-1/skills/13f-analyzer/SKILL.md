@@ -22,15 +22,7 @@ python3 /skills/13f-analyzer/scripts/one_fund_analysis.py \
     --quarter 2025-q2 \
 ```
 
-This script will print basic information for a given fund in one quarter.
-
-**Count semantics (important):**
-- **Total number of holdings**: the number of **unique CUSIPs** reported for the fund in that quarter (i.e., positions after collapsing multiple line items for the same CUSIP).
-- **Total number of holdings (line items)**: the raw number of rows in `INFOTABLE.tsv` for that accession (useful for debugging; do not treat this as the holdings count).
-- **Number of stock holdings**: the number of **unique CUSIPs** after applying the helper's equity-like `TITLEOFCLASS` filter.
-- **Number of stock holding line items**: the raw row count after that filter.
-
-AUM values are computed by summing `VALUE` across the relevant rows (all rows for Total AUM; filtered rows for Total stock AUM).
+This script will print out several basic information of a given fund on 2025-q2, including total number of holdings, AUM, total number of stock holdings, etc.
 
 ### Analyze the change of holdings of a particular fund in between two quarters:
 

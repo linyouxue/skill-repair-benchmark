@@ -19,8 +19,7 @@ def detect_pauses(energies, start_time=0, threshold_ratio=0.5, min_duration=2, w
     local_avg = uniform_filter1d(energies, size=window_size, mode="nearest")
 
     # Identify low-energy seconds
-    # Treat exact-threshold values as low energy as well (inclusive).
-    is_low_energy = energies <= (local_avg * threshold_ratio)
+    is_low_energy = energies < (local_avg * threshold_ratio)
 
     # Find continuous segments starting from start_time
     segments = []
@@ -53,7 +52,16 @@ def main():
     parser.add_argument("--energies", required=True, help="Path to energy JSON file")
     parser.add_argument("--output", required=True, help="Path to output JSON file")
     parser.add_argument("--start-time", type=int, default=0, help="Start time in seconds (default: 0)")
-    parser.add_argument("--threshold-ratio", type=float, default=0.5, help="Threshold ratio (default: 0.5)")
+    parser.add_argument(
+        "--threshold-ratio",
+        type=float,
+        default=0.5,
+        help=(
+            "Low-energy threshold as a fraction of the local average. "
+            "A second is marked low when energy < local_avg × ratio. "
+            "Higher values are more aggressive (flag more pauses). (default: 0.5)"
+        ),
+    )
     parser.add_argument("--min-duration", type=int, default=2, help="Minimum pause duration (default: 2)")
     parser.add_argument("--window-size", type=int, default=30, help="Window size for local average (default: 30)")
 

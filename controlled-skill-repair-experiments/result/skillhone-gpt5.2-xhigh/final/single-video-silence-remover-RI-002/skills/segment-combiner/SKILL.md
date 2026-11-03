@@ -18,6 +18,7 @@ Combines multiple segment JSON files into a single unified segments file for vid
 ```bash
 python3 /root/.claude/skills/segment-combiner/scripts/combine_segments.py \
     --segments /path/to/segments1.json /path/to/segments2.json \
+    --merge-gap 0.01 \
     --output /path/to/all_segments.json
 ```
 
@@ -25,10 +26,22 @@ python3 /root/.claude/skills/segment-combiner/scripts/combine_segments.py \
 
 - `--segments`: One or more segment JSON files to combine
 - `--output`: Path to output combined segments JSON
+- `--merge-gap`: Merge segments whose gap is ≤ this many seconds (default: `0`). Useful to absorb rounding artifacts and ensure non-overlap.
+- `--clamp-end`: Optional maximum timestamp to clamp segment ends (e.g., the video duration)
+
+### Time / interval convention
+
+All timestamps are in seconds on the original timeline, using half-open intervals: **`[start, end)`** (start is inclusive, end is exclusive).
 
 ### Input Format
 
-Each input file should have a `segments` array:
+Each input file may be one of the following:
+
+1. A dict with a `segments` array (recommended)
+2. A bare JSON list of segments
+3. A single segment object with `start` and `end`
+
+Example (dict with `segments`):
 
 ```json
 {
@@ -67,9 +80,6 @@ python3 /root/.claude/skills/segment-combiner/scripts/combine_segments.py \
 
 ## Notes
 
-- **Interval convention:** segments are interpreted as half-open time ranges **[start, end)** in seconds (start inclusive, end exclusive). This matches how ffmpeg `trim/atrim` behave.
-- The combiner **sorts and merges** segments so the output is non-overlapping. Adjacent segments (where `next.start == current.end`) are merged.
-- `duration` is **recomputed** as `end - start` for correctness.
-- Use `--merge-gap` to merge segments separated only by small floating-point gaps.
-- Output is compatible with `video-processor --remove-segments`.
-- Input files should contain a `segments` array; the script also accepts a raw JSON list of segments or a single segment object for convenience.
+- Output segments are **sorted, clamped (if requested), and merged** to ensure they are **non-overlapping**.
+- Adjacent/touching segments are merged when `--merge-gap 0`.
+- Compatible with video-processor `--remove-segments` input.

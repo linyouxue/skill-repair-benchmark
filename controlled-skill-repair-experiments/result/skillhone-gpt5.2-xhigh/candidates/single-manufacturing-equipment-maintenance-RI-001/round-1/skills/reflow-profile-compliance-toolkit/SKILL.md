@@ -15,34 +15,6 @@ This skill is designed to make the agent:
 - retrieve the right definitions from the handbook, and
 - compute metrics with predictable tie-breaks and interpolation.
 
-## Deliverables (files to produce when requested)
-
-Many reflow-profile compliance tasks require you to write one or more JSON artifacts under `/app/output/` (not just describe them in chat). Create **exactly** the filenames specified by the task prompt, and ensure the JSON matches the required schema and key names.
-
-Common deliverables for a 5-question compliance bundle are:
-
-- `/app/output/q01.json` — preheat max ramp rate summary per `run_id` (includes the handbook ramp-rate limit and a `violating_runs` list).
-- `/app/output/q02.json` — run-level time-above-liquidus (TAL) records (one per run, with `status`).
-- `/app/output/q03.json` — peak temperature requirement check (includes `failing_runs` and the per-run coldest/representative peak record).
-- `/app/output/q04.json` — conveyor-speed feasibility checks (per run).
-- `/app/output/q05.json` — best-run selection per `board_family`.
-
-Do **not** hard-code instance values (run ids, limits, thresholds) inside reusable code or the skill text; always derive them from the handbook and the provided datasets.
-
-## Task completion conditions (“done when”)
-
-Consider the task complete only when **all** are true:
-
-1. Every required `/app/output/*.json` file exists and is valid JSON (no comments, no trailing commas).
-2. Each output strictly follows the prompt’s schema:
-   - IDs are strings.
-   - Arrays are sorted by the required keys (e.g., `run_id`, `board_family`) lexicographically.
-   - Dict keys are emitted in sorted order when the prompt requires stable ordering.
-   - Floats are rounded to **2 decimals**; use `null` instead of NaN/Inf/missing.
-3. All numeric limits/regions/windows/margins come from `handbook.pdf` (record page/table references in your reasoning so the result is auditable).
-4. Thermocouple computations follow the deterministic recipes below (time sorting, `dt>0`, interpolation, stable tie-breaks).
-5. Missing data is handled per prompt and conservatively (e.g., if the prompt says a run without TC data fails, mark it failing).
-
 ## Handbook “where to look” checklist
 
 Search the handbook for these common sections/tables:
@@ -229,6 +201,73 @@ def r2(x):
 ### 3. Missing thermocouple data
 
 If a run has no TC records (or no valid segments for a metric), set numeric outputs to `null`, and avoid claiming “pass” unless explicitly allowed.
+
+## Deliverables (file outputs)
+
+When the user request specifies outputs under `/app/output`, treat those file paths as the primary deliverable. For the common five‑question “reflow profile compliance” shape (ramp, TAL, peak, conveyor feasibility, best‑run selection), create **all** of the following files (even if some values are `null` due to missing data):
+
+1. `/app/output/q01.json` — Preheat ramp‑rate summary
+   - Top-level keys:
+     - `ramp_rate_limit_c_per_s`: number | null (handbook sourced)
+     - `violating_runs`: array of `run_id` strings (sorted, unique)
+     - `max_ramp_by_run`: object keyed by `run_id` (emit keys in sorted order). Each value:
+       - `tc_id`: string | null
+       - `max_preheat_ramp_c_per_s`: number | null
+   - Violation rule: include a run in `violating_runs` **only when** both the limit and the computed run metric are present and `max_preheat_ramp_c_per_s > ramp_rate_limit_c_per_s`.
+
+2. `/app/output/q02.json` — Time Above Liquidus (TAL) per run
+   - JSON array sorted by `run_id`.
+   - Each item:
+     - `run_id`: string
+     - `tc_id`: string | null (the selected representative TC, or `null` if none)
+     - `tal_s`: number | null
+     - `required_min_tal_s`: number | null (handbook sourced)
+     - `required_max_tal_s`: number | null (handbook sourced)
+     - `status`: string, one of: `"compliant"` | `"non-compliant"`
+   - If you cannot evaluate (missing TC data and/or missing handbook window), set `tal_s` to `null` and `status` to `"non-compliant"` (do not guess).
+
+3. `/app/output/q03.json` — Peak temperature requirement check
+   - Top-level keys:
+     - `failing_runs`: array of `run_id` strings (sorted, unique). **If a run has no TC data, it must be included here.**
+     - `min_peak_by_run`: object keyed by `run_id` (sorted keys). Each value:
+       - `tc_id`: string | null
+       - `peak_temp_c`: number | null
+       - `required_min_peak_c`: number | null
+
+4. `/app/output/q04.json` — Conveyor speed feasibility
+   - JSON array sorted by `run_id`.
+   - Each item:
+     - `run_id`: string
+     - `required_min_speed_cm_min`: number | null
+     - `actual_speed_cm_min`: number | null
+     - `meets`: boolean
+   - If the requirement cannot be evaluated (missing rule inputs and/or missing actual speed), set `required_min_speed_cm_min` to `null` and `meets` to `false`.
+
+5. `/app/output/q05.json` — Best run selection per `board_family`
+   - JSON array sorted by `board_family`.
+   - Each item:
+     - `board_family`: string
+     - `best_run_id`: string | null
+     - `runner_up_run_ids`: array of strings (sorted)
+
+Do not embed concrete values from a specific instance in the skill itself—only compute them at task time from the provided handbook and datasets.
+
+## Task completion conditions (Definition of Done)
+
+Mark the work “done” only when:
+
+- All required `/app/output/*.json` files requested by the user exist and parse as valid JSON.
+- Every `run_id` (and `board_family`) required by the prompt is represented in the corresponding output (use `null` fields when data is missing).
+- All limits/thresholds/windows/margins and region definitions are grounded in `handbook.pdf` (capture them in a `cfg` object in code or working notes).
+- Metrics are computed deterministically:
+  - Samples sorted by `time_s` per `(run_id, tc_id)`; ignore `dt <= 0`.
+  - Region/window filters follow the handbook definition of preheat/soak/reflow/cooling.
+  - TAL uses linear interpolation at threshold crossings.
+  - Multi‑TC reductions use stable tie‑break rules.
+- Formatting constraints are satisfied:
+  - Floats rounded to 2 decimals.
+  - No NaN/Inf; use `null`.
+  - Arrays and dict keys are sorted as specified by the prompt.
 
 ## Minimal end-to-end scaffold
 

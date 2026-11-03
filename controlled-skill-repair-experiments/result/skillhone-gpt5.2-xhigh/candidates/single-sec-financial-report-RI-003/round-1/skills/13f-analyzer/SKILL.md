@@ -41,9 +41,7 @@ python3 /skills/13f-analyzer/scripts/one_fund_analysis.py \
     --baseline_accession_number <accession number assigned in q2>
 ```
 
-This script will print out the dynamic changes of holdings from 2025-q2 to 2025-q3.
-
-For cross-quarter **Top Buys / Top Sells**, interpret the output as **dollar value changes per CUSIP** (current quarter VALUE minus baseline quarter VALUE). This is *not* percentage change and is not based on share-count deltas. When asked for "increased investment", rank by the absolute VALUE increase and return the corresponding CUSIPs.
+This script will print out the dynamic changes of holdings from 2025-q2 to 2025-q3. Such as newly purchased stocks ranked by notional value, and newly sold stocks ranked by notional value.
 
 ### Analyze which funds hold a stock to the most extent
 

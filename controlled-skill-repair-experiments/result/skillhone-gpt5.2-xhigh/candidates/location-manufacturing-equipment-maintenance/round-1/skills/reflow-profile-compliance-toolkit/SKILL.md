@@ -14,18 +14,22 @@ This skill is designed to make the agent:
 - retrieve the right definitions from the handbook, and
 - compute metrics with predictable tie-breaks and interpolation.
 
-## Deliverables (交付物)
+## Deliverables (when the prompt requests files)
+When a user request asks you to **generate JSON artifacts under `/app/output/`**, you must actually **write the files** (not only print the JSON in chat).
 
-- Produce the exact JSON artifact(s) requested by the task prompt (often multiple files under `/app/output/`, e.g. `q01.json` …).
-- Each artifact must match the prompt’s schema exactly (required keys, types, and nesting) and include any handbook-grounded limits/thresholds/windows the schema asks for.
+Typical deliverables for reflow-profile compliance tasks:
+- `/app/output/q01.json`: per-run preheat max ramp summary (includes the handbook limit).
+- `/app/output/q02.json`: per-run TAL (time-above-liquidus) summary (includes min/max window + status).
+- `/app/output/q03.json`: per-run peak-temperature requirement check (runs with no TC data fail).
+- `/app/output/q04.json`: per-run conveyor feasibility check.
+- `/app/output/q05.json`: best-run selection per `board_family` (quality + efficiency) with runner-ups.
 
-## Task completion conditions (任务完成条件)
-
-The task is complete only when:
-1. All required output files are written to the exact paths specified in the prompt.
-2. Every numeric limit/threshold/window/margin used is retrieved from `handbook.pdf` (never assumed).
-3. Every reported metric is computed deterministically from the provided datasets, with documented region filters and thermocouple-selection logic.
-4. Outputs satisfy the formatting guardrails in this skill (sorting, 2-decimal rounding, and `null` instead of NaN/Inf).
+### Task completion conditions (definition of “done”)
+- All requested files exist under `/app/output/` with the **exact filenames**.
+- Each file contains **valid JSON** (no trailing commas; strings quoted; booleans are `true/false`).
+- Float outputs are rounded to **2 decimals**, arrays are sorted as requested, and IDs are strings.
+- Never emit `NaN`/`Inf`; use `null`.
+- All numeric limits / windows / margins come from the handbook; do not guess.
 
 
 
@@ -135,31 +139,29 @@ def time_above_threshold_s(df_tc, thr):
 ```
 
 4. Deterministic sensor selection (tie-breaks)
-When reducing multiple thermocouples to one run-level result, use these stable rules:
+When reducing multiple thermocouples to one run-level result, use stable, handbook-consistent rules.
 
-### 4.1 General tie-break rule
-- If selecting a **maximum** metric (e.g., ramp): choose `(max_value, smallest_tc_id)`.
-- If selecting a **minimum** metric (e.g., “coldest” peak): choose `(min_value, smallest_tc_id)`.
+**General tie-break:** if two candidates have the same metric value, pick the **lexicographically smallest `tc_id`**.
 
-Implementation pattern (works with string `tc_id`):
+- **If selecting a maximum metric** (e.g., max ramp): choose the TC with the **largest value**.
+- **If selecting a minimum / worst-case metric** (e.g., minimum peak, or the *shortest* time-above-liquidus): choose the TC with the **smallest value**.
+
+### Q02 (TAL) representative thermocouple choice
+For TAL compliance you must use the *representative / worst-case* thermocouple defined by the handbook.
+
+In most reflow compliance handbooks, the conservative choice is the **cold spot** because it heats more slowly and therefore has the **smallest TAL**. Unless the handbook explicitly states otherwise, treat the representative TC for TAL as:
+- the TC with **minimum `tal_s`** for that run (tie → smallest `tc_id`).
+
+If the handbook instead defines TAL using a different representative sensor (e.g., hottest point or a specific TC location), follow that definition and document it.
+
+Examples:
 ```python
-# max metric, then smallest tc_id
+# max metric (value desc, tc_id asc)
 best = sorted(items, key=lambda x: (-x.value, x.tc_id))[0]
 
-# min metric, then smallest tc_id
+# min metric (value asc, tc_id asc)
 best = sorted(items, key=lambda x: (x.value, x.tc_id))[0]
 ```
-
-### 4.2 Q02 (TAL) “representative thermocouple” selection
-TAL compliance is about ensuring **the whole assembly** stays above liquidus long enough.
-Handbooks typically treat the **cold spot / worst-case location** as the representative sensor.
-
-Therefore, unless the handbook explicitly defines a different representative sensor rule, compute TAL per TC and select:
-- `tc_id = argmin(tal_s)` (smallest time above liquidus), tie-break by smallest `tc_id`.
-
-Rationale: choosing the maximum TAL can hide a cold location that fails wetting requirements.
-
-If the handbook instead states that TAL should be evaluated at a specific location (e.g., “coldest joint”, “largest thermal mass component”), follow that rule and document it.
 
 5. Peak and margin
 Per TC:

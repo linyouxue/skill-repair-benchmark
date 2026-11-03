@@ -1,39 +1,44 @@
-from __future__ import annotations
-
 import argparse
+import csv
+import os
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Iterable
 
-import pandas as pd
+# Filing data is expected under /root/<quarter>/
+# Allow override for local testing / alternate layouts.
+data_root = os.environ.get("SEC13F_DATA_ROOT", "/root")
 
-DEFAULT_DATA_ROOT = "/root"
-
-# Normalized (lowercased + stripped) values observed in INFOTABLE.TITLEOFCLASS
-# that represent common-equity-like stock positions.
-TITLE_CLASS_OF_STOCKS = {
+# A pragmatic allow-list of common-equity TITLEOFCLASS values.
+# Values are compared case-insensitively after stripping.
+# NOTE: Keep in sync with /skills/fuzzy-name-search/scripts/search_stock_cusip.py
+title_class_of_stocks = {
     "com",
-    "common stock",
     "common",
+    "common stock",
     "stock",
-    "equity",
-    "cmn",
-    "com new",
-    "com cl a",
-    "com shs",
-    "cl a",
     "class a",
-    "cl b",
-    "ord shs",
-    "shs cl a",
-    "cl a com",
     "class a com",
+    "class b",
+    "cl a",
+    "cl a com",
+    "cl a new",
+    "cl b",
+    "cl b new",
+    "cmn",
+    "com cl a",
+    "com new",
+    "com shs",
+    "comm stk",
     "cap stk cl a",
     "cap stk cl c",
-    "comm stk",
-    "cl b new",
-    "cl a new",
     "foreign stock",
+    "ord shs",
     "sponsored adr",
     "sponsored ads",
     "adr",
+    "equity",
+    "shs cl a",
 }
 
 
@@ -61,111 +66,150 @@ def get_args():
         required=False,
         help="The baseline accession number for comparison",
     )
-
-    parser.add_argument(
-        "--topk_changes",
-        type=int,
-        default=10,
-        help="Top-k buys/sells to print in cross-quarter analysis (default: 10)",
-    )
-    parser.add_argument(
-        "--data_root",
-        type=str,
-        default=DEFAULT_DATA_ROOT,
-        help=f"Root directory containing quarter folders (default: {DEFAULT_DATA_ROOT})",
-    )
     return parser.parse_args()
 
 
-def _load_infotable(data_root: str, quarter: str) -> pd.DataFrame:
-    return pd.read_csv(f"{data_root}/{quarter}/INFOTABLE.tsv", sep="\t", dtype=str)
+def _tsv_rows(path: str) -> Iterable[dict[str, str]]:
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            yield {k: (v if v is not None else "") for k, v in row.items()}
 
 
-def _option_position_mask(infotable: pd.DataFrame) -> pd.Series:
-    """Return True for rows that are options (PUT/CALL).
+def _parse_float(v: str) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
 
-    SEC 13F infotables typically represent option positions using a PUTCALL
-    column (values like PUT/CALL) while keeping TITLEOFCLASS as the underlying
-    security class (e.g., COM). For "stock" questions we usually must exclude
-    those option rows.
 
-    If the dataset doesn't include a put/call column, returns all False.
+def _is_common_equity_position(row: dict[str, str]) -> bool:
+    """Return True for common-equity (non-option) rows.
+
+    - Filters by TITLEOFCLASS using the allow-list above.
+    - Excludes option positions when PUTCALL is present and non-empty.
     """
 
-    putcall_col = None
-    for candidate in ("PUTCALL", "PUT_CALL", "PUT/CALL"):
-        if candidate in infotable.columns:
-            putcall_col = candidate
-            break
+    title = (row.get("TITLEOFCLASS") or "").strip().lower()
+    if title not in title_class_of_stocks:
+        return False
 
-    if not putcall_col:
-        return pd.Series(False, index=infotable.index)
+    putcall = (row.get("PUTCALL") or "").strip().upper()
+    if putcall:
+        return False
 
-    putcall = infotable[putcall_col].fillna("").astype(str).str.upper().str.strip()
-    # Be tolerant of abbreviations.
-    return putcall.isin({"PUT", "CALL", "P", "C"})
+    return True
 
 
-def read_one_quarter_data(data_root: str, accession_number: str, quarter: str) -> pd.DataFrame:
-    """Read and process one quarter data for a given accession number.
+@dataclass
+class QuarterSummary:
+    total_holdings: int
+    total_aum: float
+    stock_holdings: int
+    stock_aum: float
 
-    Returns a DataFrame indexed by CUSIP, with VALUE aggregated (summed) by CUSIP
-    over *non-option stock* positions.
+
+@dataclass
+class StockPosition:
+    cusip: str
+    name: str
+    title: str
+    value: float
+
+
+def read_one_quarter_data(accession_number: str, quarter: str) -> tuple[QuarterSummary, dict[str, StockPosition]]:
+    """Read and process one quarter's data for a given accession number.
+
+    Returns:
+        (summary, positions_by_cusip)
+
+        positions_by_cusip is aggregated at the CUSIP level (VALUE is summed).
     """
 
-    infotable = _load_infotable(data_root, quarter)
-    infotable = infotable[infotable["ACCESSION_NUMBER"] == accession_number].copy()
+    path = os.path.join(data_root, quarter, "INFOTABLE.tsv")
+    if not os.path.isfile(path):
+        raise SystemExit(
+            f"ERROR: Missing INFOTABLE.tsv at {path}. Expected dataset under {data_root}/<quarter>/INFOTABLE.tsv"
+        )
 
-    if infotable.empty:
-        print(f"ERROR: No data found for ACCESSION_NUMBER = {accession_number} in quarter {quarter}")
-        raise SystemExit(1)
+    accession_number = accession_number.strip()
 
-    infotable["VALUE"] = pd.to_numeric(infotable["VALUE"], errors="coerce").fillna(0.0)
-    infotable["CUSIP"] = infotable["CUSIP"].astype(str).str.upper()
+    total_holdings = 0
+    total_aum = 0.0
+    stock_holdings = 0
+    stock_aum = 0.0
+
+    # Aggregation.
+    value_by_cusip: dict[str, float] = defaultdict(float)
+    first_name_by_cusip: dict[str, str] = {}
+    first_title_by_cusip: dict[str, str] = {}
+
+    for row in _tsv_rows(path):
+        if (row.get("ACCESSION_NUMBER") or "").strip() != accession_number:
+            continue
+
+        total_holdings += 1
+
+        value = _parse_float(row.get("VALUE", ""))
+        total_aum += value
+
+        if not _is_common_equity_position(row):
+            continue
+
+        stock_holdings += 1
+        stock_aum += value
+
+        cusip = (row.get("CUSIP") or "").strip().upper()
+        if not cusip:
+            continue
+
+        value_by_cusip[cusip] += value
+
+        if cusip not in first_name_by_cusip:
+            first_name_by_cusip[cusip] = (row.get("NAMEOFISSUER") or "").strip()
+        if cusip not in first_title_by_cusip:
+            first_title_by_cusip[cusip] = (row.get("TITLEOFCLASS") or "").strip()
 
     print(f"Summary stats for quarter: {quarter}, accession_number: {accession_number}")
-    print(f"- Total number of holdings: {infotable.shape[0]}")
-    print(f"- Total AUM: {infotable['VALUE'].sum():.2f}")
+    print(f"- Total number of holdings: {total_holdings}")
+    print(f"- Total AUM: {total_aum:.2f}")
+    print(f"- Number of stock holdings: {stock_holdings}")
+    print(f"- Total stock AUM: {stock_aum:.2f}")
 
-    option_mask = _option_position_mask(infotable)
-    num_options = int(option_mask.sum())
-    if num_options:
-        print(f"- Option positions (PUT/CALL rows): {num_options}")
-
-    title_norm = infotable["TITLEOFCLASS"].fillna("").astype(str).str.lower().str.strip()
-    stock_mask = title_norm.isin(TITLE_CLASS_OF_STOCKS) & (~option_mask)
-    stock_infotable = infotable[stock_mask]
-
-    # Keep the original field name but ensure it reflects *non-option* stock rows.
-    print(f"- Number of stock holdings: {stock_infotable.shape[0]}")
-    print(f"- Number of unique stock CUSIPs: {stock_infotable['CUSIP'].nunique()}")
-    print(f"- Total stock AUM: {stock_infotable['VALUE'].sum():.2f}")
-
-    if stock_infotable.empty:
-        print(
-            "ERROR: Found fund rows but no non-option stock rows after filters for "
-            f"ACCESSION_NUMBER = {accession_number} in quarter {quarter}"
+    if stock_holdings == 0:
+        raise SystemExit(
+            f"ERROR: No common-equity rows found for ACCESSION_NUMBER = {accession_number} in quarter {quarter}"
         )
-        raise SystemExit(1)
 
-    stock = (
-        stock_infotable.groupby("CUSIP")
-        .agg(
-            {
-                "NAMEOFISSUER": "first",
-                "TITLEOFCLASS": "first",
-                "VALUE": "sum",
-            }
+    positions: dict[str, StockPosition] = {}
+    for cusip, value in value_by_cusip.items():
+        positions[cusip] = StockPosition(
+            cusip=cusip,
+            name=first_name_by_cusip.get(cusip, ""),
+            title=first_title_by_cusip.get(cusip, ""),
+            value=value,
         )
-        .sort_values("VALUE", ascending=False)
-    )
-    return stock
+
+    return QuarterSummary(
+        total_holdings=total_holdings,
+        total_aum=total_aum,
+        stock_holdings=stock_holdings,
+        stock_aum=stock_aum,
+    ), positions
 
 
-def _format_pct_change(abs_change: float, base_value: float) -> str:
-    if base_value == 0:
+def _fmt_pct(pct: float | None) -> str:
+    if pct is None:
         return "N/A"
-    return f"{abs_change / base_value:.2%}"
+    return f"{pct:.2%}"
+
+
+@dataclass
+class PositionChange:
+    cusip: str
+    name: str
+    abs_change: float
+    pct_change: float | None
 
 
 def one_fund_analysis(
@@ -173,70 +217,52 @@ def one_fund_analysis(
     quarter: str,
     baseline_accession_number: str | None,
     baseline_quarter: str | None,
-    *,
-    data_root: str = DEFAULT_DATA_ROOT,
-    topk_changes: int = 10,
 ):
-    current = read_one_quarter_data(data_root, accession_number, quarter)
+    _, current_positions = read_one_quarter_data(accession_number, quarter)
 
-    if baseline_accession_number is None and baseline_quarter is None:
-        return
     if baseline_accession_number is None or baseline_quarter is None:
-        print("ERROR: baseline_quarter and baseline_accession_number must be provided together")
-        raise SystemExit(2)
+        return
 
     print(f"Performing comparative analysis using baseline quarter {baseline_quarter}")
-    baseline = read_one_quarter_data(data_root, baseline_accession_number, baseline_quarter)
+    _, baseline_positions = read_one_quarter_data(baseline_accession_number, baseline_quarter)
 
-    # Merge on CUSIP (index) and compute value deltas.
-    merged = current.merge(
-        baseline,
-        how="outer",
-        left_index=True,
-        right_index=True,
-        suffixes=("", "_base"),
-    )
-    merged["VALUE"] = merged["VALUE"].fillna(0.0)
-    merged["VALUE_base"] = merged["VALUE_base"].fillna(0.0)
-    merged["NAMEOFISSUER"] = merged["NAMEOFISSUER"].fillna(merged["NAMEOFISSUER_base"])
+    all_cusips = set(current_positions.keys()) | set(baseline_positions.keys())
 
-    merged["ABS_CHANGE"] = merged["VALUE"] - merged["VALUE_base"]
-    merged = merged.sort_values(by="ABS_CHANGE", ascending=False)
+    changes: list[PositionChange] = []
+    for cusip in all_cusips:
+        cur = current_positions.get(cusip)
+        base = baseline_positions.get(cusip)
 
-    print(
-        f"Top {topk_changes} Buys from {baseline_quarter} to {quarter} "
-        "(ranked by $ value increase, aggregated by CUSIP):"
-    )
-    top_buys = merged[merged["ABS_CHANGE"] > 0].head(topk_changes)
-    for idx, (cusip, row) in enumerate(top_buys.iterrows(), start=1):
-        pct = _format_pct_change(row["ABS_CHANGE"], row["VALUE_base"])
+        cur_val = cur.value if cur else 0.0
+        base_val = base.value if base else 0.0
+
+        abs_change = cur_val - base_val
+        pct_change = None if base_val == 0 else abs_change / base_val
+
+        name = (cur.name if cur and cur.name else "") or (base.name if base and base.name else "")
+        changes.append(PositionChange(cusip=cusip, name=name, abs_change=abs_change, pct_change=pct_change))
+
+    # Top buys: biggest positive VALUE change.
+    print(f"Top 10 Buys (VALUE increase) from {baseline_quarter} to {quarter}:")
+    top_buys = [c for c in changes if c.abs_change > 0]
+    top_buys.sort(key=lambda c: c.abs_change, reverse=True)
+    for idx, row in enumerate(top_buys[:10], start=1):
         print(
-            f"[{idx}] CUSIP: {cusip}, Name: {row['NAMEOFISSUER']} | "
-            f"ΔValue: {row['ABS_CHANGE']:.2f} (from {row['VALUE_base']:.2f} to {row['VALUE']:.2f}) | "
-            f"pct change: {pct}"
+            f"[{idx}] CUSIP: {row.cusip}, Name: {row.name}"
+            f" | Abs change: {row.abs_change:.2f} | pct change: {_fmt_pct(row.pct_change)}"
         )
 
-    print(
-        f"\nTop {topk_changes} Sells from {baseline_quarter} to {quarter} "
-        "(ranked by $ value decrease, aggregated by CUSIP):"
-    )
-    top_sells = merged[merged["ABS_CHANGE"] < 0].tail(topk_changes)[::-1]
-    for idx, (cusip, row) in enumerate(top_sells.iterrows(), start=1):
-        pct = _format_pct_change(row["ABS_CHANGE"], row["VALUE_base"])
+    # Top sells: biggest negative VALUE change.
+    print(f"\nTop 10 Sells (VALUE decrease) from {baseline_quarter} to {quarter}:")
+    top_sells = [c for c in changes if c.abs_change < 0]
+    top_sells.sort(key=lambda c: c.abs_change)
+    for idx, row in enumerate(top_sells[:10], start=1):
         print(
-            f"[{idx}] CUSIP: {cusip}, Name: {row['NAMEOFISSUER']} | "
-            f"ΔValue: {row['ABS_CHANGE']:.2f} (from {row['VALUE_base']:.2f} to {row['VALUE']:.2f}) | "
-            f"pct change: {pct}"
+            f"[{idx}] CUSIP: {row.cusip}, Name: {row.name}"
+            f" | Abs change: {row.abs_change:.2f} | pct change: {_fmt_pct(row.pct_change)}"
         )
 
 
 if __name__ == "__main__":
     args = get_args()
-    one_fund_analysis(
-        args.accession_number,
-        args.quarter,
-        args.baseline_accession_number,
-        args.baseline_quarter,
-        data_root=args.data_root,
-        topk_changes=args.topk_changes,
-    )
+    one_fund_analysis(args.accession_number, args.quarter, args.baseline_accession_number, args.baseline_quarter)

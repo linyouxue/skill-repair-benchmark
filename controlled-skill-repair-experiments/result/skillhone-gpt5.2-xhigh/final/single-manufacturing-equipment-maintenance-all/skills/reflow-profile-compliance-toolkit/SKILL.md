@@ -15,28 +15,6 @@ This skill is designed to make the agent:
 - retrieve the right definitions from the handbook, and
 - compute metrics with predictable tie-breaks and interpolation.
 
-## Deliverables & definition of done
-
-This toolkit is commonly used in tasks that require writing structured JSON artifacts (not just prose) derived from `/app/data/*` and grounded in `handbook.pdf`.
-
-You are **not done** until **all task-requested artifacts are written to disk** and match the prompt schemas. Example for a 5-question compliance task:
-
-- `/app/output/q01.json` — ramp-rate limit and per-run max preheat ramp (with representative `tc_id`).
-- `/app/output/q02.json` — per-run TAL (time above liquidus) and compliance against the handbook TAL window.
-- `/app/output/q03.json` — per-run peak temperature compliance (fail if missing TC data, per prompt).
-- `/app/output/q04.json` — per-run conveyor speed feasibility.
-- `/app/output/q05.json` — per-board-family best run selection plus runner-ups.
-
-Definition-of-done checklist (hard requirements for evaluators):
-- `/app/output/` exists (create it before writing any files).
-- Every required output file exists, is **strictly valid JSON**, and conforms to the prompt schema **even when values are unavailable** (use `null`, empty arrays, or empty dicts as appropriate; do not skip writing a file).
-- Write JSON programmatically (do not hand-edit). Re-load each written file with a JSON parser (e.g., `json.load`) to confirm it parses.
-- Prevent invalid numeric literals: sanitize NaN/Inf to `null` **and** write with `json.dump(..., allow_nan=False)`.
-- Lists/dicts are sorted as requested; floats rounded to 2 decimals.
-- Every numeric limit / region / window / margin is explicitly retrieved from the handbook (keep page/section references in your working notes).
-- “Representative thermocouple” selection follows the handbook’s placement guidance; otherwise use the deterministic rules below.
-- No guessing: if the data does not support a value, output `null` and mark compliance conservatively (usually failing/non-compliant unless the prompt/handbook allows otherwise).
-
 ## Handbook “where to look” checklist
 
 Search the handbook for these common sections/tables:
@@ -91,15 +69,11 @@ Finite-difference slope on consecutive samples:
 - the “max ramp” is `max(s_i)` over the region.
 
 Region filtering patterns:
-- Temperature band region: include any segment whose temperature interval **overlaps** `[tmin, tmax]` (segments crossing into/out of the band still reflect the ramp within preheat).
+- Temperature band region: only include segments where **both endpoints** satisfy `tmin <= T <= tmax`.
 - Zone band region: filter by `zone_id in zones`.
 - Time band region: filter by `t_start_s <= time_s <= t_end_s`.
 
-Robust implementation (temperature-band example with boundary handling):
-
-- Rationale: if you require **both endpoints inside** the band you can miss the steepest ramp that occurs while crossing the preheat boundary.
-- Compute the maximum slope over the portion of each segment that lies within `[tmin, tmax]`.
-- Use linear interpolation to clip each segment to the band.
+Robust implementation (temperature-band example):
 
 ```python
 def max_slope_in_temp_band(df_tc, tmin, tmax):
@@ -107,50 +81,14 @@ def max_slope_in_temp_band(df_tc, tmin, tmax):
     t = g["time_s"].to_numpy(dtype=float)
     y = g["temp_c"].to_numpy(dtype=float)
     best = None
-
     for i in range(1, len(g)):
-        t0, t1 = t[i-1], t[i]
-        y0, y1 = y[i-1], y[i]
-        dt = t1 - t0
+        dt = t[i] - t[i-1]
         if dt <= 0:
             continue
-
-        # constant segment
-        if y1 == y0:
-            if tmin <= y0 <= tmax:
-                best = 0.0 if best is None else max(best, 0.0)
-            continue
-
-        # temperature interval covered by this segment
-        seg_lo, seg_hi = (y0, y1) if y0 <= y1 else (y1, y0)
-        if seg_hi < tmin or seg_lo > tmax:
-            continue  # no overlap with the band
-
-        # Find the times when the segment crosses the band edges.
-        # Solve y(t) = y0 + (y1-y0)*((t-t0)/dt)
-        def t_at_temp(temp):
-            frac = (temp - y0) / (y1 - y0)
-            return t0 + frac * dt
-
-        # Compute the time interval within this segment where temp is within [tmin, tmax].
-        t_enter = t0
-        t_exit = t1
-        if seg_lo < tmin:
-            t_cross = t_at_temp(tmin)
-            t_enter = max(t_enter, min(t_cross, t1))
-        if seg_hi > tmax:
-            t_cross = t_at_temp(tmax)
-            t_exit = min(t_exit, max(t_cross, t0))
-
-        if t_exit <= t_enter:
-            continue
-
-        # Slope is constant over the segment, so the max slope within the clipped portion
-        # is just the segment slope.
-        slope = (y1 - y0) / dt
-        best = slope if best is None else max(best, slope)
-
-    return best  # None if no overlapping segments
+        if (tmin <= y[i-1] <= tmax) and (tmin <= y[i] <= tmax):
+            s = (y[i] - y[i-1]) / dt
+            best = s if best is None else max(best, s)
+    return best  # None if no valid segments
 ```
 
 ### 3. Time above threshold with linear interpolation
@@ -184,38 +122,76 @@ def time_above_threshold_s(df_tc, thr):
     return total
 ```
 
-### 4. Deterministic sensor selection (tie-breaks)
+### 4. Deterministic representative thermocouple selection (tie-breaks)
 
-When reducing multiple thermocouples to one run-level result, use these stable rules:
+Many handbook checks require reporting **one** thermocouple per run even when multiple sensors exist.
+Do **not** guess: first extract from the handbook how to pick the “representative” / “worst-case” sensor for the metric.
 
-- If selecting maximum metric (e.g., ramp): choose the largest metric value; tie-break by **lexicographically smallest** `tc_id`.
-- If selecting minimum metric (e.g., “coldest” peak): choose the smallest metric value; tie-break by **lexicographically smallest** `tc_id`.
+Common handbook patterns (apply the one the handbook actually states):
 
-### TAL (Q02) representative thermocouple selection
+1) **Cold-spot (“coldest point”) sensor rule (common for peak and TAL; confirm the definition in the handbook)**
+   - Many handbooks define a single “cold spot” TC for reporting and compliance.
+   - For **peak temperature** checks, the cold spot is typically the TC with the **lowest peak temperature** in the run.
+   - For **TAL (time above liquidus)** checks, the cold spot is often defined by liquidus behavior (e.g., the TC that is **last to rise above liquidus / first to fall below**), which operationally corresponds to the TC with the **shortest TAL**. Some documents still define cold spot via lowest peak—follow the handbook’s wording.
+   - Once the cold spot TC is identified, compute/report the metric on **that same TC**.
+   - Tie-break: smallest `tc_id`.
 
-For **time-above-liquidus (TAL)** the representative thermocouple must match the handbook intent. In most process handbooks TAL is a **minimum-at-cold-spot** requirement (the coldest location must still achieve enough wetting time), so the representative TC is usually the **coldest / worst-case** sensor.
+2) **Metric-extreme rule**
+   - For metrics with a maximum-allowed limit (e.g., ramp rate limit): report the TC with the **maximum** value.
+   - For metrics with a minimum-required limit (e.g., minimum TAL): report the TC with the **minimum** value.
+   - Tie-break: smallest `tc_id`.
 
-Follow this order:
+3) **All-sensors-must-pass rule**
+   - If the handbook says every TC must meet the window, evaluate **all** TCs.
+   - Run status is compliant only if **all** TCs are compliant.
+   - If the output schema forces a single `tc_id`, pick the “most critical” TC deterministically:
+     - If any TC is non-compliant: choose the TC with the **largest violation distance** to the nearest bound.
+     - Else (all compliant): choose the TC with the **smallest margin** to the nearest bound.
+     - Tie-break: smallest `tc_id`.
 
-1. **Handbook first (required):** if the handbook specifies a representative / worst‑case / cold‑spot thermocouple selection rule, implement it exactly (e.g., “use the coldest TC”, “use TC at largest thermal mass component”, “use center of board”, etc.).
-2. **If the handbook is silent**, use this deterministic, conservative fallback:
-   - Compute `tal_s` for every available `tc_id` in the run using the interpolation algorithm in this skill.
-   - Select the TC with the **minimum** `tal_s`.
-   - Tie-break by **lexicographically smallest `tc_id`**.
-
-Important notes:
-- If a run has no usable TC samples (or TAL cannot be computed for any TC), set `tc_id=null`, `tal_s=null`, and mark status conservatively (typically `non-compliant` unless the prompt/handbook explicitly allows missing data).
-- Do **not** pick the maximum TAL as the representative value unless the handbook explicitly defines TAL that way.
-
-Examples (safe ordering for string tc_id):
+Deterministic tie-break code patterns:
 
 ```python
-# choose max metric (e.g., ramp): highest value, then smallest tc_id
-best = sorted(items, key=lambda x: (-x.value, x.tc_id))[0]
-
-# choose min metric (e.g., coldest TAL / coldest peak): lowest value, then smallest tc_id
-best = sorted(items, key=lambda x: (x.value, x.tc_id))[0]
+# items: [{"tc_id": "...", "value": <float>}, ...] with value not None
+best_max = sorted(items, key=lambda x: (-x["value"], x["tc_id"]))[0]
+best_min = sorted(items, key=lambda x: (x["value"], x["tc_id"]))[0]
 ```
+
+**Q02 (TAL) note:** The prompt’s JSON schema asks for **one** `tc_id` + `tal_s` per run, even though TAL acceptance is a *window* (`min` and `max`) and handbooks sometimes discuss multiple sensors.
+
+Required coverage rule (do not skip IDs):
+- Emit **one row per `run_id` from `mes_log.csv`**, sorted by `run_id`.
+- If a run has no usable TC trace for TAL: set `tc_id = null`, `tal_s = null`, and `status = "non-compliant"`.
+
+### Q02 representative TC + compliance logic
+
+1) Follow the handbook **exactly** if it defines how TAL must be measured:
+- If it says TAL is measured on a **single representative / cold-spot** thermocouple:
+  - If the handbook identifies the cold spot by **location/label** (e.g., “cold spot TC”, a specific TC number, or a placement table), use that TC.
+  - If the handbook defines the cold spot generally via **peak temperature** (very common):
+    - pick the TC with the **lowest peak temperature** in the run (tie → smallest `tc_id`), and compute/report TAL on that same TC.
+  - If the handbook defines the cold spot via **liquidus behavior** (e.g., “last to rise above liquidus / first to fall below”):
+    - operationalize as the TC with the **minimum** `tal_s` (tie → smallest `tc_id`).
+  - Run `status` is based on that selected TC’s TAL only:
+    - `compliant` iff `min_tal_s <= tal_s <= max_tal_s`; otherwise `non-compliant`.
+
+- If it says **all thermocouples must be within the TAL window**:
+  - evaluate every TC; run `status = "compliant"` only if **all** TCs have a non-null TAL and are within `[min,max]`.
+  - The schema still needs one reported `tc_id`; pick it deterministically as the “most critical” TC:
+    - Define violation distance per TC:
+      - if `tal_s` is null: treat as failing with a very large distance (select it)
+      - if `tal_s < min`: distance = `min - tal_s`
+      - if `tal_s > max`: distance = `tal_s - max`
+      - else: distance = `0`
+    - If any TC is non-compliant: report the TC with **largest** distance (tie → smallest `tc_id`).
+    - Else (all compliant): report the TC with the **smallest margin** to the nearest bound, i.e. `min(tal_s - min, max - tal_s)` (tie → smallest `tc_id`).
+
+2) If the handbook is silent/ambiguous (common in simplified audits):
+- Default to reporting the **cold-spot / worst-case TAL** thermocouple rather than using peak as a proxy.
+- Compute `tal_s` for **each** TC in the run, then select the TC with the **minimum** `tal_s` (shortest time above liquidus), tie → smallest `tc_id`.
+  - If a run has **no usable** TAL computation for any TC: set `tc_id = null`, `tal_s = null`, and `status = "non-compliant"`.
+- Set run `status` based on that selected TC’s TAL window check: `"compliant"` iff `min_tal_s <= tal_s <= max_tal_s`, else `"non-compliant"`.
+- Do **not** average TAL across sensors unless the handbook explicitly instructs averaging.
 
 ### 5. Peak and margin
 
@@ -244,13 +220,22 @@ If parameters are missing, output:
 - `required_min_speed_cm_min = null`
 - `meets = false`
 
-## Output construction guardrails
+## Output construction & deliverables guardrails
 
-### 1. Sorting
+### 1. Deliverables (when the task asks for files)
+
+If the task requires writing JSON outputs (e.g., `/app/output/q01.json` …), the completion condition is:
+
+- Create **all required files** at the specified paths (e.g., **q01.json–q05.json** when the prompt asks for five questions).
+- Each file must be valid JSON matching the exact schema in the task prompt.
+- Populate *every required field*; use `null` where the prompt allows it.
+- Do not print the full JSON to the chat if the task explicitly requires writing files.
+
+### 2. Sorting
 - Lists: sort by primary ID (run_id / board_family) lexicographically.
 - Dicts keyed by ID: emit in sorted key order.
 
-### 2. Rounding and NaNs
+### 3. Rounding and NaNs
 - Round floats to 2 decimals.
 - Never emit NaN/Inf; use `null`.
 
@@ -263,7 +248,7 @@ def r2(x):
     return float(round(float(x), 2))
 ```
 
-### 3. Missing thermocouple data
+### 4. Missing thermocouple data
 
 If a run has no TC records (or no valid segments for a metric), set numeric outputs to `null`, and avoid claiming “pass” unless explicitly allowed.
 

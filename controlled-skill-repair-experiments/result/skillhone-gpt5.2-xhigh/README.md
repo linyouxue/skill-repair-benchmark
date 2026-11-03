@@ -1,109 +1,125 @@
-# SkillHone / GPT-5.2 xhigh
+# SkillHone / GPT-5.2 xhigh - unified executor
 
-Completed controlled experiment on `skill-repair-controlled-datasets-20261020`.
-Repair and task execution both use Tatu `gpt-5.2` / `xhigh`, with at most
-16,384 output tokens per model request. Each input gets one native SkillHone
-repair and one original-task execution per round, stopping at the first full
-score or after five rounds. Three independent workers refill rolling slots.
+Completed campaign `controlled-skillhone-unified-20261102` on
+`skill-repair-controlled-datasets-20261020`. This replaces the previous results
+at this path; no old score, candidate or interrupted run was reused.
 
-All **22 inputs / 101 valid rounds** finished. Ordinary failures, zero rewards
-and normal budget stops remain measured results. Infrastructure attempts are
-excluded from valid rounds; only their identifier/reason/usage/cost briefs
-remain after the user-required local cleanup.
+**22 independent inputs, 79 valid rounds, 10 full-score stops, 12 five-round
+stops (45.45% final full-score rate).** Ordinary failures and zero scores count.
+
+Repair and execution both use Tatu GPT-5.2/xhigh, maximum output 16384 per
+request. Each round performs one native SkillHone/DSH repair and one original
+task execution through the shared `BenchmarkExecutor` in `method-skill` mode.
+Repair keeps the original 1200-second budget. The full candidate bundle is
+passed to the executor. Each Step has at most 60 root Agent iterations; one
+text-only continuation shares that budget. Three workers refill rolling slots,
+including native resumptions. Existing Gold qualification is reused. No new
+controls, model calls or verifier calls were added for publication.
 
 ## Results
 
-| Condition | Inputs | Final full-score passes |
-|---|---:|---:|
-| Known error location | 5 | 1 |
-| Single-fault leave-one-out | 12 | 2 |
-| All-fault control | 5 | 0 |
-| Total | 22 | 3 |
+| Condition | Inputs | Full-score stops | Valid rounds |
+|---|---:|---:|---:|
+| Known error location | 5 | 3 | 14 |
+| Single-fault leave-one-out | 12 | 7 | 40 |
+| All-fault condition | 5 | 0 | 25 |
+| Total | 22 | 10 | 79 |
 
-`Pass` below means the original task's official score is 1. Semantic target
-repair and preservation of other working repairs have not been independently
-adjudicated. A task pass alone does not establish those content-level claims.
+`single` in the source plan combines 12 leave-one-out and 5 all-fault inputs.
+A pass is official reward 1. These task outcomes do not independently establish
+semantic defect repair or causal improvement. The two groups have different tasks.
 
 | Input | Round rewards | Final |
 |---|---|---|
-| [location-dialogue-parser](final/location-dialogue-parser/skills) | 0.833 → 0 → 0 → 0 → 0 | Fail |
+| [location-dialogue-parser](final/location-dialogue-parser/skills) | 0.833 → 1 | Pass |
 | [location-data-to-d3](final/location-data-to-d3/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
 | [location-flink-query](final/location-flink-query/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
 | [single-flink-query-all](final/single-flink-query-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
 | [single-flink-query-RI-001](final/single-flink-query-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
 | [single-flink-query-RI-002](final/single-flink-query-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [location-manufacturing-equipment-maintenance](final/location-manufacturing-equipment-maintenance/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
+| [location-manufacturing-equipment-maintenance](final/location-manufacturing-equipment-maintenance/skills) | 1 | Pass |
 | [single-manufacturing-equipment-maintenance-all](final/single-manufacturing-equipment-maintenance-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-manufacturing-equipment-maintenance-RI-001](final/single-manufacturing-equipment-maintenance-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-manufacturing-equipment-maintenance-RI-002](final/single-manufacturing-equipment-maintenance-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
+| [single-manufacturing-equipment-maintenance-RI-001](final/single-manufacturing-equipment-maintenance-RI-001/skills) | 1 | Pass |
+| [single-manufacturing-equipment-maintenance-RI-002](final/single-manufacturing-equipment-maintenance-RI-002/skills) | 0 → 0 → 0 → 0 → 1 | Pass |
 | [location-pddl-airport-planning](final/location-pddl-airport-planning/skills) | 1 | Pass |
 | [single-video-silence-remover-all](final/single-video-silence-remover-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-video-silence-remover-RI-001](final/single-video-silence-remover-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-video-silence-remover-RI-002](final/single-video-silence-remover-RI-002/skills) | 1 | Pass |
-| [single-video-silence-remover-RI-003](final/single-video-silence-remover-RI-003/skills) | 0 → 0 → 0 → 1 | Pass |
+| [single-video-silence-remover-RI-001](final/single-video-silence-remover-RI-001/skills) | 0 → 1 | Pass |
+| [single-video-silence-remover-RI-002](final/single-video-silence-remover-RI-002/skills) | 0 → 1 | Pass |
+| [single-video-silence-remover-RI-003](final/single-video-silence-remover-RI-003/skills) | 1 | Pass |
 | [single-sec-financial-report-all](final/single-sec-financial-report-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-sec-financial-report-RI-001](final/single-sec-financial-report-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
+| [single-sec-financial-report-RI-001](final/single-sec-financial-report-RI-001/skills) | 0 → 1 | Pass |
 | [single-sec-financial-report-RI-002](final/single-sec-financial-report-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
 | [single-sec-financial-report-RI-003](final/single-sec-financial-report-RI-003/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
 | [single-fix-build-google-auto-all](final/single-fix-build-google-auto-all/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
 | [single-fix-build-google-auto-RI-001](final/single-fix-build-google-auto-RI-001/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
-| [single-fix-build-google-auto-RI-002](final/single-fix-build-google-auto-RI-002/skills) | 0 → 0 → 0 → 0 → 0 | Fail |
+| [single-fix-build-google-auto-RI-002](final/single-fix-build-google-auto-RI-002/skills) | 0 → 1 | Pass |
 
 ## Evidence and complete candidates
 
-- [results-summary.json](results-summary.json) indexes every round, official
-  score, projected test name/status, complete candidate, body-use evidence,
-  original workspace inventory and usage. Repository evidence/candidate paths
-  are relative; paths explicitly marked `local_only` refer to retained source
-  material and are not GitHub downloads.
-- `candidates/<input>/round-N/skills/` contains all files in each native
-  candidate bundle, including supporting attachments. `final/<input>/skills/`
-  is byte-identical to the selected last/first-full-score snapshot.
-- `evidence/runs/<input>/round-N/` contains the exact native `result.json` and
-  `RUN_RECORD.json`, unchanged score feedback, and `skill-tool-results.jsonl`.
-  The latter is a projection of native Skill tool events, preserving original
-  trajectory line numbers. It is not the complete execution trajectory.
-- `evidence/repairs/<input>/round-N/repair.json` preserves the native repair
-  outcome and existing native commit identifiers. Candidates were generated
-  by SkillHone/DeepSeek Harness, not edited by the publication script.
-- `artifacts/` contains primary files extracted directly from the original
-  pre-verifier archives of the three passing executions: the PDDL plans and
-  the two videos with their JSON reports. No missing outputs were rebuilt.
-- Full original workspace archives (about 14.90 GB compressed), complete
-  trajectories and native repair sessions remain in the local experiment
-  archive. Those are not uploaded into this result directory.
+- [FINAL_RESULTS.md](FINAL_RESULTS.md) gives two-group per-round tables, audit
+  findings, limitations, failure patterns and accounting in Chinese.
+- [results-summary.json](results-summary.json) indexes all 79 selected scores,
+  complete candidates, native repair outcomes, instruction projections, usage
+  and actual workspace inventories. `local_only` entries are not downloads.
+- `candidates/<input>/round-N/skills/` and `final/<input>/skills/` preserve all
+  bytes, including supporting files and native bytecode in the evaluated bundle.
+  They match frozen execution inputs and native commit trees.
+- `evidence/runs/` includes exact canonical `result.json`,
+  `benchmark_result.json`, `adapter-response.json`, timing, public prompts,
+  test-status feedback, trajectory inventories and derived audits.
+- `evidence/runs/.../preload/` projects actual provider-returned instructions
+  without changing source redaction, preserving source line references. These
+  files are not full execution trajectories or training rows.
+- `evidence/repairs/` includes native outcomes and provenance/usage audits.
+  Full native sessions remain local. The host did not author candidates.
+- `artifacts/` contains primary deliverables from all ten successful executions,
+  extracted directly from their original pre-verifier workspace archives. No
+  missing products were reconstructed. Google `failed_reasons.txt` is the
+  agent's required public diagnosis note, not a hidden verifier answer.
+- All 79 real workspace archives remain local: 13,144,476,938 compressed bytes.
+  The existing full-archive validation inventory is published. Full execution
+  ACP/LLM trajectories, training rows and native repair sessions stay local.
 
 ## Interpretation and usage
 
-- PDDL known-location and video RI-002 pass in round 1. Video RI-003 scores
-  `0 → 0 → 0 → 1`, but its candidates are byte-identical across rounds 1–4:
-  the first candidate passed on its fourth execution; there is no new round-4
-  content change to credit for that pass.
-- 69/101 execution rounds record zero Skill invocations. Of 32 rounds with
-  positive invocation counts, 29 have exact full-body matches for at least
-  one candidate `SKILL.md` in successful Skill tool results (YAML frontmatter
-  excluded). All three passing executions have full-body evidence. Repairer
-  reads of location hints are not counted as execution-side Skill use.
-- Recorded native repair usage: 47,098,537 total tokens; 2,262 requests and
-  2,108 responses in the repair audit. Recorded execution usage: 56,468,823
-  total tokens, estimated cost **$27.3967463**. Discarded infrastructure
-  attempts have a separate estimated **$2.88056195**, with eight unknown
-  request counts. Repair cost and actual provider charges are unknown.
-  In-flight requests without returned usage can be missing from token totals.
-- Existing Gold qualification was reused. No new qualification matrix,
-  baseline calls or score-based reruns were added for this upload.
+- Every round has `n_skill_invocations=0`, with no actual `invoke_skill` calls.
+  Skill evidence is full-body persistent context preload and provider
+  instructions, not active invocation of a Skill tool.
+- 59 rounds have raw-exact body matches in all successful responses. In 20
+  Flink rounds, example passwords are redacted in logs; the repository redactor
+  reproduces the differences exactly. Eight also retain intact native contexts;
+  twelve lack that independent raw copy. This is an observability limit, not
+  evidence of absent input.
+- Twelve native-continuation rounds retain valid official scores and partial
+  ACP / `training_ready=false`. Do not present them as complete ACP or SFT data.
+  Publication does not rerun or fill their missing ACP events.
+- Dialogue R2, video RI-002 R2 and SEC RI-001 R2 reuse the previous candidate.
+  SEC RI-001 has no change in either round and equals the starting frozen
+  bundle. These passes cannot be credited to a new round-2 repair.
+- Execution: 2178 attempts, 2148 HTTP 200 and 30 HTTP 500; 94,651,450 recorded
+  total tokens, 2162 root iterations. The canonical execution cost estimate is
+  **$52.2658759**, not the actual bill or the whole experiment's price.
+- Repair: 1778 dispatched attempts, 1721 HTTP 200 and 57 transport errors;
+  1720 complete native usages total 38,865,525 tokens. One extra HTTP 200 was
+  truncated by the outer budget and has unknown usage. Seventy-nine title
+  helper intents were blocked before fetch and excluded from dispatched calls.
+- Including the one 34-token connectivity probe, 3957 request attempts have
+  133,517,009 known tokens. Usage for 88 requests, repair costs and actual
+  supplier charges remain unknown; missing usage is never set to zero.
+- No forbidden Gold/verifier/other-trial access or hidden test edits were
+  observed. Historical syscall writer attestation and complete retired-container
+  mount receipts are unavailable. Normal low scores and documented path/PDF
+  friction remain measured outcomes. Google public integration-test POM changes
+  are disclosed separately from assertions or skip-test settings.
 
 ## Runtime disclosure
 
-[EXPERIMENT_CONFIG.json](EXPERIMENT_CONFIG.json) records the fixed protocol
-and compatibility changes. This historical run used the frozen dataset
-runner and a private BenchFlow **0.6.5** entry with pinned OpenHands SDK/tools
-**1.28.1**, not the current repository `BenchmarkExecutor` API or current
-BenchFlow 0.6.7 source. Results should not silently be treated as execution
-under the current main-branch executor. Model, task, scoring and iteration
-budgets were not changed by infrastructure recovery.
+[EXPERIMENT_CONFIG.json](EXPERIMENT_CONFIG.json) records the frozen protocol.
+This campaign actually imports the existing shared `benchmark_executor`
+source; it does not use the old private PyPI BenchFlow 0.6.5 entry or a copied
+executor. CLI commit is `2df8a2835d3f1bd2f2eadf5a7a2e1ad0dfb0d271`, SDK/tools
+are 1.28.1. Runtime and free preflight receipts are retained.
 
-[COMPLETE.json](COMPLETE.json) records final counts. The discarded-attempt
-ledger contains briefs only; abandoned output/trajectory/checkpoint packets
-were deleted locally. Normal failures and normal budget-stop evidence remain.
-No credentials or authorization headers are included.
+Local dependency caches, credentials, raw failed packets and full workspace
+archives are not uploaded. This directory replaces the old current result
+tree without rewriting Git history. Other methods and repository rules stay unchanged.

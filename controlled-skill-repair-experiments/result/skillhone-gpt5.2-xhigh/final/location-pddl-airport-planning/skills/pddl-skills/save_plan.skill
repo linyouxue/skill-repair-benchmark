@@ -1,26 +1,78 @@
 name: save-plan
-description: Save a plan object to a file.
+description: Save a plan to a file (PDDL-style text).
 inputs:
-  - problem: unified_planning problem object (needed to serialize the plan)
-  - plan: plan object
-  - path: output file path
+  - problem: planning problem object (used by some plan writers)
+  - plan: plan object (or plan text / list of action lines)
+  - output_path: output file path
 outputs:
-  - file: output file path
+  - file: path
 implementation: python
 script: |
-  def skill(problem, plan, path):
+  def skill(problem, plan, output_path):
+      """Write *plan* to *output_path*.
+
+      Supports either:
+        - unified_planning plan objects (best-effort via PDDLWriter when available), or
+        - plain text plans (string) / list of action lines.
+
+      The parent directory of *output_path* is created if missing.
+      """
       import os
 
-      # Ensure the output directory exists.
-      os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+      parent = os.path.dirname(output_path)
+      if parent:
+          os.makedirs(parent, exist_ok=True)
 
-      # If no plan exists, write an empty plan file.
+      # 1) Plain-text plan forms
       if plan is None:
-          open(path, "w", encoding="utf-8").close()
-          return path
+          with open(output_path, "w", encoding="utf-8") as f:
+              f.write("")
+          return output_path
 
-      from unified_planning.io import PDDLWriter
+      if isinstance(plan, str):
+          text = plan
+          if text and not text.endswith("\n"):
+              text += "\n"
+          with open(output_path, "w", encoding="utf-8") as f:
+              f.write(text)
+          return output_path
 
-      writer = PDDLWriter(problem)
-      writer.write_plan(plan, filename=path)
-      return path
+      if isinstance(plan, (list, tuple)):
+          lines = [str(x).rstrip("\n") for x in plan]
+          text = "\n".join(lines) + ("\n" if lines else "")
+          with open(output_path, "w", encoding="utf-8") as f:
+              f.write(text)
+          return output_path
+
+      # 2) unified_planning plan objects (preferred when installed)
+      try:
+          try:
+              from unified_planning.io import PDDLWriter
+          except Exception:  # pragma: no cover
+              from unified_planning.io.pddl_writer import PDDLWriter
+
+          writer = PDDLWriter(problem)
+          try:
+              writer.write_plan(plan, filename=output_path)
+          except TypeError:  # pragma: no cover
+              # Signature differs across unified_planning versions.
+              try:
+                  writer.write_plan(plan, output_path)
+              except Exception:
+                  with open(output_path, "w", encoding="utf-8") as f:
+                      writer.write_plan(plan, f)
+          return output_path
+      except Exception:
+          # 3) Last-resort fallback: stringify plan / action list
+          actions = getattr(plan, "actions", None)
+          if actions is not None:
+              lines = [str(a).rstrip("\n") for a in actions]
+              text = "\n".join(lines) + ("\n" if lines else "")
+          else:
+              text = str(plan)
+              if text and not text.endswith("\n"):
+                  text += "\n"
+
+          with open(output_path, "w", encoding="utf-8") as f:
+              f.write(text)
+          return output_path

@@ -2,12 +2,11 @@ import argparse
 
 import pandas as pd
 
-# Filing data is expected under /root/<quarter>/ (e.g., /root/2025-q3/INFOTABLE.tsv)
-data_root = "/root"
+DATA_ROOT = "/root"
 
-# TITLEOFCLASS values that this skill treats as (common) equity-like "stock" holdings.
-# Keep this list in sync with fuzzy-name-search/scripts/search_stock_cusip.py.
-STOCK_TITLE_CLASSES = {
+# NOTE: This list defines the stock-selection semantics for the skill.
+# Keep it conservative and do not broaden silently.
+TITLE_CLASS_OF_STOCKS = {
     "com",
     "common stock",
     "cl a",
@@ -36,28 +35,6 @@ STOCK_TITLE_CLASSES = {
 }
 
 
-def _norm_text(series: pd.Series) -> pd.Series:
-    """Lowercase and normalize whitespace for reliable equality checks."""
-    return (
-        series.fillna("")
-        .astype(str)
-        .str.lower()
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    )
-
-
-def _norm_cusip(series: pd.Series) -> pd.Series:
-    """Normalize CUSIP strings for grouping/counting.
-
-    - Uppercase
-    - Remove all whitespace (some exports contain stray spaces)
-    - Convert nulls to empty strings
-    """
-
-    return series.fillna("").astype(str).str.upper().str.replace(r"\s+", "", regex=True)
-
-
 def get_args():
     parser = argparse.ArgumentParser(description="Analyze grouped fund holdings information")
     parser.add_argument(
@@ -82,116 +59,142 @@ def get_args():
         required=False,
         help="The baseline accession number for comparison",
     )
+    parser.add_argument(
+        "--include_options",
+        action="store_true",
+        help=(
+            "Include option rows (PUT/CALL) if present. By default the helper excludes rows where PUTCALL is set, "
+            "so stock counts and VALUE aggregates reflect common-equity holdings rather than option positions."
+        ),
+    )
     return parser.parse_args()
 
 
-def read_one_quarter_data(accession_number: str, quarter: str) -> pd.DataFrame:
-    """Read and process one quarter's holdings for a given accession number.
+def _normalize_titleofclass(series: pd.Series) -> pd.Series:
+    # dtype=str read still allows NaN; normalize defensively.
+    return series.fillna("").astype(str).str.strip().str.lower()
 
-    Returns a stock-only table grouped by CUSIP with summed VALUE.
 
-    Important semantics:
-    - "stock" rows are determined by TITLEOFCLASS membership in STOCK_TITLE_CLASSES.
-    - If a PUTCALL column is present, option positions are excluded from the stock
-      universe (i.e., keep only rows with blank/NA PUTCALL).
+def _is_blank(series: pd.Series) -> pd.Series:
+    # Treat NaN and whitespace as blank.
+    return series.isna() | (series.astype(str).str.strip() == "")
+
+
+def read_one_quarter_data(accession_number: str, quarter: str, include_options: bool = False) -> pd.DataFrame:
+    """Read and process one quarter stock holdings for a given accession number.
+
+    Returns a DataFrame with columns: CUSIP, NAMEOFISSUER, TITLEOFCLASS, VALUE.
+    VALUE is aggregated (summed) by CUSIP after applying the stock TITLEOFCLASS
+    filter.
+
+    By default, rows with a non-blank PUTCALL (options) are excluded when the
+    column exists so that counts/aggregates reflect common-equity positions.
     """
 
-    infotable = pd.read_csv(f"{data_root}/{quarter}/INFOTABLE.tsv", sep="\t", dtype=str)
-    infotable = infotable[infotable["ACCESSION_NUMBER"] == accession_number].copy()
+    infotable_path = f"{DATA_ROOT}/{quarter}/INFOTABLE.tsv"
+    infotable = pd.read_csv(infotable_path, sep="\t", dtype=str)
+    if "VALUE" not in infotable.columns:
+        raise SystemExit(f"ERROR: Missing VALUE column in {infotable_path}")
+
+    infotable["VALUE"] = infotable["VALUE"].astype(float)
+    infotable = infotable[infotable["ACCESSION_NUMBER"] == accession_number]
 
     if infotable.empty:
-        print(f"ERROR: No data found for ACCESSION_NUMBER = {accession_number} in quarter {quarter}")
-        raise SystemExit(1)
+        raise SystemExit(f"ERROR: No data found for ACCESSION_NUMBER = {accession_number} in quarter {quarter}")
 
-    infotable["VALUE"] = pd.to_numeric(infotable["VALUE"], errors="coerce").fillna(0.0)
+    # Raw counts are based on the INFOTABLE rows.
+    total_rows = int(infotable.shape[0])
+    total_unique_cusips = int(infotable["CUSIP"].nunique(dropna=True))
 
-    # Normalize CUSIP for stable counting/grouping across variants (case/whitespace).
-    infotable["CUSIP_NORM"] = _norm_cusip(infotable["CUSIP"])
+    stock_infotable = infotable[_normalize_titleofclass(infotable["TITLEOFCLASS"]).isin(TITLE_CLASS_OF_STOCKS)]
 
-    # NOTE on count semantics:
-    # - "holdings" is reported as unique CUSIPs (positions), not raw INFOTABLE rows.
-    # - raw row counts are still printed as "line items" for debugging.
-    total_line_items = int(infotable.shape[0])
-    total_unique_cusips = int(infotable.loc[infotable["CUSIP_NORM"] != "", "CUSIP_NORM"].nunique())
+    # Exclude options by default when the PUTCALL column exists.
+    if not include_options and "PUTCALL" in stock_infotable.columns:
+        stock_infotable = stock_infotable[_is_blank(stock_infotable["PUTCALL"])]
+
+    stock_rows = int(stock_infotable.shape[0])
+
+    stock = (
+        stock_infotable.groupby("CUSIP", as_index=False)
+        .agg(
+            NAMEOFISSUER=("NAMEOFISSUER", "first"),
+            TITLEOFCLASS=("TITLEOFCLASS", "first"),
+            VALUE=("VALUE", "sum"),
+        )
+        .sort_values("VALUE", ascending=False)
+    )
+    unique_stock_cusips = int(stock.shape[0])
 
     print(f"Summary stats for quarter: {quarter}, accession_number: {accession_number}")
+    print(f"- Total holdings rows (raw INFOTABLE lines): {total_rows}")
+    print(f"- Total unique CUSIPs (all holdings): {total_unique_cusips}")
+    print(f"- Total AUM: {infotable['VALUE'].sum():.2f}")
+    print(f"- Stock holdings rows (TITLEOFCLASS-filtered): {stock_rows}")
+    print(f"- Unique stock CUSIPs (TITLEOFCLASS-filtered): {unique_stock_cusips}")
+    print(f"- Total stock AUM: {stock_infotable['VALUE'].sum():.2f}")
 
-    total_aum = float(infotable["VALUE"].sum())
-    print(f"- Total number of holdings (unique CUSIPs; all securities): {total_unique_cusips}")
-    print(f"- Total number of holdings (line items/rows): {total_line_items}")
-    print(f"- Total AUM (sum of VALUE): {total_aum:.2f}")
+    if stock.empty:
+        raise SystemExit(
+            f"ERROR: No stock data found for ACCESSION_NUMBER = {accession_number} in quarter {quarter} "
+            f"after applying the TITLEOFCLASS stock filter"
+        )
 
-    title_norm = _norm_text(infotable["TITLEOFCLASS"])
-    stock_infotable = infotable[title_norm.isin(STOCK_TITLE_CLASSES)].copy()
-
-    # Exclude option positions when the dataset provides a PUTCALL indicator.
-    # Many 13F datasets use blank/NA for common equity and "PUT"/"CALL" for options.
-    if "PUTCALL" in stock_infotable.columns:
-        putcall_norm = _norm_text(stock_infotable["PUTCALL"])
-        stock_infotable = stock_infotable[putcall_norm.eq("")].copy()
-
-    stock_line_items = int(stock_infotable.shape[0])
-    stock_unique_cusips = int(stock_infotable.loc[stock_infotable["CUSIP_NORM"] != "", "CUSIP_NORM"].nunique())
-
-    stock_aum = float(stock_infotable["VALUE"].sum())
-    print(f"- Number of stock holdings (unique CUSIPs; options excluded when PUTCALL exists): {stock_unique_cusips}")
-    print(f"- Number of stock holding line items (rows): {stock_line_items}")
-    print(f"- Total stock AUM (sum of VALUE): {stock_aum:.2f}")
-
-    if stock_infotable.empty:
-        print(f"ERROR: No stock holdings found for ACCESSION_NUMBER = {accession_number} in quarter {quarter}")
-        raise SystemExit(1)
-
-    # Group by normalized CUSIP so multiple spellings collapse into one position.
-    stock = stock_infotable.groupby("CUSIP_NORM", as_index=False).agg(
-        CUSIP=("CUSIP_NORM", "first"),
-        NAMEOFISSUER=("NAMEOFISSUER", "first"),
-        TITLEOFCLASS=("TITLEOFCLASS", "first"),
-        VALUE=("VALUE", "sum"),
-    )
     return stock
 
 
-def one_fund_analysis(accession_number, quarter, baseline_accession_number, baseline_quarter):
-    current_stock = read_one_quarter_data(accession_number, quarter)
-    if baseline_accession_number is None or baseline_quarter is None:
+def one_fund_analysis(
+    accession_number: str,
+    quarter: str,
+    baseline_accession_number: str | None,
+    baseline_quarter: str | None,
+    include_options: bool = False,
+):
+    current = read_one_quarter_data(accession_number, quarter, include_options=include_options)
+
+    if baseline_accession_number is None and baseline_quarter is None:
         return
+    if baseline_accession_number is None or baseline_quarter is None:
+        raise SystemExit("ERROR: --baseline_accession_number and --baseline_quarter must be provided together")
 
     print(f"Performing comparative analysis using baseline quarter {baseline_quarter}")
-    baseline_stock = read_one_quarter_data(baseline_accession_number, baseline_quarter)
+    baseline = read_one_quarter_data(baseline_accession_number, baseline_quarter, include_options=include_options)
 
-    merged = pd.merge(current_stock, baseline_stock, how="outer", suffixes=("", "_base"), on="CUSIP")
+    merged = pd.merge(current, baseline, how="outer", suffixes=("", "_base"), on="CUSIP")
 
-    # analyze changes
+    # Analyze changes.
     merged["VALUE"] = merged["VALUE"].fillna(0.0)
     merged["VALUE_base"] = merged["VALUE_base"].fillna(0.0)
-    merged["NAMEOFISSUER"] = merged["NAMEOFISSUER"].fillna(merged["NAMEOFISSUER_base"])
-    merged["TITLEOFCLASS"] = merged["TITLEOFCLASS"].fillna(merged["TITLEOFCLASS_base"])
+    merged["NAMEOFISSUER"] = merged["NAMEOFISSUER"].fillna(merged.get("NAMEOFISSUER_base"))
 
     merged["ABS_CHANGE"] = merged["VALUE"] - merged["VALUE_base"]
-    # Avoid division-by-zero for display only; rankings should always use ABS_CHANGE.
-    merged["PCT_CHANGE"] = merged["ABS_CHANGE"] / merged["VALUE_base"].replace(0, 1)
 
-    merged = merged.sort_values(by="ABS_CHANGE", ascending=False)
+    # Avoid division-by-zero. For new positions (baseline == 0) the percentage
+    # change is not meaningful; it will print as nan%.
+    denom = merged["VALUE_base"].replace(0.0, float("nan"))
+    merged["PCT_CHANGE"] = merged["ABS_CHANGE"] / denom
 
-    # print top buy and sell
+    # Print top buys and sells by notional VALUE change.
     print(f"Top 10 Buys from {baseline_quarter} to {quarter}:")
-    top_buys = merged[merged["ABS_CHANGE"] > 0].head(10)
+    top_buys = merged[merged["ABS_CHANGE"] > 0].sort_values(by="ABS_CHANGE", ascending=False).head(10)
     for rank, row in enumerate(top_buys.itertuples(index=False), start=1):
         print(
-            f"[{rank}] CUSIP: {row.CUSIP}, Name: {row.NAMEOFISSUER} | "
-            f"Abs change: {row.ABS_CHANGE:.2f} | pct change: {row.PCT_CHANGE:.2%}"
+            f"[{rank}] CUSIP: {row.CUSIP}, Name: {row.NAMEOFISSUER} | Abs change: {row.ABS_CHANGE:.2f} | pct change: {row.PCT_CHANGE:.2%}"
         )
 
     print(f"\nTop 10 Sells from {baseline_quarter} to {quarter}:")
     top_sells = merged[merged["ABS_CHANGE"] < 0].sort_values(by="ABS_CHANGE", ascending=True).head(10)
     for rank, row in enumerate(top_sells.itertuples(index=False), start=1):
         print(
-            f"[{rank}] CUSIP: {row.CUSIP}, Name: {row.NAMEOFISSUER} | "
-            f"Abs change: {row.ABS_CHANGE:.2f} | pct change: {row.PCT_CHANGE:.2%}"
+            f"[{rank}] CUSIP: {row.CUSIP}, Name: {row.NAMEOFISSUER} | Abs change: {row.ABS_CHANGE:.2f} | pct change: {row.PCT_CHANGE:.2%}"
         )
 
 
 if __name__ == "__main__":
     args = get_args()
-    one_fund_analysis(args.accession_number, args.quarter, args.baseline_accession_number, args.baseline_quarter)
+    one_fund_analysis(
+        args.accession_number,
+        args.quarter,
+        args.baseline_accession_number,
+        args.baseline_quarter,
+        include_options=args.include_options,
+    )

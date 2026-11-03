@@ -34,8 +34,8 @@ class TooltipHandler {
      */
     show(event, data) {
         // Check if tooltip should be shown for this data.
-        // IMPORTANT: if we skip showing for this datum, actively hide any
-        // previously-visible tooltip to avoid leaving stale content on screen.
+        // IMPORTANT: If we should NOT show, also hide any currently-visible tooltip
+        // so excluded items don't leave stale tooltips on screen.
         if (!this.shouldShow(data)) {
             this.hide();
             return;

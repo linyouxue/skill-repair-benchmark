@@ -1,14 +1,14 @@
 import argparse
+from pathlib import Path
 
 import pandas as pd
 from rapidfuzz import fuzz, process
 
-# Filing data is expected under /root/<quarter>/ (e.g., /root/2025-q3/INFOTABLE.tsv)
-data_root = "/root"
+DATA_ROOT = "/root"
 
-# TITLEOFCLASS values that this skill treats as (common) equity-like "stock" holdings.
-# Keep this list in sync with 13f-analyzer/scripts/one_fund_analysis.py.
-STOCK_TITLE_CLASSES = {
+# Keep this list aligned with 13f-analyzer/one_fund_analysis.py.
+# It defines the conservative common-equity TITLEOFCLASS universe.
+TITLE_CLASS_OF_STOCKS = {
     "com",
     "common stock",
     "cl a",
@@ -37,29 +37,13 @@ STOCK_TITLE_CLASSES = {
 }
 
 
-def _norm_text(series: pd.Series) -> pd.Series:
-    return (
-        series.fillna("")
-        .astype(str)
-        .str.lower()
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    )
-
-
-def get_args():
-    parser = argparse.ArgumentParser(description="Fuzzy search stock CUSIP by its name")
+def get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Fuzzy search a stock CUSIP by issuer name")
     parser.add_argument(
         "--keywords",
         type=str,
         required=True,
-        help="The stock name or keywords to search for",
-    )
-    parser.add_argument(
-        "--quarter",
-        type=str,
-        default="2025-q2",
-        help="Which quarter's INFOTABLE.tsv to use as the symbol universe (default: 2025-q2)",
+        help="Stock/issuer name or keywords to search for",
     )
     parser.add_argument(
         "--topk",
@@ -67,47 +51,118 @@ def get_args():
         default=10,
         help="The maximum number of results to return",
     )
+    parser.add_argument(
+        "--quarter",
+        type=str,
+        default=None,
+        help=(
+            "Optional quarter to search in (e.g., 2025-q3). If omitted, the helper searches across all "
+            "available /root/<quarter>/INFOTABLE.tsv files."
+        ),
+    )
+    parser.add_argument(
+        "--include_options",
+        action="store_true",
+        help=(
+            "Include option rows (PUT/CALL) if present. By default the helper excludes rows where PUTCALL is set, "
+            "so the returned CUSIPs reflect common-equity positions."
+        ),
+    )
     return parser.parse_args()
 
 
-def search_stock_by_name(keywords: str, quarter: str, topk: int = 5):
-    """Fuzzy search stock information (CUSIP) by issuer name.
+def _normalize_titleofclass(series: pd.Series) -> pd.Series:
+    return series.fillna("").astype(str).str.strip().str.lower()
 
-    The search universe is built from the specified quarter's INFOTABLE.tsv,
-    filtered to equity-like TITLEOFCLASS values.
-    """
 
-    infotable = pd.read_csv(f"{data_root}/{quarter}/INFOTABLE.tsv", sep="\t", dtype=str)
-    stocks = infotable[["CUSIP", "NAMEOFISSUER", "TITLEOFCLASS"]].copy()
+def _is_blank(series: pd.Series) -> pd.Series:
+    return series.isna() | (series.astype(str).str.strip() == "")
 
-    title_norm = _norm_text(stocks["TITLEOFCLASS"])
-    stocks = stocks[title_norm.isin(STOCK_TITLE_CLASSES)].copy()
 
-    if stocks.empty:
-        print(f"No stock-like rows found in quarter {quarter}")
-        return
+def _discover_quarters(data_root: str) -> list[str]:
+    root = Path(data_root)
+    if not root.exists():
+        return []
 
-    stocks["CUSIP"] = stocks["CUSIP"].astype(str).str.upper()
-    stocks["NAMEOFISSUER"] = _norm_text(stocks["NAMEOFISSUER"])
+    quarters: list[str] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        infotable = child / "INFOTABLE.tsv"
+        if infotable.exists():
+            quarters.append(child.name)
+    return quarters
 
-    # One row per CUSIP (first NAMEOFISSUER shown). This mirrors how analysis is grouped.
-    stocks = stocks.drop_duplicates(subset=["CUSIP"], keep="first")
+
+def _load_stock_universe(quarters: list[str], include_options: bool) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for quarter in quarters:
+        path = Path(DATA_ROOT) / quarter / "INFOTABLE.tsv"
+        df = pd.read_csv(path, sep="\t", dtype=str)
+
+        required = {"CUSIP", "NAMEOFISSUER", "TITLEOFCLASS"}
+        missing = required - set(df.columns)
+        if missing:
+            raise SystemExit(f"ERROR: Missing columns {sorted(missing)} in {path}")
+
+        cols = ["CUSIP", "NAMEOFISSUER", "TITLEOFCLASS"]
+        if "PUTCALL" in df.columns:
+            cols.append("PUTCALL")
+
+        df = df[cols].copy()
+        df["QUARTER"] = quarter
+        frames.append(df)
+
+    if not frames:
+        raise SystemExit("ERROR: No INFOTABLE.tsv files found to build a stock universe")
+
+    stocks = pd.concat(frames, ignore_index=True)
+
+    # Conservative common-equity filter.
+    stocks = stocks[_normalize_titleofclass(stocks["TITLEOFCLASS"]).isin(TITLE_CLASS_OF_STOCKS)]
+
+    if not include_options and "PUTCALL" in stocks.columns:
+        stocks = stocks[_is_blank(stocks["PUTCALL"])]
+
+    stocks["CUSIP"] = stocks["CUSIP"].fillna("").astype(str).str.strip().str.upper()
+    stocks["NAMEOFISSUER"] = stocks["NAMEOFISSUER"].fillna("").astype(str).str.strip().str.lower()
+
+    stocks = stocks[stocks["CUSIP"] != ""]
+
+    # One canonical issuer-name per CUSIP.
+    stocks = stocks.drop_duplicates(subset=["CUSIP"], keep="first").reset_index(drop=True)
+
+    return stocks
+
+
+def search_stock_by_name(keywords: str, topk: int = 10, quarter: str | None = None, include_options: bool = False) -> None:
+    # Build the stock universe from one or more quarters.
+    if quarter:
+        quarters = [quarter]
+    else:
+        quarters = _discover_quarters(DATA_ROOT)
+
+    if not quarters:
+        raise SystemExit(
+            "ERROR: Could not discover any quarters under /root. Provide --quarter explicitly (e.g., --quarter 2025-q3)."
+        )
+
+    stocks = _load_stock_universe(quarters, include_options=include_options)
 
     choices = stocks["NAMEOFISSUER"].tolist()
-    matches = process.extract(keywords.lower(), choices, scorer=fuzz.WRatio, limit=topk)
+    matches = process.extract(keywords.strip().lower(), choices, scorer=fuzz.WRatio, limit=topk)
 
     print("Search Results:")
-    for idx, (match_name, score, _) in enumerate(matches):
-        matched = stocks[stocks["NAMEOFISSUER"] == match_name]
-        if matched.empty:
-            continue
-        matched_row = matched.iloc[0]
-        print(f"** Rank {idx+1} (score = {score:.3f}) **")
+    for rank, (match_name, score, match_idx) in enumerate(matches, start=1):
+        matched = stocks.iloc[int(match_idx)]
+        print(f"** Rank {rank} (score = {score:.3f}) **")
         print(f"  Name: {match_name}")
-        print(f"  CUSIP: {matched_row['CUSIP']}")
+        print(f"  CUSIP: {matched['CUSIP']}")
+        if quarter is None:
+            print(f"  Quarter (sampled from): {matched['QUARTER']}")
         print()
 
 
 if __name__ == "__main__":
     args = get_args()
-    search_stock_by_name(args.keywords, quarter=args.quarter, topk=args.topk)
+    search_stock_by_name(args.keywords, topk=args.topk, quarter=args.quarter, include_options=args.include_options)

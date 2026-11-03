@@ -1,57 +1,88 @@
 ---
 name: 13f-analyzer
-description: Perform various data analysis on SEC 13-F and obtain some insights of fund activities such as number of holdings, AUM, and change of holdings between two quarters.
+description: Perform analysis on SEC 13F filings (INFOTABLE/COVERPAGE) to obtain fund-level stats (e.g., reported value/AUM proxy, number of holdings) and changes between quarters.
 ---
 
 ## Overview
 
-**Dataset layout:** by default these scripts expect the SEC 13F TSVs under `/root/<quarter>/`, e.g.
-- `/root/2025-q3/COVERPAGE.tsv`
-- `/root/2025-q3/INFOTABLE.tsv`
+This skill provides helper scripts to analyze the downloaded SEC 13F dataset laid out as:
 
-You can override the dataset root by setting `SEC_13F_DATA_ROOT`.
+- `${DATA_ROOT}/${QUARTER}/COVERPAGE.tsv`
+- `${DATA_ROOT}/${QUARTER}/INFOTABLE.tsv`
 
-**Path convention:** commands below assume your working directory is the repository root.
+Where `${QUARTER}` is a folder like `2025-q3`.
 
-### Analyze the holding summary of a particular fund in one quarter
+### Path / working-directory convention
+
+You can run the scripts either:
+
+- From the skill directory:
+  ```bash
+  cd skills/13f-analyzer
+  python3 scripts/one_fund_analysis.py ...
+  ```
+
+- Or from the repo root (use the full path):
+  ```bash
+  python3 skills/13f-analyzer/scripts/one_fund_analysis.py ...
+  ```
+
+All commands below assume you are in `skills/13f-analyzer`.
+
+## 1) Analyze one fund in one quarter
 
 ```bash
-python3 skills/13f-analyzer/scripts/one_fund_analysis.py \
-  --accession_number <accession_number> \
-  --quarter 2025-q3
+python3 scripts/one_fund_analysis.py \
+  --accession_number <ACCESSION_NUMBER> \
+  --quarter 2025-q3 \
+  --data_root /root
 ```
 
-This script prints basic information for the given filing, including:
-- Total rows (positions) and total value (AUM proxy, in the file's `VALUE` units)
-- Common-equity rows and **unique common-equity CUSIPs** (options excluded)
+The script prints summary statistics, including:
 
-For questions like "How many stocks are held", use **unique common-equity CUSIPs** (not the raw row count).
+- **Total positions (rows)**: number of INFOTABLE line items for this filing
+- **Total distinct CUSIPs**: unique CUSIPs across all line items
+- **Common stock holdings (distinct CUSIPs)**: unique CUSIPs after filtering to common equity (and excluding options when possible)
+- **Total reported value**: sum of `VALUE` (13F convention is typically USD *thousands*)
 
-### Analyze the change of holdings between two quarters (Top Buys / Top Sells)
+When a task asks “how many stocks are held”, use **Common stock holdings (distinct CUSIPs)** (not raw row count).
+
+## 2) Compare a fund between two quarters (Top Buys / Top Sells)
 
 ```bash
-python3 skills/13f-analyzer/scripts/one_fund_analysis.py \
+python3 scripts/one_fund_analysis.py \
   --quarter 2025-q3 \
-  --accession_number <accession number assigned in q3> \
+  --accession_number <Q3_ACCESSION_NUMBER> \
   --baseline_quarter 2025-q2 \
-  --baseline_accession_number <accession number assigned in q2>
+  --baseline_accession_number <Q2_ACCESSION_NUMBER> \
+  --topk 10 \
+  --data_root /root
 ```
 
-This script:
-1. Loads each quarter's `INFOTABLE` for the given accession number.
-2. Filters to common-equity rows (excludes options via `PUTCALL` when present).
-3. Aggregates by CUSIP within each quarter.
-4. Computes `ABS_CHANGE = VALUE_current - VALUE_base` per CUSIP.
+### How “Top Buys” is computed
 
-**Top Buys** are CUSIPs with `ABS_CHANGE > 0`, ranked by `ABS_CHANGE` descending (new positions count as buys with a base value of 0).
+The comparison is performed on **CUSIP-level common equity holdings**:
 
-### Analyze which funds hold a stock the most (top managers)
+1. Load each quarter’s `INFOTABLE.tsv` and filter to the given `ACCESSION_NUMBER`.
+2. Filter to likely **common-equity** rows using:
+   - `TITLEOFCLASS` allowlist (normalized)
+   - exclude option legs when a `PUTCALL` column exists
+   - keep only share positions when `SHRSORPRN == SH` exists
+3. Group by `CUSIP` and **sum `VALUE`** per quarter.
+4. Outer-join the two quarters on `CUSIP`.
+5. Compute `ABS_CHANGE = VALUE_now - VALUE_base`.
+6. Sort by `ABS_CHANGE`:
+   - **Top Buys**: largest positive `ABS_CHANGE` (includes both *new positions* and *increases*)
+   - **Top Sells**: most negative `ABS_CHANGE`
+
+## 3) Find which funds hold a stock the most (Top holders)
 
 ```bash
-python3 skills/13f-analyzer/scripts/holding_analysis.py \
-  --cusip <stock cusip> \
+python3 scripts/holding_analysis.py \
+  --cusip <CUSIP> \
   --quarter 2025-q3 \
-  --topk 10
+  --topk 10 \
+  --data_root /root
 ```
 
-This script prints the top-k fund managers (with names) holding the given CUSIP by total value in the specified quarter (common-equity positions; options excluded).
+This prints the top managers (by total `VALUE`) holding the given CUSIP in the specified quarter. When available, it enriches results with `FILINGMANAGER_NAME` from `COVERPAGE.tsv`.

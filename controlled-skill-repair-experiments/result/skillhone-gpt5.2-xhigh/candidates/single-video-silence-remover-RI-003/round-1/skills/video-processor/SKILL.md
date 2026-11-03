@@ -19,8 +19,8 @@ For a silence-removal task, treat the available audio and video skills as one or
 
 1. Extract the input video's audio.
 2. Calculate the audio-energy sequence.
-3. Detect the non-teaching opening with the silence detector's time-aligned result, then start long-pause detection at that returned boundary (pass it as pause-detector `--start-time`).
-4. Combine, sort, clamp, and de-overlap all removal segments. Preserve every positive gap; merge only overlapping or exactly touching intervals (`next.start <= current.end`).
+3. Detect the non-teaching opening with the silence detector's time-aligned result, then start long-pause detection at that returned boundary. 
+4. Combine, sort, clamp, and de-overlap all removal segments. Preserve every positive gap; merge only overlapping or touching intervals.
 5. Process the original video with the combined segments to create the compressed video.
 6. Generate the task-format compression report from the actual original video, compressed video, and final segment list.
 7. Verify both outputs with tools and repair any failed check.
@@ -78,16 +78,26 @@ python3 /root/.claude/skills/video-processor/scripts/process_video.py \
 
 ### Output
 
-Creates the processed video. (If you also need a task-format JSON report, use the `report-generator` skill to produce `compression_report.json` in the required schema.)
+Creates the processed video and a report JSON:
+
+```json
+{
+  "original_duration": 3908.61,
+  "output_duration": 3078.61,
+  "removed_duration": 830.0,
+  "compression_percentage": 21.24,
+  "segments_removed": 91,
+  "segments_kept": 91
+}
+```
 
 ## How It Works
 
 1. **Load removal segments** from JSON file(s)
 2. **Calculate keep segments** (inverse of removal segments)
 3. **Build ffmpeg filter** to trim and concatenate
-4. **Process video** with ffmpeg trim+concat
-
-(Reporting is handled by `report-generator`; this script may emit an extra *_report.json for debugging, but it is not the task-format report.)
+4. **Process video** using hardware-accelerated encoding
+5. **Generate report** with statistics
 
 ### FFmpeg Filter Example
 
