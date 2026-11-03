@@ -2,20 +2,20 @@
 
 ## 原始Skill baseline
 
-模型为Tatu GPT-5.2，reasoning effort为xhigh，单请求输出上限16384。使用完整官方原Skill；每次最多60次父迭代，completion guard最多1次且共享此额度，无子Agent。数据版本pilot-v2，评分item-accuracy-v1；2026-10-30完成验收。
+模型为Tatu GPT-5.2，reasoning effort为xhigh，单请求输出上限16384。使用完整官方原Skill；每次最多60次父迭代，completion guard共享此额度；九条沿用guard1，原题r02/r03和group_03-r03因早停选入guard3独立重评并替换，无子Agent。数据版本pilot-v2，评分item-accuracy-v1；2026-10-30完成原批验收，2026-11-03完成三条替换。
 
-分数以百分比显示（100%=reward 1）。reward为(正确输出正例数+正确排除负例数)/(正例数+负例数+额外错误项数)，输出缺失或不可读得0。每组3次独立有效运行直接取算术均值，正常FAIL/0分均计入；基础设施故障及恢复来源另列。
+分数以百分比显示（100%=reward 1）。reward为(正确输出正例数+正确排除负例数)/(正例数+负例数+额外错误项数)，输出缺失或不可读得0。每组3条当前结果直接取算术均值，正常新FAIL/0分也用于替换；基础设施故障及恢复来源另列。这是九条guard1与三条按早停选中的guard3重评，不是统一guard3的12次随机baseline，差异不能全部归因于guard。
 
 | 数据集 | 有效次数 | 第1次 | 第2次 | 第3次 | 均值 | 全对次数 |
 |---|---:|---:|---:|---:|---:|---:|
-| 原任务 | 3/3 | 74.09% | 0.00% | 0.00% | **24.70%** | 0/3 |
+| 原任务 | 3/3 | 74.09% | 74.09% | 0.00% | **49.40%** | 0/3 |
 | group_01 | 3/3 | 44.95% | 44.95% | 0.00% | **29.97%** | 0/3 |
 | group_02 | 3/3 | 46.90% | 46.90% | 0.00% | **31.27%** | 0/3 |
 | group_03 | 3/3 | 50.00% | 0.00% | 0.00% | **16.67%** | 0/3 |
 
-**合计12/12条有效，平均reward 25.65%，严格全对0/12。**全对次数要求单次reward=1；它与连续reward均值分别报告。
+**合计12/12条有效，平均reward 31.83%，严格全对0/12。**全对次数要求单次reward=1；它与连续reward均值分别报告。
 
-完整逐次结果、原Skill版本和证据见[baseline报告](baseline/README.md)、[汇总表](baseline/summary.csv)、[12次运行索引](baseline/STATUS.csv)及[原生证据下载](baseline/evidence-assets.json)。原始精度分数保存在CSV/JSON；本页百分比四舍五入至两位小数。本组使用同一冻结原Skill，没有根据泛化成绩修订或选择Skill。
+完整逐次结果、原Skill版本和证据见[baseline报告](baseline/README.md)、[汇总表](baseline/summary.csv)、[12次运行索引](baseline/STATUS.csv)及[原生证据下载](baseline/evidence-assets.json)。原始精度分数保存在CSV/JSON；本页百分比四舍五入至两位小数。本组使用同一冻结原Skill，没有根据泛化成绩修订或选择Skill。两条新运行含原生SDK恢复续段，评分有效；完整SDK/LLM及派生ATIF可追溯，但原始ACP完整性和训练隔离限制见baseline报告。
 
 ## 提交真实泛化结果
 
