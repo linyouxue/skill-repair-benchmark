@@ -1,0 +1,74 @@
+{
+  "diagnoses": [
+    {
+      "prediction_id": "034.jpg/date",
+      "description": "Date disambiguation failure: the pipeline likely selected a secondary date-like token (or OCR-corrupted label line) instead of the primary header date. Receipts/invoices can contain multiple date-like strings (header date, print date, closed date, etc.), and naive “first regex match” can pick the wrong one.",
+      "evidence": "Allowed feedback: 034.jpg date_correct=false while amount_correct=true. The image shows a clear header date field (e.g., “Date: 09/03/2018”), but other date-like strings can appear elsewhere or be OCR-mutated (e.g., DATE→DATA). The current generic OCR skill does not emphasize label-tolerant date selection and top-of-receipt preference strongly enough to prevent this failure mode.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Date extraction (reduce false positives)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "074.jpg/total_amount",
+      "description": "Total selection failure due to OCR digit flip/outlier and competing ‘total’ variants: the model selected an implausible total-like number (e.g., 702.00) instead of the payable/rounded total (e.g., 102.00). This happens when OCR corrupts one line and the extractor lacks an outlier rejection / rounded-total preference.",
+      "evidence": "Allowed feedback: 074.jpg amount_correct=false while date_correct=true. The receipt contains multiple total-related lines (Total excl/incl GST, Total Amt Rounded, Payment, GST Summary). OCR can misread 102.00 as 702.00; without a plausibility check and explicit preference for “Total Amt Rounded/Total Rounded” over “Total incl GST” when inconsistent, the wrong value is chosen.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "077.jpg/total_amount",
+      "description": "Rounding-line precedence failure: the extractor chose ‘Total (Inclusive of GST)’ instead of the final payable ‘TOTAL:’ after a rounding adjustment, causing an exact-match miss (often by 0.01).",
+      "evidence": "Allowed feedback: 077.jpg amount_correct=false while date_correct=true. The image shows a rounding adjustment line (e.g., “Rounding Adj: -0.01”) followed by a bold final “TOTAL: 23.25”, while an earlier line shows “Total (Inclusive of GST): 23.26”. The skill guidance needs an explicit rule to prefer the final total after rounding when present.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "078.jpg/total_amount",
+      "description": "Output normalization failure: total_amount was emitted as an empty string instead of null (on failure) or a two-decimal string (on success). This violates the task’s strict schema and causes exact-match failure even if OCR found the number.",
+      "evidence": "Allowed feedback: 078.jpg amount_correct=false; predictions table shows total_amount=\"\". Task spec requires null on extraction failure and exactly two decimals when present. The skill docs should explicitly forbid empty strings and require strict post-processing/validation.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Amount string normalization (critical for exact-match scoring)"
+        }
+      ]
+    }
+  ],
+  "file_updates": [
+    {
+      "path": "environment/skills/image-ocr/SKILL.md",
+      "content": "---\nname: image-ocr\ndescription: Extract text content from images using Tesseract OCR via Python\n---\n\n# Image OCR Skill\n\n## Purpose\nExtract text from images (JPG/PNG/etc.) using Tesseract (`pytesseract`) with receipt-friendly preprocessing and downstream parsing guidance.\n\n## When to Use\n- Scanned receipts/invoices where you must extract specific fields (e.g., date, total)\n- Batch OCR over many images\n\n## Required Libraries\n```python\nimport pytesseract\nfrom PIL import Image, ImageFilter, ImageOps\nimport os\nimport re\n```\n\n## Practical OCR Guidance for Receipts\n\n### 1) Preserve line structure\nReceipt parsing depends on line breaks. Prefer `image_to_string` outputs with newlines preserved.\n\nRecommended PSMs to try:\n- `--psm 6` (uniform block; good default for receipts)\n- `--psm 4` (single column)\n- `--psm 11` (sparse text)\n\n### 2) Minimal preprocessing variants (try a small set)\nReceipts fail due to faint ink / low contrast / small fonts.\n\nTry these variants (in order):\n1. Grayscale + autocontrast\n2. Grayscale + sharpen\n3. Thresholded (binary) at 1–2 thresholds\n4. Invert only if white-on-dark\n\nAlso consider 2× upscaling if the shortest side is small.\n\n### 3) Multi-pass OCR: select best *field* candidate, don’t concatenate\nConcatenating multi-pass text can introduce duplicate/conflicting totals.\nInstead:\n- run multiple OCR passes\n- extract date/total candidates per pass\n- score candidates and keep the best\n\n## Field Extraction Heuristics (Receipts)\n\n### Date extraction (reduce false positives)\nReceipts often contain multiple date-like strings (header date, print date, closed date, etc.).\n\n**Candidate generation**\n- Accept common formats:\n  - `dd/mm/yyyy`, `dd-mm-yyyy`, `dd/mm/yy`, `dd-mm-yy`\n  - `yyyy-mm-dd`\n- Validate plausibility:\n  - year in a reasonable range (e.g., 2000–2035)\n  - month 1–12, day 1–31\n\n**Candidate ranking (most important first)**\n1. Prefer dates on lines with an explicit label (case-insensitive):\n   - `DATE`, `DATED`, `DOC DATE`, `INVOICE DATE`\n   - Be tolerant to OCR label corruption near the label, e.g. `DAIE`, `DAtE`, `DATA`.\n2. Prefer dates near a `TIME` token on the same/adjacent line.\n3. Prefer the date closest to the top of the receipt.\n\n**Ambiguity note**\n- Do not “fix” ambiguous day/month swaps unless you have a strong cue.\n- If forced, Malaysian receipts commonly use `dd/mm`, but only apply when both interpretations are valid.\n\n### Total amount extraction (avoid subtotals/cash/change)\nReceipts contain many amounts; the payable total is usually near the bottom and may be affected by rounding.\n\n**Priority keywords (highest → lowest)**\n1. `GRAND TOTAL`\n2. `TOTAL RM`, `TOTAL: RM` (also tolerate OCR `RN` for `RM`)\n3. `TOTAL AMOUNT`\n4. `TOTAL ROUNDED`, `TOTAL AMT ROUNDED`, `AMOUNT ROUNDED`, `ROUNDED TOTAL`\n5. `NETT TOTAL`, `NET TOTAL`, `TOTAL`, `AMOUNT`, `TOTAL DUE`, `AMOUNT DUE`, `BALANCE DUE`\n\n**Exclusions (skip these as totals)**\n- Always exclude lines whose *primary meaning* is not the payable total:\n  - `SUBTOTAL`, `SUB TOTAL`\n  - `DISCOUNT`\n  - `CHANGE`, `CASH TENDERED`, `CASH RECEIVED`\n- Tax lines: exclude when the line is a tax subtotal/summary rather than the payable total:\n  - `TOTAL GST`, `GST TOTAL`, `TAX TOTAL`, `SST TOTAL`\n  - `GST SUMMARY`, `TAX SUMMARY`, `SST SUMMARY`\n\n**Important: GST/SST/TAX as modifiers**\n- Do **not** blanket-exclude every line containing `GST`/`SST`/`TAX`.\n  - Lines like `Total (Inclusive of GST)` or `Total Sales Incl GST` can be the correct total.\n  - Exclude only when the line is clearly a tax-only total/summary (e.g., `Total GST`, `GST Summary`).\n\n**Rounding handling (common exact-match failure)**\n- If a rounding adjustment exists (`ROUNDING`, `ROUNDING ADJ`, `Rounding Adj`) and there is a later/final\n  `TOTAL` / `TOTAL ROUNDED` line, prefer that final total.\n- If both `Total (Inclusive of GST)` and a later bold `TOTAL:` exist and they differ by a small rounding delta,\n  prefer the later bold `TOTAL:`.\n\n**Split keyword/amount across lines**\n- If the keyword line has no number, use the **last number on the next non-empty line**.\n\n**Plausibility cross-check (guards against OCR digit flips like 102.00→702.00)**\nWhen multiple total-like candidates exist:\n- Prefer candidates consistent with nearby totals (e.g., `Subtotal`, `Total Rounded`, `Payment`).\n- Reject extreme outliers relative to other total-like numbers on the receipt.\n\n### Amount string normalization (critical for exact-match scoring)\nWhen you extract a numeric amount:\n- Remove currency markers (`RM`, `$`) and thousands separators (`,`)\n- Normalize common OCR punctuation:\n  - treat `:` or `;` between digits as `.` when it looks like a decimal separator (e.g., `92:80` → `92.80`)\n- Output must be a string with **exactly two decimal places** (e.g., `\"47.70\"`).\n- If extraction fails/uncertain: output **None/null**.\n  - **Never** output an empty string.\n\n## Code Example: receipt-oriented multi-pass OCR (texts kept separate)\n```python\nfrom PIL import Image, ImageOps, ImageFilter\nimport pytesseract\n\n\ndef _variants(img):\n    g = ImageOps.grayscale(img)\n    yield ImageOps.autocontrast(g)\n    yield ImageOps.autocontrast(g).filter(ImageFilter.SHARPEN)\n    for t in (110, 140):\n        yield ImageOps.autocontrast(g).point(lambda p, tt=t: 255 if p > tt else 0)\n\n\ndef ocr_receipt_texts(image_path):\n    img = Image.open(image_path)\n    if min(img.size) < 900:\n        img = img.resize((img.size[0] * 2, img.size[1] * 2))\n\n    psm_modes = ['--psm 6', '--psm 4', '--psm 11']\n    texts = []\n    for v in _variants(img):\n        for psm in psm_modes:\n            txt = pytesseract.image_to_string(v, lang='eng', config=psm)\n            if txt and txt.strip():\n                texts.append(txt)\n    return texts\n```\n\n## Error Handling\n- If OCR is empty/garbage, try a different PSM and a thresholded variant.\n- If the receipt is rotated, try rotating 90/180 degrees and re-running OCR.\n\n## Quality Self-Check\n- [ ] Preserve newlines in OCR output\n- [ ] Use multi-pass OCR for faint/low-contrast receipts\n- [ ] Date: prefer label-adjacent, top-of-receipt candidates; validate plausibility\n- [ ] Total: apply priority keywords + exclusions; prefer final total after rounding\n- [ ] Normalize totals to exactly two decimals\n- [ ] Use None/null on failure; never empty string\n\n## Limitations\n- Tesseract accuracy drops on very faint ink, heavy blur, or extreme skew\n- Complex multi-column layouts may require cropping or per-region OCR\n\n## Version History\n- **1.1.1** (2026-10-21): Added label-tolerant date ranking, rounding precedence, outlier rejection, strict null/2dp normalization\n- **1.0.0** (2026-01-13): Initial release\n"
+    }
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.74,
+      "rationale": "The update targets the observed failure modes: (1) date ambiguity via label-tolerant ranking and top-of-receipt preference; (2) total confusion via explicit rounding precedence and GST-summary exclusion; (3) OCR digit-flip/outlier mitigation; (4) strict output normalization (null vs empty string, two decimals). These are likely to improve exact-match accuracy on hard receipts without degrading easy cases."
+    },
+    "trigger_precision": {
+      "score": 0.81,
+      "rationale": "Guidance is scoped to receipt OCR and the specific fields required by the task (date, total). It avoids prescribing a single OCR configuration globally and instead recommends a small, standard set of PSM/preprocess variants and field-level selection rules."
+    },
+    "instruction_compliance": {
+      "score": 0.9,
+      "rationale": "Diagnoses rely only on permitted evidence (field-level correctness feedback, predictions, and visible images) and do not reference oracle values. Only the changed SKILL.md file is provided as a complete replacement; other skills are left untouched."
+    },
+    "solution_path_coverage": {
+      "score": 0.78,
+      "rationale": "Covers the main error classes seen in the run: wrong date among multiple candidates, wrong total due to GST summary/rounding, OCR digit flips, and schema/formatting violations. Does not attempt broader enhancements (deskew/cropping) not implicated by the provided failures."
+    },
+    "overall_rationale": "The original skills were generic OCR guides and did not encode receipt-specific disambiguation and strict output formatting required by exact-match scoring. A minimal, transferable improvement is to strengthen the image-ocr skill with receipt-oriented candidate ranking for dates, robust total selection (including rounding precedence and GST-summary handling), plausibility checks against OCR outliers, and explicit null/2-decimal normalization rules."
+  },
+  "iteration_summary": "Diagnosed four field-level failures (034 date; 074/077/078 totals) and updated only environment/skills/image-ocr/SKILL.md to add receipt-specific date ranking, total selection with rounding precedence and GST-summary exclusions, outlier rejection for OCR digit flips, and strict output normalization (two decimals or null; never empty string)."
+}

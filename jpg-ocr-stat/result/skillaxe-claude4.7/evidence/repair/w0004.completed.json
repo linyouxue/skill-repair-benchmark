@@ -1,0 +1,91 @@
+{
+  "window_id": "w0004",
+  "attempt": 4,
+  "diagnoses": [
+    {
+      "prediction_id": "074.jpg/total_amount",
+      "description": "Total extraction is vulnerable to OCR corruption and to selecting the wrong ‘total-like’ line when multiple totals exist (incl/excl GST, rounded total, payment, item count). The historical run picked an implausible outlier (702.00) that contradicts other nearby totals (102.00). The skill should explicitly recommend (a) a small, receipt-friendly preprocessing+PSM baseline, and (b) a candidate scoring approach that prefers consistent totals (e.g., rounded total / payment) and rejects outliers.",
+      "evidence": "Allowed feedback: 074.jpg amount_correct=false. Timeline shows raw OCR without preprocessing produced “Total inel. of GBT 702.00” and “Toial Amt Rounded … yo2.00”, causing the extractor to select 702.00. The same timeline shows that grayscale+autocontrast with PSM 6 yields a clean “Total incl. of GST 102.00”, demonstrating that preprocessing/PSM choice is decisive. Current image-ocr skill mentions multi-pass but does not explicitly elevate a strong default baseline (grayscale+autocontrast + PSM 6) nor a concrete outlier-rejection rule tied to other total-like anchors (payment/subtotal/rounded).",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Practical OCR Guidance for Receipts / 2) Minimal preprocessing variants (try a small set)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Plausibility cross-check (guards against OCR digit flips like 102.00→702.00)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "077.jpg/total_amount",
+      "description": "Rounding precedence failure: when a receipt shows an inclusive total plus a rounding adjustment and then a final bold TOTAL, the payable amount is the final total after rounding. The skill should make this precedence rule unambiguous and operational (prefer final TOTAL after rounding over inclusive total).",
+      "evidence": "Allowed feedback: 077.jpg amount_correct=false. Image shows “Total (Inclusive of GST): 23.26”, “Rounding Adj: -0.01”, and final “TOTAL: 23.25”. The historical prediction used 23.26. Current image-ocr skill mentions rounding handling, but this failure indicates the rule needs to be stated as a hard preference when a rounding adjustment line exists and a later TOTAL exists.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Rounding handling (common exact-match failure)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "078.jpg/total_amount",
+      "description": "Schema/normalization failure: total_amount was emitted as an empty string instead of null, violating the task’s strict output requirements. The skill should explicitly require a final validation step that converts empty/whitespace-only strings to null and enforces two-decimal formatting only when a numeric value is confidently extracted.",
+      "evidence": "Allowed feedback: 078.jpg amount_correct=false; predictions table shows total_amount=\"\". Task spec requires null on failure and exactly two decimals on success. Current image-ocr skill warns “Never output an empty string,” but the historical run still produced one; the skill should add an explicit ‘final output validation’ checklist item and a tiny reference snippet to make this hard to miss in implementations.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Amount string normalization (critical for exact-match scoring)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Quality Self-Check"
+        }
+      ]
+    },
+    {
+      "prediction_id": "034.jpg/date",
+      "description": "Date disambiguation failure: receipts/invoices can contain multiple date-like strings and OCR can corrupt the DATE label (e.g., DATE→DATA). The skill should more strongly instruct label-tolerant matching and top-of-receipt preference, and recommend ranking labeled dates above unlabeled ones even if another date-like token appears elsewhere.",
+      "evidence": "Allowed feedback: 034.jpg date_correct=false while amount_correct=true. Prior method history notes OCR label corruption (“Data: 09/08/2018”) and the image shows a clear header “Date: 09/03/2018”. Current image-ocr skill includes label-tolerant guidance, but this miss suggests emphasizing: treat near-miss labels (DAIE/DATA) as DATE labels and prefer the header block date.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Date extraction (reduce false positives)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "image-ocr/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.7,
+      "rationale": "The changes are targeted at the observed failure modes in the historical run: (1) OCR-quality sensitivity (074) by elevating a strong baseline (grayscale+autocontrast + PSM6) that the run itself showed to fix key lines; (2) rounding precedence (077) by making it a hard rule; (3) empty-string schema violation (078) by adding an explicit final validation step; (4) date label corruption (034) by emphasizing label-tolerant matching. These should improve exact-match accuracy without materially harming already-correct cases."
+    },
+    "trigger_precision": {
+      "score": 0.82,
+      "rationale": "All additions are scoped to receipt OCR and the two required fields (date, total). The guidance avoids receipt-specific constants and focuses on transferable heuristics (baseline preprocessing, exclusions, precedence, validation)."
+    },
+    "instruction_compliance": {
+      "score": 0.9,
+      "rationale": "Uses only permitted evidence (field-level correctness feedback, predictions, and provided timeline/image observations) and does not reference oracle values. Provides complete replacement content only for the changed existing SKILL.md file (image-ocr)."
+    },
+    "solution_path_coverage": {
+      "score": 0.76,
+      "rationale": "Covers the main error classes shown: wrong total due to OCR corruption/outliers, wrong total due to rounding precedence, wrong output due to empty string, and wrong date due to label corruption/ambiguity. Does not attempt broader enhancements (deskew/cropping pipelines), which were not implicated by the allowed feedback."
+    },
+    "overall_rationale": "The original run’s misses are dominated by receipt-specific selection/normalization issues and OCR-quality sensitivity. The minimal, high-leverage repair is to (a) standardize a strong baseline OCR pass known to work on these receipts, (b) clarify total-selection precedence (especially rounding), (c) expand exclusions for non-monetary ‘total item’ lines, and (d) enforce strict null/2dp output validation to prevent schema-level exact-match failures."
+  },
+  "iteration_summary": "Updated only environment/skills/image-ocr/SKILL.md to strengthen receipt OCR baseline (grayscale+autocontrast + PSM6), clarify rounding precedence, add item-count exclusions, emphasize outlier rejection against subtotal/payment anchors, and add an explicit final output validation step to prevent empty-string totals.",
+  "request_audit": "w0004__attempt-04.request-audit.json",
+  "response_record": "w0004__attempt-04.response.json"
+}

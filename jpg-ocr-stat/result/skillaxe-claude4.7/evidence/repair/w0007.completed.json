@@ -1,0 +1,72 @@
+{
+  "window_id": "w0007",
+  "attempt": 1,
+  "diagnoses": [
+    {
+      "prediction_id": "074.jpg/total_amount",
+      "description": "Total selection is vulnerable to OCR digit-flip outliers when multiple total-like lines exist; a corrupted high-priority line (e.g., “Total Amt Rounded”) can dominate even when other internal anchors (Subtotal/Payment/Total incl) agree on a different value. The skill should explicitly require an anchor-consistency override and warn against majority-vote across OCR variants without anchor checks.",
+      "evidence": "Allowed feedback: 074.jpg amount_correct=false while date_correct=true. Predictions show 074 total_amount=\"702.00\". The run’s own debugging notes OCR variants can produce both 702.00 and 102.00; the receipt image shows totals around 102.00 and includes multiple confirming anchors (Subtotal/Payment/Total incl). This is a classic OCR digit-flip (1→7) where internal consistency beats keyword priority or variant-majority voting.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Anchor-driven outlier rejection (critical for OCR digit flips like 102.00→702.00)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "078.jpg/total_amount",
+      "description": "Total extraction can fail when the ‘Grand Total’ label is OCR-corrupted (e.g., missing space) and/or the amount uses a non-dot decimal separator (e.g., 92:80). Without robust normalization and label-tolerant matching, the extractor may fall back to non-total payment lines (Cash Received) or emit empty/incorrect values. The skill should explicitly add (a) label-tolerant GRAND TOTAL matching, (b) decimal-separator normalization, and (c) stronger exclusions for cash received/tendered lines.",
+      "evidence": "Allowed feedback: 078.jpg amount_correct=false; predictions show total_amount as empty string \"\". Timeline OCR for 078 shows lines like \"a Total — 92:80\" and \"GrandTota. = tS 92.80\" plus \"Cash Received 100.00\". This demonstrates two failure modes: (1) keyword corruption (GrandTota.) and (2) punctuation corruption (92:80). The task requires null on failure and exact two-decimal formatting on success; empty string violates schema.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Total amount extraction (avoid subtotals/cash/change)"
+        },
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Amount string normalization (critical for exact-match scoring)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "034.jpg/date",
+      "description": "Date disambiguation can fail on invoices with multiple date-like strings and OCR-corrupted labels (DATE→DATA). The skill should more mechanically prioritize the primary header ‘Date:’ field over other header-adjacent date-like tokens and recommend top-of-receipt/header-block preference when multiple labeled candidates exist.",
+      "evidence": "Allowed feedback: 034.jpg date_correct=false while amount_correct=true. The provided image shows a clear header date field, while prior method history indicates OCR can produce alternate labeled lines (e.g., ‘Data: …’) that can be mistakenly selected by naive regex-first or majority voting.",
+      "locations": [
+        {
+          "file": "environment/skills/image-ocr/SKILL.md",
+          "section": "Field Extraction Heuristics (Receipts) / Date extraction (reduce false positives)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "image-ocr/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.8,
+      "rationale": "Directly targets the remaining high-impact failure patterns evidenced in the run: (a) OCR-corrupted GRAND TOTAL label and colon decimal separator (078), and (b) OCR digit-flip outlier where internal anchors agree (074). Also strengthens date disambiguation (034) with a more mechanical header-date preference. These changes are likely to improve exact-match accuracy without harming already-correct receipts."
+    },
+    "trigger_precision": {
+      "score": 0.84,
+      "rationale": "New rules are narrowly scoped to receipt total/date extraction. Label-tolerant GRAND TOTAL matching is constrained to close variants; split-line fallback tightening triggers only in the intended ‘keyword-only line’ scenario; anchor override triggers only when multiple anchors exist and agree."
+    },
+    "instruction_compliance": {
+      "score": 0.92,
+      "rationale": "Uses only permitted evidence (field-level correctness feedback, predictions, and provided OCR snippets/images) and does not reference oracle values. Returns complete replacement content only for the changed existing SKILL.md (image-ocr); other skills untouched."
+    },
+    "solution_path_coverage": {
+      "score": 0.83,
+      "rationale": "Covers: keyword corruption (GrandTota.), punctuation corruption (92:80), payment-line confusion (Cash Received), OCR digit-flip outliers (102→702) via anchor-consistency, and date ambiguity under label corruption (DATE→DATA). Does not attempt unrelated enhancements (deskew/cropping) not implicated by the provided failures."
+    },
+    "overall_rationale": "The historical misses are dominated by selection/normalization under OCR noise rather than lack of OCR capability. The minimal transferable repair is to (1) make GRAND TOTAL matching tolerant to common OCR spacing/punctuation errors, (2) tighten the split-line fallback so it cannot jump to payment lines when the keyword line is merely garbled, (3) expand cash-payment exclusions, and (4) explicitly require anchor-consistency overrides to defeat OCR digit-flip outliers even when a high-priority keyword line or variant-majority suggests otherwise."
+  },
+  "iteration_summary": "Updated only environment/skills/image-ocr/SKILL.md: added label-tolerant GRAND TOTAL matching, tightened split-line fallback trigger, expanded cash-payment exclusions, emphasized anchor-consistency override vs OCR-variant majority voting, and reinforced header-date preference for disambiguation.",
+  "request_audit": "w0007__attempt-01.request-audit.json",
+  "response_record": "w0007__attempt-01.response.json"
+}
