@@ -1,0 +1,73 @@
+Build failure analysis — google/auto (value module, functional Invoker IT)
+==========================================================================
+
+CI command (reproduced under JDK 7, Maven 3.6.3):
+  mvn -Dhttps.protocols=TLSv1.2 -B -U -f build-pom.xml verify \
+      --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Reactor summary:
+  auto-parent        SUCCESS
+  auto-common        SUCCESS
+  auto-factory       SUCCESS
+  auto-service       SUCCESS
+  auto-value         FAILURE  <-- fails on maven-invoker-plugin integration tests
+  build-only         SUCCESS
+
+The failure comes from one Invoker sub-project under value:
+  value/src/it/functional/pom.xml
+
+Compilation of its test sources fails with 12 errors:
+
+(A) 8x "unmappable character for encoding ASCII" at `@author ... (Éamonn ...)`
+    header lines in these files:
+      - src/test/java/com/google/auto/value/AutoValueTest.java         (line 50)
+      - src/test/java/com/google/auto/value/SimpleValueTypeTest.java   (line 26)
+      - src/test/java/com/google/auto/value/enums/MyEnum.java          (line 19)
+      - src/test/java/PackagelessValueTypeTest.java                    (line 25)
+
+    The maven-compiler-plugin configuration in src/it/functional/pom.xml
+    does NOT set <encoding>. Maven therefore uses the platform encoding
+    (ANSI_X3.4-1968 == US-ASCII in the Travis image), and non-ASCII
+    characters such as "É" in the javadoc header are unmappable.
+
+    (The same warnings appear in main-source compilation of the same
+    Invoker project but are only warnings there; in test compilation
+    the same characters are reported as compilation errors with the
+    plugin's default behavior, so the Invoker build fails.)
+
+(B) 4x "cannot find symbol: class MoreObjects" in
+    src/test/java/com/google/auto/value/AutoValueTest.java (import at
+    line 20, uses at line 72).
+
+    com.google.common.base.MoreObjects was introduced in Guava 18.0.
+    The functional Invoker pom declares guava-testlib 18.0 but it does
+    NOT declare the guava core artifact explicitly. During dependency
+    resolution for this Invoker project Maven picks guava 17.0 (pulled
+    in via another test dependency - truth 0.25 depends on guava 17.0,
+    which is "nearer" than the transitive guava 18.0 brought in via
+    guava-testlib). Guava 17.0 has no MoreObjects class, hence the
+    cannot-find-symbol errors.
+
+    The parent (value/pom.xml) uses guava.version = 18.0 for the main
+    project and explicitly depends on guava 18.0 and guava-testlib
+    18.0, which is why the main value module compiles fine. The
+    functional Invoker project is a separate build and does not inherit
+    that configuration — it needs its own explicit guava 18.0 dep.
+
+Fix plan (minimal, within the functional Invoker POM only):
+
+  1. Add `<encoding>UTF-8</encoding>` to the maven-compiler-plugin
+     configuration in value/src/it/functional/pom.xml (both the default
+     plugin block and the "eclipse" profile plugin block). This fixes
+     all 8 unmappable-character errors in the test sources (and silences
+     the matching warnings in the main sources of the same project).
+
+  2. Add an explicit `com.google.guava:guava:18.0` dependency to the
+     same functional pom so that MoreObjects (introduced in Guava 18.0)
+     is on the test classpath. This fixes the 4 MoreObjects errors.
+
+Both changes are confined to one file:
+  /home/travis/build/failed/google/auto/value/src/it/functional/pom.xml
+
+No source code changes are required. No changes to parent poms or to
+other Invoker projects are required (they already pass).
