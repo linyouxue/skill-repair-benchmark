@@ -1,6 +1,5 @@
 # JPG现有实验结果
 
-**当前泛化评测只跑group2；group1、group3暂时不用跑，下面保留两组历史baseline。**
 
 同学上传泛化评测结果请看[精简提交说明](methods/README.md)：每个方法配置一份README，加上group2各次运行的原Excel、完整轨迹和评分记录。最终Skill仍提交到[`jpg-ocr-stat/result/`](../../result/README.md)。
 
@@ -21,19 +20,21 @@ group1、group3的逐票错误模式和数量见[错误分析](groups13-error-an
 
 | Skill | 数据集 | 次数 | 第1次 | 第2次 | 第3次 | 均值 |
 |---|---|---:|---:|---:|---:|---:|
+| manual-round26 | group_01 | 3 | 75.00% | 92.50% | 95.00% | **87.50%** |
 | manual-round26 | group_02 | 3 | 97.50% | 97.50% | 97.50% | **97.50%** |
+| manual-round26 | group_03 | 3 | 90.00% | 87.50% | 87.50% | **88.33%** |
 
-人工Round26三次使用同一冻结Skill，均值为三次字段正确率的算术均值；第一次使用Tatu/AIGW，后两次使用Paratera，分别记录配置。人工Round26不与原始Skill baseline混算。
+人工Round26共9次（group_01、group_02、group_03 各3次），均值为各数据集三次字段正确率的算术均值。group_02 第一次使用Tatu/AIGW、后两次使用Paratera；group_01/group_03 六次均使用Paratera（`paratera/Claude-Opus-4.7`，数据版本 `v2-current-images`，每次上限65次父迭代）。人工Round26不与原始Skill baseline混算。
 
 ## 文件
 
 - `summary.json`：全部成绩和当前baseline均值。
-- `runs.csv`：19次已有有效运行的逐次数据，含10次当前baseline、3次人工Skill、6次旧版结果。
+- `runs.csv`：25次已有有效运行的逐次数据，含10次当前baseline、9次人工Skill、6次旧版结果。
 - `baseline/`、`manual/`、`historical-v1/`：每次真实原Excel、原评分及已有验收记录；`run.json`对应运行身份。
-- `manual/<run>/skills/`：人工Round26实际使用的完整冻结Skill及支持文件、许可。
-- `trajectory/`（各运行内）：16次本地运行的完整LLM记录（无损XZ）与已有ACP、ATIF或恢复会话原件；恢复前原段和接续段分别保留。
+- `manual/<run>/skills/`：group_02 三次人工Round26实际使用的完整冻结Skill及支持文件、许可；group_01/group_03 六次直接引用同一冻结Skill目录。
+- `trajectory/`（各运行内）：22次本地运行的完整LLM记录（无损XZ）与已有ACP、ATIF或恢复会话原件；恢复前原段和接续段分别保留。
 - `accounting.json`：已保存的用量与费用记录，估算与实际确认字段沿用原记录。
 
-另3份远端旧LLM日志本次未补取，已在对应`run.json`中标记；19份原Excel和评分均齐全，不用另一条轨迹替代。
+另3份远端旧LLM日志本次未补取，已在对应`run.json`中标记；25份原Excel和评分均齐全，不用另一条轨迹替代。
 
 当前评测图片和参考表见[上级目录](../README.md)，原22票任务见[任务目录](../../README.md)。本次只整理已有数据，不重跑、不重新评分。
