@@ -1,6 +1,5 @@
 # JPG现有实验结果
 
-**当前泛化评测只跑group2；group1、group3暂时不用跑，下面保留两组历史baseline。**
 
 同学上传泛化评测结果请看[精简提交说明](methods/README.md)：每个方法配置一份README，加上group2各次运行的原Excel、完整轨迹和评分记录。最终Skill仍提交到[`jpg-ocr-stat/result/`](../../result/README.md)。
 
