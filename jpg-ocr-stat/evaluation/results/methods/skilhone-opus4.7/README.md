@@ -1,4 +1,4 @@
-# SkillHone / Paratera Opus4.7 / group_02
+# SkillHone / Paratera Opus4.7
 
 最终Skill与修复过程见[原任务提交](../../../../result/skillhone__paratera-opus47-diagnosis-s0-20261031/README.md)及[完整skills](../../../../result/skillhone__paratera-opus47-diagnosis-s0-20261031/skills/)，原生冻结commit `cefb35d9a1adc54ff956c83c7f4406e85947264f`。本目录引用同一版本，不重复放Skill；公开冻结文件固定于Git提交[`87c9af56be340dc6ccb016eb39e7bf751994341f`](https://github.com/linyouxue/skill-repair-benchmark/tree/87c9af56be340dc6ccb016eb39e7bf751994341f/jpg-ocr-stat/result/skillhone__paratera-opus47-diagnosis-s0-20261031/skills)。
 
@@ -6,9 +6,15 @@
 
 | 组别 | 第1次 | 第2次 | 第3次 | 均值 |
 |---|---:|---:|---:|---:|
+| group_01 | 75.00% | 52.50% | 67.50% | **65.00%** |
 | group_02 | 95.00% | 95.00% | 95.00% | **95.00%** |
+| group_03 | 75.00% | 87.50% | 77.50% | **80.00%** |
 
-三次均38/40字段，严格全对0/3。全部既定运行保留，正常错误不缩分母，不用泛化结果继续改或挑Skill；未运行group1/3。
+group_01 与 group_03 使用v2-api3000图片，每次20张、40字段，沿用同一冻结Skill和65次父迭代上限。[逐次成绩索引](groups13-summary.json)记录现存成绩，原Excel、评分文件和轨迹已在本地清理。
+
+## group_02 运行材料
+
+group_02三次均38/40字段，严格全对0/3。全部既定运行保留，正常错误不缩分母，不用泛化结果继续改或挑Skill。
 
 | 运行目录 | 字段正确率 | 日期 | 金额 | 已用父步/65 | 原生run ID |
 |---|---:|---:|---:|---:|---|
