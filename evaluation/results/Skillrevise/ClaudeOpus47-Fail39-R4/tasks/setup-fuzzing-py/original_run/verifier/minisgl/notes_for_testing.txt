@@ -1,0 +1,28 @@
+Fuzzing notes (minisgl)
+
+Context
+- minisgl is a large ML system with heavy deps (torch/transformers/etc).
+- For a lightweight always-runnable fuzz target, focus on pure-Python parsing helpers.
+
+High-value inputs / boundaries
+- minisgl.env._PARSE_MEM_BYTES(mem: str) -> int
+  - Parses strings like "1G", "512MB", "1024" into bytes.
+  - Potential edge cases: empty strings, whitespace, floats, unknown units, missing suffix.
+
+Suggested functions-under-test (FUTs)
+1) minisgl.env._PARSE_MEM_BYTES
+2) minisgl.env._TO_BOOL (simple, but used in env parsing)
+
+Primary fuzz oracle
+- No unexpected exceptions like IndexError / KeyError; prefer ValueError for invalid input.
+
+Acceptable exceptions (treat as non-findings)
+- ValueError from int()/float() conversions on malformed input
+
+Suspicious exceptions (let them surface)
+- IndexError (e.g., empty string)
+- KeyError (unknown unit mapping)
+
+Dependency strategy for fuzzing
+- Install minisgl editable with --no-deps, and only install atheris.
+- Import minisgl.env directly; it has no heavyweight imports.

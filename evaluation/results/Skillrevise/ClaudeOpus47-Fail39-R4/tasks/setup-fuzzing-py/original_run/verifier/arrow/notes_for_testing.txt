@@ -1,0 +1,34 @@
+Fuzzing notes (arrow)
+
+High-value inputs / boundaries
+- Date/time string parsing: arrow.parser.DateTimeParser.parse_iso(), DateTimeParser.parse()
+- Factory surface: arrow.get() / arrow.factory.ArrowFactory.get() which routes to DateTimeParser.parse_iso()
+- Timezone parsing: arrow.parser.TzinfoParser.parse() (indirectly via ArrowFactory.get(..., tzinfo=...))
+
+Suggested functions-under-test (FUTs)
+1) arrow.parser.DateTimeParser.parse_iso(datetime_string, normalize_whitespace=False)
+   - Regex-heavy ISO-like parsing; splits date/time/tz; branches on separators.
+   - Likely to hit edge cases with whitespace normalization, unusual TZ offsets, week dates.
+
+2) arrow.parser.DateTimeParser.parse(datetime_string, fmt | [fmt...])
+   - Builds regex from fmt tokens; exercise regex compilation, token parsing, and error handling.
+
+3) arrow.get(str, tzinfo=..., normalize_whitespace=...)
+   - Public API; should be resilient to malformed strings and tzinfo expressions.
+
+Fuzzing harness plan
+- Primary payload: Unicode string (no surrogates), length-capped.
+- Exercise both parse_iso() and parse() with a small set of known-good formats.
+- If parsing succeeds, do a cheap round-trip:
+  - dt -> arrow.get(dt).isoformat() -> parse_iso(iso_string)
+  - Ensure round-trip does not crash.
+
+Acceptable exceptions (treat as non-findings)
+- arrow.parser.ParserError / ParserMatchError
+- ValueError, TypeError (from underlying conversions)
+
+Suspicious exceptions (let them surface)
+- AssertionError, IndexError, KeyError, RecursionError, SystemError, segmentation faults (native)
+
+Performance / DoS notes
+- Cap string length (e.g., <= 512 chars) to avoid pathological regex backtracking.

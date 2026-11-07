@@ -1,0 +1,19 @@
+# Pause-Based Video Compressor
+
+## Purpose
+Detect all low-energy pause segments longer than a task-specified minimum duration across an audio or video input, remove them, and emit a compressed media file plus a JSON report describing the compression.
+
+## When to Use
+Use when a task requires shortening a recording by removing silent or low-energy pauses above a duration threshold and producing both a compressed media artifact and a structured compression report. Do not use for pure transcription, scene detection, or initial-silence-only trimming.
+
+## Procedure
+- Discover inputs and outputs: parse the task statement for the source media path, the pause duration threshold (default >2s if unspecified), and the required output paths for the compressed media and report. If paths are unspecified, choose discoverable workspace paths and record them. Verify the source file exists and is readable; probe duration with `ffprobe` and capture `original_duration_seconds`.
+- Detect pause segments across the full timeline: prefer `ffmpeg -af silencedetect=noise=<db>:d=<threshold>` and parse `silence_start`/`silence_end` from stderr. If an energy-based pipeline is available, compute per-frame energy with numpy and threshold against a global baseline; otherwise use silencedetect directly. Produce a list of `{start, end, duration}` segments where `duration > threshold`.
+- Build the keep-ranges (complement of pause segments) and cut/concat with `ffmpeg` (e.g., `-vf select`/`-af aselect` with `setpts`/`asetpts`, or segment-wise cut then concat demuxer). Write the compressed file to the task-declared output path. Re-probe its duration to obtain `compressed_duration_seconds`.
+- Write the report JSON with keys: `original_duration_seconds`, `compressed_duration_seconds`, `removed_duration_seconds`, `compression_percentage`, `segments_removed` (list of removed segments). Then reload both artifacts: stat the compressed media, `json.loads` the report, assert all required keys are present and that `abs(original - removed - compressed) < 0.5`. Only declare completion after these checks pass.
+
+## Constraints / Pitfalls
+- Do not hard-code input or output paths; resolve them from the task statement or workspace discovery, and never silently redirect writes if the declared path fails - diagnose permissions or mounts instead.
+- Do not restrict detection to the initial window; scan the entire timeline. If no pauses exceed the threshold, still emit a valid report with empty `segments_removed` and `compressed == original`, and copy the source as the compressed output.
+- Validate tool availability (`ffmpeg`, `ffprobe`, `numpy`) up front; if a dependency is missing, fall back to the available method rather than aborting silently.
+- Keep report keys and numeric semantics aligned with the task-declared schema; do not invent extra keys or rename existing ones.

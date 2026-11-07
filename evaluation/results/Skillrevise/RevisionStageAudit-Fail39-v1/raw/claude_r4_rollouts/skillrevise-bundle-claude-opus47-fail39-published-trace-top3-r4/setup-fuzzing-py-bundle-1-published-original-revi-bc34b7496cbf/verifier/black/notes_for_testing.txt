@@ -1,0 +1,46 @@
+Fuzzing Target Note — black
+===========================
+
+Library: black (Python code formatter). Install name: `black`. Import name: `black`.
+
+Important files (ranked):
+  1. src/black/__init__.py         — format_str (main entry point), format_file_contents.
+  2. src/black/parsing.py          — lib2to3 → ast driver; converts source text to AST (parse boundary).
+  3. src/black/lines.py / linegen.py — line splitting logic.
+  4. src/black/strings.py          — string literal normalization.
+  5. src/blib2to3/                  — tokenizer/parser (lib2to3 fork).
+
+Function under test (FUT): `black.format_str`
+  * File / location: src/black/__init__.py:1177 (approx).
+  * Why: single public entry point from raw source text to formatted source text; routes through tokenizer, lib2to3 parser, AST normalization, line splitting, and string normalization. Enormous branching surface. Primary parse boundary accepting bytes/str from untrusted sources.
+  * Input surface: single `str` (source code) + `Mode()` config.
+  * Boundary considerations: pure Python; uses lib2to3-derived parser.
+  * Current test gaps: existing tests cover canonical/valid Python inputs; malformed/weird-but-tokenizable programs (e.g. unusual indentation, exotic unicode identifiers, nested fstrings, pattern-matching edge cases) are an undertested surface.
+
+Callable contract:
+  * Required imports: `from black import format_str, Mode`.
+  * Preconditions: input is `str` (any content). Mode() defaults are fine.
+  * Determinism: deterministic.
+  * External deps: click, mypy_extensions, packaging, pathspec, platformdirs, pytokens.
+
+Input model:
+  * Primary payload: str (python-like text).
+  * Edge classes: empty, pure whitespace, invalid encodings as str, exotic indentation, nested fstrings, long docstrings, unterminated strings, nested parens.
+
+Oracles:
+  * Must hold: no uncaught exception other than:
+      - black.NothingChanged
+      - black.InvalidInput
+      - black.parsing.ASTSafetyError (if raised)
+      - SyntaxError / IndentationError / tokenize.TokenError (from parser)
+  * Suspicious: AssertionError, RecursionError, KeyError, AttributeError.
+  * Crash-only check.
+
+Harness plan:
+  * Decode FDP bytes into a str payload.
+  * Call `format_str(src, mode=Mode())`.
+  * Catch and ignore the expected exception types above.
+
+Risk flags:
+  * No native extension; no I/O.
+  * Potential DoS via deeply nested code (recursion limit) — interesting signal.

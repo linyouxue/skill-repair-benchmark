@@ -1,0 +1,84 @@
+Build failure analysis for google/auto (AutoValue)
+====================================================
+
+Target CI environment
+---------------------
+- Travis declares `jdk: openjdk7` in .travis.yml.
+- Reproduced locally with:
+    source /opt/jdk_switcher/jdk_switcher.sh
+    jdk_switcher use openjdk7
+    export JAVA_HOME=/usr/lib/jvm/java-7-openjdk-amd64
+    export PATH=$JAVA_HOME/bin:$PATH
+    export TRAVIS_JDK_VERSION=openjdk7
+- Reproduction command (from .travis.yml):
+    mvn -Dhttps.protocols=TLSv1.2 -B -U -f build-pom.xml verify \
+        --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Reactor outcome
+---------------
+- Auto (parent)                     SUCCESS
+- Auto Common Libraries             SUCCESS
+- AutoFactory                       SUCCESS
+- AutoService                       SUCCESS
+- AutoValue                         FAILURE  <-- the only failing module
+- build-only                        SUCCESS
+
+Failure site
+------------
+AutoValue's `maven-invoker-plugin` integration-test step launches nested
+Maven builds under `value/src/it/*/pom.xml`. The reactor failed because
+these two Invoker sub-builds failed:
+
+    *  gwtserializer/pom.xml   -- network/transient: SSL handshake while
+                                  downloading com.google.gwt:gwt-dev:2.7.0
+                                  from Maven Central. Not a project defect;
+                                  will succeed on a fresh resolution.
+    *  functional/pom.xml      -- real, deterministic compile error.
+
+First real compile error (functional):
+    value/src/it/functional/src/test/java/com/google/auto/value/AutoValueTest.java:[20,30]
+        cannot find symbol
+          symbol:   class MoreObjects
+          location: package com.google.common.base
+
+Root cause
+----------
+`com.google.common.base.MoreObjects` first appeared in Guava 18.0. The
+functional integration-test POM at `value/src/it/functional/pom.xml`
+only declares a test-scope dependency on `guava-testlib:18.0`; it does
+not declare the matching `guava:18.0` artifact. Maven's dependency
+mediation resolves `com.google.guava:guava` to version 17.0 transitively
+(from `com.google.truth:truth:0.25` via its ancient `guava:17.0`
+dependency), so the test-compile classpath has Guava 17.0 even though
+`guava-testlib` is at 18.0. Valid test source that uses `MoreObjects`
+therefore fails to compile.
+
+This is a dependency-version drift inside the Maven Invoker nested
+project, not a JDK/Java-version issue. Repairing Java 11 compatibility,
+the parent `pom.xml`, or the main AutoValue sources would be wrong.
+
+Fix (scoped only to value/src/it/functional/pom.xml)
+----------------------------------------------------
+Synchronize the functional integration-test POM dependencies as one
+coherent set, pinning Guava to a version that provides `MoreObjects`
+and bringing Truth and jsr305 and JUnit up to matching versions used by
+the intended AutoValue integration-test configuration:
+
+  - jsr305          3.0.0   (provided)   was 1.3.9
+  - junit           4.12    (test)       was 4.11
+  - guava           19.0    (test)       NEW explicit dependency
+  - guava-testlib   19.0    (test)       was 18.0
+  - truth           0.28    (test)       was 0.25
+
+No other POM, no main source, and no toolchain setting needs to change.
+
+Verification plan
+-----------------
+1. Edit value/src/it/functional/pom.xml with the dependency sync above.
+2. Write the change as a unified diff at
+     /home/travis/build/failed/google/auto/patch_1.diff
+3. Apply the diff to the repository.
+4. Re-run the exact CI verify command under openjdk7 and confirm the
+   reactor finishes without BUILD FAILURE. gwtserializer must also pass
+   on this run; its first failure was a transient SSL handshake fetching
+   gwt-dev-2.7.0, which succeeds on re-run from the local repo cache.

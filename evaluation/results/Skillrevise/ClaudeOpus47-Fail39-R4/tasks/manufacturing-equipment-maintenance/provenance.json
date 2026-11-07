@@ -1,0 +1,39 @@
+{
+  "task_id": "manufacturing-equipment-maintenance",
+  "initial_run_id": "manufacturing-equipment-maintenance-original-skill-v11x-20260908-guarddiag-infra-r003",
+  "selected_run_id": "manufacturing-equipment-maintenance-bundle-2-published-original-revi-f9f20ba20695",
+  "selected_reward": 1.0,
+  "selected_success": true,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/manufacturing-equipment-maintenance/bundle-2-published-original-revised-f586eed1475b1c24/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/skillrevise-bundle-claude-opus47-fail39-published-trace-top3-r4-replay27-resume13/manufacturing-equipment-maintenance-bundle-2-published-original-revi-f9f20ba20695",
+  "selected_overrides": {
+    "reflow-profile-compliance-toolkit/SKILL.md": "# reflow-profile-compliance-toolkit\n\n## Purpose\nProduce deterministic reflow-profile compliance outputs (ramp, TAL, peak, feasibility, selection) by extracting handbook limits, computing per-run thermocouple metrics, and writing one JSON artifact per question. Favor producing partial outputs over perfect ones.\n\n## When to Use\nAny task asking reflow questions grounded in a handbook PDF plus MES and thermocouple CSVs, where multiple numbered question outputs must be written to a known output directory.\n\n## Procedure\n- Discover environment: list the input directory and output directory from the task prompt (do not hard-code). Confirm expected CSV files (MES log, thermocouples) and a handbook PDF exist. If output directory is missing, create it.\n- Load CSVs: read MES and thermocouple tables; cast id columns to strings; sort thermocouples by (run_id, tc_id, time_s); drop segments where dt <= 0.\n- Extract handbook config with bounded fallback. Try in order: pdfplumber, pypdf, PyPDF2, then subprocess `pdftotext` or `pdfminer`. If all fail, set `cfg = {degraded: true}` with every numeric limit = null and continue. Parse limits (ramp_limit, TAL threshold/min/max, peak_margin, conveyor rule, preheat region) via regex; any field not found stays null.\n- For each question qNN in order: compute its metric using the rules in Constraints; build the JSON object; write `<OUT_DIR>/qNN.json` immediately before starting the next question. Never batch all writes to the end.\n- Final sweep: verify each expected `qNN.json` exists; if any is missing, write a minimal valid JSON with nulls and `status=\"unknown\"` so no file is absent.\n\n## Constraints / Pitfalls\n- Ramp: finite-difference slope over consecutive samples; include a segment only if both endpoints lie inside the configured region (temp band, zone list, or time band). Max ramp is max over valid segments; null if none.\n- Time above threshold: linear interpolation across crossings; never naive bucket counting.\n- Sensor tie-breaks: for max-metric selections pick (max_value, smallest tc_id); for min-metric selections pick (min_value, smallest tc_id). Lexicographic string compare on tc_id.\n- Peak and margin: per-TC peak = max(temp_c); run peak uses coldest-TC rule when handbook calls for worst case; required_peak = liquidus + peak_margin.\n- Conveyor feasibility: compute `speed_min_cm_min = (L_eff_cm / t_bound_s) * 60`; if any input is null, set required speed to null and `meets=false`.\n- If a cfg limit needed for a question is null (degraded extraction), emit numeric fields as null and `status` as \"non_compliant\" or \"unknown\" rather than aborting.\n- Missing TC rows for a run: numeric metrics = null; include run in failing/unknown list; do not claim pass.\n- Output hygiene: id fields as strings; arrays sorted lexicographically by primary id; dict keys emitted in sorted order; floats rounded to 2 decimals; replace NaN/Inf with null; valid JSON only.\n- Do not spend more than a small bounded effort on handbook tool discovery; after the fallback chain fails, proceed to compute and write.\n- Write each `qNN.json` the moment its computation completes, so a later failure still leaves earlier artifacts on disk."
+  },
+  "selection": {
+    "targets": [
+      "reflow-machine-maintenance-guidance/SKILL.md",
+      "reflow-profile-compliance-toolkit/SKILL.md"
+    ],
+    "rationale": "Task is reflow handbook + MES/thermocouple/defect analysis; the agent stalled on PDF text extraction and never retrieved handbook config or computed metrics. Both skills govern handbook retrieval and deterministic computations but neither instructs how to extract text from handbook.pdf or handle missing PDF libraries, causing the failure.",
+    "raw_response": "{\"targets\":[\"reflow-machine-maintenance-guidance/SKILL.md\",\"reflow-profile-compliance-toolkit/SKILL.md\"],\"rationale\":\"Task is reflow handbook + MES/thermocouple/defect analysis; the agent stalled on PDF text extraction and never retrieved handbook config or computed metrics. Both skills govern handbook retrieval and deterministic computations but neither instructs how to extract text from handbook.pdf or handle missing PDF libraries, causing the failure.\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "reflow-machine-maintenance-guidance/SKILL.md",
+      "accepted": false,
+      "accepted_revision": false,
+      "decision": "rejected_unmodified_v0",
+      "score_before": 0.0,
+      "score_after": 0.0
+    },
+    {
+      "target_skill": "reflow-profile-compliance-toolkit/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.0,
+      "score_after": 1.0
+    }
+  ]
+}

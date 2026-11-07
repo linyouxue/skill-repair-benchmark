@@ -1,0 +1,20 @@
+Repository analyzed: /home/github/build/failed/AgentOps-AI/agentops
+
+Observed failure (repro):
+- Running `python -m pip install -e '.[dev]'` fails with:
+  "Project ... has a 'pyproject.toml' and its build backend is missing the 'build_editable' hook... Since it does not have a 'setup.py' nor a 'setup.cfg', it cannot be installed in editable mode."
+
+Root cause:
+- The project is configured only with PEP 621 metadata in pyproject.toml and uses `setuptools.build_meta`.
+- In the build environment, pip/setuptools are old (pip 22.0.2, setuptools 59.6.0). This combination does not support PEP 660 editable installs (`build_editable`).
+- Because there is no legacy setuptools entrypoint (setup.py/setup.cfg), pip cannot fall back to the legacy editable install path.
+
+Conclusion:
+- The build failure is in packaging/build configuration, not runtime code.
+
+Plan to fix:
+1) Add legacy setuptools packaging files so editable installs work on older pip/setuptools:
+   - Add `setup.py` (thin wrapper calling `setuptools.setup()`).
+   - Add `setup.cfg` containing the package metadata, dependencies, and extras.
+2) Remove the duplicated `[project]` metadata section from pyproject.toml (keep only `[build-system]`) to avoid conflicting metadata sources between pyproject.toml and setup.cfg.
+3) Verify `pip install -e .` succeeds using the system pip, and that `pip install .` still works.

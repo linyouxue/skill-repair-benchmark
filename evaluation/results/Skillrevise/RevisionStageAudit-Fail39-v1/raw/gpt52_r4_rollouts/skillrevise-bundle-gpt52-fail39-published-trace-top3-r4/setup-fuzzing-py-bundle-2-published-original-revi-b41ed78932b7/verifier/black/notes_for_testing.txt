@@ -1,0 +1,29 @@
+Important functions / APIs to test (Black)
+
+High-value fuzz targets (input boundaries)
+
+1) black.format_str(src: str, mode: black.Mode)
+   - Why: core public API; exercises parsing, AST/lib2to3 conversion, formatting pipeline.
+   - Inputs to vary:
+     - Random unicode text, near-Python code, extremely nested brackets, weird indentation.
+     - Mix of line endings (\n, \r\n) if using bytes->decode_bytes first.
+   - Expected failures (invalid input):
+     - black.parsing.InvalidInput
+     - SyntaxError / IndentationError
+     - blib2to3.pgen2.tokenize.TokenError
+
+2) black.decode_bytes(src: bytes, mode: black.Mode)
+   - Why: decoding/encoding + newline detection; boundary for non-utf8 and mixed newlines.
+   - Inputs to vary: arbitrary bytes, BOMs, invalid sequences, very long lines.
+
+3) black.parsing.lib2to3_parse / black.parsing.parse_ast
+   - Why: parser front-door; likely to expose crashes in edge token streams.
+
+Existing tests
+- black/tests and tests/data/cases cover many syntax constructs.
+- Fuzzing should complement by generating malformed token streams and odd unicode/encoding sequences.
+
+Fuzz harness note
+- Use Mode() with defaults.
+- Treat InvalidInput/TokenError/SyntaxError/IndentationError as acceptable "reject" outcomes.
+- Keep max input length bounded (e.g., <= 8k) to reduce worst-case parse time.

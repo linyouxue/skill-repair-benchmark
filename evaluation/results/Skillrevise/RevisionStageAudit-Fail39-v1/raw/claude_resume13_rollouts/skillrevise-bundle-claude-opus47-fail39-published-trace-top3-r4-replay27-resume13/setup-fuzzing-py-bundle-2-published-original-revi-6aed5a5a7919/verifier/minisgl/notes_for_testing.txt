@@ -1,0 +1,49 @@
+minisgl — notes for fuzz testing
+================================
+
+Library: /app/minisgl  (namespace package `minisgl`, source under
+  `/app/minisgl/python/minisgl`)
+Full-install runtime deps: torch, flashinfer, sgl_kernel, msgpack, zmq,
+  fastapi, uvicorn, transformers, modelscope, apache-tvm-ffi, prompt-
+  toolkit, etc. Many are GPU-only or do not build in this environment,
+  so we deliberately AVOID installing them. Instead the harness picks a
+  pure-Python FUT and adds the source directory to sys.path. This keeps
+  the fuzzer within reach without pulling the heavy ML stack.
+
+Primary FUT (fuzz target):
+  qualname: minisgl.env._PARSE_MEM_BYTES
+  file:line: python/minisgl/env.py:40 (`_PARSE_MEM_BYTES`)
+  signature: _PARSE_MEM_BYTES(mem: str) -> int
+  input type: str (e.g. "1G", "1024", "512M", "1.5GB")
+  rationale: it parses user-supplied memory-size strings into byte
+    counts and is reached from any config path that reads a MINISGL_*
+    env var. Pure-Python, no deps, perfect for a quick coverage-guided
+    fuzzing demonstration. It uses `.strip`, `.upper`, `.isalpha`,
+    integer / float conversions, and a small unit-letter table — plenty
+    of edges for the fuzzer to exercise.
+
+Install note:
+  We do not run `pip install .` here (torch/flashinfer/… are heavy and
+  CUDA-only). The venv has `atheris` only; the harness extends sys.path
+  with `/app/minisgl/python` before importing `minisgl.env`.
+
+Invalid-input exceptions (CAUGHT, early return in harness):
+  - ValueError        (int() / float() on garbage, int() of e.g. "")
+  - KeyError          (unknown single-letter unit)
+  - IndexError        (empty string after strip/upper[-1])
+  - OverflowError     (float(x) producing inf → int())
+
+Real-crash exceptions (PROPAGATE):
+  - any other uncaught exception (AssertionError, TypeError,
+    AttributeError, RecursionError, etc.).
+
+Oracle: crash-only.
+
+Seeds (via FDP as a Unicode string):
+  "1024", "1K", "1.5G", "0", "100M", "2GB", "garbage", "", " 1G ".
+
+Fuzz entry (pseudocode):
+  fdp = FuzzedDataProvider(data)
+  s = fdp.ConsumeUnicodeNoSurrogates(fdp.remaining_bytes())
+  try: _PARSE_MEM_BYTES(s)
+  except INVALID_INPUT_EXCEPTIONS: return
