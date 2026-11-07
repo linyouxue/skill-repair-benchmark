@@ -85,7 +85,7 @@
 
 ## 可追溯来源
 
-- [现有baseline与原Excel](README.md)：四个`baseline/api3000-group_*`运行下的`run.json`、`acceptance.json`、`accuracy.json`及原`stat_ocr.xlsx`，逐字段与本表核对。
+- [现有baseline与原Excel](README.md)：四个`baseline/group_*`运行下的`run.json`、`acceptance.json`、`accuracy.json`及原`stat_ocr.xlsx`，逐字段与本表核对。
 - [当前图片及冻结参考表](../README.md)：group1、group3各20张；本次逐张查看22张发生错误的票据，复用2026-10-26的40张答案复核。
 - 三条恢复运行的`trajectory/final-openhands-conversation.tar.gz`，按原SDK event序号读取真实动作／观察；恢复前后的完整LLM与ACP段保留，未把session/load重播计作新动作，也不补造缺失的原生ATIF。
 - group3第2次的`trajectory/full-llm-complete.jsonl.xz`（65条交换）、原ACP及ATIF；只读提取真实工具参数和输出。示例：LLM-55显示0158同时有18/48候选，LLM-59显示0001的15/16/18日候选，LLM-60显示0161的03/05月候选。
