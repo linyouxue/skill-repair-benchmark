@@ -26,9 +26,6 @@ group1、group3的逐票错误模式和数量见[错误分析](groups13-error-an
 
 人工Round26共9次（group_01、group_02、group_03 各3次），均值为各数据集三次字段正确率的算术均值。group_02 第一次使用Tatu/AIGW、后两次使用Paratera；group_01/group_03 六次均使用Paratera（`paratera/Claude-Opus-4.7`，数据版本 `v2-current-images`，每次上限65次父迭代）。人工Round26不与原始Skill baseline混算。
 
-## SkillHone现有结果
-
-group_01 三次均值为65.00%，group_03 三次均值为80.00%。逐次成绩与group_02的原始材料见[SkillHone结果目录](methods/skilhone-opus4.7/README.md)。
 
 ## 文件
 
