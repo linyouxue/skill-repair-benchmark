@@ -1,15 +1,18 @@
 """Export one held-out batch as a native task, keeping the executor API unchanged."""
 import argparse
 import json
+import re
 from pathlib import Path
 import shutil
 
 PACKAGE = Path(__file__).resolve().parents[1]
+# First frozen case in each group whose names resolve to the intended targets.
+EVALUATION_CASES = {"group_01": "case_001", "group_02": "case_001", "group_03": "case_002"}
 
 
 def prepare(group, output, package=PACKAGE):
     package, output = Path(package).resolve(), Path(output).resolve()
-    if group not in {"group_01", "group_02", "group_03"}:
+    if group not in EVALUATION_CASES:
         raise ValueError("Unknown frozen group")
     if output.exists():
         raise FileExistsError("Refusing to overwrite an export")
@@ -17,80 +20,56 @@ def prepare(group, output, package=PACKAGE):
     spec = json.loads((selected / "inputs/queries.json").read_text(encoding="utf-8"))
     previous, current = spec["baseline_period"], spec["current_period"]
     original = (package / "task.md").read_text(encoding="utf-8")
-    frontmatter = original[:original.index("\n---", 4) + 4]
-    prompt = f"""
-
-Analyze the supplied SEC Form 13F data, comparing {previous} with {current}.
-The tables are in `/root/{previous}` and `/root/{current}`. Read `/root/queries.json`
-for the 20 independent query cases. Every case uses the same four questions:
-
-1. Sum the current-quarter reported holdings VALUE (AUM under the original task's convention)
-   for `summary_manager`.
-2. Count its current-quarter stock holding rows, following the original
-   `13f-analyzer` helper's evaluated TITLEOFCLASS selection and aggregation semantics.
-   Do not silently broaden its stock universe or count distinct CUSIPs instead of rows.
-3. For `change_manager`, return the five stock CUSIPs with the largest positive
-   current-minus-baseline VALUE increases, in descending order. Aggregate by CUSIP
-   after the same original stock selection; an absent CUSIP has value zero.
-4. For `security`, return the three current-quarter fund manager names with the
-   largest summed VALUE in that CUSIP, in descending order. Use all matching rows,
-   with no stock-title or PUTCALL filter for this question.
-
-Use the supplied CIKs and CUSIPs to disambiguate identities, preserving leading zeros.
-The input cohort and full statistical conventions are described in
-`/root/statistical_contract.json`. Dates in the ZIP publication window are different
-from report quarters; the exported input already contains the declared report cohort.
-Managers and securities can repeat across data rows; do not deduplicate positions.
-VALUE is integer USD; do not multiply by 1000. The selected top rankings have no ties.
-
-Write `/root/answers.json` as one JSON object keyed by the 20 `case_id` values.
-For each case provide the original four-key answer object:
-
-```json
-{{
-  "case_001": {{
-    "q1_answer": 0,
-    "q2_answer": 0,
-    "q3_answer": ["cusip1", "cusip2", "cusip3", "cusip4", "cusip5"],
-    "q4_answer": ["manager1", "manager2", "manager3"]
-  }}
-}}
-```
-
-The values above are schema placeholders. Include every supplied case. Scoring uses
-ten answer slots per case: q1, q2, five ordered q3 slots, and three ordered q4 slots.
-The original q1 rule accepts relative error strictly below 0.1%; q2 and CUSIPs must
-match exactly, and manager names are case-insensitive with rank/order preserved.
-Missing or invalid slots are wrong. Extra ranked entries and unknown case IDs count
-as extra errors. Runtime is subject to the task timeout and is not a weighted score.
-"""
+    case_id = EVALUATION_CASES[group]
+    query = next(q for q in spec["queries"] if q["case_id"] == case_id)
+    reference = json.loads((selected / "verifier/reference_answers.json").read_text(encoding="utf-8"))["cases"][case_id]
+    manager = query["summary_manager"]["name"].strip()
+    change_manager = query["change_manager"]["name"].strip()
+    issuer = query["security"]["issuer"].strip()
+    previous_label = f"Q{previous[-1]} {previous[:4]}"
+    current_label = f"Q{current[-1]} {current[:4]}"
+    replacements = {
+        "q3 2025": current_label,
+        "q2 2025": previous_label,
+        "2025-q2": previous,
+        "2025-q3": current,
+        "Q2": previous_label,
+        "Q3": current_label,
+        "Renaissance Technologies founded by Jim Simons": manager,
+        "renaissance technologies": manager,
+        "Renaissance": manager,
+        "Warren Buffett's Berkshire Hathaway": change_manager,
+        "Berkshire Hathaway": change_manager,
+        "Palantir": issuer,
+    }
+    prompt = re.sub("|".join(map(re.escape, replacements)), lambda match: replacements[match[0]], original)
     output.mkdir(parents=True)
-    (output / "task.md").write_text(frontmatter + prompt, encoding="utf-8", newline="\n")
+    (output / "task.md").write_text(prompt, encoding="utf-8", newline="\n")
     environment = output / "environment"
     environment.mkdir()
     shutil.copytree(package / "environment/skills", environment / "skills")
     shutil.copytree(selected / "inputs/data", environment / "data")
-    shutil.copyfile(selected / "inputs/queries.json", environment / "queries.json")
-    shutil.copyfile(package / "environment/statistical_contract.json", environment / "statistical_contract.json")
+    # Keep the original stock-name helper's fixed baseline path available.
     dockerfile = f"""FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y python3 python3-pip python3-venv wget unzip && rm -rf /var/lib/apt/lists/*
 WORKDIR /root
 RUN pip3 install --break-system-packages pandas==2.3.3 rapidfuzz==3.14.3
 COPY data/ /root/
-COPY queries.json statistical_contract.json /root/
 RUN python3 -c "import gzip,pathlib; [(p.with_suffix('').write_bytes(gzip.decompress(p.read_bytes())),p.unlink()) for p in pathlib.Path('/root').glob('20??-q?/*.tsv.gz')]"
+RUN ln -s /root/{previous} /root/2025-q2
 """
     (environment / "Dockerfile").write_text(dockerfile, encoding="utf-8", newline="\n")
     verifier = output / "verifier"
     verifier.mkdir()
     for name in ["test.sh", "native_grade.py", "score_accuracy.py"]:
         shutil.copyfile(package / "verifier" / name, verifier / name)
-    shutil.copyfile(selected / "verifier/reference_answers.json", verifier / "expected_output.json")
+    (verifier / "expected_output.json").write_text(json.dumps(reference, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (output / "EXPORT.json").write_text(json.dumps({"task_id": "sec-financial-report", "group": group,
         "dataset_version": spec["dataset_version"], "scoring_version": "sec-answer-accuracy-v1",
         "original_skill_bundle_preserved": True, "same_four_question_template": True,
-        "original_prompt_byte_identical": False, "query_cases": len(spec["queries"]),
+        "original_output_format_preserved": True, "query_cases": 1, "answer_items": 10,
+        "case_id": case_id, "baseline_period": previous, "current_period": current,
         "only_selected_group_in_environment": True, "deploy_verifier_only_after_agent_exit": True,
         "diagnosis_oracle_other_groups_excluded": True, "model_calls": 0}, indent=2) + "\n", encoding="utf-8")
     return output
@@ -98,7 +77,7 @@ RUN python3 -c "import gzip,pathlib; [(p.with_suffix('').write_bytes(gzip.decomp
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--group", required=True, choices=["group_01", "group_02", "group_03"])
+    parser.add_argument("--group", required=True, choices=EVALUATION_CASES)
     parser.add_argument("--output", required=True, type=Path, help="New native task directory; name it sec-financial-report")
     args = parser.parse_args()
     print(prepare(args.group, args.output))

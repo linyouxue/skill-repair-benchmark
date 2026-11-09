@@ -9,7 +9,7 @@ sec-financial-report/
 ├── verifier/ / oracle/          # 当前评分与原参考，仅评分/组织侧使用
 ├── result/README.md             # 最终冻结Skill和原题真实执行的提交要求
 ├── evaluation/                  # 冻结后的三批测试输入、评分及导出工具
-│   ├── group_01/                # 20案例/200答案项；另有02和03
+│   ├── group_01/                # 每组1案例/10答案项；另有02和03
 │   └── results/README.md        # 泛化执行结果的提交要求
 ├── tools/ / tests/              # 材料复核、环境检查和免费回归
 └── validation/                  # 参考计算与历史输出重放证据
@@ -64,7 +64,7 @@ result = executor.run(
 
 每个案例 10 项：q1 金额 1 项、q2 股票持仓行数 1 项、q3 前五 CUSIP 各 1 项、q4 前三经理名各 1 项。判对规则沿用原题：q1 相对误差严格小于 0.001（0.1%），q2 精确相等，CUSIP 保留前导零且按位匹配，经理名仅转小写比较且顺序必须正确。
 
-`accuracy = 正确项数 / (预期项数 + 额外错误项数)`。缺失、非法或错位的项记错；多余排名元素每个、未知 case_id 每个各增加一个错误项。原题允许的额外对象字段仍忽略。整个输出缺失、不可读或非法 JSON 得 0。另报 strict_success；运行时间不加权，保留原执行时限。历史二元 reward 不改写成新正确率。
+`accuracy = 正确项数 / (预期项数 + 额外错误项数)`。缺失、非法或错位的项记错；每个多余排名元素增加一个错误项。原题允许的额外对象字段仍忽略。整个输出缺失、不可读或非法 JSON 得 0。另报 strict_success；运行时间不加权，保留原执行时限。历史二元 reward 不改写成新正确率。
 
 **保留原口径的已知局限：**原 helper 的股票类别表漏逗号，Python 会拼接部分字符串。为保持原任务可比性，本包按其实际求值结果计数和聚合，不扩大股票范围。这里的“股票数”是筛选后的行数，不是不同 CUSIP 数。q1 是 13F 申报持仓 VALUE 合计，并非基金所有资产。规则见 [statistical_contract.json](environment/statistical_contract.json)。
 
@@ -72,17 +72,17 @@ result = executor.run(
 
 | 批次 | 基准报告期 → 当前报告期 | 案例数 | 答案项 |
 |---|---|---:|---:|
-| group_01 | 2024-Q1 → 2024-Q2 | 20 | 200 |
-| group_02 | 2024-Q3 → 2024-Q4 | 20 | 200 |
-| group_03 | 2025-Q4 → 2026-Q1 | 20 | 200 |
+| group_01 | 2024-Q1 → 2024-Q2 | 1 | 10 |
+| group_02 | 2024-Q3 → 2024-Q4 | 1 | 10 |
+| group_03 | 2025-Q4 → 2026-Q1 | 1 | 10 |
 
 原题训练保留 2025-Q2/Q3 的完整原始 ZIP，问 Renaissance、Berkshire 和 Palantir。新增输入来自 SEC 同一 Form 13F 数据发布渠道。ZIP 发布窗口与持仓报告期不同，构建时同时核对 COVERPAGE 和 SUBMISSION 的报告期，只保留非修订的初始 13F-HR；同 CIK 若有多份初始申报，取最早申报日，再按 accession 选择。
 
-每批从两个报告期都有申报、两期持仓行数均至少 50 的经理中按固定 SHA256 顺序选候选。选 20 个经理回答 q1/q2，另外 20 个回答 q3，再选 20 个证券回答 q4；排除排名前列或截止处并列、正增持不足五项或持有人不足三名的查询。筛选不使用任何模型成绩。成员和来源见各批 metadata.json，构建程序见 [build_dataset.py](tools/build_dataset.py)。
+每组从已复核的 20 个冻结候选中取一条能用机构名和证券名唯一定位目标的案例。group_01、group_02 取 `case_001`，group_03 取 `case_002`。候选池的构建规则、输入行与完整参考记录见各组 metadata.json 和 [build_dataset.py](tools/build_dataset.py)。
 
 保留全部 40 个查询经理在两期的完整持仓行；当前期还保留全部合格经理关于 20 个查询证券的持仓行，防止 q4 因只保留查询经理而漏掉真正的持有人。四张表的选中原始行保持原字节，压缩文件的行数与解压校验值记录在 metadata.json。
 
-三批报告期互不重叠，均不使用训练报告期；查询目标 CIK 和查询证券 CUSIP 在批次间不重复，也排除原题目标。其他持仓证券、q4 返回的经理可能重复，不宣称所有实体互斥。这是同源的时间和查询目标迁移挑战集，不是难度匹配的 IID 抽样。新题提供 CIK/CUSIP 消歧，将同样四问参数化成 20 个案例；不宣称题面逐字相同，也不把每批 200 个相关答案项当成 200 次独立 Agent 实验。
+三组使用不同的报告期和查询目标，均排除原题的报告期、机构和证券。导出时复用原题题面，只替换季度、机构和证券名称。每组回答同样四问，`/root/answers.json` 的顶层是 `q1_answer` 至 `q4_answer`，共 10 个答案项。
 
 三批冻结输入与参考都直接随包提供。选取输入时使用的六份全量SEC ZIP不重复提交Git；来源、报告期、大小和SHA见[source说明](evaluation/source/README.md)及SOURCES.json，供组织者按需重新构建，不影响同学直接执行已冻结任务。
 
@@ -106,7 +106,7 @@ python -B -m unittest discover -s sec-financial-report/tests -v
 单独计算实际输出的正确率：
 
 ```bash
-python sec-financial-report/verifier/score_accuracy.py --actual /path/to/answers.json --reference sec-financial-report/evaluation/group_01/verifier/reference_answers.json --report /tmp/sec-accuracy.json
+python sec-financial-report/verifier/score_accuracy.py --actual /path/to/answers.json --reference /tmp/sec-group01/tasks/sec-financial-report/verifier/expected_output.json --report /tmp/sec-accuracy.json
 ```
 
-原题来源固定 SkillsBench `b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af`，旧轨迹固定 benchmark `bee9b0df5b04a300735e5009f5238f5d5c8aaf61`。八份 ZIP 的来源、大小和 SHA256 见 [SOURCES.json](evaluation/source/SOURCES.json)；SEC 原始发布见 [Form 13F data sets](https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets)。已完成7次历史输出/独立答案的Docker评分重放，610个独立复算答案项全部通过；原题及三批导出任务还通过了Docker构建、8张输入表读取与原环境中的评分检查，见[环境记录](validation/task_environments/SUMMARY.json)和[验证报告](VALIDATION_REPORT.md)。这些检查没有调用模型，不代表新增方法成绩。来源和许可另见[source说明](evaluation/source/README.md)。
+原题来源固定 SkillsBench `b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af`，旧轨迹固定 benchmark `bee9b0df5b04a300735e5009f5238f5d5c8aaf61`。八份 ZIP 的来源、大小和 SHA256 见 [SOURCES.json](evaluation/source/SOURCES.json)；SEC 原始发布见 [Form 13F data sets](https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets)。原题和三批冻结候选的 610 个答案项已独立复算并通过 Docker 评分。当前单案例导出以独立复算答案核对三组 verifier，每组均为 10/10。冻结候选的 Docker 构建、输入读取和评分证据见[环境记录](validation/task_environments/SUMMARY.json)和[验证报告](VALIDATION_REPORT.md)。这些检查没有调用模型，不代表新增方法成绩。来源和许可另见[source说明](evaluation/source/README.md)。
