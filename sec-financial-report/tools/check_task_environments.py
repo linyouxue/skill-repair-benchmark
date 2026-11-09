@@ -8,7 +8,7 @@ import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-LOG = ROOT / "validation/task_environments"
+LOG = ROOT / "validation/task_environments_single_case"
 loader = importlib.util.spec_from_file_location("sec_export", ROOT / "evaluation/prepare_task.py")
 exporter = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(exporter)
@@ -41,16 +41,19 @@ def main():
         for group in ["original", "group_01", "group_02", "group_03"]:
             directory = LOG / group
             directory.mkdir(parents=True, exist_ok=True)
+            actual = ROOT / "validation/verifier_replay/independent_answers" / group / "answers.json"
+            assert actual.is_file(), "Compute independent answers before environment checks"
             if group == "original":
                 environment, verifier = ROOT / "environment", ROOT / "verifier"
                 periods = ["2025-q2", "2025-q3"]
             else:
                 task = exporter.prepare(group, Path(temporary) / group / "sec-financial-report")
                 environment, verifier = task / "environment", task / "verifier"
-                spec = json.loads((environment / "queries.json").read_text(encoding="utf-8"))
+                spec = json.loads((task / "EXPORT.json").read_text(encoding="utf-8"))
                 periods = [spec["baseline_period"], spec["current_period"]]
-            actual = ROOT / "validation/verifier_replay/independent_answers" / group / "answers.json"
-            assert actual.is_file(), "Compute independent answers before environment checks"
+                answer = json.loads(actual.read_text(encoding="utf-8"))[spec["case_id"]]
+                actual = Path(temporary) / group / "answers.json"
+                actual.write_text(json.dumps(answer), encoding="utf-8")
             tag = "sec-env-check-" + group.replace("_", "-") + ":" + uuid.uuid4().hex[:10]
             build = ["docker", "build", "--pull=false", "-t", tag, str(environment)]
             print(json.dumps({"building_environment": group}), flush=True)

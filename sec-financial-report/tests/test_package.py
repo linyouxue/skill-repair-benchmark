@@ -73,18 +73,25 @@ class PackageTests(unittest.TestCase):
                 self.assertFalse((output / "oracle").exists())
                 self.assertFalse(list(env.rglob("*reference*")))
                 self.assertFalse(list(env.rglob("*expected*")))
-                queries = json.loads((env / "queries.json").read_text())
-                self.assertEqual(queries["group"], group)
+                exported = json.loads((output / "EXPORT.json").read_text(encoding="utf-8"))
+                self.assertEqual((exported["group"], exported["query_cases"], exported["answer_items"]), (group, 1, 10))
+                self.assertFalse((env / "queries.json").exists())
+                original_prompt = (ROOT / "task.md").read_text(encoding="utf-8")
+                prompt = (output / "task.md").read_text(encoding="utf-8")
+                self.assertEqual(prompt.split("Format your answer", 1)[1],
+                                 original_prompt.split("Format your answer", 1)[1])
                 deployed = json.loads((output / "verifier/expected_output.json").read_text())
-                self.assertEqual(deployed["expected_answer_items"], 200)
+                self.assertEqual(set(deployed), {"q1_answer", "q2_answer", "q3_answer", "q4_answer"})
+                independent = ROOT / "validation/verifier_replay/independent_answers" / group / "answers.json"
+                answer = json.loads(independent.read_text(encoding="utf-8"))[exported["case_id"]]
                 actual = Path(temp) / (group + "-reference-fixture.json")
-                actual.write_text(json.dumps(deployed["cases"]), encoding="utf-8")
+                actual.write_text(json.dumps(answer), encoding="utf-8")
                 log = Path(temp) / (group + "-verifier-logs")
                 subprocess.run([sys.executable, "-B", str(output / "verifier/native_grade.py"),
                                 "--actual", str(actual), "--log-dir", str(log)], check=True, capture_output=True)
                 self.assertEqual(float((log / "reward.txt").read_text()), 1)
-                self.assertEqual(json.loads((log / "ctrf.json").read_text())["results"]["summary"]["passed"], 200)
-                self.assertEqual({p.name for p in (env / "data").iterdir()}, {queries["baseline_period"], queries["current_period"]})
+                self.assertEqual(json.loads((log / "ctrf.json").read_text())["results"]["summary"]["passed"], 10)
+                self.assertEqual({p.name for p in (env / "data").iterdir()}, {exported["baseline_period"], exported["current_period"]})
                 for original in (ROOT / "environment/skills").rglob("*"):
                     if original.is_file() and "__pycache__" not in original.parts:
                         self.assertEqual(original.read_bytes(), (env / "skills" / original.relative_to(ROOT / "environment/skills")).read_bytes())
