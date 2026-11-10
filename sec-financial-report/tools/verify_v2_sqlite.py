@@ -15,7 +15,7 @@ from zipfile import ZipFile
 
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(PACKAGE / "verifier"), str(PACKAGE / "evaluation")]
-from prepare_task import DEFAULT_ARCHIVES, source_archives
+from prepare_task import EVALUATION, SOURCE, source_archives, split_paths
 from score_accuracy import load_reference, score
 
 
@@ -32,7 +32,7 @@ def rows(archive, kind):
 
 
 def verify_classes():
-    classes = read_json(PACKAGE / "stock_classes.json")
+    classes = read_json(SOURCE / "stock_classes.json")
     assert len(classes) == len(set(classes)) == 25
     for script in ("13f-analyzer/scripts/one_fund_analysis.py",
                    "fuzzy-name-search/scripts/search_stock_cusip.py"):
@@ -133,7 +133,7 @@ def ranked_holders(db, current, cusip):
     return unambiguous_ranks(rows)
 
 
-def verify_split(db, folder, spec, manifest, issuer_matches):
+def verify_split(db, reference_path, spec, manifest, issuer_matches):
     previous, current = spec["baseline"], spec["current"]
     computed = {}
     for c in spec["cases"]:
@@ -158,29 +158,28 @@ def verify_split(db, folder, spec, manifest, issuer_matches):
             "q6_answer": ranked_changes(db, previous, current, cik, -1),
             "q7_answer": ranked_holders(db, current, cusip),
         }
-    reference = load_reference(folder / "verifier/expected_output.json")
+    reference = load_reference(reference_path)
     if computed != reference:
         mismatches = [(case, key) for case in reference for key in reference[case]
                       if computed.get(case, {}).get(key) != reference[case][key]]
-        raise ValueError(f"{folder.name} reference mismatch at {mismatches}")
+        raise ValueError(f"{reference_path} mismatch at {mismatches}")
     return computed, reference
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--answers-dir", type=Path, help="Optional directory for independently computed outputs")
-    parser.add_argument("--archives-dir", type=Path, default=DEFAULT_ARCHIVES)
+    parser.add_argument("--archives-dir", type=Path)
     args = parser.parse_args()
-    data = PACKAGE / "data"
-    manifest = read_json(data / "manifest.json")["splits"]
+    manifest = read_json(EVALUATION / "manifest.json")["splits"]
     classes = verify_classes()
-    groups = {s: read_json(data / s / "queries.json") for s in manifest}
-    a, b = groups["train"]["cases"], groups["test_entity"]["cases"]
-    assert a == groups["test_period"]["cases"] and b == groups["test_both"]["cases"]
+    groups = {s: read_json(split_paths(s)[0]) for s in manifest}
+    a, b = groups["train"]["cases"], groups["group_02"]["cases"]
+    assert a == groups["group_01"]["cases"] and b == groups["group_03"]["cases"]
     assert not ({c["manager"]["cik"] for c in a} & {c["manager"]["cik"] for c in b})
     assert not ({c["security"]["cusip"] for c in a} & {c["security"]["cusip"] for c in b})
     assert (groups["train"]["baseline"], groups["train"]["current"]) == (
-        groups["test_entity"]["baseline"], groups["test_entity"]["current"])
+        groups["group_02"]["baseline"], groups["group_02"]["current"])
     managers, securities, lookup_keys = defaultdict(set), defaultdict(set), defaultdict(set)
     for spec in groups.values():
         previous, current = spec["baseline"], spec["current"]
@@ -214,7 +213,7 @@ def main():
             output.mkdir(parents=True, exist_ok=False)
         report = {}
         for split, details in manifest.items():
-            independent, reference = verify_split(db, data / split, groups[split], details, issuer_matches)
+            independent, reference = verify_split(db, split_paths(split)[1], groups[split], details, issuer_matches)
             actual = output / f"{split}.json"
             actual.write_text(json.dumps(independent, ensure_ascii=False) + "\n", encoding="utf-8")
             grading = score(actual, reference)

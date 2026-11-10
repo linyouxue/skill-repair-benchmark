@@ -38,13 +38,22 @@ environment:
   gpus: 0
 ---
 
-Analyze SEC Form 13F holdings from baseline period {{BASELINE}} to current period {{CURRENT}}.
-The source tables are under `/root/{{BASELINE}}/` and `/root/{{CURRENT}}/`.
+Analyze SEC Form 13F holdings from baseline period 2024-q1 to current period 2024-q2.
+The source tables are under `/root/2024-q1/` and `/root/2024-q2/`.
 Use the following case IDs and lookup names. Each case names one filing manager and one target security.
 
 | Case ID | Filing manager | Target security issuer | Target security class |
 | --- | --- | --- | --- |
-{{CASES}}
+| case_001 | CWS Financial Advisors, LLC | HEIDRICK & STRUGGLES INTL IN | cmn |
+| case_002 | Marion Wealth Management | MINK THERAPEUTICS INC | com |
+| case_003 | Teza Capital Management LLC | BALLYS CORPORATION | cmn |
+| case_004 | Birchview Capital, LP | DAYFORCE INC | cmn |
+| case_005 | Dynamic Wealth Strategies, LLC | LEMAITRE VASCULAR INC | cmn |
+| case_006 | Red Wave Investments LLC | NETAPP INC | adr |
+| case_007 | EDMP, INC. | DANA HOLDING CORP | com |
+| case_008 | ARQ WEALTH ADVISORS, LLC | TELEPHONE & DATA SYS INC | cmn |
+| case_009 | NICHOLAS COMPANY, INC. | ONEOK INC NEW | cmn |
+| case_010 | Gallagher Fiduciary Advisors, LLC | AEVA TECHNOLOGIES INC | cmn |
 
 The input contains the complete SEC archives for both periods. For each period,
 join COVERPAGE and SUBMISSION by ACCESSION_NUMBER. Keep 13F-HR filings with
@@ -55,7 +64,7 @@ same-day ties by ascending ACCESSION_NUMBER. Match the manager by COVERPAGE name
 To locate the target CUSIP, match the current-period issuer name and specified
 TITLEOFCLASS on eligible holding rows with an empty PUTCALL field.
 Use raw integer VALUE in US dollars. For stock-only questions, lowercase TITLEOFCLASS
-and use these exact allowed values: {{CLASSES}}. The class list alone controls the stock-row filter.
+and use these exact allowed values: `com`, `common stock`, `cl a`, `com new`, `class a`, `stock`, `common`, `com cl a`, `com shs`, `sponsored adr`, `sponsored ads`, `adr`, `equity`, `cmn`, `cl b`, `ord shs`, `cl a com`, `class a com`, `cap stk cl a`, `comm stk`, `cl b new`, `cap stk cl c`, `cl a new`, `foreign stock`, `shs cl a`. The class list alone controls the stock-row filter.
 
 For each case answer the following seven questions in order.
 
