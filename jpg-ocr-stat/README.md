@@ -8,7 +8,9 @@
 
 后续评测材料见 [evaluation/README.md](evaluation/README.md)：3组各20张SROIE小票，配套冻结参考表、隔离任务导出和三份真实Excel的免费评分入口。
 
-原任务及三个评测组的现有baseline、均值、人工Skill结果和各次原Excel统一放在 [evaluation/results/](evaluation/results/README.md)，直接汇总已有有效运行，不重跑实验。
+原任务结果放在 [results/](results/README.md)
+
+三个评测组的现有baseline、均值、人工Skill结果和各次原Excel统一放在 [evaluation/results/](evaluation/results/README.md)，直接汇总已有有效运行，不重跑实验。
 
 ```text
 jpg-ocr-stat/
