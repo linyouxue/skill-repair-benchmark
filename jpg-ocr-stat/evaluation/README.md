@@ -3,7 +3,7 @@
 
 版本日期：2026-10-27。
 
-图片、参考表和评分代码现已公开，仅供最终冻结Skill评测，不用于修复、诊断或选版。当前只评测group2，沿用[result提交与执行约定](../result/README.md)及[group2结果提交说明](results/methods/README.md)。
+图片、参考表和评分代码现已公开，仅供最终冻结Skill评测，不用于修复、诊断或选版。当前需要评测group1，2，3沿用[result提交与执行约定](../result/README.md)及[group2结果提交说明](results/methods/README.md)。
 
 现有baseline和人工Skill结果见 [results/README.md](results/README.md)：按数据集列出每次字段正确率和均值，同目录提供原Excel、原评分及运行记录。
 
