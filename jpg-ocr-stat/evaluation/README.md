@@ -27,6 +27,7 @@ evaluation/
 
 ## 准备一组20张任务
 
+以下以group2为示例
 在已有`openpyxl`的Python环境，从本包`jpg-ocr-stat`的父目录运行：
 
 ```bash
@@ -35,8 +36,7 @@ python jpg-ocr-stat/evaluation/prepare_task.py \
   --skills /path/to/frozen-final/skills \
   --output /path/to/new-tasks/jpg-group02
 ```
-
-本轮只准备group2。不传`--skills`时使用原5个Skill。准备命令只复制文件，不构建Docker、不启动Agent、不调用API。导出的Task、Dockerfile和verifier代码保持原样，只换入本组20张图片、冻结参考表和20成员spec；原600秒评分时间不变。参考表只放verifier侧，不挂到Agent工作区。
+不传`--skills`时使用原5个Skill。准备命令只复制文件，不构建Docker、不启动Agent、不调用API。导出的Task、Dockerfile和verifier代码保持原样，只换入本组20张图片、冻结参考表和20成员spec；原600秒评分时间不变。参考表只放verifier侧，不挂到Agent工作区。
 
 实际运行仍交给统一SkillsBench/BenchFlow执行器，冻结Skill后再跑；准备脚本不会自行保证65次父迭代，执行配置必须独立留证。本次文档更新没有调用模型或重跑实验。
 
@@ -57,7 +57,7 @@ python jpg-ocr-stat/verifier/score_accuracy.py \
   --report /path/to/group02-field-accuracy.json
 ```
 
-上述命令使用同一verifier的评分实现，只评测group2，每次固定40字段；三个重复的均值为三次字段正确率的算术均值。缺表不缩分母，基础设施故障需另行说明。原`score_results.py`仍是三组汇总工具，本轮不要把未运行的group1/3计成零分后使用其120字段总分。免费检查中的参考表自比和缺表fixture均为软件检查，不是模型成绩或真实预测Excel。
+上述命令使用同一verifier的评分实现，评测group1，2，3，每次固定40字段；三个重复的均值为三次字段正确率的算术均值。缺表不缩分母，基础设施故障需另行说明。原`score_results.py`仍是三组汇总工具，本轮不要把未运行的group1/3计成零分后使用其120字段总分。免费检查中的参考表自比和缺表fixture均为软件检查，不是模型成绩或真实预测Excel。
 
 ## 免费回归检查
 
