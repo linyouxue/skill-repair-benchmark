@@ -22,7 +22,7 @@ def main():
                  for r in report["item_feedback"]]
         tests.extend({"name": f"extra_output:{i+1}", "status": "failed"} for i in range(report["extra_error_items"]))
         passed = report["correct_items"]
-        ctrf = {"results": {"tool": {"name": "sec-answer-accuracy-v1"},
+        ctrf = {"results": {"tool": {"name": "sec-seven-question-v2"},
                 "summary": {"tests": len(tests), "passed": passed, "failed": len(tests) - passed,
                             "pending": 0, "skipped": 0, "other": 0,
                             "start": started, "stop": int(time.time() * 1000)}, "tests": tests}}

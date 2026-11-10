@@ -14,21 +14,21 @@ title_class_of_stocks = [
     "common",
     "com cl a",
     "com shs",
-    "sponsored adr"
-    "sponsored ads"
-    "adr"
-    "equity"
-    "cmn"
-    "cl b"
-    "ord shs"
-    "cl a com"
-    "class a com"
-    "cap stk cl a"
-    "comm stk"
-    "cl b new"
-    "cap stk cl c"
-    "cl a new"
-    "foreign stock"
+    "sponsored adr",
+    "sponsored ads",
+    "adr",
+    "equity",
+    "cmn",
+    "cl b",
+    "ord shs",
+    "cl a com",
+    "class a com",
+    "cap stk cl a",
+    "comm stk",
+    "cl b new",
+    "cap stk cl c",
+    "cl a new",
+    "foreign stock",
     "shs cl a",
 ]
 

@@ -1,112 +1,60 @@
-# SEC Financial Report：原题训练材料与三批同源测试
+# SEC 机构持仓泛化评测
 
-本包保留 SkillsBench 原题、原 Skill、原始输入和原 GT，将最终指标改为答案项正确率。新测试沿用原 helper 实际执行的统计口径，各自计算参考答案。没有调用付费模型，也没有启动新的修复实验。
+四组使用同一份七问题面。每组给 10 对申报机构和目标证券，每对输出 10 个计分项，共 100 项。季度和查询名称随组替换，输出均为 `/root/answers.json`。顶层键为 `case_001` 至 `case_010`，每个案例包含 `q1_answer` 至 `q7_answer`。
 
 ```text
 sec-financial-report/
-├── task.md / environment/       # 原题、两份完整原始ZIP、完整原Skill
-├── diagnosis/                   # GPT-5.2完整轨迹、恢复的原输出和允许反馈
-├── verifier/ / oracle/          # 当前评分与原参考，仅评分/组织侧使用
-├── result/README.md             # 最终冻结Skill和原题真实执行的提交要求
-├── evaluation/                  # 冻结后的三批测试输入、评分及导出工具
-│   ├── group_01/                # 每组1案例/10答案项；另有02和03
-│   └── results/README.md        # 泛化执行结果的提交要求
-├── tools/ / tests/              # 材料复核、环境检查和免费回归
-└── validation/                  # 参考计算与历史输出重放证据
+├── task.md / stock_classes.json  # 固定七问题型和 25 个股票类别
+├── environment/skills/          # 两份 Skill 与类别表修正后的脚本
+├── data/
+│   ├── archives/                # 六份完整 SEC 源 ZIP，四组共用
+│   ├── train/                    # 训练查询名单和训练 GT
+│   ├── test_period/              # 同对象换季度
+│   ├── test_entity/              # 同季度换对象
+│   ├── test_both/                # 换对象和季度
+│   └── manifest.json             # 季度、来源和申报覆盖记录
+├── evaluation/prepare_task.py   # 导出一组原生任务
+├── verifier/                    # 逐项正确率与原生评分入口
+└── tools/ / VALIDATION.json     # 两套参考计算与验证结果
 ```
 
-拿到仓库后，先按下表读取原题、原Skill、完整轨迹和反馈，交给现有方法adapter。原题两份ZIP和三批冻结输入已包含，无需另外下载全量SEC源数据。执行器安装与初始化沿用[统一接入说明](../DELIVERY_GUIDE.md#5-入口-b修复算法自动调用)，使用其Python3.12及Docker环境。本包的免费检查可从仓库根运行：
+| 集合 | 基准期 → 当前期 | 查询对象 | 答案项 |
+| --- | --- | --- | ---: |
+| train | 2024 Q1 → Q2 | A 组 | 100 |
+| test_period | 2024 Q3 → Q4 | A 组 | 100 |
+| test_entity | 2024 Q1 → Q2 | B 组 | 100 |
+| test_both | 2025 Q4 → 2026 Q1 | B 组 | 100 |
+
+A 与 B 的机构 CIK、目标证券 CUSIP 和查询证券名称互斥。训练组和只换对象组使用字节一致的两份完整 SEC ZIP。四组均提供对应两季的全量申报包和完整持仓明细，由 Agent 自行查找并筛选所需记录。按季度和名称核对机构，按发行人名和证券类别从非期权记录定位目标 CUSIP，筛除前二排名内部及截止处并列的案例。
+
+## 口径和原 Skill
+
+[股票类别表](stock_classes.json)列出补齐逗号后的 25 个独立类别，两份 Skill 附带的相关脚本采用同一名单。两份原 `SKILL.md` 正文沿用。总市值以原始美元 `VALUE` 求和。股票行数和涨跌榜先筛类别，涨跌榜按 CUSIP 聚合后做当前减基准，缺失期视为零。持有人榜按目标 CUSIP 对当前期合格申报聚合。报送使用每个 CIK 在对应报告期内符合规则的初始 13F-HR；有多个时沿用旧构建器的最早申报日及编号顺序。
+
+四组 GT 均从完整源 ZIP 按上述规则计算。训练诊断使用 `train` 上真实生成的输出和反馈，冻结 Skill 后再评测三个测试组。新版训练轨迹待运行。
+
+## 通过统一执行器接入
+
+进入本任务包目录后运行以下命令。
 
 ```bash
-python -B -m unittest discover -s sec-financial-report/tests -v
+python evaluation/prepare_task.py --group train --output /tmp/sec-v2-train/tasks/sec-financial-report
+python evaluation/prepare_task.py --group test_period --output /tmp/sec-v2-period/tasks/sec-financial-report
 ```
 
-修复及原题执行的最终交付见[result说明](result/README.md)；冻结Skill后再读取[evaluation说明](evaluation/README.md)并导出测试任务。
+将 `tasks_root` 设为对应导出目录的父目录。继续使用现有方法 adapter 和 `BenchmarkExecutor.run(task_id="sec-financial-report", ...)`。导出从包内 `data/archives/` 读取两份完整季度 ZIP，也可用 `--archives-dir` 指定源目录。verifier 在 Agent 退出后部署，其 `expected_output.json` 只供评分。导出环境的两个兼容路径分别让证券搜索脚本和持有人排名脚本读取本组当前期。
 
-## 原题和修复材料的位置
-
-| 材料 | 位置 |
-|---|---|
-| 原题、原执行配置 | [task.md](task.md) |
-| 原始输入 | [2025-Q2 ZIP](environment/13f-2025-q2.zip)、[2025-Q3 ZIP](environment/13f-2025-q3.zip) |
-| 原 Skill | [13f-analyzer](environment/skills/13f-analyzer/SKILL.md)、[fuzzy-name-search](environment/skills/fuzzy-name-search/SKILL.md)，支持脚本见 [完整 bundle](environment/skills/) |
-| 指定 GPT-5.2 完整原生轨迹 | [ACP](diagnosis/source_run/trajectory/acp_trajectory.jsonl)、[LLM 请求/响应](diagnosis/source_run/trajectory/llm_trajectory.jsonl)、[ATIF](diagnosis/source_run/trainer/atif.json) |
-| 反馈、运行状态与产物清单 | [allowed_feedback.json](diagnosis/outputs/allowed_feedback.json)、[execution_metadata.json](diagnosis/outputs/execution_metadata.json)、[output_inventory.json](diagnosis/outputs/output_inventory.json) |
-| 原生记录及固定来源索引 | [diagnosis/index.json](diagnosis/index.json)、[源运行审计](validation/source_run_audit.json) |
-| 恢复的原模型输出 | [answers.json](diagnosis/recovered_output/answers.json)、[恢复来源](diagnosis/recovered_output/provenance.json) |
-
-指定旧运行的历史 reward=0 原样保留，原 verifier 确实因 uv 下载失败而未进入 pytest。本次从 ACP/LLM 中的原始写入命令和实际文件回读恢复原输出，并完成 Docker verifier-only 重放：原版测试为1通过/1失败，逐项正确率为 **4/10（40%）**；q1、q4正确，q2错误，q3五个位置均错误。因此可作为**经重放确认的模型 FAIL**诊断材料。原文件未独立归档，恢复文件不冒称原归档；[diagnosis说明](diagnosis/README.md)列明来源与使用范围，[重放结果](validation/verifier_replay/SUMMARY.json)保留原评分故障与本次有效重放的区别。
-
-两份 Skill 正文在原执行器中被预载；显式 Skill 调用数为 0，30/30 次响应记录包含 Skill 指令，详见审计。历史运行步数和成绩不追改。
-
-## 统一接入
-
-修复侧沿用各方法原有 adapter：读取原题、原完整 Skill bundle、完整轨迹和允许反馈，继续使用该方法自己的诊断、迭代和选版方式。本包不增加专用 adapter 或请求格式。
-
-执行侧沿用现有统一 `BenchmarkExecutor`，`tasks_root` 指向包含 `sec-financial-report/` 的父目录。传入修复后的完整 bundle：
-
-```python
-result = executor.run(
-    task_id="sec-financial-report",
-    condition="method-skill",
-    skill_bundle="/path/to/frozen/full-skills",
-    method_id="your-method",
-    stage="final",
-    rollout_id="sec-final-unique-run-id",
-)
-```
-
-使用当前统一执行器的 60 次父迭代和既有 completion guard。每次执行使用新 rollout_id。只有 environment 与题面提供给 Agent，verifier 在 Agent 退出后部署；不要将整个本包挂入容器。`oracle/`、`verifier/`、`validation/` 和测试参考仅在组织者/评分侧使用。
-
-## 评分与 GT
-
-原题的 [expected_output.json](verifier/expected_output.json) 保持原字节，当前评分直接读取该文件，不另存一套训练 GT；原二元 verifier 存于 [source/original_verifier](evaluation/source/original_verifier/)。当前 [test.sh](verifier/test.sh) 用 Python 标准库运行 [native_grade.py](verifier/native_grade.py)，无需联网安装评分依赖。
-
-每个案例 10 项：q1 金额 1 项、q2 股票持仓行数 1 项、q3 前五 CUSIP 各 1 项、q4 前三经理名各 1 项。判对规则沿用原题：q1 相对误差严格小于 0.001（0.1%），q2 精确相等，CUSIP 保留前导零且按位匹配，经理名仅转小写比较且顺序必须正确。
-
-`accuracy = 正确项数 / (预期项数 + 额外错误项数)`。缺失、非法或错位的项记错；每个多余排名元素增加一个错误项。原题允许的额外对象字段仍忽略。整个输出缺失、不可读或非法 JSON 得 0。另报 strict_success；运行时间不加权，保留原执行时限。历史二元 reward 不改写成新正确率。
-
-**保留原口径的已知局限：**原 helper 的股票类别表漏逗号，Python 会拼接部分字符串。为保持原任务可比性，本包按其实际求值结果计数和聚合，不扩大股票范围。这里的“股票数”是筛选后的行数，不是不同 CUSIP 数。q1 是 13F 申报持仓 VALUE 合计，并非基金所有资产。规则见 [statistical_contract.json](environment/statistical_contract.json)。
-
-## 三批同源测试如何构建
-
-| 批次 | 基准报告期 → 当前报告期 | 案例数 | 答案项 |
-|---|---|---:|---:|
-| group_01 | 2024-Q1 → 2024-Q2 | 1 | 10 |
-| group_02 | 2024-Q3 → 2024-Q4 | 1 | 10 |
-| group_03 | 2025-Q4 → 2026-Q1 | 1 | 10 |
-
-原题训练保留 2025-Q2/Q3 的完整原始 ZIP，问 Renaissance、Berkshire 和 Palantir。新增输入来自 SEC 同一 Form 13F 数据发布渠道。ZIP 发布窗口与持仓报告期不同，构建时同时核对 COVERPAGE 和 SUBMISSION 的报告期，只保留非修订的初始 13F-HR；同 CIK 若有多份初始申报，取最早申报日，再按 accession 选择。
-
-每组从已复核的 20 个冻结候选中取一条能用机构名和证券名唯一定位目标的案例。group_01、group_02 取 `case_001`，group_03 取 `case_002`。候选池的构建规则、输入行与完整参考记录见各组 metadata.json 和 [build_dataset.py](tools/build_dataset.py)。
-
-保留全部 40 个查询经理在两期的完整持仓行；当前期还保留全部合格经理关于 20 个查询证券的持仓行，防止 q4 因只保留查询经理而漏掉真正的持有人。四张表的选中原始行保持原字节，压缩文件的行数与解压校验值记录在 metadata.json。
-
-三组使用不同的报告期和查询目标，均排除原题的报告期、机构和证券。导出时复用原题题面，只替换季度、机构和证券名称。每组回答同样四问，`/root/answers.json` 的顶层是 `q1_answer` 至 `q4_answer`，共 10 个答案项。
-
-三批冻结输入与参考都直接随包提供。选取输入时使用的六份全量SEC ZIP不重复提交Git；来源、报告期、大小和SHA见[source说明](evaluation/source/README.md)及SOURCES.json，供组织者按需重新构建，不影响同学直接执行已冻结任务。
-
-冻结 Skill 后，隔离导出一批原生任务：
+每答对一个位置计一项。金额沿用相对误差严格小于 0.1% 的规则，计数精确匹配，排名按位置比较。缺项和错项记错，多余案例或排名项增加错误项。标准分母为 100，运行时间不参与正确率。
 
 ```bash
-python sec-financial-report/evaluation/prepare_task.py --group group_01 --output /tmp/sec-group01/tasks/sec-financial-report
+python verifier/score_accuracy.py --actual /path/to/answers.json --reference /tmp/sec-v2-period/tasks/sec-financial-report/verifier/expected_output.json --report /tmp/sec-v2-period-accuracy.json
 ```
 
-将执行器的 tasks_root 指向 `/tmp/sec-group01/tasks`，仍调用同一 task_id 和公共 API。导出环境不含其他批次、diagnosis、oracle 或参考答案。完整本地包包含测试资料，修复/选版阶段应由组织者隔离，不向方法开放测试答案。
+## 数据来源与复核
 
-## 免费复核
-
-Python 整数聚合从完整源 ZIP 计算新参考；[独立 SQLite 程序](tools/verify_references_sqlite.py) 从原题 ZIP 和实际导出的测试行重新计算，不导入主计算模块。原题先与未变的官方 GT 比较，再检查全部新案例。结果见 [reference_crosscheck.json](validation/reference_crosscheck.json) 与 [VALIDATION_REPORT.md](VALIDATION_REPORT.md)。
+[数据清单](data/manifest.json)记录六个完整源 ZIP 及各组使用的季度。参考计算按冻结查询名单从全量数据使用 Python 整数聚合。独立复核程序直接扫描同六份完整 ZIP，用 SQLite 查询逐项核对参考值、名称匹配、排名并列、持仓及持有人记录覆盖。四组 400 项一致，Docker 逐项评分均通过。 [验证记录](VALIDATION.json)
 
 ```bash
-python -B sec-financial-report/tools/verify_references_sqlite.py
-python -B -m unittest discover -s sec-financial-report/tests -v
+python -B tools/build_v2.py --output /tmp/sec-v2-reference-rebuild
+python -B tools/verify_v2_sqlite.py
 ```
-
-单独计算实际输出的正确率：
-
-```bash
-python sec-financial-report/verifier/score_accuracy.py --actual /path/to/answers.json --reference /tmp/sec-group01/tasks/sec-financial-report/verifier/expected_output.json --report /tmp/sec-accuracy.json
-```
-
-原题来源固定 SkillsBench `b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af`，旧轨迹固定 benchmark `bee9b0df5b04a300735e5009f5238f5d5c8aaf61`。八份 ZIP 的来源、大小和 SHA256 见 [SOURCES.json](evaluation/source/SOURCES.json)；SEC 原始发布见 [Form 13F data sets](https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets)。原题和三批冻结候选的 610 个答案项已独立复算并通过 Docker 评分。当前单案例导出以独立复算答案核对三组 verifier，每组均为 10/10。冻结候选的 Docker 构建、输入读取和评分证据见[环境记录](validation/task_environments/SUMMARY.json)和[验证报告](VALIDATION_REPORT.md)。这些检查没有调用模型，不代表新增方法成绩。来源和许可另见[source说明](evaluation/source/README.md)。
