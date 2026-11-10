@@ -2,8 +2,6 @@
 
 这是原 [SkillsBench `jpg-ocr-stat`](https://github.com/benchflow-ai/skillsbench/tree/9a1f4dd5f7659f75707435da3ce854b6e48321d1/tasks/jpg-ocr-stat) 的独立任务副本。原任务有 **22张小票、44个日期/金额字段**。本目录保留原题、图片、环境、5个 Skill、参考表和 oracle，只把原来整份 Excel 全对才得1分的 verifier，改为逐字段正确率。
 
-它使用原 SkillsBench 的22张图片，和本仓库另一个目录里的120/40/40划分数据集分别使用、分别报告。
-
 需要用已有Opus轨迹修复Skill的同学，从 [diagnosis/README.md](diagnosis/README.md) 开始：这里提供79任务结果中JPG最终选用运行的索引、无损分窗、22张原图、原Excel和允许的逐字段反馈，以及不会调用模型的读取入口。
 
 修复完成后，按 [result/README.md](result/README.md) 上传一个最终冻结版本：顶层仍为完整`skills/`、简短`README.md`及`evidence/`。证据必须包含真实修复过程、最终冻结Skill在原22张小票任务上的执行轨迹，以及该次执行实际生成并导出的`stat_ocr.xlsx`原文件。最终任务执行上限为65次父迭代，方法内部的诊断与修复迭代不受这个65次限制；接入端落实与留证要求见结果提交说明。本轮不要求泛化成绩。
