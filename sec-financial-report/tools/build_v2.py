@@ -12,7 +12,7 @@ from zipfile import ZipFile
 
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE / "evaluation"))
-from prepare_task import DEFAULT_ARCHIVES, SPLITS, source_archives
+from prepare_task import SOURCE, SPLITS, source_archives, split_paths
 
 MONTHS = {name: index for index, name in enumerate(
     "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(), 1
@@ -107,12 +107,11 @@ def answer(case, old, new):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--archives-dir", type=Path, default=DEFAULT_ARCHIVES)
+    parser.add_argument("--archives-dir", type=Path)
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(args.output)
-    data = PACKAGE / "data"
-    specs = {split: read_json(data / split / "queries.json") for split in SPLITS}
+    specs = {split: read_json(split_paths(split)[0]) for split in SPLITS}
     managers, securities = defaultdict(set), defaultdict(set)
     for spec in specs.values():
         for case in spec["cases"]:
@@ -120,7 +119,7 @@ def main():
             managers[spec["baseline"]].add(cik)
             managers[spec["current"]].add(cik)
             securities[spec["current"]].add(case["security"]["cusip"])
-    classes = set(read_json(PACKAGE / "stock_classes.json"))
+    classes = set(read_json(SOURCE / "stock_classes.json"))
     archives = source_archives(args.archives_dir, sorted(managers))
     results = {p: summarize_period(path, p, managers[p], securities[p], classes)
                for p, path in archives.items()}
