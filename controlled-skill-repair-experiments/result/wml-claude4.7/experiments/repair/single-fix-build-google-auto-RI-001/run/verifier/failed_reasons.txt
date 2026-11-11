@@ -1,0 +1,85 @@
+Repository: google/auto (snapshot in /home/travis/build/failed/google/auto)
+CI driver (.travis.yml):
+    install: mvn -B -U -f build.pom.xml dependency:go-offline test clean --quiet \
+             --fail-never -DskipTests=true
+    script : mvn -B -U -f build-pom.xml verify --fail-at-end \
+             -Dsource.skip=true -Dmaven.javadoc.skip=true
+    jdk    : oraclejdk7, openjdk7
+
+Reactor (build-pom.xml): ., common, factory, service, value.
+
+== Historical CI failure (the one the repair targets) ==
+
+The project drives CI through the reactor's "verify" phase. The AutoValue
+module (value/) binds maven-invoker-plugin, which launches a nested Maven
+build for every src/it/*/pom.xml in that module. Those nested builds have
+their own dependency mediation.
+
+The nested build that fails is:
+
+    value/src/it/functional/pom.xml   (The Auto-Value Functional Integration Test)
+
+Looking at that nested POM, the test dependency set is internally inconsistent:
+
+    com.google.code.findbugs:jsr305        : 1.3.9   (provided)
+    junit:junit                            : 4.11    (test)
+    com.google.truth:truth                 : 0.25    (test)
+    com.google.guava:guava-testlib         : 18.0    (test)
+    (no direct com.google.guava:guava declaration)
+
+The test source
+value/src/it/functional/src/test/java/com/google/auto/value/AutoValueTest.java
+directly uses `com.google.common.base.MoreObjects`, together with
+`com.google.common.collect.ImmutableList/Set/Map/Table`,
+`com.google.common.testing.EqualsTester`, and
+`com.google.common.testing.SerializableTester`.
+
+`MoreObjects` is a Guava-18+ API. Because this nested Invoker POM has NO
+direct Guava dependency and relies on whatever Guava `truth:0.25` and
+`guava-testlib:18.0` happen to transitively pull in, Maven's nearest-wins
+mediation can (and does, in CI) select an older Guava where MoreObjects is
+absent, producing:
+
+    cannot find symbol: class MoreObjects
+      location: package com.google.common.base
+
+Per the Maven-build-lifecycle guidance, when `guava` and `guava-testlib`
+must be used together (they are tightly version-coupled), both must be
+declared explicitly at the same version, and the surrounding test stack
+(junit, truth, jsr305) must be moved to a mutually compatible set.
+
+This is a build-configuration bug (dependency-version drift in the
+Invoker-launched integration-test POM), NOT a Java source bug. The source
+usage of MoreObjects is correct; the POM must be repaired to declare a
+Guava version that provides it.
+
+== Note on this verification environment ==
+
+Re-running `mvn -B -U -f build-pom.xml verify ...` here fails earlier than
+the Invoker tests because this environment ships JDK 11, and
+`com.google.testing.compile:compile-testing:0.7` (a transitive test
+dependency of auto-common / auto-factory / auto-service) declares a
+system-scoped `com.sun:tools:${java.version}` artifact at
+`${java.home}/../lib/tools.jar`, which was removed from the JDK in Java 9.
+That is an environment mismatch against the original Travis matrix
+(oraclejdk7 / openjdk7, where tools.jar existed), not the historical CI
+failure being repaired. The historical failure, and the repair target, is
+the nested value/src/it/functional/pom.xml dependency drift above.
+
+== Plan ==
+
+Patch exactly one file: value/src/it/functional/pom.xml.
+
+Synchronize the test-dependency block as a coherent version set:
+
+  - com.google.code.findbugs:jsr305   1.3.9  -> 3.0.0   (provided)
+  - junit:junit                       4.11   -> 4.12    (test)
+  - Add direct com.google.guava:guava         19.0      (test)
+  - com.google.guava:guava-testlib    18.0   -> 19.0    (test)
+  - com.google.truth:truth            0.25   -> 0.28    (test)
+
+Do NOT edit the test Java source: the `MoreObjects` usage is legitimate
+Guava API, and rewriting valid source to work around a POM defect would
+mask the real fix.
+
+Patch file: /home/travis/build/failed/google/auto/patch_1.diff

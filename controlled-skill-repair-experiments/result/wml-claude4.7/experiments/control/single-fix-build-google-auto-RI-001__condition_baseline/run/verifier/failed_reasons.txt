@@ -1,0 +1,77 @@
+Failed build analysis
+=====================
+
+Target repository
+-----------------
+Path    : /home/travis/build/failed/google/auto
+Project : google/auto (snapshot containing auto-common, auto-factory,
+          auto-service, auto-value, auto-util)
+CI      : Travis CI; .travis.yml drives
+          `mvn -B -U -f build-pom.xml verify --fail-at-end
+           -Dsource.skip=true -Dmaven.javadoc.skip=true`
+JDKs    : oraclejdk7 / openjdk7
+
+Reactor behaviour
+-----------------
+The `build-pom.xml` reactor includes `value/`. The `value/` POM runs the
+`maven-invoker-plugin`, which executes an embedded Maven build rooted at
+`value/src/it/functional/pom.xml` (the AutoValue "functional" integration
+test). That nested Invoker build is where the CI failure actually occurs.
+
+First real failure
+------------------
+Compiling `value/src/it/functional/src/test/java/com/google/auto/value/
+AutoValueTest.java` fails with:
+    cannot find symbol: class MoreObjects
+    location: package com.google.common.base
+
+`AutoValueTest` imports and calls `com.google.common.base.MoreObjects`, a
+Guava API that first appeared in Guava 18.0.
+
+Root cause: dependency drift in the Invoker POM
+-----------------------------------------------
+`value/src/it/functional/pom.xml` is an independent Maven project, so it
+does NOT inherit the parent reactor's dependency management. Its own
+`<dependencies>` block declares:
+
+  * com.google.code.findbugs:jsr305    1.3.9  (provided)
+  * junit:junit                        4.11   (test)
+  * com.google.truth:truth             0.25   (test)
+  * com.google.guava:guava-testlib     18.0   (test)
+
+There is NO direct declaration of `com.google.guava:guava`. Guava is
+resolved transitively, and Maven's "nearest-definition wins" rule lets
+truth 0.25 (which depends on an older Guava, ~16.x) pull in a Guava
+version older than 18.0. That older Guava has no `MoreObjects`, which
+produces the compile error above even though `guava-testlib:18.0` is
+present.
+
+`guava` and `guava-testlib` must always be at the same version; declaring
+`guava-testlib` without pinning `guava` directly is the drift source.
+
+Fix plan
+--------
+Repair `value/src/it/functional/pom.xml` as ONE coherent dependency
+sync (per the maven-build-lifecycle skill checkpoint for this repo):
+
+  * com.google.code.findbugs:jsr305    1.3.9 -> 3.0.0  (provided)
+  * junit:junit                        4.11  -> 4.12   (test)
+  * add com.google.guava:guava         19.0           (test, new direct)
+  * com.google.guava:guava-testlib     18.0  -> 19.0   (test)
+  * com.google.truth:truth             0.25  -> 0.28   (test)
+
+Adding guava:19.0 directly makes it the nearest declaration, so it wins
+over any older transitive Guava pulled in by truth. Upgrading truth to
+0.28 keeps the test library compatible with Guava 19. junit 4.12 and
+jsr305 3.0.0 are the corresponding modern baselines used by google/auto
+in this snapshot.
+
+No test source code is wrong; the failure is purely a build-config /
+dependency-version issue in the Invoker integration-test POM. Only that
+one file needs to change.
+
+Artifact locations
+------------------
+Analysis : /home/travis/build/failed/failed_reasons.txt
+Patch    : /home/travis/build/failed/google/auto/patch_1.diff
+Target   : /home/travis/build/failed/google/auto/value/src/it/functional/pom.xml

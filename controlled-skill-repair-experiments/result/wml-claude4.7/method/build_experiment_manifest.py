@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("WML_CONTROLLED_ROOT", Path(__file__).resolve().parent.parent))
 
 
 def load(path: Path) -> dict:
@@ -23,6 +24,20 @@ def prepared_record(folder: str, experiment_id: str) -> dict:
 
 def entry(kind: str, experiment_id: str, row: dict, prepared_folder: str) -> dict:
     record = prepared_record(prepared_folder, experiment_id)
+    attempt_dir = Path(row["attempt_dir"]).resolve()
+    audit_path = attempt_dir / "EXECUTION_AUDIT.json"
+    preflight_path = attempt_dir / "EXECUTION_PREFLIGHT.json"
+    if not audit_path.is_file() or not preflight_path.is_file():
+        raise RuntimeError(f"missing environment/Skill audit for {experiment_id}")
+    audit = load(audit_path)
+    preflight = load(preflight_path)
+    if audit.get("valid") is not True:
+        raise RuntimeError(f"failed environment/Skill audit for {experiment_id}")
+    if preflight.get("task_id") != record["task_id"]:
+        raise RuntimeError(f"task identity mismatch for {experiment_id}")
+    collision_guard = preflight.get("collision_guard") or {}
+    if collision_guard.get("enabled") is not True:
+        raise RuntimeError(f"environment collision guard missing for {experiment_id}")
     result_file = relative(row["result_file"])
     result_path = ROOT / result_file
     trajectory = result_path.parent / "trajectory" / "acp_trajectory.jsonl"
@@ -41,6 +56,14 @@ def entry(kind: str, experiment_id: str, row: dict, prepared_folder: str) -> dic
         "attempt_dir": relative(row["attempt_dir"]),
         "result_file": result_file,
         "trajectory_file": trajectory.relative_to(ROOT).as_posix(),
+        "execution_preflight": relative(preflight_path),
+        "execution_audit": relative(audit_path),
+        "unique_task_name": preflight["unique_task_name"],
+        "task_identity_sha256": preflight["task_identity_sha256"],
+        "dockerfile_sha256": preflight.get("dockerfile_sha256"),
+        "skill_bundle_sha256": audit["expected_skill_bundle"]["skill_bundle_sha256"],
+        "skill_exposure_verified": True,
+        "environment_collision_guard_verified": True,
     }
 
 
@@ -51,6 +74,10 @@ def main() -> None:
         raise RuntimeError("WML repair summary is incomplete")
     if (controls["total"], controls["valid"], controls["invalid"]) != (33, 33, 0):
         raise RuntimeError("control summary is incomplete")
+    if repairs["executor_model"] != controls["executor_model"]:
+        raise RuntimeError("repair/control executor model mismatch")
+    if repairs["base_url"] != controls["base_url"]:
+        raise RuntimeError("repair/control base URL mismatch")
 
     experiments = []
     for row in repairs["trials"]:
@@ -69,8 +96,8 @@ def main() -> None:
         "repair_method": "workflow-localized-mechanism-learning",
         "repair_model": "Claude-Opus-4.7",
         "executor_agent": "openhands",
-        "executor_model": "openai/Claude-Opus-4.7",
-        "base_url": "https://llmapi.paratera.com/v1",
+        "executor_model": repairs["executor_model"],
+        "base_url": repairs["base_url"],
         "counts": {
             "total": 55,
             "wml_repairs": 22,

@@ -1,0 +1,92 @@
+Repository: google/auto (located at /home/travis/build/failed/google/auto)
+Build command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Overall reactor result:
+  Auto (Parent) ............................... SUCCESS
+  Auto Common Libraries ....................... SUCCESS
+  AutoFactory ................................. SUCCESS
+  AutoService ................................. SUCCESS
+  AutoValue ................................... FAILURE
+  build-only .................................. SUCCESS
+
+Only the `auto-value` module failed. The failure originates from the Maven
+Invoker plugin integration test defined by:
+
+  /home/travis/build/failed/google/auto/value/src/it/functional/pom.xml
+
+The invoker extracts this project into
+  value/target/it/functional/
+and tries to compile it with maven-compiler-plugin 3.1.
+The relevant build.log is at
+  value/target/it/functional/build.log
+
+Two independent errors occur during `default-testCompile` of the invoker
+project `com.google.auto.value.it.functional:functional`:
+
+---------------------------------------------------------------------------
+Error 1 — "unmappable character for encoding ASCII"
+---------------------------------------------------------------------------
+File encoding has not been set, so Maven uses the platform encoding
+(ANSI_X3.4-1968 / ASCII). Several source files contain the non-ASCII
+character 'É' (U+00C9, appears in an `@author ... Éamonn McManus` javadoc).
+
+Affected files (in value/src/it/functional):
+  src/main/java/com/google/auto/value/NestedValueType.java (line 6)
+  src/main/java/com/google/auto/value/SimpleValueType.java (line 26)
+  src/main/java/PackagelessNestedValueType.java (line 22)
+  src/main/java/PackagelessValueType.java (line 27)
+  src/test/java/com/google/auto/value/AutoValueTest.java (line 50)
+  src/test/java/com/google/auto/value/SimpleValueTypeTest.java (line 26)
+  src/test/java/com/google/auto/value/enums/MyEnum.java (line 19)
+  src/test/java/PackagelessValueTypeTest.java (line 25)
+
+In production (main) sources these only produce warnings, but in test
+sources the compiler treats them as errors (likely because of
+`-Xlint:all` + `showWarnings=true` combined with the Java 6 test
+compilation path). The compilation of test sources fails with 8 errors.
+
+Root cause: value/src/it/functional/pom.xml does NOT declare
+`project.build.sourceEncoding=UTF-8`, nor does it set `<encoding>UTF-8</encoding>`
+on the maven-compiler-plugin. The parent `auto-parent` POM does set this,
+but it is NOT inherited by the invoker IT project because the invoker
+project has no <parent>.
+
+---------------------------------------------------------------------------
+Error 2 — "cannot find symbol: class MoreObjects"
+---------------------------------------------------------------------------
+AutoValueTest.java imports/uses com.google.common.base.MoreObjects, which
+was first added in Guava 18.0. The functional/pom.xml declares:
+  truth:0.25            (brings transitive guava:17.0)
+  guava-testlib:18.0    (would bring guava:18.0)
+Because `truth` is declared BEFORE `guava-testlib`, Maven's "nearest wins"
+mediation at the same depth selects guava 17.0, so MoreObjects is missing
+from the compile classpath. The build log confirms only guava-17.0.jar was
+downloaded.
+
+Root cause: functional/pom.xml does not pin a compatible Guava version.
+
+---------------------------------------------------------------------------
+Fix plan
+---------------------------------------------------------------------------
+Edit a single file: value/src/it/functional/pom.xml
+
+1. Add a <properties> block that sets
+     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+   This makes maven-compiler-plugin 3.1 pick up UTF-8 for reading the
+   sources and fixes the eight "unmappable character" errors.
+
+2. Add an explicit test-scoped dependency on guava 18.0:
+     <dependency>
+       <groupId>com.google.guava</groupId>
+       <artifactId>guava</artifactId>
+       <version>18.0</version>
+       <scope>test</scope>
+     </dependency>
+   Placed so that it takes precedence (direct dependency wins over the
+   transitive guava:17.0 pulled in by truth:0.25). This provides
+   com.google.common.base.MoreObjects and fixes the four MoreObjects
+   compile errors.
+
+Both changes are isolated to the invoker IT POM and do not affect the
+production artifacts of auto-value.

@@ -1,0 +1,86 @@
+# Failed Build Analysis — google/auto
+
+Repository: /home/travis/build/failed/google/auto
+Build config: `.travis.yml` runs `mvn -B -U -f build-pom.xml verify --fail-at-end
+-Dsource.skip=true -Dmaven.javadoc.skip=true` under `jdk_switcher use openjdk7`
+(JAVA_HOME=/usr/lib/jvm/java-7-openjdk-amd64).
+
+## Original failure signature (from /home/travis/build/101506036-orig.log)
+
+```
+[INFO] [ERROR] /home/travis/build/google/auto/value/target/it/functional/src/test/java/com/google/auto/value/AutoValueTest.java:[20,30] cannot find symbol
+[INFO] [ERROR]   symbol:   class MoreObjects
+[INFO] [ERROR]   location: package com.google.common.base
+[INFO] [ERROR] /home/travis/build/google/auto/value/target/it/functional/src/test/java/com/google/auto/value/AutoValueTest.java:[72,16] package MoreObjects does not exist
+[INFO] [ERROR] /home/travis/build/google/auto/value/target/it/functional/src/test/java/com/google/auto/value/AutoValueTest.java:[72,49] cannot find symbol
+[INFO] [ERROR]   symbol:   variable MoreObjects
+[INFO] [ERROR]   location: class com.google.auto.value.AutoValueTest
+```
+
+The failing Maven module is the nested Maven-Invoker integration-test project
+`value/src/it/functional/pom.xml` (run by `auto-value` via
+`maven-invoker-plugin:1.8:run`). The outer modules
+`auto-common`, `auto-factory`, `auto-service`, and the inner `auto-value` jar
+itself all build cleanly; only the functional IT testCompile fails.
+
+## Root cause
+
+`value/src/it/functional/src/test/java/com/google/auto/value/AutoValueTest.java`
+was updated in upstream commit 317dcc8f (migrate c.g.c.base.Objects →
+MoreObjects). `MoreObjects` was introduced in Guava 18.0.
+
+`value/src/it/functional/pom.xml` declares, in order:
+  1. `junit:4.11` (test)
+  2. `com.google.truth:truth:0.25` (test) — depends transitively on `guava:17.0`
+  3. `com.google.guava:guava-testlib:18.0` (test) — depends transitively on `guava:18.0`
+
+Maven's "nearest wins" / declaration-order mediation picks the Guava brought in
+by `truth:0.25` (guava 17.0) over the one from `guava-testlib:18.0`, confirmed
+by `dependency:tree` on the cloned IT project:
+
+```
+[INFO] +- com.google.truth:truth:jar:0.25:test
+[INFO] |  \- com.google.guava:guava:jar:17.0:test
+[INFO] \- com.google.guava:guava-testlib:jar:18.0:test
+```
+
+Guava 17.0 does not contain `com.google.common.base.MoreObjects` (added in 18.0),
+so the testCompile step of the functional IT fails.
+
+## Passing-build evidence (/home/travis/build/101720044-orig.log)
+
+Same PR, same source, but the passing build downloads:
+  - `com/google/guava/guava-testlib/19.0/guava-testlib-19.0.pom`
+  - `com/google/guava/guava/19.0/guava-19.0.jar`
+  - `com/google/truth/truth/0.28/truth-0.28.pom`
+  - `com/google/errorprone/error_prone_annotations/2.0.2/...`
+
+i.e. in the passing build the functional IT pom was updated to use
+`truth:0.28` and `guava-testlib:19.0`, which resolves `guava:19.0`
+and makes `com.google.common.base.MoreObjects` available.
+
+## Fix plan (minimal, targets the smallest failing POM)
+
+Only edit `value/src/it/functional/pom.xml`:
+  - Bump `com.google.truth:truth` from `0.25` → `0.28`
+  - Bump `com.google.guava:guava-testlib` from `18.0` → `19.0`
+
+No source-code change is required. No change to the aggregator or other
+modules — the defect is isolated to a single Maven-Invoker IT project.
+
+## Notes on local reproduction (not required for the fix)
+
+When I ran the reproduction locally, two environmental symptoms appeared that
+are NOT present in the original Travis log and therefore NOT part of the
+BugSwarm failure to repair:
+
+  - Java 11 is the default `mvn` JDK, which makes `${java.home}/../lib/tools.jar`
+    missing and breaks a transitive `com.sun:tools:system` dep coming from
+    `compile-testing:0.7`. Original Travis ran OpenJDK 7, which has tools.jar.
+  - The host locale is `LANG=C`, so the inner Maven invocation of the
+    functional IT defaulted to ASCII and emitted "unmappable character for
+    encoding ASCII" warnings/errors on files containing UTF-8 (e.g. "Éamonn
+    McManus"). Original Travis used UTF-8, with no such errors.
+
+Both are provided by the Travis/BugSwarm runner, not the repository. The
+repair is strictly the two dependency-version bumps above.

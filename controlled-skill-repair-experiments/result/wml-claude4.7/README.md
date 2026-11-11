@@ -1,109 +1,35 @@
-# WML / Claude 4.7
+# WML / Claude Opus 4.7 controlled skill-repair experiments
 
-Selected final results from the supplied `wml-claude4.7-controlled-results-final.zip`
-for `skill-repair-controlled-datasets-20261020`. This publication reads the
-provided records; it does not run the packaged scripts or repeat any experiment.
+- Method: Workflow-Localized Mechanism Learning (WML), with its original diagnosis and iterative repair mechanism.
+- Controlled dataset: `skill-repair-controlled-datasets-20261020` (8 base tasks; 22 repair experiments and 33 control experiments).
+- Repair model: `Claude-Opus-4.7` through Paratera (`https://llmapi.paratera.com/v1`).
+- Executor: BenchFlow 0.6.7, `openhands`, model `paratera/Claude-Opus-4.7`, base URL `https://llmapi.paratera.com`.
+- Final rerun: 2026-11-10 to 2026-11-11 after adding collision-safe task identities and mandatory persistent Skill preload audits.
+- Human involvement: experiment operation, infrastructure-only retry/remediation, packaging, and an AI-assisted manual semantic review. Candidate Skill content was not manually rewritten after WML output.
 
-| Slice | Selected runs | Pass | Fail |
-|---|---:|---:|---:|
-| WML repairs | 22 | 12 | 10 |
-| Controls | 33 | 19 | 14 |
-| Total | 55 | 31 | 24 |
+## Final results
 
-Repair model: `Claude-Opus-4.7`; execution: OpenHands with
-`openai/Claude-Opus-4.7`, through the supplied Paratera endpoint configuration.
-The 55 selected records have a scored result, no native error/partial flag,
-and `bench_exit_code == 0`. These checks do not replace a new semantic or
-complete trajectory audit. Budgets/seeds not frozen in the source are not
-retroactively invented here.
+| Scope | Valid | Pass | Fail | Invalid |
+|---|---:|---:|---:|---:|
+| WML repairs | 22 | 12 | 10 | 0 |
+| Controls | 33 | 21 | 12 | 0 |
+| Total | 55 | 33 | 22 | 0 |
 
-## Contents
+All 55 selected attempts have a valid `EXECUTION_AUDIT.json`, complete native result data, ACP and LLM trajectories, verifier output, a task-identity collision guard, and executor-level proof that the intended Skill bundle was preloaded. A task verifier failure remains a valid experimental result and is reported as `fail`; no infrastructure failure is counted as an experimental failure.
 
-- [results-summary.json](results-summary.json): portable paths for the 55
-  selected result/RUN_RECORD pairs and original source-member references.
-- [COMPLETE.json](COMPLETE.json) and [EXPERIMENT_CONFIG.json](EXPERIMENT_CONFIG.json):
-  final counts and supplied method/model identity.
-- `evidence/runs/`: exact selected native `result.json` and `RUN_RECORD.json`.
-  [Evidence index](evidence/SELECTED_EVIDENCE_INDEX.json) maps the source members.
-- `eval-runs/` and `control-runs/`: complete native trajectories, logs,
-  verifier outputs and available artifacts for all 55 selected runs.
-  `prepared/` and `control-prepared/` contain their execution inputs.
-  [Full evidence index](evidence/FULL_EVIDENCE_INDEX.json) maps every run.
-- `candidates/`: all 22 complete supplied WML candidates and native repair/usage
-  records. `inputs/`, `method/` and `protocol/` preserve the supplied small
-  input bundles, method code and protocol metadata.
-- `review/`: the source's 22-row semantic review and its evidence. The source
-  labels this as AI-assisted review, not an independent human sign-off. Its
-  strict target-repair count is 5/22 and non-target preservation is 12/12 for
-  leave-one-out cases; these are separate from the 12 original-task passes.
-- `source/`: unchanged supplied README, final summaries and historical
-  collector outputs. Some historical collector rows are invalid, ambiguous
-  or missing; only the explicit 55 entries in the final source manifest are
-  selected for the table and evidence above.
+The manual semantic review reports 5/22 targets fully repaired and 17/22 not fully repaired under the Gold semantic criteria. For the 12 leave-one-out trials, all 12 retained the non-target Gold repairs. This semantic score is separate from the native task verifier score.
 
-Complete trajectories, corresponding prepared task environments/assets and
-available execution artifacts for the 55 selected runs are published from the
-supplied ZIP. Superseded and infrastructure-failed attempts are excluded from
-the measured results. The source README documents the earlier credential
-redaction in trajectory copies, which is preserved. No keys or authorization
-headers are added. Other methods and repository READMEs are unchanged.
+## Directory layout
 
-## Selected records
+- `manifest/`: authoritative 55-run manifest, repair/control summaries, remediation status, package index, and file checksums.
+- `protocol/`: dataset catalog, repair-group definition, schema, and official scoring template.
+- `method/`: the WML adapter and the exact evaluation/validation launchers used for this run.
+- `repair/inputs/`: the 22 isolated repair inputs exposed to WML.
+- `repair/candidates/`: all 22 complete WML output bundles, diagnoses, responses, and API-usage records.
+- `review/`: the official-format semantic review CSV and detailed evidence notes.
+- `experiments/repair/`: one final valid executor run for each of the 22 repaired candidates.
+- `experiments/control/`: one final valid executor run for each of the 33 controls.
 
-| Type | Experiment | Reward | Source status |
-|---|---|---:|---|
-| wml_repair | location-data-to-d3 | 0.0 | fail |
-| wml_repair | location-dialogue-parser | 0.833 | fail |
-| wml_repair | location-flink-query | 0.0 | fail |
-| wml_repair | location-manufacturing-equipment-maintenance | 1.0 | pass |
-| wml_repair | location-pddl-airport-planning | 0.0 | fail |
-| wml_repair | single-fix-build-google-auto-RI-001 | 1.0 | pass |
-| wml_repair | single-fix-build-google-auto-RI-002 | 1.0 | pass |
-| wml_repair | single-fix-build-google-auto-all | 1.0 | pass |
-| wml_repair | single-flink-query-RI-001 | 0.0 | fail |
-| wml_repair | single-flink-query-RI-002 | 0.0 | fail |
-| wml_repair | single-flink-query-all | 0.0 | fail |
-| wml_repair | single-manufacturing-equipment-maintenance-RI-001 | 1.0 | pass |
-| wml_repair | single-manufacturing-equipment-maintenance-RI-002 | 1.0 | pass |
-| wml_repair | single-manufacturing-equipment-maintenance-all | 1.0 | pass |
-| wml_repair | single-sec-financial-report-RI-001 | 1.0 | pass |
-| wml_repair | single-sec-financial-report-RI-002 | 1.0 | pass |
-| wml_repair | single-sec-financial-report-RI-003 | 0.0 | fail |
-| wml_repair | single-sec-financial-report-all | 1.0 | pass |
-| wml_repair | single-video-silence-remover-RI-001 | 0.0 | fail |
-| wml_repair | single-video-silence-remover-RI-002 | 1.0 | pass |
-| wml_repair | single-video-silence-remover-RI-003 | 0.0 | fail |
-| wml_repair | single-video-silence-remover-all | 1.0 | pass |
-| control | data-to-d3__full_gold | 1.0 | pass |
-| control | data-to-d3__original | 0.0 | fail |
-| control | dialogue-parser__full_gold | 0.833 | fail |
-| control | dialogue-parser__original | 0.833 | fail |
-| control | fix-build-google-auto__all_faults | 1.0 | pass |
-| control | fix-build-google-auto__full_gold | 1.0 | pass |
-| control | fix-build-google-auto__original | 1.0 | pass |
-| control | flink-query__all_faults | 0.0 | fail |
-| control | flink-query__full_gold | 0.0 | fail |
-| control | flink-query__original | 0.0 | fail |
-| control | manufacturing-equipment-maintenance__all_faults | 1.0 | pass |
-| control | manufacturing-equipment-maintenance__full_gold | 0.0 | fail |
-| control | manufacturing-equipment-maintenance__original | 1.0 | pass |
-| control | pddl-airport-planning__full_gold | 1.0 | pass |
-| control | pddl-airport-planning__original | 1.0 | pass |
-| control | sec-financial-report__all_faults | 1.0 | pass |
-| control | sec-financial-report__full_gold | 1.0 | pass |
-| control | sec-financial-report__original | 1.0 | pass |
-| control | single-fix-build-google-auto-RI-001__condition_baseline | 1.0 | pass |
-| control | single-fix-build-google-auto-RI-002__condition_baseline | 1.0 | pass |
-| control | single-flink-query-RI-001__condition_baseline | 0.0 | fail |
-| control | single-flink-query-RI-002__condition_baseline | 0.0 | fail |
-| control | single-manufacturing-equipment-maintenance-RI-001__condition_baseline | 1.0 | pass |
-| control | single-manufacturing-equipment-maintenance-RI-002__condition_baseline | 1.0 | pass |
-| control | single-sec-financial-report-RI-001__condition_baseline | 1.0 | pass |
-| control | single-sec-financial-report-RI-002__condition_baseline | 1.0 | pass |
-| control | single-sec-financial-report-RI-003__condition_baseline | 1.0 | pass |
-| control | single-video-silence-remover-RI-001__condition_baseline | 0.0 | fail |
-| control | single-video-silence-remover-RI-002__condition_baseline | 0.0 | fail |
-| control | single-video-silence-remover-RI-003__condition_baseline | 1.0 | pass |
-| control | video-silence-remover__all_faults | 0.0 | fail |
-| control | video-silence-remover__full_gold | 0.0 | fail |
-| control | video-silence-remover__original | 0.0 | fail |
+Within every experiment directory, `run/` contains the original executor metadata, result, verifier records, Skill snapshot, and trajectories. Large `.jsonl` files are stored losslessly as `.jsonl.gz`; `manifest/upload-package-index.json` records the mapping. Repeated staged task payloads are not duplicated. The task identity, patched Dockerfile, verifier, Skill snapshot, preflight hash, and audit remain present, while the fixed public task payload is identified by the dataset/provenance versions above.
+
+Transient Debian/Ubuntu download failures and the legacy Google Auto CA bootstrap were handled only in per-attempt staging Dockerfiles. Task bodies, candidate Skill bundles, and verifiers were not modified during this remediation.

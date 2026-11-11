@@ -14,14 +14,18 @@ import sys
 import threading
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("WML_CONTROLLED_ROOT", Path(__file__).resolve().parent.parent))
 PREPARED = ROOT / "prepared"
 RUNS = ROOT / "eval-runs"
-RUNNER = Path("/Users/king/Downloads/skill-repair-controlled-datasets-20261020/tools/runner.py")
-BENCH_SHIM = ROOT / "bench_paratera.sh"
-ENV_FILE = Path("/Users/king/Documents/Codex/2026-09-18/skillaxe-20-17-skillaxe-39-48-2/claudeapikey.env")
+RUNNER = Path(__file__).resolve().parent / "safe_controlled_eval.py"
+BENCH_SHIM = Path(__file__).resolve().parent / "bench_paratera.sh"
+ENV_FILE = Path(os.environ.get(
+    "WML_CLAUDE_ENV_FILE",
+    "/Users/king/Documents/Codex/2026-09-18/skillaxe-20-17-skillaxe-39-48-2/claudeapikey.env",
+))
 METHOD = "WML-Paratera-Claude47-Controlled-20261029"
-MODEL = "openai/Claude-Opus-4.7"
+MODEL = "paratera/Claude-Opus-4.7"
+BASE_URL = os.environ.get("WML_BASE_URL", "https://llmapi.paratera.com")
 LOCK = threading.Lock()
 
 
@@ -45,6 +49,15 @@ def result_files(attempt: Path) -> list[Path]:
 
 
 def valid_result(attempt: Path) -> dict | None:
+    audit_file = attempt / "EXECUTION_AUDIT.json"
+    if not audit_file.is_file():
+        return None
+    try:
+        audit = json.loads(audit_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if audit.get("valid") is not True:
+        return None
     files = result_files(attempt)
     if len(files) != 1:
         return None
@@ -92,8 +105,8 @@ def run_trial(prepared: Path, key: str, retries: int) -> dict:
         return {"trial_id": trial, "status": "pass" if old["reward"] == 1 else "fail", **old, "new_attempts": 0}
     env = dict(os.environ)
     env.update({
-        "OPENAI_API_KEY": key,
-        "OPENAI_BASE_URL": "https://llmapi.paratera.com/v1",
+        "PARATERA_API_KEY": key,
+        "PARATERA_BASE_URL": BASE_URL,
         "NO_PROXY": "127.0.0.1,localhost,host.docker.internal",
         "no_proxy": "127.0.0.1,localhost,host.docker.internal",
     })
@@ -101,7 +114,7 @@ def run_trial(prepared: Path, key: str, retries: int) -> dict:
     for retry in range(1, retries + 1):
         index, attempt = next_attempt(trial)
         command = [
-            sys.executable, str(RUNNER), "eval",
+            sys.executable, str(RUNNER),
             "--prepared", str(prepared),
             "--jobs", str(attempt),
             "--agent", "openhands",
@@ -137,7 +150,7 @@ def write_summary(rows: list[dict]) -> None:
         "repair_model": "Claude-Opus-4.7",
         "executor_agent": "openhands",
         "executor_model": MODEL,
-        "base_url": "https://llmapi.paratera.com/v1",
+        "base_url": BASE_URL,
         "total": len(list(PREPARED.iterdir())),
         "valid": sum(row.get("valid") is True for row in rows),
         "passes": sum(row.get("status") == "pass" for row in rows),

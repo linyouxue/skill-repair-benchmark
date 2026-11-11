@@ -1,0 +1,81 @@
+Build-repair analysis: google/auto (BugSwarm google__auto)
+
+TARGET CI
+---------
+Travis config (.travis.yml) declares jdk: oraclejdk7 / openjdk7 and runs:
+
+  mvn -B -U -f build-pom.xml verify --fail-at-end \
+      -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Reproduced with JDK 7 (source /opt/jdk_switcher/jdk_switcher.sh;
+jdk_switcher use openjdk7). Under JDK 7 the reactor builds the parent,
+common, factory and service modules successfully. auto-value fails in
+maven-surefire with one test failure:
+
+  AutoAnnotationCompilationTest.testMissingClass
+  java.lang.AssertionError: Not true that
+  <"unmappable character for encoding ASCII"> contains <"NotAutoAnnotation">
+
+ROOT CAUSE
+----------
+The failure is in build configuration, not in the Java code.
+
+1. value/pom.xml declares a <resources> entry whose directory is
+   src/main/java with no <includes> filter:
+
+     <resources>
+       <resource>
+         <directory>src/main/java</directory>
+       </resource>
+     </resources>
+
+   The clause exists only to ship the Velocity templates
+   (autoannotation.vm, autovalue.vm, gwtserializer.vm) on the classpath.
+   It also copies every .java source file into value/target/classes.
+
+2. Some of those sources are UTF-8 and contain a non-ASCII byte
+   (the "É" in the @author javadoc of AutoAnnotation.java and others).
+
+3. testMissingClass builds a JavaCompiler task with no -encoding option.
+   The JVM default charset in this container is ANSI_X3.4-1968 (ASCII):
+   LANG=C, file.encoding=ANSI_X3.4-1968. The compiler puts
+   value/target/classes on the classpath, finds
+   com/google/auto/value/AutoAnnotation.java next to AutoAnnotation.class,
+   and recompiles the .java source. It cannot map the UTF-8 byte to ASCII,
+   so diagnostic #0 becomes "unmappable character for encoding ASCII"
+   instead of the expected "cannot find symbol ... NotAutoAnnotation".
+   The assertion on diagnostics.get(0) therefore fails.
+
+   Verified with a standalone reproducer: with the .java files removed
+   from target/classes (or with -encoding UTF-8 added), diagnostic #0 is
+   the expected "cannot find symbol" for NotAutoAnnotation. Restoring
+   target/classes to its normal content makes the ASCII error return.
+
+FIX
+---
+Restrict the resource copy so only the Velocity templates are copied:
+
+  value/pom.xml, <resources> entry for src/main/java:
+
+    <includes>
+      <include>**/*.vm</include>
+    </includes>
+
+This is the same change upstream google/auto made in commit d61a969
+("Don't include AutoValue's sources in its Maven jar. ... That clause is
+only there so that the *.vm files are present.").
+
+After the fix, no .java file lands in value/target/classes, javac does not
+pick up AutoAnnotation.java, the first diagnostic becomes
+"cannot find symbol ... NotAutoAnnotation", and the test passes. The .vm
+templates, which are the real runtime resource, are still packaged.
+
+VERIFICATION
+------------
+Re-run the exact CI command under JDK 7:
+
+  mvn -Dhttps.protocols=TLSv1.2 -B -U -f build-pom.xml verify \
+      --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+The reactor must complete with BUILD SUCCESS, including the auto-value
+Maven Invoker integration tests.

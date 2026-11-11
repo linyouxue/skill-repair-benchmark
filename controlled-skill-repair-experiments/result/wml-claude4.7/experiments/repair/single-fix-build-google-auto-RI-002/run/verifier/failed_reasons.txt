@@ -1,0 +1,79 @@
+Repository: google/auto
+Failure locus: NESTED Maven Invoker child build (not the parent reactor)
+
+Target CI (from .travis.yml, openjdk7):
+  mvn -Dhttps.protocols=TLSv1.2 -B -U -f build-pom.xml verify \
+      --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+The parent reactor runs successfully through the 'install' phase for
+auto-common, auto-factory, auto-service, auto-value. During auto-value's
+integration-test phase, the maven-invoker-plugin (clones src/it -> target/it)
+runs two invoked projects:
+
+  * value/src/it/gwtserializer  -> SUCCESS
+  * value/src/it/functional     -> FAILURE  (this is what we must fix)
+
+Authoritative error from value/target/it/functional/build.log:
+
+  [ERROR] default-testCompile on project functional - Compilation failure:
+
+  1) Unmappable character for encoding ASCII
+     (© copyright character in several source files):
+       src/main/java/com/google/auto/value/NestedValueType.java (line 6)
+       src/main/java/com/google/auto/value/SimpleValueType.java (line 26)
+       src/main/java/PackagelessNestedValueType.java            (line 22)
+       src/main/java/PackagelessValueType.java                  (line 27)
+       src/test/java/com/google/auto/value/AutoValueTest.java   (line 50)
+       src/test/java/com/google/auto/value/SimpleValueTypeTest.java (line 26)
+       src/test/java/com/google/auto/value/enums/MyEnum.java    (line 19)
+       src/test/java/PackagelessValueTypeTest.java              (line 25)
+
+     Root cause: the IT functional pom.xml does NOT set
+     <project.build.sourceEncoding>, so maven-resources-plugin and
+     maven-compiler-plugin fall back to platform encoding
+     (ANSI_X3.4-1968 / ASCII) and cannot read the UTF-8 copyright header.
+     The compiler warning in the log is explicit:
+       "File encoding has not been set, using platform encoding
+        ANSI_X3.4-1968 ... build is platform dependent"
+
+  2) cannot find symbol: class com.google.common.base.MoreObjects
+       src/test/java/com/google/auto/value/AutoValueTest.java:20
+       src/test/java/com/google/auto/value/AutoValueTest.java:72
+
+     Root cause: MoreObjects was introduced in Guava 18.0. The IT
+     functional pom.xml transitively pulls in com.google.truth:truth:0.25,
+     which hard-depends on com.google.guava:guava:17.0 at compile scope.
+     Because 'truth' is declared as a direct dependency in the IT pom,
+     guava 17.0 is at depth 2 in the IT dep tree. The other direct deps
+     (auto-value, guava-testlib:18.0) bring guava 18.0 also at depth 2.
+     In Maven's "nearest definition wins + declaration order" rule the
+     resolver ends up on guava 17.0 (confirmed by the IT build log:
+     'Downloading .../guava/17.0/guava-17.0.jar').
+
+     Note: the IT child build does NOT inherit the parent reactor's
+     dependencyManagement (<guava.version>18.0</guava.version>) because
+     a maven-invoker-plugin invocation is a separate Maven build. The
+     fix must live in the IT pom itself.
+
+Classification (per maven-build-lifecycle skill):
+  NESTED INVOKER CHILD -> patch files under value/src/it/functional/,
+  NOT the parent module.
+
+Patch plan (single patch_1.diff) edits value/src/it/functional/pom.xml:
+  a) Add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+     property to force UTF-8 source handling (fixes 8 encoding errors).
+  b) Add an explicit <dependency> on com.google.guava:guava:18.0
+     (compile scope, test-only use) at the top of <dependencies> so
+     that the IT project's own direct declaration overrides the
+     transitive guava 17.0 from truth 0.25 (fixes MoreObjects errors).
+
+Nothing in the parent reactor needs to change. Historical JDK 7 is used
+throughout; no Java-source / Java-target modernization is performed.
+
+Verification:
+  source /opt/jdk_switcher/jdk_switcher.sh
+  jdk_switcher use openjdk7
+  export TRAVIS_JDK_VERSION=openjdk7
+  cd /home/travis/build/failed/google/auto
+  mvn -Dhttps.protocols=TLSv1.2 -B -U -f build-pom.xml verify \
+      --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true

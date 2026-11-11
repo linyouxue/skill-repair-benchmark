@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 
-ROOT = Path(os.environ.get("CONTROL_WORK_ROOT", Path(__file__).resolve().parent))
+ROOT = Path(os.environ.get("CONTROL_WORK_ROOT", Path(__file__).resolve().parent.parent))
 PREPARED = ROOT / "control-prepared"
 PACKAGE = Path("/Users/king/Downloads/skill-repair-controlled-datasets-20261020")
 RUNNER = PACKAGE / "tools" / "runner.py"

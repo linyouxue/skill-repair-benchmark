@@ -1,0 +1,116 @@
+Build failure analysis for google/auto (snapshot in /home/travis/build/failed/google/auto)
+=========================================================================================
+
+Target CI environment (declared in .travis.yml)
+-----------------------------------------------
+- language: java
+- jdk: openjdk7 (and oraclejdk7)
+- script: mvn -B -U -f build-pom.xml verify --fail-at-end
+          -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Local reproduction uses openjdk7 (/usr/lib/jvm/java-7-openjdk-amd64).
+Container locale is LANG=C, so the JVM default charset is US-ASCII
+(file.encoding=ANSI_X3.4-1968).
+
+
+Observed failures (two sequential ones, both JDK-7-reproducible)
+----------------------------------------------------------------
+
+Failure 1: Surefire unit test in the `value` module
+
+  Test: com.google.auto.value.processor.AutoAnnotationCompilationTest#testMissingClass
+  Reactor summary: `AutoValue 1.2-SNAPSHOT ... FAILURE`
+  Error:
+    Not true that <"unmappable character for encoding ASCII">
+                  contains <"NotAutoAnnotation">
+
+  Root cause:
+    `doTestMissingClass` invokes `ToolProvider.getSystemJavaCompiler()` with
+    a null file manager, then calls `assertThat(diagnostics.get(0).getMessage(null))
+    .contains("NotAutoAnnotation")`.
+    value/pom.xml adds `src/main/java` as a resources directory
+      <resources>
+        <resource>
+          <directory>src/main/java</directory>
+        </resource>
+      </resources>
+    so .java sources (including AutoAnnotation.java, which contains the
+    non-ASCII author line "Éamonn McManus") are copied into
+    value/target/classes and end up on the test classpath. javac in the
+    forked surefire JVM inherits the platform encoding (US-ASCII under
+    LANG=C), hits the "É" byte sequence in AutoAnnotation.java while
+    resolving the `@AutoAnnotation` reference from the in-memory
+    `Erroneous` source, and emits an "unmappable character for encoding
+    ASCII" diagnostic BEFORE the expected "NotAutoAnnotation" one. The
+    assertion on diagnostics.get(0) then fails.
+
+  Nothing in the source is actually broken; the test only happens to pass
+  when the surefire JVM uses UTF-8 (which is the typical Travis-Ubuntu
+  default but not this container's default).
+
+Failure 2 (exposed after fixing failure 1): Maven Invoker functional IT
+
+  Invoker root: value/src/it/functional/pom.xml
+  Reactor hit: `maven-invoker-plugin:1.8:run (integration-test) @ auto-value`
+  Invoker build.log tail:
+    [ERROR] .../AutoValueTest.java:[50,33] unmappable character for encoding ASCII
+    [ERROR] .../SimpleValueTypeTest.java:[26,33] unmappable character for encoding ASCII
+    [ERROR] .../MyEnum.java:[19,33] unmappable character for encoding ASCII
+    [ERROR] .../PackagelessValueTypeTest.java:[25,33] unmappable character for encoding ASCII
+    [ERROR] .../AutoValueTest.java:[20,30] cannot find symbol
+              symbol:   class MoreObjects
+              location: package com.google.common.base
+    [ERROR] .../AutoValueTest.java:[72,16] package MoreObjects does not exist
+    [ERROR] .../AutoValueTest.java:[72,49] cannot find symbol
+              symbol:   variable MoreObjects
+  Earlier warnings in the same log confirm the independent nature:
+    [WARNING] File encoding has not been set, using platform encoding
+              ANSI_X3.4-1968, i.e. build is platform dependent!
+
+  Two independent root causes inside this nested Invoker POM:
+
+  2a. The functional IT POM has no parent and declares neither
+      <project.build.sourceEncoding> nor an explicit <encoding> on
+      maven-compiler-plugin, so the Invoker-spawned child Maven uses
+      platform encoding (ASCII) to read the UTF-8 test sources.
+
+  2b. The functional IT dependency block is stale with respect to the
+      APIs the test sources use. AutoValueTest.java imports
+      `com.google.common.base.MoreObjects`, which was *added* in Guava
+      18 but the test assertions and surrounding sources are the
+      synchronized Guava-19/Truth-0.28/jsr305-3.0.0 set used by
+      AutoValue's intended Invoker fixture. With the currently declared
+      guava-testlib:18.0, the mediated Guava on the IT compile classpath
+      does not expose `MoreObjects.toStringHelper(Class)` in a shape the
+      tests expect, and the symbol is not resolved during the clone-and-
+      compile Invoker run. This is dependency-version drift inside the
+      Invoker project only; the main reactor modules build cleanly on
+      JDK 7 (once failure 1 is addressed).
+
+
+Repair plan (narrow and scoped)
+-------------------------------
+
+A. Fix failure 1 in value/pom.xml by configuring maven-surefire-plugin to
+   pass `-Dfile.encoding=UTF-8` to the forked test JVM, so the in-test
+   javac reads project sources under a UTF-8 charset. This is a minimal,
+   surgical change confined to the value module's build section; it does
+   not touch source or Java language level.
+
+B. Fix failure 2 in value/src/it/functional/pom.xml by synchronizing the
+   functional IT dependency block as one coherent repair and by
+   declaring UTF-8 as the project build source encoding:
+     - add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+     - com.google.code.findbugs:jsr305      1.3.9 -> 3.0.0 (provided)
+     - junit:junit                          4.11  -> 4.12 (test)
+     - add com.google.guava:guava:19.0 (test) as a direct dependency
+     - com.google.guava:guava-testlib       18.0  -> 19.0 (test)
+     - com.google.truth:truth               0.25  -> 0.28 (test)
+   The change stays within this one Invoker POM; nothing else in the
+   reactor is modified. This matches the maven-build-lifecycle skill's
+   AutoValue functional IT guidance.
+
+Both patches are applied under JDK 7 and verified with the exact Travis
+command:
+  mvn -Dhttps.protocols=TLSv1.2 -B -U -f build-pom.xml verify \
+      --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true

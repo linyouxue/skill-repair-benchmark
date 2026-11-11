@@ -15,13 +15,16 @@ import sys
 import threading
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("WML_CONTROLLED_ROOT", Path(__file__).resolve().parent.parent))
 INPUTS = ROOT / "inputs"
 CANDIDATES = ROOT / "candidates"
 FAILURES = ROOT / "failed-attempts"
-ADAPTER = ROOT / "wml_adapter.py"
+ADAPTER = Path(__file__).resolve().parent / "wml_adapter.py"
 RUNNER = Path("/Users/king/Downloads/skill-repair-controlled-datasets-20261020/tools/runner.py")
-ENV_FILE = Path("/Users/king/Documents/Codex/2026-09-18/skillaxe-20-17-skillaxe-39-48-2/claudeapikey.env")
+ENV_FILE = Path(os.environ.get(
+    "WML_CLAUDE_ENV_FILE",
+    "/Users/king/Documents/Codex/2026-09-18/skillaxe-20-17-skillaxe-39-48-2/claudeapikey.env",
+))
 LOCK = threading.Lock()
 
 
