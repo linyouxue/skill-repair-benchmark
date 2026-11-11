@@ -1,0 +1,58 @@
+Build failure analysis — google/auto (AutoValue)
+=================================================
+
+Reproduced target
+-----------------
+Repository: /home/travis/build/failed/google/auto
+The parent reactor (`mvn install`) runs the maven-invoker-plugin on
+AutoValue's nested integration-test projects under:
+    value/src/it/functional/pom.xml
+
+Failing nested build
+--------------------
+The invoker reports:
+    The following builds failed:
+    *  functional/pom.xml
+
+The first real compiler error inside that nested build is in
+    value/src/it/functional/src/test/java/com/google/auto/value/AutoValueTest.java
+pointing at:
+    import com.google.common.base.MoreObjects;
+    ...
+    MoreObjects.ToStringHelper toStringHelper = MoreObjects.toStringHelper(Simple.class);
+
+Error:
+    cannot find symbol: class MoreObjects
+    location: package com.google.common.base
+
+Root cause: dependency-version drift
+------------------------------------
+`com.google.common.base.MoreObjects` is available in Guava >= 18, but the
+`toStringHelper` API in the shape the test uses is stable from Guava 19+ and
+is coupled with a matching `guava-testlib`. The nested functional-test POM
+declares only `guava-testlib:18.0` and no direct `guava` dependency, so the
+transitively selected `guava` can be older/mismatched.
+
+Other dependencies in `value/src/it/functional/pom.xml` are also stale:
+  - findbugs jsr305 1.3.9  -> should be 3.0.0 (provided)
+  - junit 4.11             -> should be 4.12  (test)
+  - truth 0.25             -> should be 0.28  (test)
+  - guava-testlib 18.0     -> should be 19.0  (test)
+  - (missing)              -> add direct guava 19.0 (test)
+
+The error is NOT in the production source code; it is dependency-drift in
+the Maven Invoker integration-test POM. The main reactor's `guava` version
+does not govern this nested build.
+
+Fix plan
+--------
+Edit only `value/src/it/functional/pom.xml`:
+  1. Bump `jsr305` 1.3.9 -> 3.0.0 (scope provided).
+  2. Bump `junit` 4.11 -> 4.12 (scope test).
+  3. Add a direct `com.google.guava:guava:19.0` dependency (scope test).
+  4. Bump `guava-testlib` 18.0 -> 19.0 (scope test).
+  5. Bump `com.google.truth:truth` 0.25 -> 0.28 (scope test).
+
+Deliverables:
+  - /home/travis/build/failed/google/auto/patch_1.diff (unified diff)
+  - Apply patch, verify `git diff` touches the project POM.
