@@ -1,0 +1,33 @@
+Important functions / APIs to test (Arrow)
+
+High-value fuzz targets (input boundaries)
+
+1) arrow.api.get / arrow.get
+   - Why: public entrypoint that accepts many input shapes (str, datetime, date, timestamp, list/tuple), plus optional format strings and tzinfo.
+   - Inputs to vary:
+     - Unicode strings (including weird separators, mixed locales, very long numeric runs).
+     - format specifiers list vs single format string.
+     - tzinfo strings ("UTC", "Europe/Paris", garbage) and offsets.
+   - Expected failures: arrow.parser.ParserError, ValueError, OverflowError.
+
+2) arrow.parser.ArrowParser.parse / ArrowParser.parse_iso
+   - Why: complex parsing/validation logic, heavy branching, regex/token-like format handling.
+   - Inputs to vary:
+     - (string, format) pairs where format includes unusual tokens, repeated tokens, missing tokens.
+     - timestamp formats: X/x with decimal points, signs, huge magnitudes.
+   - Oracles:
+     - Must not hang.
+     - If it returns datetime, result.tzinfo should be set consistently with the format.
+
+3) arrow.arrow.Arrow.dehumanize
+   - Why: parses natural-language deltas ("in 2 days", "3 weeks ago") which is error-prone.
+   - Inputs to vary: random human strings, mixed digits/words.
+   - Expected failures: ValueError, ParserError.
+
+Existing tests
+- tests/test_parser.py heavily tests ArrowParser.parse across many formats and timestamp edge-cases.
+- Fuzzing should complement by exploring malformed/unexpected format strings, extreme lengths, and odd unicode.
+
+Fuzz harness note
+- Prefer calling ArrowParser().parse(s, fmt) where fmt is either a single format or list of formats.
+- Cap input sizes aggressively (e.g., <= 256 chars) to avoid pathological regex backtracking / DoS.

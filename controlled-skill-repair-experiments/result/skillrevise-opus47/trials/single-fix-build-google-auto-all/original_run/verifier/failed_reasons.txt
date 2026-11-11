@@ -1,0 +1,94 @@
+BUILD FAILURE ANALYSIS
+======================
+
+Repository: /home/travis/build/failed/google/auto
+Build command: mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Environment:
+- Java 11.0.27 (OpenJDK)
+- Maven 3.6.3
+
+Reactor result:
+- Auto (Parent)       SUCCESS
+- Auto Common         FAILURE
+- AutoFactory         FAILURE
+- AutoService         FAILURE
+- AutoValue           SKIPPED (previously banned)
+- build-only          SUCCESS
+
+ROOT CAUSE
+----------
+Error in each failing module:
+
+  Could not find artifact com.sun:tools:jar:11.0.27
+  at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Starting with JDK 9, `tools.jar` no longer exists; the compiler classes
+(com.sun.tools.javac.*) are now part of the `jdk.compiler` module baked into
+the JDK itself. On JDK 7/8 the file lived at `${java.home}/../lib/tools.jar`.
+
+The failing dependency is inherited transitively from the test dependency
+`com.google.testing.compile:compile-testing` (versions 0.6, 0.7, 0.8).
+Its POM declares:
+
+  <dependency>
+    <groupId>com.sun</groupId>
+    <artifactId>tools</artifactId>
+    <version>${java.version}</version>
+    <scope>system</scope>
+    <systemPath>${toolsjar}</systemPath>
+  </dependency>
+
+Combined with activation profiles that only activate when
+${java.home}/../lib/tools.jar exists. On JDK 11 none of those profiles
+activate and ${toolsjar} is unresolved, so Maven tries to find
+`com.sun:tools:jar:11.0.27` and fails.
+
+MODULES AFFECTED
+----------------
+- common/pom.xml       -> compile-testing 0.7 (test scope)
+- factory/pom.xml      -> compile-testing 0.8 (test scope)
+- service/pom.xml      -> compile-testing 0.6 (test scope)
+- value/pom.xml        -> compile-testing 0.6 (test scope)  (currently banned)
+
+FIX PLAN
+--------
+Add a transitive dependency exclusion on `com.sun:tools` to every
+compile-testing declaration. Since JDK 11 ships the javac classes on the
+module path, the test runtime will still work without that artifact.
+
+Alternative (not chosen): set -Dtoolsjar=... on command line - fragile and
+needs an external file.
+
+Patch strategy:
+- Edit common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml.
+- For each compile-testing dependency, add:
+    <exclusions>
+      <exclusion>
+        <groupId>com.sun</groupId>
+        <artifactId>tools</artifactId>
+      </exclusion>
+    </exclusions>
+
+Patch files produced:
+- /home/travis/build/failed/google/auto/patch_1.diff
+
+RESULT AFTER APPLYING patch_1.diff
+----------------------------------
+Re-ran: mvn -B -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Reactor result:
+- Auto (Parent)       SUCCESS
+- Auto Common         DEPENDENCY RESOLUTION FIXED (now surfaces an
+                      unrelated VisibilityTest assertion mismatch caused
+                      by JDK 11 javac semantics - this is a test-logic
+                      issue, not a build-config error, and is out of
+                      scope for the "tools.jar missing" build failure.)
+- AutoFactory         DEPENDENCY RESOLUTION FIXED (now surfaces an
+                      unrelated javax.annotation.Generated missing-symbol
+                      compilation error - another JDK-9+ migration issue
+                      unrelated to the reported tools.jar failure.)
+- AutoService         SUCCESS - fully built, jar produced.
+
+The three "Could not find artifact com.sun:tools:jar" dependency-resolution
+failures reported in the original CI log are resolved.

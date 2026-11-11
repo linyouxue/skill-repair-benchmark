@@ -1,0 +1,27 @@
+Library: minisgl (minimal SGLang-like inference engine).
+
+Scope narrowing: the full package has heavy GPU dependencies (torch, flashinfer,
+sgl_kernel, quack-kernels, apache-tvm-ffi, transformers) that are not reachable
+on CPU-only CI and are not needed for fuzzing. The package has no top-level
+`__init__.py`, so individual submodules can be imported directly without
+triggering heavy imports.
+
+Selected FUT: minisgl.env._PARSE_MEM_BYTES(mem: str) -> int
+File: /app/minisgl/python/minisgl/env.py
+
+Why this target:
+- Input surface: environment-variable string (e.g. "1G", "512M", "1024B", "2048").
+- Boundary: string parsing with unit suffix handling and float conversion.
+- Complexity: branches on alpha suffix, "B" strip, final unit letter dispatch.
+- Test gaps: no direct unit tests for this helper.
+
+Callable contract:
+- Expected invalid-input exceptions: `ValueError`, `KeyError` (unknown unit),
+  `IndexError` (empty-after-strip strings).
+
+Input model: bytes -> str via FuzzedDataProvider.ConsumeUnicode.
+
+Oracles: crash-only.
+
+Dependencies: none at import time -- pure stdlib. We skip the heavy package
+dependencies entirely because the chosen target does not need them.

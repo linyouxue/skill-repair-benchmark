@@ -1,0 +1,29 @@
+Notes for testing / fuzzing: minisgl
+
+This project has very heavy ML/GPU dependencies (torch, transformers, flashinfer, etc).
+For a lightweight, always-available fuzz target, focus on pure-stdlib code paths.
+
+High-value modules / boundaries
+- minisgl/env.py -> _PARSE_MEM_BYTES(): parses human-friendly memory sizes ("10G", "512MB", etc)
+- minisgl/env.py -> EnvVar._init(): reads env vars and attempts type conversion (swallows exceptions)
+
+Suggested functions-under-test (FUTs)
+1) minisgl.env._PARSE_MEM_BYTES(mem: str) -> int
+
+Input ideas
+- Empty strings, whitespace-only
+- No suffix: "0", "001", "-1", very large integers
+- With suffixes: "1K", "1KB", "1M", "1MB", "1G", "1GB"
+- Decimal: "1.5G", "0.5M"
+- Weird casing: "  10mB  "
+- Garbage: "GG", "1T", "1MiB"
+
+Inferred oracles / properties
+- No crash / no hang
+- If it returns, result should be an int
+
+Expected/acceptable exceptions
+- ValueError, KeyError, IndexError (e.g., empty string), OverflowError
+
+Seed corpus ideas
+- "1K", "1KB", "1M", "1G", "1024", " 10mb ", "0.5G", ""
