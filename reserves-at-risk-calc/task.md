@@ -26,7 +26,7 @@ metadata:
 verifier:
   type: test-script
   timeout_sec: 600.0
-  service: main
+  service: verifier
   hardening:
     cleanup_conftests: true
 agent:
