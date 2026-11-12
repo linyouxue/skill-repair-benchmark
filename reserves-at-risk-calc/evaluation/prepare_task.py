@@ -16,6 +16,7 @@ def task_prompt(year):
         raise ValueError("Unexpected upstream prompt")
     return (prompt.replace(ORIGINAL_SOURCE, FROZEN_SOURCE)
             .replace("2025", str(year))
+            .replace("  service: main", "  service: verifier", 1)
             .replace("build_timeout_sec: 600.0", "build_timeout_sec: 1800.0"))
 
 
@@ -31,7 +32,8 @@ def prepare(split, output):
     for name in ("test-rar.xlsx", "gold-prices.xlsx"):
         shutil.copyfile(source_inputs / name, inputs / name)
     shutil.copytree(ROOT / "environment/skills", inputs / "skills")
-    shutil.copyfile(ROOT / "environment/Dockerfile", inputs / "Dockerfile")
+    for name in ("Dockerfile", "Verifier.Dockerfile", "docker-compose.yaml"):
+        shutil.copyfile(ROOT / "environment" / name, inputs / name)
     verifier.mkdir()
     shutil.copyfile(data / "verifier/expected_output.json", verifier / "expected_output.json")
     for name in ("test.sh", "score_accuracy.py"):

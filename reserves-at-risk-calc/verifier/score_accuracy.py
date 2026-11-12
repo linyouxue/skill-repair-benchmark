@@ -4,6 +4,7 @@ from io import BytesIO
 import json
 import math
 from pathlib import Path
+from statistics import NormalDist
 import subprocess
 from tempfile import TemporaryDirectory
 import time
@@ -19,6 +20,7 @@ TABLES = {
     "step3": (20, 9, {"gold_value": 21, "total_reserves": 23, "rar_percent": 24}),
 }
 TOTAL = 43
+EXACT_Z = NormalDist().inv_cdf(0.95)
 
 
 def key(name):
@@ -45,13 +47,23 @@ def is_number(value):
     return type(value) in (float, int) and math.isfinite(value)
 
 
+def matches(observed, expected):
+    return is_number(observed) and math.isclose(observed, expected, rel_tol=1e-6, abs_tol=1e-6)
+
+
 def score(sheet, reference, input_status="ok"):
     cells = tuple(sheet.iter_rows(min_row=1, max_row=24, min_col=3, max_col=11,
                                   values_only=True)) if sheet is not None else ()
+    exact_quantile = bool(cells) and matches(cells[2][0], EXACT_Z)
     feedback = []
     for step, item, expected, address in fields(reference):
         if not is_number(expected):
             raise ValueError("Invalid numeric reference")
+        if exact_quantile:
+            if step == "step1" and item == "C3":
+                expected = EXACT_Z
+            elif item.endswith((":exposure", ":rar_percent")):
+                expected *= EXACT_Z / reference["step1"]["C3"]
         observed = None
         if cells:
             if step == "step1":
@@ -62,7 +74,7 @@ def score(sheet, reference, input_status="ok"):
                            if key(cells[header - 1][col]) == country]
                 if len(columns) == 1:
                     observed = cells[row - 1][columns[0]]
-        correct = is_number(observed) and math.isclose(observed, expected, rel_tol=1e-6, abs_tol=1e-6)
+        correct = matches(observed, expected)
         feedback.append({"section": step, "item": item, "correct": correct})
     if len(feedback) != TOTAL:
         raise ValueError("Expected exactly 43 scoring items")

@@ -90,18 +90,19 @@ def main():
     assert not set(snapshot["prices_usd_per_troy_ounce"]["2023"]) & set(snapshot["prices_usd_per_troy_ounce"]["2025"])
 
     results = {}
-    for split in YEARS:
-        task = prepare(split, scratch / split / "reserves-at-risk-calc")
-        check_workbooks(split, task / "environment", snapshot)
-        image = f"codex-rar-validation:{uuid4().hex[:12]}"
-        docker("build", "-t", image, str(task / "environment"))
-        try:
+    image = f"codex-rar-validation:{uuid4().hex[:12]}"
+    docker("build", "-t", image, "-f", str(ROOT / "environment/Verifier.Dockerfile"),
+           str(ROOT / "environment"))
+    try:
+        for split in YEARS:
+            task = prepare(split, scratch / split / "reserves-at-risk-calc")
+            check_workbooks(split, task / "environment", snapshot)
             results[split] = grade(image, task, fixtures / f"{split}.xlsx", scratch / f"{split}-logs", 43)
             if split == "train":
                 results["one_wrong"] = grade(image, task, fixtures / "one-wrong.xlsx", scratch / "one-wrong-logs", 42)
                 results["missing"] = grade(image, task, None, scratch / "missing-logs", 0)
-        finally:
-            docker("image", "rm", image)
+    finally:
+        docker("image", "rm", image)
     output = ROOT / "validation/local_results.json"
     output.parent.mkdir(exist_ok=True)
     output.write_text(json.dumps({"runtime": "Docker with network disabled for verification",
