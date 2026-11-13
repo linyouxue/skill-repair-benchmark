@@ -1,0 +1,38 @@
+Repo: /home/travis/build/failed/google/auto
+
+CI config (.travis.yml):
+- install: mvn -B -U -f build.pom.xml dependency:go-offline test clean --quiet --fail-never -DskipTests=true
+- script:  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+- jdk: oraclejdk7, openjdk7
+
+Local toolchain used for repro:
+- JDK: OpenJDK 7 (java version 1.7.0_75)
+- Maven: 3.6.3
+
+Repro command (matches CI script):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failure (key lines):
+- FATAL Non-resolvable parent POM for com.google.auto:auto-parent:4-SNAPSHOT
+  Could not transfer org.sonatype.oss:oss-parent:pom:7 from central:
+  https://repo.maven.apache.org/.../oss-parent-7.pom (403 Forbidden)
+- FATAL Non-resolvable parent POM for modules (common/factory/service/value)
+  because they declare parent com.google.auto:auto-parent:3, which Maven tries
+  to download from central (403 Forbidden), and the default parent.relativePath
+  points at the local repo root pom.xml (auto-parent 4-SNAPSHOT), so it is
+  considered the “wrong local POM”.
+
+Root cause guess:
+- Build configuration (POM parent chain), not Java code.
+- The project depends on remote parent POMs (oss-parent:7 and auto-parent:3).
+  In this environment Maven Central fetches are blocked (403), so parent POM
+  resolution fails before compilation.
+
+Plan:
+1) Make the build self-contained by removing the remote parent from the repo
+   root pom.xml (drop org.sonatype.oss:oss-parent:7).
+2) Align module parent versions to the local reactor parent:
+   change common/factory/service/value parent version from 3 -> 4-SNAPSHOT.
+   (Optional but safer: add <relativePath>../pom.xml</relativePath> explicitly.)
+3) Re-run the CI Maven command. If compilation/tests then fail, fix code-level
+   issues next (but first unblock POM resolution).
