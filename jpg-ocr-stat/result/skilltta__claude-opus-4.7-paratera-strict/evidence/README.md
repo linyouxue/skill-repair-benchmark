@@ -32,7 +32,7 @@ gzip -t llm_trajectory.jsonl.gz
 ```
 
 - Run 02 重组后 SHA-256：`55f6d2649106156e72603fee3ee7e5859e18cf2033240a983d639e30fd51ccda`（`part-00` 至 `part-04`）。
-- Run 03 重组后 SHA-256：`a0882310dafd0f2b9231ff493a64f086357073abb7fa4b49de7832241d24f623`。为提高 GitHub 上传可靠性，`part-02` 与 `part-03` 又按连续字节细分为带字母后缀的小片段；仍按上述 `part-*` 通配符的字典序拼接即可。
+- Run 03 重组后 SHA-256：`a0882310dafd0f2b9231ff493a64f086357073abb7fa4b49de7832241d24f623`（`part-00` 至 `part-03`）。
 
 ## 修复过程中的重试说明
 
