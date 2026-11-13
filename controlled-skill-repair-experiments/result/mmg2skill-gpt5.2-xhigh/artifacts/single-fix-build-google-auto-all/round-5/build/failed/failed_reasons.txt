@@ -1,0 +1,51 @@
+Repo: /home/travis/build/failed/google/auto
+
+Toolchain:
+- java -version: OpenJDK 11.0.27 (javac binary not installed)
+- mvn -v: Apache Maven 3.6.3
+
+Repro command (CI equivalent from .travis.yml):
+- mvn -B -e -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Observed failures
+1) Dependency/plugin downloads blocked (403 from Maven Central)
+   - First run fails while resolving parent POMs (oss-parent, auto-parent:3) because Maven tries to fetch from https://repo.maven.apache.org.
+   - Root cause is environment/network: outbound Maven Central access is blocked.
+
+2) Build is not using the prewarmed Maven cache
+   - The sandbox has a populated cache at /home/travis/.m2/repository.
+   - Running Maven as the current user uses a different ~/.m2, so it attempts network downloads and fails.
+
+3) Even when pointing Maven at /home/travis/.m2/repository, the build still fails because:
+   a) maven-enforcer-plugin runs (inherited via oss-parent) and tries to resolve missing plugin deps (e.g. org.apache.maven:maven-artifact:2.0.9 JAR), which triggers blocked downloads.
+   b) Tests pull in com.google.testing.compile:compile-testing (0.6/0.7) which declares a system-scoped dependency on com.sun:tools using ${java.home}/../lib/tools.jar.
+      - On Java 11 there is no tools.jar, so dependency resolution fails:
+        "Could not find artifact com.sun:tools:jar:11.0.27 at specified path .../tools.jar".
+
+Classification
+- Primary issues are build configuration / dependency management (offline build + outdated tooling assumptions), not Java source code logic.
+
+Fix plan
+A) Force Maven to use the prewarmed local repository
+   - Add repo-root .mvn/maven.config with:
+     -Dmaven.repo.local=/home/travis/.m2/repository
+   - This prevents unnecessary network access.
+
+B) Remove oss-parent inheritance (to stop enforcer and other release-only plugins)
+   - Update repo-root pom.xml to remove the <parent> org.sonatype.oss:oss-parent:7.
+
+C) Ensure modules inherit the in-repo parent (and therefore no oss-parent)
+   - Update common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml:
+     - parent version -> 4-SNAPSHOT
+     - add <relativePath>../pom.xml</relativePath>
+
+D) Make compile-testing usable on Java 11 by removing tools.jar dependency
+   - In each module that depends on compile-testing, add an exclusion:
+     <exclusion>
+       <groupId>com.sun</groupId>
+       <artifactId>tools</artifactId>
+     </exclusion>
+
+Verification
+- From repo root:
+  mvn -B -e -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true

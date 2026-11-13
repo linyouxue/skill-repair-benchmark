@@ -1,0 +1,57 @@
+Repo: /home/travis/build/failed/google/auto
+
+== Toolchain ==
+pwd: /home/travis/build/failed/google/auto
+
+-- java -version --
+openjdk version "11.0.27" 2025-04-15
+OpenJDK Runtime Environment (build 11.0.27+6-post-Ubuntu-0ubuntu120.04)
+OpenJDK 64-Bit Server VM (build 11.0.27+6-post-Ubuntu-0ubuntu120.04, mixed mode, sharing)
+
+-- mvn -v --
+[1mApache Maven 3.6.3[m
+Maven home: /usr/share/maven
+Java version: 11.0.27, vendor: Ubuntu, runtime: /usr/lib/jvm/java-11-openjdk-amd64
+Default locale: en_US, platform encoding: ANSI_X3.4-1968
+OS name: "linux", version: "6.18.33.2-microsoft-standard-wsl2", arch: "amd64", family: "unix"
+
+== Repro ==
+Planned command (from .travis.yml):
+mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+== Observed failure ==
+Command run:
+  mvn -B -U -e -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+First failure (build config / dependency resolution):
+  Non-resolvable parent POM ... Authorization failed ... 403 Forbidden
+  Example:
+    Could not transfer artifact org.sonatype.oss:oss-parent:pom:7 ... 403 Forbidden
+
+Follow-up failures once forcing a local repo / offline:
+  1) maven-enforcer-plugin:1.0 is pulled in via oss-parent and fails because its Maven 2.0.9
+     dependency JARs are missing locally and remote downloads are blocked (403).
+  2) auto-* modules fail resolving com.sun:tools:jar:${java.version} with systemPath tools.jar.
+     This comes from the old com.google.testing.compile:compile-testing (0.6/0.7/0.8) POM,
+     which declares a system-scoped com.sun:tools dependency using ${toolsjar}. Java 11 has
+     no tools.jar, so resolution fails.
+
+== Root cause ==
+- Build configuration assumes it can download from Maven Central, but outbound access returns 403.
+- The build also inherits oss-parent which triggers maven-enforcer-plugin:1.0; that plugin expects
+  Maven 2.0.9 JARs that are not present in the seeded cache.
+- Tests depend on old compile-testing versions that pull in tools.jar via com.sun:tools system dependency,
+  which is incompatible with Java 9+.
+
+== Fix plan ==
+1) Add project-local Maven defaults (.mvn/maven.config) to use the seeded cache:
+     -Dmaven.repo.local=/home/travis/.m2/repository
+   and run offline to avoid any remote checks:
+     -o
+2) Remove oss-parent from the root pom.xml to stop maven-enforcer-plugin from running.
+3) Update module POMs (common/factory/service/value) to inherit from the local auto-parent (4-SNAPSHOT)
+   instead of released auto-parent:3.
+4) Align intra-repo dependency versions to the reactor modules (use 1.0-SNAPSHOT instead of 0.3/0.5/1.0-rc2).
+5) For each compile-testing dependency, exclude com.sun:tools to avoid tools.jar resolution on Java 11.
+
+After edits, re-run the same Maven verify command and ensure BUILD SUCCESS.
