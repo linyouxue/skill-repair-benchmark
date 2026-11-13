@@ -1,0 +1,35 @@
+## Scope of new evidence (window w0022, exchanges e0030–e0036)
+
+This window captures the tail of the source run where the Agent was iteratively tuning `extract.py` based on in-run OCR self-checks. Thought logs show the Agent explicitly aware of three stubborn residual cases (071 date, 074 amount, 077 amount) and already planning fixes for 074/077 by (a) adding `EXCLUDING` to the exclusion-keyword list and (b) experimenting with upscaled OCR. Field feedback confirms the run ultimately scored 0.909 (date_correct 21/22, amount_correct 19/22) and terminated at `max_iterations=65` with `acp_stop_reason=max_turn_requests` — i.e. not natural completion. The Agent never got to re-score after its last edits; many of the last exchanges are pure `think` + narrow re-OCR, consuming the iteration budget.
+
+## Per-failure causal analysis (grounded in the 22 image blocks)
+
+1. **034.jpg — date wrong (pred `2018-08-09`, image shows "Date: 09/03/2018", with "Time: 08:49:00" on the adjacent line).** The receipt uses DD/MM/YYYY and prints Date and Time stacked. The predicted month `08` matches the hour portion of the time string, and day `09` matches the real day. Cause: the date regex/parser in `extract.py` is matching tokens globally rather than anchoring to the "Date:" label, so when OCR flows "Date: 09/03/2018  Time: 08:49:00" onto the same visual column it composes `08/09` from the hour and day (or a general "DD/MM" scan picks `09/08` because "03" OCR'd poorly and `08` from the time was more confident). Window evidence does not show the Agent revisiting 034 at all — it fell out of the loop after they prioritized 064/071/074/077.
+
+2. **074.jpg — amount wrong (pred `702.00`, image clearly shows all tier-matching lines agreeing on `102.00`).** The Agent's own thought (m0099) enumerates the preprocessed OCR output: `Subtotal : 102.00`, `Total incl. of GST 102.00`, `Total Amt Rounded 702.00` (OCR glyph misread `1→7`), `Payment : 102.00`. Current algorithm picks the LAST priority-4 match within the pass, so the corrupted `702.00` line wins. The Agent considered consensus voting but never implemented it; the planned `EXCLUDING` exclusion (m0102) does not help here because "Total Amt Rounded" has no such keyword.
+
+3. **077.jpg — amount wrong (pred `23.26`, receipt image shows `Total (Inclusive of GST): 23.26`, then `Rounding Adj: -0.01`, then a large `TOTAL: 23.25`).** True final total is `23.25`. The extract keeps `23.26` because "Total (Inclusive of GST)" matches the tier-4 TOTAL keyword and the raw `TOTAL:` line with 23.25 either (a) is parsed earlier/later in a way that `23.26` wins by "last in tier", or (b) OCR split the big-font `TOTAL: 23.25` into a line the current regex rejects (no decimal captured on same line → fallback to previous value). The Agent's late addition of an "EXCLUDING" exclusion keyword will not help 077 (it actually *could* break it: that exclusion would drop the pre-tax "Total (Excluding GST): 21.30" line, but the pred was already `23.26`, not `21.30`, so the dominant issue is pre- vs post-rounding, not exclusion).
+
+4. **078.jpg — amount wrong (pred empty string, image shows two unambiguous lines `Total : 92.80` and `Grand Total : 92.80`).** "GRAND TOTAL" is tier-1 in the task hint, so even a single OCR hit should yield 92.80. An empty string implies keyword matching failed on both passes. Likely causes visible from the image: this receipt is a lower-contrast thermal print; the words "Grand Total" and "Total" have trailing colons and leading spaces, and the colon-space-number layout combined with the Agent's recent strict 2-decimal regex (m0090 "Test with strict 2-decimal number regex") may be rejecting the number if OCR inserted a stray char between `:` and `92.80`, or splitting the keyword across two tokens. The empty output correlates with the window showing the Agent tightening regexes without re-running the full 22-image verification afterwards.
+
+## Run-level causes
+
+- **Iteration budget exhaustion**: Exchanges e0030–e0036 all carry prompt_tokens ≈ 91k–96k and are dominated by `think`/narrow terminal checks. The Agent spent many iterations on micro-reasoning (m0093, m0099, m0105) about a single receipt before editing. Termination at 65/65 prevented a final full re-verification pass, so edits intended to fix 077 (exclusion keyword) or 074 (upscaling) were never validated end-to-end.
+- **Local tie-break policy ("last candidate in tier")** causes both 074 (OCR-corrupted trailing line wins) and 077 (pre-rounding line wins over final rounded TOTAL).
+- **Date parser lacks label anchoring**, causing 034's `Date:`/`Time:` adjacency to leak hour into month slot.
+- **Keyword/number co-location is brittle** under OCR noise, causing 078's silent null despite a clear `Grand Total` line.
+
+## Guidance for Momentum / Patcher (no Skill rewrites here)
+
+- Patcher should target `extract.py`, not the Skills: the `image-ocr` skill is generic and already drives multi-pass OCR; the failures are in the downstream domain logic for receipt total/date selection.
+- High-leverage, low-risk fixes:
+  1. For date: prefer tokens on the *same* OCR line as a `DATE` label; reject date candidates whose "month" field exceeds 12 before falling back; forbid composing day/month from different source lines.
+  2. For total: switch tie-breaking within a tier from "last" to "most-agreed value across all OCR passes and across Subtotal/Payment/Total-incl lines"; this directly repairs 074 (102.00 has 3 votes vs 702.00's 1).
+  3. For 077: within tier-4, if a line literally begins with `TOTAL` (no parenthetical qualifier) and appears *after* a `Rounding Adj` line, prefer it over any earlier `Total (Inclusive …)` line.
+  4. For 078: fall back to fuzzy keyword match (allow 1 edit on "GRAND TOTAL"/"TOTAL") and relax the strict 2-decimal regex to accept values with a single stray non-digit char adjacent to the number.
+- Momentum should not re-tune OCR preprocessing globally; the three amount errors are selection-logic, and the one date error is label-anchoring. Avoid re-adding broad exclusions (e.g. `EXCLUDING`) without re-verifying all 22, since the source run's late exclusion edits were never full-suite tested.
+
+## Uncertainty
+
+- Window text is largely request-ID bookkeeping; I did not see the final `extract.py` body in this window, so the exact current regex/tie-break code is inferred from m0099/m0102/m0105 thoughts and the field-level outcomes. The exact reason 078 produced `""` (vs a wrong number) is inferred from the image + the m0090 "strict 2-decimal" edit; could alternatively be an OCR skip of the `Total` line entirely.
+- For 034, I cannot see the actual OCR text in this window; the "time-bleeds-into-date" hypothesis fits predicted `2018-08-09` perfectly but a pure OCR misread of `03 → 08` cannot be ruled out. Either way, label-anchoring the date fixes both.

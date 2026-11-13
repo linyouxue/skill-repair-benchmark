@@ -1,0 +1,40 @@
+## Scope of failures (from permitted boolean feedback)
+
+Field accuracy 40/44 (0.909). Four wrong fields across four receipts:
+
+| file | field | predicted | image (pixels) | root cause |
+|---|---|---|---|---|
+| 034.jpg | date | 2018-08-09 | "Date: 09/03/2018" | OCR misread "3" as "8" in month |
+| 074.jpg | amount | 702.00 | "102.00" (Subtotal/Total Incl./Rounded all 102.00) | OCR misread leading "1" as "7" |
+| 077.jpg | amount | 23.26 | Bold "TOTAL: 23.25" below "Total (Inclusive of GST): 23.26" and "Rounding Adj: -0.01" | Code picked the pre-rounding line because the final rounded bold TOTAL line was either not recognised or rejected by regex |
+| 078.jpg | amount | null | "Grand Total 92.80" | Regex failed on OCR-garbled "GrandTota." / "Total — 92:80" |
+
+The remaining 18 receipts (date+amount both correct) confirm the keyword-tier + "last candidate line + last decimal number" heuristic is basically sound; the failures are concentrated in (a) OCR-character errors that no regex alone can repair, and (b) a regex that cannot absorb common OCR noise around numbers.
+
+## Causal analysis per failure
+
+**034.jpg (date).** The image's printed date is unambiguously `09/03/2018`. The window's OCR of the body shows `Salesperson: Data: 09/08/2018` — a classic Tesseract 3↔8 confusion in a single glyph on a slightly noisy scan. The source extract_date regex is otherwise correct (it would produce `2018-03-09`). Evidence: the source skill's `image-ocr` doc already lists upscaling, autocontrast, sharpen, and multi-pass PSM as remedies; the executor never used any of them. Low uncertainty.
+
+**074.jpg (amount).** Pixels show three separate occurrences of `102.00` (item line, Subtotal, Total Incl. of GST, Total Amt Rounded). The window's OCR line reads `Total inel. of GBT 702.00` and `Toial Amt Rounded oO yo2.00` — the glyph "1" was recognised as "7" at the final `Total` line, which the code then picked because tier-2 (`TOTAL RM`) misses and tier-4 (`TOTAL`) selects the LAST matching line. Note that the earlier (correctly OCR'd) `Subtotal : 102.00` is excluded by the SUBTOTAL rule. Pure OCR glyph error; a second preprocessing/PSM pass that produces "102.00" anywhere would let a majority/plurality check across candidate lines override a single corrupted one. Low uncertainty on cause.
+
+**077.jpg (amount).** Pixels: three stacked lines — `Total (Inclusive of GST): 23.26`, `Rounding Adj: -0.01`, and a bold standalone `TOTAL: 23.25`. The window's OCR output never emits the final bold TOTAL line (it ends mid-row with `Rounding Ma: ~0.0)` and skips the next). The extractor then finds its "last TOTAL" at `Total (Inclusive of GST): 23.26` and returns 23.26. Two compounding issues: (1) OCR under default PSM dropped a visually prominent line; (2) even if read, the hint's priority tiers do not distinguish "pre-rounding TOTAL" from "final TOTAL" — the correct behaviour is to prefer a bare `TOTAL:` after Rounding Adj over `Total (Inclusive of GST)`. Medium uncertainty whether a repreprocess alone recovers 23.25; a secondary PSM 6 pass over the lower region is likely needed.
+
+**078.jpg (amount).** Pixels show clean `Total : 92.80` and `Grand Total : 92.80`. Window's OCR produced `a Total — 92:80` and `GrandTota. = tS 92.80`. Failure modes:
+- `GRAND\s+TOTAL` regex rejects `GrandTota.` (missing "l" and glued word) → tier-1 miss.
+- `TOTAL` tier matches `a Total — 92:80`, but `NUM_RE` requires `\d+\.\d{1,2}`; OCR gave `92:80` (colon) → no number, and the fallback only looks forward on next lines, not the SAME line beyond a colon. The adjacent `GrandTota. = tS 92.80` line is never matched because the keyword regex requires a word boundary and space. High-confidence root cause; two orthogonal fixes needed: (a) a looser keyword match that tolerates glued/misspelled "GrandTotal", (b) a number regex that also accepts `\d+[.:]\d{2}` when inside a known total line, and (c) a reverse-direction fallback (keyword line's own number even if separators are garbled).
+
+## Secondary systemic evidence
+
+- **Termination was `max_iterations` (65/65)**, not `finish`. The window shows the agent spent iterations dumping raw OCR for all 22 images before writing `extract.py`. The source skills contain preprocess/multi-pass guidance that was never invoked. A more disciplined pipeline (preprocess → OCR → extract → write once) would both free iterations for targeted recovery passes and improve per-image accuracy.
+- The code's `is_excluded` correctly filters `SUBTOTAL`, `TAX`, `GST`, `CHANGE`, `CASH TENDERED`, `DISCOUNT`, matching the task hint. No regression there.
+- Date logic on receipts like 087.jpg (`27/07/17`) and 088.jpg (`09/08/17`) passed — DD/MM/YY precedence is correct; so 034's error is not a DMY/MDY ambiguity but raw OCR.
+- `NUM_RE` requires a decimal; this is the right invariant to keep (it prevents picking "6%" or qty counts), but it must survive `:` for `.` substitution within a TOTAL-tagged line.
+
+## Implications for Momentum / Patcher stages
+
+- **OCR layer:** Add a multi-pass path — baseline + (grayscale+autocontrast+2× upscale) + PSM 6 — and union lines. Expected to recover 034's `03`, 074's `102.00`, and 077's bold `TOTAL: 23.25`.
+- **Amount extractor:** (1) accept `\d+[.:]\d{2}` when the current line matched a priority keyword; (2) if multiple candidate values across lines in the same tier disagree, prefer the value that appears most often across matched/nearby lines (handles 074); (3) within tier-4 TOTAL, prefer a bare `^TOTAL\b` line that appears AFTER a `Rounding Adj` line over an earlier `Total (Inclusive …)` (handles 077); (4) loosen Grand-Total pattern to `GRAND\s*TOTA\w*` and allow same-line number even without a clean word boundary (handles 078).
+- **Date extractor:** No structural change needed; gains come from better OCR on 034.
+- **Process:** Keep the one-write Excel step; do not spend iterations re-dumping OCR for all 22 images — iterate only on the 4 failing ones once feedback is available.
+
+Uncertainty: medium on whether multi-pass OCR alone fully recovers 077's bold TOTAL line (may need a cropped bottom-region re-pass); low on the other three.
