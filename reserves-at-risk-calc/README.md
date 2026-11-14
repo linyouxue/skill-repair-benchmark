@@ -1,28 +1,29 @@
 # 黄金储备风险评测
 
-基于 SkillsBench 的 `reserves-at-risk-calc`。任务要求用 IMF 月度金价估算短期冲击，汇总各国黄金储备市值，再计算损失占总储备的比例。任务包包含一个训练集、三个受控测试集和独立的历史诊断材料。
+基于 SkillsBench 的 `reserves-at-risk-calc`。任务要求用 IMF 月度金价估算短期冲击，汇总各国黄金储备市值，再计算损失占总储备的比例。任务包包含一个训练集、三个受控测试集和独立的训练失败诊断材料。
 
 | 目录 | 内容 |
 |---|---|
-| [task.md](task.md) 和 [environment](environment/) | A 组 2025 年训练题、两份冻结输入和完整原 Skill |
-| [diagnosis](diagnosis/) | SkillsBench 原题、原输入、GPT‑5.2 完整失败轨迹、实际 Excel 和允许反馈 |
+| [task.md](task.md) 和 [environment](environment/) | A 组 2023 年训练题、两份冻结输入和完整原 Skill |
+| [diagnosis](diagnosis/) | A 组 2023 年训练题与输入、GPT‑5.2 完整失败轨迹、实际 Excel 和允许反馈 |
 | [evaluation](evaluation/) | 三个测试集、隔离导出入口及接入说明 |
 | [verifier](verifier/) | 连续正确率入口及训练集参考答案 |
-| [result](result/) | 冻结 Skill 和执行证据的提交格式 |
+| [result](result/README.md) | 冻结 Skill、修复说明和训练运行证据 |
+| [evaluation/results](evaluation/results/README.md) | 三组测试成绩、实际输出和逐次运行索引 |
 | [source](source/) | IMF 冻结观测、来源说明和国家分组 |
 
 ## 训练与泛化测试
 
 | 数据集 | 国家 | 年份 | 相对训练集的变化 |
 |---|---|---:|---|
-| train | A 组 9 国 | 2025 | 训练和选版 |
-| group_01 | B 组 9 国 | 2025 | 只换国家 |
-| group_02 | A 组 9 国 | 2023 | 只换年份 |
-| group_03 | B 组 9 国 | 2023 | 国家和年份都换 |
+| train | A 组 9 国 | 2023 | 训练和选版 |
+| group_01 | B 组 9 国 | 2023 | 只换国家 |
+| group_02 | A 组 9 国 | 2025 | 只换年份 |
+| group_03 | B 组 9 国 | 2025 | 国家和年份都换 |
 
 同年份使用完全相同的 13 个月金价观测。同国家组使用完全相同的国家名单和字段可用性。各组都有 7 国同时提供黄金市值和总储备、1 国只有黄金市值、1 国只有黄金重量。另有 2 个市值已知国家同时提供重量，检验市值来源优先规则。
 
-四组复用原题三步和工作簿的五个工作表。题面只换目标年份，并将在线下载改为读取本地冻结 IMF 工作簿。输出仍为 `/root/output/rar_result.xlsx`，`Answer` 表行列沿用原题。训练使用同一 IMF 口径的 A 组 2025 快照；历史原题和原始数据可从 diagnosis 读取。
+四组复用原题三步和工作簿的五个工作表。题面只换目标年份，并将在线下载改为读取本地冻结 IMF 工作簿。输出仍为 `/root/output/rar_result.xlsx`，`Answer` 表行列沿用原题。训练使用 A 组 2023 快照。诊断材料来自该快照的一条原 Skill baseline。冻结 Skill 后，用 2025 年的两组输入评估向后续年份的迁移。
 
 ## 同学接入
 

@@ -5,19 +5,12 @@ from pathlib import Path
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-YEARS = {"train": 2025, "group_01": 2025, "group_02": 2023, "group_03": 2023}
-ORIGINAL_SOURCE = "download global commodity excel database from https://www.imf.org/en/research/commodity-prices,"
-FROZEN_SOURCE = "open the frozen IMF commodity workbook at /root/data/gold-prices.xlsx,"
+YEARS = {"train": 2023, "group_01": 2023, "group_02": 2025, "group_03": 2025}
 
 
 def task_prompt(year):
-    prompt = (ROOT / "diagnosis/task_prompt.md").read_text(encoding="utf-8")
-    if prompt.count(ORIGINAL_SOURCE) != 1:
-        raise ValueError("Unexpected upstream prompt")
-    return (prompt.replace(ORIGINAL_SOURCE, FROZEN_SOURCE)
-            .replace("2025", str(year))
-            .replace("  service: main", "  service: verifier", 1)
-            .replace("build_timeout_sec: 600.0", "build_timeout_sec: 1800.0"))
+    prompt = (ROOT / "task.md").read_text(encoding="utf-8")
+    return prompt.replace(str(YEARS["train"]), str(year))
 
 
 def prepare(split, output):

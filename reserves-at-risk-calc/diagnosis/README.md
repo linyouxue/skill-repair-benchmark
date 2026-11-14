@@ -1,14 +1,14 @@
-# 历史失败诊断材料
+# A 组 2023 年训练失败诊断
 
-这份材料对应 GPT‑5.2 在 **SkillsBench 原黄金题**上的失败运行。模型正常生成了 Excel，原 verifier 为 3 项通过、2 项失败，reward 为 0。新的 A 组 2025 训练集使用另一批国家，因此这次历史运行没有按新训练集计算 43 项正确率。
+这份材料对应 Tatu GPT‑5.2 xhigh 在 A 组 2023 年训练数据上的原 Skill baseline。按运行编号选取首条已有实际输出和完整轨迹的有效失败，逐项正确率为 **24/43（55.81%）**。
 
-| 材料 | 位置 |
+| 材料 | 文件 |
 |---|---|
-| 原题和原输入 | [task_prompt.md](task_prompt.md)、[原 Excel](inputs/test-rar.xlsx) |
+| 训练题面与两份冻结输入 | [题面](task_prompt.md)、[储备模板](inputs/test-rar.xlsx)、[月度金价](inputs/gold-prices.xlsx) |
 | 原 Skill | [完整 xlsx bundle](../environment/skills/xlsx/) |
-| 完整失败轨迹 | [ATIF](records/atif.json)、[ACP 事件](records/acp_trajectory.jsonl)、[LLM 请求和响应](records/llm_trajectory.jsonl) |
-| 允许反馈 | [测试对错](outputs/allowed_feedback.json) |
-| 原产物归档 | [实际 Excel](outputs/rar_result.xlsx)，供组织者复核 |
+| 完整失败轨迹 | [ATIF](records/atif.json)、[ACP](records/acp_trajectory.jsonl)、[LLM](records/llm_trajectory.jsonl) |
+| 允许反馈 | [43 项对错](outputs/allowed_feedback.json) |
+| 实际交付 | [训练失败工作簿](outputs/rar_result.xlsx) |
 | 运行索引 | [index.json](index.json) |
 
-原 Skill 以 AgentContext 全文预载，显式 Skill 工具调用数为 0。失败轨迹、原题、原 Skill 和允许反馈直接交给现有 adapter。历史产物含较早的公开金价，覆盖 2023 测试窗口，原 Excel 只留作审计，放在修复和选版输入之外。训练侧使用 A 组 2025 输入，测试输入、参考值和评分由评测侧隔离。
+使用原 Skill、训练题面、两份输入、实际失败工作簿、完整轨迹和允许反馈进行诊断、修复与选版。2025 年的两个测试组留在评测侧。此前使用 2025 年训练材料生成的候选不纳入这一划分的修复与选版。

@@ -19,8 +19,8 @@ COHORTS = {
     ))),
 }
 SPLITS = {
-    "train": ("A", 2025), "group_01": ("B", 2025),
-    "group_02": ("A", 2023), "group_03": ("B", 2023),
+    "train": ("A", 2023), "group_01": ("B", 2023),
+    "group_02": ("A", 2025), "group_03": ("B", 2025),
 }
 INDICATORS = {
     "value": "IRFCLDT1_IRFCL56_USD",
