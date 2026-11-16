@@ -1,6 +1,6 @@
 # Flink 评测结果
 
-四组均使用 Tatu GPT-5.2 xhigh、每 Step 最多 60 次父迭代和 3 次 text-only continuation。主表每种方法每组列 3 次，括号内为平均正确率。人工修复 r2 按最终交付的运行统计。50 条已有结果均验证了 Skill 预载，显式 Skill 工具调用均为 0。
+四组均使用 Tatu GPT-5.2 xhigh、每 Step 最多 60 次父迭代和 3 次 text-only continuation。主表每种方法每组列 3 次，括号内为平均正确率。人工修复 r2 按最终交付的运行统计。47 条已有结果均验证了 Skill 预载，显式 Skill 工具调用均为 0。
 
 | 数据集 | 原 Skill Baseline | SkillHone 冻结版 | 人工修复 r2 |
 |---|---:|---:|---:|
@@ -21,11 +21,9 @@
 | SkillHone Maven 补测 | `scale` | 95.62% |
 | 人工修复 r1 | `repair` | 95.92% |
 | 人工修复 r1 | `scale` | 0.00%、95.92%、100.00% |
-| 人工修复 r2 初次运行 | `repair` r03、`stages` r01 | 0.00%、0.00% |
-| 人工修复 r2 中间补测 | `stages` r04 | 0.00% |
 
 SkillHone 的 `scale` 第 3 条原运行得 0.00%，Maven 补测得 95.62%。按运行记录中的替换口径，该组均值为 87.93%。主表的 SkillHone 列采用原三条运行，Maven 补测可在逐次索引中查阅。
 
-[逐次运行索引](runs.json)收录 50 条已有评分。[结构化汇总](summary.json)在 `manual-r2` 列出最终交付的运行 ID 和均值，`manual-r2-initial` 保留初次统计。45 条评分与现存 verifier 汇总核对，另 5 条来自保留的结果回执。[中断记录](interruptions.json)列出 15 条未评分的基础设施中断。
+[逐次运行索引](runs.json)收录 47 条已有评分。[结构化汇总](summary.json)在 `manual-r2` 列出最终交付的运行 ID 和均值。45 条评分与现存 verifier 汇总核对，另 2 条来自保留的结果回执。[中断记录](interruptions.json)列出 15 条未评分的基础设施中断。
 
 [Baseline 测试](baseline/) · [SkillHone 测试](methods/skillhone-gpt5.2/) · [人工修复测试](manual/) · [Skill 和修复组证据](../../result/README.md)
