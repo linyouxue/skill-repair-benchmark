@@ -1,0 +1,91 @@
+Build failure analysis: google/auto
+====================================
+
+CI command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+JDK declared in .travis.yml: oraclejdk7 / openjdk7. Local reproduction uses /usr/lib/jvm/java-7-openjdk-amd64 (OpenJDK 1.7.0_75).
+
+Reactor result (JDK 7):
+  auto-parent         SUCCESS
+  auto-common         SUCCESS
+  auto-factory        SUCCESS
+  auto-service        SUCCESS
+  auto-value          FAILURE  <-- failing module
+  build-only          SUCCESS
+
+Failing goal:
+  org.apache.maven.plugins:maven-invoker-plugin:1.8:run (integration-test) on project auto-value
+  Sub-build: value/src/it/functional (invoker clone target: value/target/it/functional)
+  Failing phase inside the sub-build: maven-compiler-plugin:3.1:testCompile (default-testCompile)
+
+Root cause (test-compile failure of value/src/it/functional):
+
+  [ERROR] AutoValueTest.java:[20,30] cannot find symbol
+    symbol:   class MoreObjects
+    location: package com.google.common.base
+
+  com.google.common.base.MoreObjects was introduced in Guava 18.0. The
+  functional integration-test actually resolves guava:17.0 at test scope:
+
+    functional dependency:tree (relevant lines):
+      +- com.google.auto.value:auto-value:jar:1.2-SNAPSHOT:compile
+      +- com.google.truth:truth:jar:0.25:test
+      |  \- com.google.guava:guava:jar:17.0:test
+      \- com.google.guava:guava-testlib:jar:18.0:test
+
+  Why guava:17.0 wins:
+  - truth:0.25 declares com.google.guava:guava:17.0 as a direct dep.
+  - guava-testlib:18.0 transitively brings guava:18.0.
+  - The auto-value:1.2-SNAPSHOT installed by the invoker-plugin is produced
+    by the maven-shade-plugin with minimizeJar + relocation of com.google
+    to autovalue.shaded.com.google, so the installed artifact no longer
+    advertises guava as a dependency. In the functional IT, guava therefore
+    only appears via truth and guava-testlib.
+  - Both are at depth 2 in the dep tree, so Maven's "nearest wins" rule falls
+    back to declaration order. truth is declared BEFORE guava-testlib in
+    value/src/it/functional/pom.xml, so guava:17.0 wins.
+  - 17.0 does not contain com.google.common.base.MoreObjects -> compile error.
+
+  This is purely a build-configuration (dependency ordering) problem; the
+  test source code is correct and does import com.google.common.base.MoreObjects.
+
+Secondary issue (warnings, not fatal, but noisy and worth fixing):
+
+  [WARNING] File encoding has not been set, using platform encoding
+            ANSI_X3.4-1968, i.e. build is platform dependent!
+  [WARNING] ...NestedValueType.java:[6,33] unmappable character for encoding ASCII
+  [WARNING] ...AutoValueTest.java:[50,33] unmappable character for encoding ASCII
+  ... (and similar for a few other files)
+
+  The source files use UTF-8 (the author name "Éamonn McManus" in a javadoc
+  @author tag, byte sequence 0xC3 0x89). The parent pom sets
+  project.build.sourceEncoding=UTF-8 but value/src/it/functional/pom.xml is a
+  standalone invoker project with no parent and no sourceEncoding property,
+  so the compiler falls back to the platform encoding. These show up as
+  WARNING on the main sources and get printed in the ERROR block when the
+  test compile also fails for the MoreObjects reason above.
+
+Classification: missing_or_conflicting_dep (primary) + build-config encoding
+(secondary). NOT a JDK/environment mismatch: the project targets JDK 1.6, the
+CI uses JDK 7, and JDK 7 is installed and selected locally.
+
+Fix plan (minimal, scoped to value/src/it/functional/pom.xml only):
+
+1. Pin guava to 18.0 at test scope in the functional IT pom. Declare it
+   BEFORE truth so that, even without "nearest wins" at the same depth,
+   this direct dep (depth 1) wins over truth's transitive guava:17.0
+   (depth 2). This restores MoreObjects on the test classpath.
+
+2. Add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+   to the same pom so compile and testCompile use UTF-8 and the unmappable-
+   character warnings go away. This is a no-op for the real fix (step 1
+   alone is enough to make the build pass) but it keeps the build clean and
+   platform-independent, matching the parent pom's convention.
+
+Verification plan:
+  export JAVA_HOME=/usr/lib/jvm/java-7-openjdk-amd64
+  export PATH=$JAVA_HOME/bin:$PATH
+  cd /home/travis/build/failed/google/auto
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Expected: BUILD SUCCESS, all 5 reactor modules + build-only pass.

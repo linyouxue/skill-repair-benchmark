@@ -1,0 +1,53 @@
+{
+  "change": "single-quoted rewrite_targets property name to JSON double quotes",
+  "character_offset": 3935,
+  "model_values_changed": false,
+  "original_response": "command_result.json.gz",
+  "parsed_diagnosis": {
+    "labels": [
+      "false_certainty",
+      "wrong_abstraction_level"
+    ],
+    "evidence": [
+      {
+        "source": "trace",
+        "snippet": "074.jpg: date=2018-03-20 total=702.00 (final emitted); verifier amount_correct=false",
+        "reason": "The skill's reconcile step promises a leading-digit / 2x-anchor outlier filter and preference for values matching anchors within 0.05. Subtotal and Total-incl-GST anchors agree on 102.00, yet the chosen tier value 702.00 (OCR 1\u21927 confusion) was emitted. The skill asserts this filter will drop such outliers (false_certainty); in practice the filter either wasn't implemented tightly or was dominated by frequency voting across variants."
+      },
+      {
+        "source": "trace",
+        "snippet": "078.jpg: total=\"\" written to xlsx cell; delivery valid but amount_correct=false",
+        "reason": "Skill mandates post-write reload-and-assert that coerces empty strings to None. The output cell is an empty string, meaning either the finalize/validate step didn't run or didn't catch '' for the total column. This is false_certainty about the execution-anchor validation guarantee."
+      },
+      {
+        "source": "trace",
+        "snippet": "077.jpg: total=23.26 (OCR \"Total (Inclusive of GST): 23.26\" vs later \"TOTAL: 23.25\" after Rounding Adj -0.01); amount_correct=false",
+        "reason": "Skill says 'If a Rounding/Rounded line separates two candidates, prefer the later line's value (final post-rounding total).' The later post-rounding 23.25 line exists in PSM6 passes but was not preferred, indicating the rounding-aware selection rule is under-specified for cases where the later candidate only appears in a subset of OCR variants (wrong_abstraction_level between per-pass extraction and cross-pass reconciliation)."
+      },
+      {
+        "source": "trace",
+        "snippet": "034.jpg: date=2018-08-09 emitted; verifier date_correct=false",
+        "reason": "Date-selection rule prioritizes a labelled Date/Tarikh/Tanggal token and keeps printed DD/MM order. Multiple OCR passes read '09/08/2018' from a 'Data:'/'Date:' label while higher-fidelity upscale passes read '09/03/2018'. The rule treats any labelled token as authoritative without weighing per-digit OCR confidence or cross-pass agreement on the month field, overcommitting to a single labelled reading (false_certainty)."
+      },
+      {
+        "source": "skill",
+        "snippet": "'drop any candidate whose leading integer digit disagrees with every anchor's leading digit, or whose value exceeds 2x the maximum anchor'",
+        "reason": "This rule is stated as a definite guarantee but relies on anchors being present and correctly extracted. For 074 subtotal/anchor extraction clearly fired yet 702 was still chosen, so the written procedure overstates certainty of the filter (false_certainty)."
+      },
+      {
+        "source": "skill",
+        "snippet": "'Validate and finalize (execution anchor): ... coerce '' and whitespace-only values to None, re-save ... every non-null total matches ^\\d+\\.\\d{2}$ ... no cell equals ''.'",
+        "reason": "Delivered xlsx contains an empty-string total for 078.jpg, directly contradicting the asserted execution anchor. The skill's finalize contract is asserted with false certainty but not reliably enforced in the trace."
+      }
+    ],
+    "causal_judgment": "The skill promises specific reconciliation and finalize guarantees (anchor-based outlier rejection, rounding-aware later-line preference, empty-string\u2192None coercion with re-asserted invariants) at a level of certainty the implementation does not actually deliver. Field errors on 074 (anchor-outlier filter not applied), 077 (rounding-aware preference not applied across variants), 034 (over-trust in a single labelled date against stronger multi-pass evidence), and 078 (empty string not coerced to None) all stem from these overcommitted rules rather than from environment or specificity issues. The abstraction level of 'per-pass extract then cross-pass reconcile' is also mis-pitched: tier priority and anchor filtering are described at the per-pass level, but the failing cases require cross-pass evidence combination, which the skill does not operationalize.",
+    "rewrite_targets": [
+      "Make the anchor-based outlier filter execution-level explicit: enumerate the comparison (leading digit, 2\u00d7 cap, within-0.05 agreement) and apply it after cross-pass aggregation, not only per pass.",
+      "Specify cross-pass reconciliation precisely: when the same tier yields different values across OCR variants, prefer the value supported by the most anchors AND by a later rounding-adjusted line in any pass, not simple frequency vote.",
+      "Tighten date selection: require agreement from \u22652 independent OCR passes (or anchor consistency with the receipt's time/invoice fields) before accepting a single labelled Date token; otherwise fall back to majority across passes.",
+      "Enforce the finalize contract concretely: after writing, open the xlsx, assert for each row that date matches ^\\d{4}-\\d{2}-\\d{2}$ or is None and total matches ^\\d+\\.\\d{2}$ or is None, coercing any '' to None, and re-run until assertions pass \u2014 state this as a mandatory loop, not advisory.",
+      "Reduce false certainty by replacing absolute claims ('never', 'mandatory') with the exact predicates and the fallback behavior when they cannot be satisfied."
+    ],
+    "summary": "Failures on 034 (date), 074/077/078 (totals) trace to rules the skill asserts with more certainty than the procedure actually enforces \u2014 anchor-outlier rejection, rounding-aware later-line preference, labelled-date trust, and the empty-string\u2192None finalize check \u2014 combined with abstraction mismatch between per-pass extraction and cross-pass reconciliation."
+  }
+}

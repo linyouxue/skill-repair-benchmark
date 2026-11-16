@@ -1,0 +1,26 @@
+# Rulebook-Driven Tabular Scoring
+
+## Purpose
+Reusable procedure for tasks that combine a rulebook document (PDF or similar) with a tabular dataset (xlsx, csv, or equivalent) to compute an aggregate numeric answer. Covers extraction, input validation, rule interpretation with executed sensitivity branches, explicit gap-policy comparison, and verification. Standalone PDF authoring, OCR, and form filling remain out of scope and delegate to sibling skills.
+
+## When to Use
+Trigger when a task provides (a) a rules or scoring document and (b) a structured dataset of events, turns, rows, or records, and asks for an aggregate numeric result (score, count, match total, ranking, difference). Also use when a rulebook alone drives a downstream computation. Do not use for pure extraction tasks with no scoring step.
+
+## Procedure
+- Discover and extract. Identify input files and formats. For PDFs, try extractors in order pdfplumber, pypdf, pdftotext (CLI with `-layout`); install only if none are present. For spreadsheets, prefer pandas/openpyxl. Record chosen backends. If the PDF text is empty, escalate to an OCR-capable sibling skill.
+- Validate inputs. Load the tabular dataset and print row count, column count, index/key range, and null cells. Derive the expected shape from the rulebook (e.g., N turns per game, M games). Assert observed vs expected. If any gap exists (missing row, duplicate key, out-of-range value), tag it and continue to the gap-policy checkpoint below before aggregation.
+- Quote rules verbatim. For every scoring category, definition, threshold, tie-breaker, or ordering constraint, copy the exact sentence from the rulebook into an Assumptions block with page or section anchors. Do not paraphrase before quoting.
+- Enumerate interpretations for each ambiguous quote. Ambiguity triggers include words like "ordered", "subset", "contiguous", "exactly", "at most", "distinct", "between", "and/or". List at least two candidate readings per ambiguous rule and assign each an interpretation_id.
+- Execute every interpretation. Implement each candidate reading as a separate pure scoring function over the validated table. Produce a printed candidate_scores table: rows (rule_id, interpretation_id), columns including per-category score and the resulting final aggregate. Do not skip an alternative because it "seems unlikely".
+- Resolve interpretations by textual tie-break. For each ambiguous rule, pick the reading whose literal wording is most directly supported by the quoted text, applying these tie-breaks in order: (1) a reading that makes every quoted word non-redundant beats one that ignores a word; (2) when the quote contains "ordered", "exactly", "contiguous", or "strictly", prefer the stricter reading; (3) when the quote is neutral, keep all surviving readings as live candidates.
+- Enumerate and execute gap policies. For each tagged data gap, enumerate at least two documented policies (e.g., score only available sub-records; treat missing as zero; drop parent record). Recompute the final aggregate under each policy and print a policy_sensitivity table: policy_id -> final_aggregate -> delta vs baseline. Prefer "score only available data" over zero-imputation when the question is a difference, ranking, or comparison and the rulebook does not explicitly define a default value for missing entries; prefer the rulebook's explicit default when one is quoted.
+- Decide or escalate at final-answer time. Compute the set final_candidates of final aggregates across all surviving (interpretation, gap_policy) combinations. If len(set(final_candidates)) == 1, commit that value. Otherwise, if a textual tie-break uniquely selects one combination, commit its value and cite the quote. Otherwise, emit a candidate-set report that lists every distinct final answer with its (interpretation_id, policy_id) label and the delta, rather than silently selecting one.
+- Verify. Re-read any written artifact and re-assert required fields, types, and numeric ranges before finalizing. Record the chosen extractor, spreadsheet backend, selected interpretation_ids, and selected policy_id in the output notes.
+
+## Constraints / Pitfalls
+- Do not silently impute missing rows, cells, or categories. Every gap must appear in the policy_sensitivity table and be resolved by an explicitly cited policy or escalated as a candidate set.
+- Do not commit to one reading of an ambiguous quote without having executed the alternative numerically. Qualitative "delta would be small" notes are not acceptable.
+- When final_candidates has more than one distinct value and no textual tie-break applies, do not pick one; report the full candidate set.
+- Do not paraphrase rulebook text before quoting it; interpretations and tie-break reasoning live next to the verbatim quote.
+- Do not expand this skill into PDF authoring, OCR, encryption, watermarking, or form filling; delegate those to sibling skills.
+- Keep all output in printable ASCII unless the source explicitly requires other characters.

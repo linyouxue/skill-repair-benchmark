@@ -1,0 +1,28 @@
+Library: ujson (UltraJSON: C-accelerated JSON encoder/decoder).
+
+Selected FUT: ujson.loads(data)
+File: /app/ujson/src/ujson/ujson.c (C extension entry point)
+
+Why this target:
+- Input surface: raw JSON text (bytes or str) from an untrusted source.
+- Boundary: native C parser with bespoke numeric handling (double-conversion),
+  surrogate escapes, deeply nested structures.
+- Complexity: hand-written C state machine -- classic fuzz target.
+- Test gaps: existing suite covers conforming inputs; fuzzing covers malformed and
+  pathological payloads.
+
+Callable contract:
+- `ujson.loads(s: str | bytes | bytearray) -> Any`
+- Expected invalid-input exceptions: `ValueError` (ujson raises this for parse
+  errors), `TypeError`, `UnicodeDecodeError`, `RecursionError`, `MemoryError`.
+
+Secondary FUT: ujson.dumps(obj) on structures recovered from loads
+(round-trip oracle candidate; not used in the crash-only harness here).
+
+Input model: raw bytes passed directly to ujson.loads.
+
+Oracles: crash-only.
+
+Dependencies: build-time only (setuptools, setuptools-scm, C compiler). No
+runtime deps beyond Python itself. We build and install the extension into the
+venv via `pip install .`.

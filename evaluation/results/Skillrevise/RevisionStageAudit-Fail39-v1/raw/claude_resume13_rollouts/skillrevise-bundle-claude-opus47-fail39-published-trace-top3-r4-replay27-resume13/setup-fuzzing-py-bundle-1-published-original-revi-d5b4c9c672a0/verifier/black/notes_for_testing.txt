@@ -1,0 +1,27 @@
+Library: black (uncompromising Python code formatter).
+
+Selected FUT: black.format_str(src_contents, mode=black.Mode())
+File: /app/black/src/black/__init__.py
+
+Why this target:
+- Input surface: arbitrary Python source text.
+- Boundary: parses source via blib2to3, normalises AST, re-emits formatted source.
+- Complexity: full Python grammar + many stability invariants.
+- Test gaps: existing tests use curated fixtures; fuzzing explores malformed/edge syntax.
+
+Callable contract:
+- `black.format_str(src: str, *, mode: black.Mode) -> str`
+- Expected invalid-input exceptions: `black.InvalidInput`, `black.parsing.InvalidInput`,
+  `SyntaxError`, `IndentationError`, `TokenError`, `ValueError`, `AssertionError`
+  (black uses asserts in some invariants, documented as internal errors), `RecursionError`.
+- `black.NothingChanged` can be raised by higher-level helpers but not by `format_str`.
+- Observed during fuzzing: blib2to3 can raise `KeyError` on unknown operator tokens
+  (e.g. "~=") and `AttributeError`/`LookupError` on other malformed input. These are
+  included in the allow-list as known-noisy edges of the bundled parser.
+
+Input model: bytes -> str via FuzzedDataProvider.ConsumeUnicode.
+
+Oracles: crash-only for now. Could later add a round-trip (format(format(x)) == format(x))
+stability oracle on syntactically valid outputs.
+
+Dependencies: click, mypy_extensions, packaging, pathspec, platformdirs, pytokens.

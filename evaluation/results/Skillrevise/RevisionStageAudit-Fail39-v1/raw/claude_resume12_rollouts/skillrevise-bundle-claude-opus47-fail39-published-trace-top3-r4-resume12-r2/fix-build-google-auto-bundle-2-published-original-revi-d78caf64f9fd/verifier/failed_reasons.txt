@@ -1,0 +1,74 @@
+Repository: /home/travis/build/failed/google/auto
+CI command: mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Environment:
+- JDK: OpenJDK 11.0.27
+- Maven: 3.6.3
+- Project build file: build-pom.xml (reactor builds modules: common, factory, service, value; value is banned/skipped)
+
+Failure signature:
+  [ERROR] Failed to execute goal on project auto-common: Could not resolve dependencies
+    for project com.google.auto:auto-common:jar:1.0-SNAPSHOT:
+    Could not find artifact com.sun:tools:jar:11.0.27 at specified path
+    /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Same error for auto-factory and auto-service modules.
+
+Root cause:
+  All three failing modules (common, factory, service) depend transitively on
+  `com.google.testing.compile:compile-testing` (versions 0.6/0.7/0.8). That POM
+  declares a system-scope dependency on `com.sun:tools:jar:${java.version}` with
+  systemPath `${toolsjar}` resolved to `${java.home}/../lib/tools.jar` via a
+  default-activated profile. Starting with JDK 9, `tools.jar` was removed
+  (its contents merged into the module system). On JDK 11 the file does not
+  exist, so dependency resolution fails fast.
+
+Classification: env_mismatch (compile-testing transitive expects a JDK<=8
+tools.jar that does not exist on JDK 11).
+
+Fix strategy:
+  Minimal POM-only change: exclude the transitive `com.sun:tools` dependency
+  from each declaration of `compile-testing` in common/pom.xml, factory/pom.xml,
+  and service/pom.xml. This is portable (works on JDK 8+), does not alter
+  compile source/target, and does not require a JDK switch or toolchain.
+  value/pom.xml also declares compile-testing 0.6 but AutoValue is banned/
+  skipped by the reactor; we patch it anyway for consistency and to keep the
+  module buildable.
+
+Patches:
+  patch_1.diff - common/pom.xml  : add <exclusions> on compile-testing to drop com.sun:tools
+  patch_2.diff - factory/pom.xml : add <exclusions> on compile-testing to drop com.sun:tools
+  patch_3.diff - service/pom.xml : add <exclusions> on compile-testing to drop com.sun:tools
+  patch_4.diff - value/pom.xml   : add <exclusions> on compile-testing to drop com.sun:tools
+  patch_5.diff - factory/pom.xml : add javax.annotation:javax.annotation-api:1.3.2
+                                   (JDK 9+ removed javax.annotation.Generated from the
+                                    base module; FactoryWriter.java imports it)
+
+After applying patches 1-5 the originally failing dependency-resolution and
+compilation errors are resolved:
+  - auto-common       : compiles, resources, test-compile OK
+  - auto-factory      : compiles, test-compile OK
+  - auto-service      : BUILD SUCCESS (compile, test, package)
+  - auto-value        : SKIPPED (banned in reactor by build-pom.xml)
+
+Residual (surefire test) failures that remain under JDK 11 (project targets JDK 7):
+  1. common: com.google.auto.common.VisibilityTest.effectiveClassVisibility
+     - Assertion: Not true that <DEFAULT> is equal to <PUBLIC>
+     - Cause: JDK 11 javac/compile-testing behavior change in how nested-class
+       enclosing-element visibility is reported during annotation processing.
+     - Not fixable by pom-only change; would require patching Visibility.java or
+       the test, which is out of scope for build-config repair.
+  2. factory: com.google.auto.factory.processor.AutoFactoryProcessorTest (19/28 fail)
+     - Assertion: expected top-level type `tests.SimpleClassFactory`, got
+       `tests.tests_SimpleClassFactory` (file name mangled).
+     - Cause: compile-testing 0.8 generates different file-name mangling under
+       JDK 11's annotation processing API vs JDK 7.
+     - Not fixable by pom-only change; would require upgrading compile-testing
+       beyond 0.8 (API-incompatible with this code) or rewriting the test
+       assertions.
+
+These residual failures are JDK version mismatches between the project (whose
+Travis config targets oraclejdk7 / openjdk7) and the local JDK 11 toolchain.
+The original build-blocking errors identified at the start (unresolvable
+com.sun:tools dependency and missing javax.annotation.Generated) are fully
+fixed by the five patches.

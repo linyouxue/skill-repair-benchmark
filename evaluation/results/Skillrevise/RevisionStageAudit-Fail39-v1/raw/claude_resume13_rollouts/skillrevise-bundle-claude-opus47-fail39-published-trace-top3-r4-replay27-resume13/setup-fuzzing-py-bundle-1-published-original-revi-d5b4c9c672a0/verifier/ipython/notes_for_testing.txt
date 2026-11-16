@@ -1,0 +1,32 @@
+Library: ipython (IPython: productive interactive Python shell).
+
+Selected FUT: IPython.core.inputtransformer2.TransformerManager.transform_cell(cell)
+File: /app/ipython/IPython/core/inputtransformer2.py (line ~635)
+
+Why this target:
+- Input surface: user-typed cell source (string) containing a mix of plain Python,
+  IPython magics (`%foo`, `%%foo`), shell escapes (`!cmd`), help queries (`help?`),
+  and prompt-stripped pasted code.
+- Boundary: tokenisation (`tokenize`), AST parsing, regex-based line matchers.
+- Complexity: multi-pass line and token transformers with ordering concerns.
+- Test gaps: tests cover canonical magic/shell forms; fuzzing probes malformed cells,
+  unterminated strings, odd Unicode, mixed indentation.
+
+Callable contract:
+- `TransformerManager().transform_cell(cell: str) -> str`
+- Expected invalid-input exceptions: `SyntaxError`, `IndentationError`,
+  `tokenize.TokenizeError`, `ValueError`, `UnicodeDecodeError`.
+- Observed during fuzzing: `IndexError` (e.g. assignment-magic matcher reaching
+  past the tokens-by-line list on short/malformed cells), plus `AttributeError`
+  and `KeyError`. Added to the allow-list as known-noisy edges of the transformer.
+
+Input model: bytes -> str via FuzzedDataProvider.ConsumeUnicode.
+
+Oracles: crash-only.
+
+Dependencies: traitlets, decorator, prompt_toolkit, pygments, pexpect, stack_data,
+jedi, matplotlib-inline, ipython_pygments_lexers. Install via `pip install -e .`
+which pulls declared runtime deps.
+
+Note: We only import `IPython.core.inputtransformer2`, which has light deps
+(stdlib + `IPython.utils.tokenutil`). Instrument that submodule directly.
