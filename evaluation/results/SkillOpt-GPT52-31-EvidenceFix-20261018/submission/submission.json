@@ -1,0 +1,1443 @@
+{
+  "method_id": "skillopt",
+  "benchmark_version": "manual-gold-defects-20260917-v25",
+  "tasks": [
+    {
+      "task_id": "dialogue-parser",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill documentation explains dialogue graph construction and validation but does not specify how sentinel terminal targets such as \"End\" should be represented. This likely led implementers to auto-create an \"End\" node to satisfy normal graph integrity assumptions. In this benchmark, the verifier excludes traversal into \"End\" while still checking node reachability, so emitting \"End\" as a node guarantees an unreachable-node failure. The skill also uses Edge(source,target) naming while the task schema expects ('from','to'), increasing the chance of task-specific adaptation mistakes.\nRepair instruction: Add an explicit section on terminal/sentinel node conventions for exported graphs. Clarify that special targets like \"End\" may legally appear only as edge targets and should often NOT be emitted as concrete nodes unless the evaluator explicitly treats them as traversable. Include a validator example showing reachability checks that exclude terminal sentinels from traversal and node-reachability requirements. Also add a schema-mapping note documenting conversions between Edge(source,target) and JSON edge keys ('from','to'). Finally, fix incomplete/truncated examples in the visualization section so examples are syntactically correct and less likely to encourage ad hoc compatibility workarounds.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/dialogue-parser/skills",
+      "executor_run_id": "dialogue-parser-skillopt-20261017T125805Z"
+    },
+    {
+      "task_id": "exoplanet-detection-period",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "BLS usage latched onto the maximum-power peak without robust alias/harmonic rejection. The skill underemphasizes that the top BLS peak is often a harmonic/subharmonic (or cadence/window alias), especially with residual stellar variability, and lacks a concrete validation checklist (folded light curve, odd/even, duration realism, testing P, 2P, 3P and P/2, P/3). It also doesn’t clearly constrain realistic transit-duration grids, which can inflate spurious power if durations are too long.\nRepair instruction: Add an explicit 'Validation & common failure modes' section: (1) always review top N peaks, not just max; (2) systematically test harmonics/subharmonics by evaluating P, 2P, 3P and P/2, P/3 with the same duration prior; (3) require phase-fold + binned visualization and model overlay to confirm a coherent box-shaped dip; (4) perform odd/even transit depth comparison and secondary-eclipse check; (5) add duration sanity guidance for TESS (hours-scale typical) and recommend tying duration bounds to period and stellar density (avoid overly long durations unless justified); (6) mention alias sources (data gaps, cadence, detrending leakage) and recommend SNR/FAP/bootstrapping where available; include an example where the highest BLS peak is not the true period.",
+          "locations": [
+            {
+              "file": "box-least-squares/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Workflow guidance is too generic for activity-dominated transit searches and did not enforce iterative validation steps, allowing the agent to accept an alias period. It lacks a concrete troubleshooting path for when preprocessing leaves rotational power that can dominate BLS/TLS and produce misleading peaks.\nRepair instruction: Add a step-by-step workflow for 'strong stellar variability' cases: (1) estimate rotation timescale (optionally via Lomb-Scargle) to inform detrend settings; (2) detrend with transit-preserving methods and document window heuristics; (3) run BLS/TLS; (4) validate candidates via folded morphology + harmonics/aliases + odd/even + transit count consistency; (5) iterate: mask detected transits, re-detrend, rerun search; (6) final refinement of period/epoch using folded fit. Explicitly warn: strongest peak may be non-physical; always check harmonics before reporting.",
+          "locations": [
+            {
+              "file": "exoplanet-workflows/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Preprocessing likely left residual rotational variability or distorted transit signals (over/under-flattening), which can bias period searches toward short aliases. The skill lacks enough concrete guidance on choosing detrending windows relative to transit duration and on avoiding treating in-transit points as outliers.\nRepair instruction: Expand with transit-preserving detrending guidance: choose detrend/flatten windows much longer than expected transit duration (e.g., 5–20×), avoid overfitting that removes dips; handle quality flags before clipping; do sigma-clipping on detrended residuals rather than raw flux; explicitly caution against removing in-transit points as outliers; recommend segment-wise normalization for gaps; require before/after plots and an iterative 'detrend → search → mask transits → re-detrend' pattern to reduce leakage of variability into the periodogram.",
+          "locations": [
+            {
+              "file": "light-curve-preprocessing/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "TLS is often more robust for shallow transit-shaped signals, but guidance may not sufficiently stress using TLS for validation/cross-checking and using TLS diagnostics to reject aliases/harmonics when BLS and TLS disagree.\nRepair instruction: Strengthen 'when to use TLS' and 'how to validate' sections: recommend TLS as primary or as cross-validation after BLS in transit searches; add instructions to constrain period/duration ranges, interpret TLS metrics (e.g., SNR/SDE, transit count, duration consistency), and explicitly check harmonics/subharmonics of the TLS best period. Provide a short recipe for resolving BLS vs TLS discrepancies by folding at P and harmonic alternatives and selecting the period with consistent, repeated transit morphology.",
+          "locations": [
+            {
+              "file": "transit-least-squares/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/exoplanet-detection-period/skills",
+      "executor_run_id": "exoplanet-detection-period-skillopt-20261017T204236Z"
+    },
+    {
+      "task_id": "python-scala-translation",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Multiple samples identify gaps in precise Python→Scala mapping details that can produce compile-successful but behaviorally incorrect solutions. Common problem areas include None/null/Option handling, module-level functions vs Scala 2.13 objects, regex/string splitting differences, iterator laziness, default arguments, and Scala-specific compile pitfalls such as annotations and method organization.\nRepair instruction: Add a dedicated 'Scala 2.13 translation pitfalls' section covering: None/null/Option conventions; module-level Python functions mapped into Scala objects/package objects; regex and split escaping differences; iterator/generator laziness vs strict collections; default arguments and overloads; integer division/string interpolation differences; and common compile issues such as @tailrec requirements, companion objects, overloaded defs/vals, and required public signatures. Include a checklist for behavioral parity and API-shape matching.",
+          "locations": [
+            {
+              "file": "python-scala-syntax-mapping/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The task relies heavily on functional Scala patterns for tokenization pipelines, validation, dispatch, and absence/error handling. Current guidance likely under-specifies idiomatic Option/Either/Try usage, recursion vs iteration tradeoffs, and builder/composition patterns needed for reliable Scala 2.13 implementations.\nRepair instruction: Expand the guide with concrete Scala 2.13 patterns for Option/Either/Try flows, including map/flatMap/getOrElse and right-biased Either. Add examples translating Python exception-based and None-based logic into composable Scala pipelines. Include dedicated coverage for recursion vs iteration: when @tailrec is valid, common failure cases, and idiomatic replacements using foldLeft, Iterator, unfold, or while loops. Add tokenizer/batch-processing examples showing validation, metadata propagation, and runtime dispatch via pattern matching.",
+          "locations": [
+            {
+              "file": "python-scala-functional/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Collections are central to tokenization and batch APIs, and the current skill excerpt appears truncated/corrupted around reduce/fold examples. Missing or incomplete guidance on Scala 2.13 collection semantics, batching, laziness, and aggregation can easily cause semantic mismatches even when code compiles.\nRepair instruction: Repair truncated/malformed sections (especially reduce/fold examples) and extend coverage with task-relevant collection recipes: Iterator/View/LazyList for large or lazy pipelines; zipWithIndex for token positions; groupBy and aggregation equivalents to Python Counter/defaultdict; stable sorting; map/filter/flatMap batching patterns; generator/yield equivalents; and warnings about Scala 2.13 mapValues view semantics and mutable vs immutable collection tradeoffs.",
+          "locations": [
+            {
+              "file": "python-scala-collections/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The benchmark explicitly expects idiomatic Scala design using immutability, sealed ADTs, case classes, and expression-oriented style. Weak idiom guidance can lead to brittle translations using nulls, mutable state, or non-idiomatic API structures that diverge from expected Scala behavior and maintainability.\nRepair instruction: Extend the guide with translation-oriented Scala design templates: sealed trait hierarchies for enums/token types, case classes for immutable data, object-based module organization, immutable builder patterns using copy/withX methods, and Option/Either instead of nulls/exceptions. Add examples for tokenizer-style APIs, metadata enrichment, validation flows, and runtime dispatch implemented idiomatically with pattern matching and immutable data structures.",
+          "locations": [
+            {
+              "file": "python-scala-idioms/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "Multiple samples indicate the skill over-emphasizes idiomatic redesigns and abstraction-heavy Scala patterns without sufficiently prioritizing semantic parity with the original Python implementation. This likely encouraged unnecessary architectural changes, extra layers, and divergence from evaluator-expected APIs and behavior.\nRepair instruction: Add explicit guidance that translation benchmarks prioritize preserving public API shape, class/function names, observable behavior, and filesystem/module structure before applying idiomatic refactors. Include warnings against introducing unrelated frameworks, unsupported abstractions, or architectural embellishments. Expand examples for sealed ADTs, companion objects, immutable builders, and module-level function translation while emphasizing compatibility-oriented Scala 2.13 design.",
+          "locations": [
+            {
+              "file": "python-scala-idioms/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "The skill contains truncated sections and incomplete functional examples, especially around pattern matching and error-handling flows. Samples also suggest the guidance may unintentionally encourage unnecessary monadic or functional rewrites instead of faithful behavioral translation.\nRepair instruction: Repair all truncated/malformed examples and complete sections covering pattern matching, Option/Either/Try, generators→Iterator/LazyList, and error-safe parsing. Add explicit guidance on when to use straightforward behavioral translations instead of advanced functional abstractions. Include Scala 2.13 examples for preserving imperative Python semantics while still using idiomatic error handling and composable pipelines.",
+          "locations": [
+            {
+              "file": "python-scala-functional/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "The task involved translating Python class hierarchies and externally visible APIs, but the current skill focuses more on idiomatic Scala classes than compatibility-sensitive translation details. Missing guidance on constructor parity, inheritance preservation, mutability expectations, and evaluator-facing method signatures likely contributed to semantic mismatches.\nRepair instruction: Expand the guide with API-compatible translation patterns for Python class hierarchies, including preserving constructor defaults, inheritance behavior, override parity, mutability semantics, method names, and externally visible interfaces expected by tests. Add examples for abstract base classes, builder patterns, companion objects, and case-class usage that preserve Python runtime behavior.",
+          "locations": [
+            {
+              "file": "python-scala-oop/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P008",
+          "description": "The current syntax mapping guidance is broad but under-specifies several Scala 2.13 behavioral pitfalls that commonly produce compile-successful yet semantically incorrect translations, including Option/null handling, regex behavior, laziness, module/function mapping, default arguments, and collection semantics.\nRepair instruction: Add Scala 2.13-specific translation guidance for Option vs null, Iterator/View/LazyList behavior, regex and split differences, module-level functions via objects, default parameters, varargs, integer division, and collection conversion semantics. Include a behavioral parity checklist covering exported names, laziness, mutability, collection ordering, and hidden-test compatibility.",
+          "locations": [
+            {
+              "file": "python-scala-syntax-mapping/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/python-scala-translation/skills",
+      "executor_run_id": "python-scala-translation-skillopt-20261017T140949Z"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Provides basic CLI examples but omits environment prerequisites (Python version/deps), working-directory assumptions, and an offline/verifier-compatible way to run when `uv/uvx` is unavailable. It also doesn’t explicitly document the expected local dataset layout or how to point the analysis scripts at quarter folders like `/root/2025-q2` and `/root/2025-q3`, which is central to this benchmark.\nRepair instruction: Add a \"Verifier-compatible / Offline execution\" section that: (1) states required Python version and how dependencies are expected to be available in the evaluator (avoid any requirement for `uv/uvx`); (2) standardizes examples to `python3 ...` and specifies the repo working directory to run from; (3) documents how scripts discover data by default and how to override via a flag or env var (e.g., `--data_dir /root/2025-q3` or `DATA_ROOT=/root`), explicitly mentioning `/root/2025-q2` and `/root/2025-q3`; (4) includes troubleshooting for missing tooling/network-restricted installs; (5) provides an end-to-end example for Q2→Q3 change analysis using two accession numbers, showing the expected key outputs (AUM/holdings summary, top buys/sells).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Documents fuzzy search commands but lacks clear notes on offline/local dataset usage and how the search scripts locate quarter data on disk. It also doesn’t offer a no-`uvx` fallback run path or troubleshooting guidance for network-restricted environments, which can cause agents to fail to obtain accession numbers/cusips reliably in the benchmark.\nRepair instruction: Add setup/offline guidance that: (1) explicitly states searches run against local quarter folders and documents the expected on-disk location and any override mechanism (flag/env var); (2) clarifies whether any indexing/preprocessing step is needed and, if so, how to run it offline; (3) standardizes invocation using `python3 scripts/search_fund.py ...` (and any stock search script) without `uv/uvx`; (4) adds task-aligned examples for finding a fund by fuzzy name in specific quarters and then using the returned accession number in downstream analysis; (5) includes troubleshooting for missing dependencies and confirms no external downloads are required at runtime.",
+          "locations": [
+            {
+              "file": "fuzzy-name-search/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/sec-financial-report/skills",
+      "executor_run_id": "sec-financial-report-skillopt-20261017T140745Z"
+    },
+    {
+      "task_id": "software-dependency-audit",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The strongest recurring issue is lack of deterministic offline scanning guidance. Results differed from the verifier because scans likely used a newer vulnerability DB snapshot, refreshed advisory feeds, incorrect scan targets, or inconsistent Trivy options. Current guidance does not sufficiently enforce reproducible benchmark-safe workflows for package-lock scanning.\nRepair instruction: Expand the skill with explicit reproducibility requirements: pin Trivy version and vulnerability DB snapshot, require `--offline-scan` and `--skip-db-update`, document use of fixed cache/DB paths (`TRIVY_CACHE_DIR`), and warn that live DB updates will change CVE sets and fix versions. Add exact command examples for scanning only `package-lock.json` and generating JSON output. Include verification steps for DB metadata/version, preventing network access, avoiding unintended filesystem/dependency expansion, and validating deterministic outputs across environments.",
+          "locations": [
+            {
+              "file": "trivy-offline-vulnerability-scanning/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Multiple samples showed mismatched CVE IDs and CVSS scores for the same package/version, indicating unclear advisory selection and CVSS source-priority behavior. The current skill does not fully specify deterministic handling when multiple advisories, aliases, or score providers exist in Trivy output.\nRepair instruction: Define strict deterministic selection rules for identifiers and scores. Specify a canonical priority order such as: prefer CVE IDs over GHSA aliases; prefer NVD CVSS v3.1/v3 scores, then GHSA/vendor scores, then v2 only as fallback. Add parsing examples from Trivy JSON (`CVSS.nvd.V3Score`, aliases, `VulnerabilityID`) and document tie-breaking, deduplication, and handling of multiple advisories for one package/version. Clarify formatting and normalization rules so repeated runs produce stable CVE and CVSS outputs.",
+          "locations": [
+            {
+              "file": "cvss-score-extraction/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "CSV schema generation worked, but the benchmark mismatch indicates insufficient guidance on canonical row construction, normalization, deduplication, and deterministic field mapping from scanner JSON. The skill currently emphasizes formatting more than producing benchmark-stable records.\nRepair instruction: Add explicit normalization and canonicalization rules for vulnerability rows. Define row identity and deduplication behavior, stable handling of multiple advisories per package/version, deterministic selection of title/URL/fixed version fields, and consistent severity/package/version normalization. Include examples converting Trivy JSON into exact CSV records, with stable sorting and guidance for preserving only the intended HIGH/CRITICAL findings without introducing extra records.",
+          "locations": [
+            {
+              "file": "vulnerability-csv-reporting/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/software-dependency-audit/skills",
+      "executor_run_id": "software-dependency-audit-skillopt-20261017T140816Z"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "All samples identify silence-detector as the workflow break point. The documentation is truncated mid-example and lacks robust, copy-paste-safe invocation patterns, parameter recommendations for lecture videos, and validation guidance. This likely contributed to malformed commands and prevented generation of the opening-removal segment JSON needed downstream.\nRepair instruction: Complete all truncated sections and provide a minimal end-to-end example with a fully valid command (including `--output opening.json`). Add recommended parameters for teaching/lecture videos, explain expected output schema compatibility with downstream tools, and include sanity checks for detected segment duration/bounds. Add troubleshooting guidance for empty or overly long detections and ensure examples use workspace-relative output paths.",
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "No `compressed_video.mp4` was produced. The skill documentation is truncated and does not clearly enforce the required output filename/location, segment schema semantics, or validation steps needed for verifier-compatible cuts. Missing guidance on overlap handling and exact cut behavior risks mismatches between removed segments and actual processed audio.\nRepair instruction: Expand the skill with a concise task-compliant example that reads a combined segments JSON and outputs exactly `./compressed_video.mp4`. Explicitly document segment semantics (`start`,`end`,`duration`), overlap/adjacent-segment normalization expectations, and how sub-second trimming is handled. Add validation steps using ffprobe/output existence checks and clarify that the final cuts must exactly match the provided segments list to satisfy downstream verification.",
+          "locations": [
+            {
+              "file": "video-processor/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "`compression_report.json` was never created, and current examples may not match the evaluator’s strict schema expectations. Existing examples include extra fields and do not strongly emphasize consistency between the report, the actual removed segments, and the processed video durations.\nRepair instruction: Add a task-specific example generating `./compression_report.json` with the exact required schema: `original_duration_seconds`, `compressed_duration_seconds`, `removed_duration_seconds`, `compression_percentage`, and `segments_removed[{start,end,duration}]`. Remove nonessential fields from the primary example, document duration/math consistency rules, and state that the report must use the same normalized segment list supplied to video-processor.",
+          "locations": [
+            {
+              "file": "report-generator/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The task requires reliable removal of pauses longer than 2 seconds, but the documentation is truncated and lacks concrete tuning guidance for lecture-style audio. Without clearer defaults and integration guidance, pause detection may underperform or generate incompatible segment JSON.\nRepair instruction: Complete the truncated documentation and add recommended lecture-video presets (`--min-duration 2`, threshold/window heuristics, merge-short-gap recommendations). Clarify `start/end` semantics and ensure examples produce JSON directly compatible with segment-combiner/video-processor. Include quick validation examples for reviewing longest detected pauses and avoiding accidental speech removal.",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "Pause detection guidance/defaults are too brittle for lecture-style audio with variable volume and short (2–5s) pauses, causing missed pauses (low recall) and borderline-speech false positives (low precision). Documentation lacks a practical tuning loop, parameter sweep ranges, and evaluator-oriented post-processing (merge/pad) to improve IoU alignment.\nRepair instruction: Add a task-specific “lecture video preset + tuning loop” section: recommend sweeping `--threshold-ratio` (e.g., 0.35–0.6), `--window-size` (20–60), and `--min-duration` (>=2s) using energy stats/plots; describe how to diagnose over/under-detection and adjust parameters. Include post-processing guidance to (a) merge pauses separated by small gaps (<=0.5–1.0s), (b) optionally pad each pause by ~0.2–0.5s on both sides to improve IoU while capping padding to avoid clipping speech, and (c) drop micro/low-confidence segments. Clarify handling of pauses near/inside the opening segment (exclude or clip to avoid double-removal).",
+          "locations": [
+            {
+              "file": "pause-detector/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "Initial silence/opening detection is frequently mis-calibrated for noisy or quiet openings, leading to overlong or poorly bounded opening segments that remove real instruction and degrade precision/recall by shifting segment alignment. The skill lacks safeguards and concrete parameter calibration for “noisy intro then speech” patterns.\nRepair instruction: Improve opening-detection recipe for teaching videos: provide recommended ranges and decision rules for `--threshold-multiplier`, `--initial-window`, and `--smoothing-window` under noisy room-tone intros; add a safeguard heuristic to detect the start of “sustained non-silence” (e.g., require N consecutive seconds above threshold) to set the end boundary, and suggest plausibility limits/spot-checking around the predicted boundary to avoid cutting into early speech. Include troubleshooting for “opening too long/too short” with ordered parameter adjustments and emphasize verifying the transition point with energy inspection or quick listening.",
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "Combining outputs from opening + pause detection is under-specified: lack of endorsed normalization steps (merge overlaps/near-adjacent, deduplicate, filter pauses inside opening, drop tiny segments, optional padding) can yield fragmented/overlapping removal lists that reduce IoU matching and precision.\nRepair instruction: Extend the skill documentation to include best-practice normalization: sort segments, merge overlaps and segments within a configurable merge-gap, remove segments shorter than a minimum duration, deduplicate overlaps between detectors, and filter/clip pause segments that fall inside the opening segment. Provide an example pipeline for combining `opening.json` + `pauses.json` into a single normalized `segments.json`, and explain how merge-gap and padding choices affect IoU/precision/recall.",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P008",
+          "description": "Downstream detectors depend on the energy profile; 1-second windowing may be too coarse for accurate boundaries and for detecting brief 2–5s pauses, contributing to missed detections and boundary misalignment.\nRepair instruction: Document the tradeoffs of `--window-seconds` for pause sensitivity and boundary accuracy; recommend smaller windows (e.g., 0.25–0.5s) when targeting 2–5s pauses and suggest how to aggregate/interpret higher-resolution energy for detectors. Clarify expected downstream impact (better boundary IoU and recall for short pauses, potentially more noise requiring smoothing/merging).",
+          "locations": [
+            {
+              "file": "energy-calculator/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/video-silence-remover/skills",
+      "executor_run_id": "video-silence-remover-original-skill-r001"
+    },
+    {
+      "task_id": "lab-unit-harmonization",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill guidance is too generic for reliable multi-source clinical harmonization and does not provide sufficiently explicit analyte-by-analyte unit handling. Failures indicate ambiguous or missing conversion logic for BUN/urea, total and ionized calcium, ferritin, troponins, arterial blood gases, urine protein/creatinine, triglycerides, lactate, hemoglobin, prealbumin, vitamin D, and PTH. Current heuristics appear to rely on simplistic out-of-range checks and single-threshold assumptions, causing both missed conversions and erroneous scaling.\nRepair instruction: Expand the skill with a comprehensive analyte-specific harmonization reference covering: target US conventional units, common SI/alternate units, exact conversion factors, expected physiologic ranges, and common assay/reporting conventions. Explicitly include conversions and guidance for BUN↔urea, creatinine µmol/L↔mg/dL, total and ionized calcium mmol/L↔mg/dL, triglycerides and cholesterol mmol/L↔mg/dL, hemoglobin/prealbumin g/L↔g/dL or mg/dL, ferritin ng/mL↔µg/L, troponin ng/L↔ng/mL↔pg/mL, urine protein mg/L↔mg/dL↔g/L, urine creatinine mmol/L/µmol/L↔mg/dL, lactate mmol/L↔mg/dL, blood gases kPa↔mmHg, vitamin D unit systems, and PTH assay units. Add explicit expected-range tables for each analyte and emphasize that physiologic plausibility checks must evaluate both excessively low and excessively high values.",
+          "locations": [
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill is too generic for row-level unit inference in real-world mixed-unit lab columns and is missing/underspecified conversion factors and heuristics for several analytes repeatedly failing verification (bilirubin total/direct, Free T4/Free T3, cholesterol fractions and other lipids, iron studies, plus common edge cases like blood gases and troponins). As a result, range-triggered logic either fails to trigger (overlapping plausible ranges) or applies incorrect factors, leaving values outside expected physiologic ranges.\nRepair instruction: Add a task-oriented ‘analyte conversion playbook’ that includes, for each benchmark-relevant analyte: (1) canonical target unit (US conventional vs SI) and expected physiologic range(s) used for plausibility checks; (2) bidirectional conversion factors and common source units; (3) explicit unit-inference thresholds/heuristics for mixed-unit columns (row-level conversion) including overlapping-range cases. At minimum cover: Total/Direct Bilirubin (µmol/L↔mg/dL; factor 17.1), Free T4 (pmol/L↔ng/dL; factor 0.0777), Free T3 (pmol/L↔pg/mL; factor 0.651), lipid panel and subfractions LDL/HDL/Non-HDL/Triglycerides (mmol/L↔mg/dL; cholesterol factor 38.67; triglycerides factor 88.57), serum iron (µmol/L↔µg/dL; factor 5.585). Extend with edge-case sections for blood gases (kPa↔mmHg; factor 7.5006), troponins (ng/L↔ng/mL and related reporting conventions), lactate, urine chemistries, and protein markers. Finally, specify an iterative workflow: infer units → convert selectively → validate against ranges → if still implausible, reclassify/try alternate unit mapping → flag for manual review. Include examples of mixed-unit datasets and cautions against blanket conversions (especially lipids) without analyte-specific thresholds.",
+          "locations": [
+            {
+              "file": "lab-unit-harmonization/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/lab-unit-harmonization/skills",
+      "executor_run_id": "lab-unit-harmonization-skillopt-20261017T153313Z"
+    },
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill does not explicitly address a common D3/SVG interaction pitfall where overlay text labels intercept pointer events and block clicks on underlying shapes. As a result, interactive linked-view behaviors can fail under browser automation even when the visualization logic is otherwise correct. The guidance also lacks recommendations for structuring interactive SVG nodes, stable selectors, and Playwright-compatible click targets.\nRepair instruction: Add a dedicated section on SVG interaction robustness and automated-test compatibility. Instruct users to: (1) set `pointer-events: none` on non-interactive overlay labels such as `<text>` elements; (2) prefer wrapping related marks in a `<g class=\"node\">` and attaching click/hover handlers to the group or topmost interactive element; (3) ensure clickable marks are not visually or interactively obscured; (4) use deterministic class names/data attributes for automated selectors; (5) include examples for bubble charts with labels showing `text.style('pointer-events','none')` or equivalent CSS; and (6) provide a checklist for Playwright-style interaction requirements such as visible, stable, enabled, unobstructed click targets and CSS-class-based highlight toggling.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Current guidance is too general for interactive, test-verified SVG bubble/force charts. It does not strongly emphasize that overlay labels/annotations can block pointer events, causing automated clicks to fail. It also under-specifies how to make force simulations deterministic and verifiable via DOM geometry (transforms/cx/cy) at the time tests run, leading to collapsed or unchanged positions even if a simulation exists. Tooltip guidance is not robust enough for grouped nodes and automation (hover targets, visibility toggles, coordinate choice, avoiding CSS that hides/blocks the tooltip).\nRepair instruction: Revise/extend the skill with a dedicated section focused on \"Automation-proof interactivity & verifiability\" that includes: (1) Layering/pointer-events rules: require `pointer-events: none` on non-interactive overlay text/labels; recommend structuring marks as `g.node > circle + text` and attaching click/hover handlers to the circle or the parent `g.node` (not the label), ensuring the intended hit-target is unobstructed. (2) Deterministic force-simulation recipe: set explicit SVG width/height attributes; initialize node positions (optionally seeded near cluster centers); run a fixed number of `simulation.tick()` steps (or run until alpha threshold) after nodes exist; on each tick update rendered positions via `attr('transform', 'translate(x,y)')` on the same element Playwright measures (or update `cx/cy` directly); only then `stop()`; add a quick validation checklist to ensure x/y spread is non-zero and not all nodes share the same transform/cx/cy. (3) Tooltip robustness: standardize on `event.pageX/pageY` (or `clientX/clientY` + scroll) for positioning; ensure show/hide is implemented via explicit CSS classes/opacity and the tooltip has appropriate z-index and `pointer-events: none`; wire `mouseenter/mousemove/mouseleave` (or pointer equivalents) on the interactive node container and ensure filtering logic (e.g., excluding certain categories) doesn’t inadvertently disable all tooltips. (4) Provide a short Playwright-oriented checklist: clickable bubbles (no occlusion), stable selectors/classes/data-* attributes, tooltip appears on hover, selection state reflected via classes/attributes.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/data-to-d3/skills",
+      "executor_run_id": "data-to-d3-skillopt-20261017T154926Z"
+    },
+    {
+      "task_id": "dynamic-object-aware-egomotion",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The mask workflow is too fragile under imperfect alignment, parallax, illumination changes, and 5fps sampling. Using simple affine warping plus single-frame differencing and basic morphology can produce noisy, unstable masks with poor boundary localization and high flicker, matching the observed metrics. The skill under-specifies when to use homography versus affine transforms, how to suppress residual background motion and warp-border artifacts, how to calibrate adaptive thresholds robustly, and how to stabilize masks temporally across sampled frames.\nRepair instruction: Expand the workflow to include: (1) explicit guidance for choosing homography versus affine transforms with RANSAC quality checks and fallback behavior; (2) robust global compensation with warped validity masks, erosion of invalid borders, and optional residual/confidence maps to suppress parallax artifacts; (3) photometric normalization before differencing (blur/CLAHE) and adaptive thresholding using robust statistics or percentile-based thresholds with image-size/fps-aware minimums; (4) temporal stabilization such as EMA smoothing, majority vote across adjacent sampled frames, or persistence filtering to reduce flicker; (5) stronger morphology and connected-component filtering using area ratios plus optional shape/solidity filtering and hole filling; (6) edge-aware or distance-transform-based boundary refinement; and (7) self-check heuristics for sparsity, border activation, and flicker before final export.",
+          "locations": [
+            {
+              "file": "dyn-object-masks/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Validation currently checks structural correctness only, so poor-quality masks can pass despite severe instability and weak boundaries. The observed failure mode would not be caught by existing checks because there are no non-GT diagnostics for flicker, excessive coverage, noisy components, or warp-border contamination.\nRepair instruction: Extend validation with lightweight mask-quality heuristics: monitor mask area ratios per frame, temporal XOR flicker between adjacent masks, connected-component counts and size distributions, boundary roughness/coherence, and border-band activation after warping. Add guidance to iteratively retune thresholds, morphology, and minimum component area when masks are overly sparse, overly dense, or highly unstable.",
+          "locations": [
+            {
+              "file": "output-validation/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Although camera-motion labels were correct, the transform estimation guidance is oriented toward classification rather than producing stable frame warps for downstream dynamic-object masking. Weak or poorly distributed feature tracks and insufficient transform robustness can directly degrade compensated differencing and amplify flicker.\nRepair instruction: Add guidance for producing high-quality transforms usable for global alignment: encourage well-distributed feature sampling, outlier rejection, transform smoothing, and homography estimation when scenes contain perspective effects or strong rotation. Clarify that the estimated transform should support both motion labeling and robust frame warping for dynamic-object extraction.",
+          "locations": [
+            {
+              "file": "egomotion-estimation/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The current mask-generation recipe (single-frame aligned differencing plus simple morphology) is not robust enough for this benchmark. Observed metrics showed low mean IoU, extremely low boundary IoU, and high flicker, consistent with residual alignment errors, illumination sensitivity, unstable thresholds, and insufficient temporal consistency. Guidance also under-specifies transform quality checks, border suppression, parameter scaling for 5fps sampling, and techniques for reducing false positives from parallax or warp residuals.\nRepair instruction: Expand the workflow with stronger alignment-aware masking guidance: validate affine/homography quality using RANSAC inlier checks and fallback behavior; erode warped valid regions to suppress border artifacts; optionally normalize illumination (blur/CLAHE/normalized differencing) before differencing; define thresholds using robust MAD plus percentile/floor constraints tied to fps and resolution; add explicit temporal stabilization such as EMA or 2-of-3 majority voting to reduce flicker; strengthen morphology/component filtering with area scaling and border-touch rejection; and add self-check heuristics for mask fill ratio, flicker, and boundary quality. Include concrete default parameter ranges for 720p/5fps pipelines and debugging advice for tuning IoU versus false positives.",
+          "locations": [
+            {
+              "file": "dyn-object-masks/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The sampling policy is ambiguous for fps-based extraction and likely caused the off-by-one failure where 19 masks were generated instead of the expected 18. The current guidance suggests optionally appending the last frame, which conflicts with evaluator expectations when using fixed-rate sampling. The skill also lacks a deterministic mapping from timestamps to frame indices and does not clearly constrain downstream outputs to exactly match sampled-frame count.\nRepair instruction: Clarify fps-based sampling as a deterministic time-grid process: generate sample timestamps at the target rate (e.g. 5fps), map them to source frame indices using a documented rounding/floor rule, and only include the final frame if it lies on the sampling grid rather than appending it unconditionally. Add explicit examples showing exact sample counts and indices for common source fps/frame-count combinations. Emphasize that JSON intervals, NPZ masks, and all downstream artifacts must align exactly with the computed sample_ids and contain no extra frames.",
+          "locations": [
+            {
+              "file": "sampling-and-indexing/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "Existing validation focuses on structural correctness but would not catch the observed off-by-one sampling mismatch or severe mask instability. The 19-vs-18 frame-count error and high-flicker masks likely passed local checks because there are no explicit validations for fps-derived sample counts, temporal consistency, or noisy mask behavior.\nRepair instruction: Strengthen validation guidance with explicit cross-checks between computed sample_ids, JSON interval coverage, and NPZ frame count so fps-based off-by-one errors are detected before submission. Add lightweight non-GT diagnostics for mask quality, including foreground coverage ratio, adjacent-frame XOR flicker, border activation, and excessive tiny connected components. Include sanity thresholds and troubleshooting guidance when masks are unstable or overly dense.",
+          "locations": [
+            {
+              "file": "output-validation/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/dynamic-object-aware-egomotion/skills",
+      "executor_run_id": "dynamic-object-aware-egomotion-original-skill-v11x-20260903-r001"
+    },
+    {
+      "task_id": "multilingual-video-dubbing",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The task critically depends on natural-sounding multilingual speech, yet the produced dubbing scored very poorly on UTMOS. The current skill emphasizes cleanup and normalization but lacks operational guidance for selecting high-quality neural multilingual TTS systems, preserving prosody, avoiding robotic artifacts, handling punctuation/SSML for pacing, and fitting speech into subtitle timing windows without unnatural stretching. It also under-specifies perceptual-quality validation and anti-artifact practices that directly affect MOS.\nRepair instruction: Expand the skill into a quality-first multilingual dubbing workflow. Add explicit recommendations for modern neural multilingual TTS engines and voice selection criteria; discourage low-quality/formant fallback engines except for prototyping. Include prosody-aware synthesis guidance (punctuation shaping, sentence chunking, SSML/rate controls), multilingual voice handling, and safe duration-control strategies that prioritize silence padding and small tempo adjustments over aggressive stretching. Add anti-artifact cleanup guidance (short fades, de-clicking, avoiding clipping and repeated normalization), native-sample-rate generation plus transparent conversion to 48k mono, and iterative validation steps using listening checks and MOS/UTMOS-oriented heuristics before final export. Provide concrete FFmpeg/DSP examples tuned for natural speech preservation.",
+          "locations": [
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Although loudness and formatting requirements passed, FFmpeg processing choices can significantly reduce perceived speech naturalness. The current skill is generic and lacks speech-focused guidance on transparent resampling, loudnorm best practices, filter ordering, tempo adjustment limits, clipping prevention, and minimizing artifacts introduced during TTS mastering. Some command examples are incomplete or error-prone for dubbing workflows.\nRepair instruction: Add a dedicated speech/TTS dubbing section covering: high-quality resampling to 48kHz with libsoxr; safe mono downmix workflows; recommended minimal filter chains for TTS (e.g. highpass -> fades/declick -> aresample -> loudnorm once); two-pass loudnorm guidance with true-peak headroom; safe tempo-adjustment ranges for speech; and cautions against repeated lossy re-encoding, aggressive EQ/compression, clipping, or chained volume boosts. Include examples for transparent speech mastering and correct/complete any broken command examples, especially audio replacement/muxing patterns.",
+          "locations": [
+            {
+              "file": "ffmpeg-audio-processing/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The skill covers cleanup and loudness normalization but is not prescriptive enough about achieving high-naturalness multilingual speech under offline or constrained environments. It lacks concrete guidance for selecting modern neural TTS engines, avoiding low-MOS fallback engines like espeak/formant synthesis, handling package/environment compatibility, validating perceptual quality before export, and fitting speech to subtitle windows without robotic pacing artifacts.\nRepair instruction: Expand the skill with a dedicated multilingual dubbing workflow focused on MOS/UTMOS-sensitive synthesis: recommend a hierarchy of environment-compatible neural TTS options and fallback rules; explicitly discourage formant/espeak output for final delivery; include multilingual voice-selection criteria, package/runtime compatibility notes, and offline-safe generation examples; add guidance for prosody shaping (punctuation, SSML, pacing), duration fitting via gentle tempo adjustment or silence padding, and a perceptual validation loop before export. Include anti-patterns that reduce naturalness (aggressive denoise/compression, extreme atempo, repeated lossy transcoding, clipping).",
+          "locations": [
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The audio-processing guidance is too generic for TTS dubbing workflows and omits MOS-preserving mastering practices. Current examples do not sufficiently emphasize two-pass loudnorm, high-quality resampling, artifact-safe filtering, clipping prevention, transparent mono conversion, or conservative timing adjustments for speech. Incomplete or weak mux/mix examples may also contribute to fragile outputs or degraded naturalness.\nRepair instruction: Add speech-focused FFmpeg mastering recipes tailored to dubbing: two-pass loudnorm with measured values carried into pass 2; high-quality 48kHz mono conversion using transparent resampling; gentle cleanup chains (high-pass, optional low-pass, micro-fades); clipping/headroom guidance; conservative atempo bounds with preference for silence padding over aggressive stretching; sample-accurate alignment using adelay/apad/atrim; and robust audio replacement/mixing commands that preserve video while encoding compliant AAC output. Include quality-audit checks using ebur128/astats and troubleshooting for common FFmpeg failures.",
+          "locations": [
+            {
+              "file": "ffmpeg-audio-processing/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The format-conversion skill is generic and does not sufficiently cover safe final muxing patterns required for multilingual dubbing deliverables. Missing guidance around explicit stream mapping, audio replacement, codec/sample-rate enforcement, and validation can lead to missing outputs or incompatible MP4 files.\nRepair instruction: Add task-oriented muxing examples for dubbing workflows: preserve original video with -c:v copy while replacing audio; explicitly map streams; enforce AAC, 48kHz, mono output; use -shortest safely; ensure deterministic output paths; and demonstrate ffprobe validation of codec, sample rate, channels, and duration. Include troubleshooting for common muxing and stream-selection mistakes.",
+          "locations": [
+            {
+              "file": "ffmpeg-format-conversion/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/multilingual-video-dubbing/skills",
+      "executor_run_id": "multilingual-video-dubbing-original-skill-v11x-20260903-r001"
+    },
+    {
+      "task_id": "enterprise-information-search",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill correctly emphasizes multi-hop retrieval, grounding, and anti-distractor filtering, but it under-specifies exhaustive recall and completeness validation for list-style extraction tasks. The observed under-retrieval suggests the agent likely stopped after initial successful matches instead of systematically enumerating all qualifying entities across documents, chats, meetings, PRs, URLs, metadata indices, and linked references. Current guidance also lacks explicit closure criteria, count reconciliation, alternate-query expansion, and mandatory coverage audits before finalizing extracted sets.\nRepair instruction: Extend the skill with a dedicated 'Completeness & Coverage Validation' procedure. Require at least two retrieval passes: (1) broad candidate harvesting across all artifact types and linked references using multiple query variants, aliases, IDs, and alternate spellings; (2) focused follow-up searches for gaps or unresolved entities. Mandate aggregation and deduplication of entities across artifacts, explicit inclusion criteria tied to the question, and traversal of cross-references until no new candidates appear. Add a final completeness audit checklist: verify expected counts when implied by the query, re-run searches for missing variants, check adjacent/linked artifacts and metadata directories, and confirm evidence coverage for every extracted entity. Instruct the agent to avoid premature stopping after plausible partial results and to return uncertainty notes when completeness cannot be verified.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Despite existing anti-distractor and multi-hop intent, execution shows partial entity enumeration (missing IDs), inconsistent results across runs (non-deterministic search plan / premature stopping), and occasional cross-product contamination (CoachForce vs similarly named products). Additionally, the agent failed strict output typing (tokens as strings), indicating the skill does not sufficiently mandate a final schema/type validation step tied to the benchmark’s JSON outputs.\nRepair instruction: Update the skill with complementary (non-duplicate) guardrails beyond generic “search more”: (1) Deterministic retrieval plan: require a fixed sequence of sources and query variants (start from the explicitly named product’s canonical artifact/index; then follow only linked artifacts; only then broaden to global search) and record the exact queries used to reduce run-to-run drift. (2) Explicit stop condition for enumeration: do not finalize until a full “no-new-entities” iteration occurs AND a reconciliation step is done (compare people mentioned across doc header authors/reviewers, PR reviewers, meeting action items, and directory/metadata tables; if any source references an extra person not in the set, continue). (3) Stronger product-grounding contract: before extracting IDs, the subagent must state the target product identifier and reject artifacts whose product field/name does not match unless there is an explicit cross-link (URL/doc reference) from an in-scope artifact. (4) Reviewer/role disambiguation rules: meeting participants are NOT reviewers; require explicit reviewer signals first (PR review, “reviewed by”, approval records), then evidence-based contributors; always attach evidence pointers per ID. (5) Pre-write output validation checklist embedded in the skill: verify keys q1–q3 exist, list lengths are plausible vs evidence counts, IDs match directory pattern, and numeric fields (e.g., tokens) are emitted as numbers not strings; if validation fails, return NEED_MORE_SEARCH or a repair action instead of emitting partial JSON.",
+          "locations": [
+            {
+              "file": "enterprise-artifact-search/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/enterprise-information-search/skills",
+      "executor_run_id": "enterprise-information-search-original-skill-r002"
+    },
+    {
+      "task_id": "reserves-at-risk-calc",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill provides strong generic spreadsheet formatting and zero-error guidance but lacks task-critical controls for financial risk modeling across multiple sheets. Missing guidance includes: enforcing unit consistency between value and volume datasets; explicitly converting volume to value using the required Jan–Sep average gold price; ensuring lookups match both country and year with deterministic alignment; handling missing 2025 records correctly; and validating exposure/RaR calculations with consistent volatility, horizon, and percentage conventions. These gaps plausibly caused off-by-one country mappings, swapped outputs, incorrect magnitudes, and zero-filled results despite technically valid formulas.\nRepair instruction: Extend xlsx/SKILL.md with a dedicated 'Financial risk-model QA and cross-sheet reconciliation' section. Require explicit unit auditing for every imported field (e.g., tonnes vs USD, % vs decimal, thousands vs units) and mandate documenting conversions in helper cells or comments. Prescribe robust lookup patterns using exact-match XLOOKUP or INDEX-MATCH keyed on both country and year, with locked ranges and deterministic sorting/filtering rather than positional references. Add workflow guidance for reserve calculations: derive the 2025 country list from source sheets, identify countries present only in Volume data, convert those reserves using the specified Jan–Sep average gold price, and exclude countries lacking required 2025 Total Reserves data. Include standard exposure/RaR conventions (clear z-score, volatility scaling, horizon handling, and annualization rules). Add mandatory validation checks before delivery: reconcile sample countries against source sheets, verify no unexpected zeros, confirm reasonable magnitude ranges, ensure template columns align with intended country headers, and verify every answer cell traces to the correct 2025 source record.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The spreadsheet skill does not provide sufficient operational guidance for building financial models that remain correct after external recalculation in LibreOffice/Gnumeric. The agent used incompatible or fragile formulas and lookup patterns that produced #NAME?, #VALUE!, and #N/A errors, and also generated incorrect Step 2/3 outputs due to country/year misalignment, wrong reserve mappings, zeroed values, and confusion between reserve value and reserve volume datasets. The skill also lacks explicit validation procedures for preserving row alignment after filtering/deleting rows and for verifying that annualization, percentage scaling, and reserve-to-value conversions are applied correctly.\nRepair instruction: Expand the skill with a dedicated compatibility and QA section for spreadsheet-based financial modeling. Require use of broadly supported functions and syntax compatible with Excel, LibreOffice, and Gnumeric; document preferred alternatives when newer functions may fail. Require bounded ranges instead of whole-column references, exact-match lookups only (INDEX/MATCH or XLOOKUP with exact mode), deterministic lookup keys combining country and year when duplicates are possible, and explicit validation that copied or filtered tables preserve row alignment. Add mandatory recalculation/testing after workbook generation and require zero formula errors after external recalculation. Add finance-table integrity guidance covering separation of value vs volume units, correct year filtering, conversion of volume-only reserves into value using the specified benchmark price, exclusion of countries missing required total-reserve data, and verification of exposure/RaR formulas, annualization, and percentage scaling. Require final audit checks for nonzero outputs, plausible magnitudes, correct lookup hits, and sample end-to-end reconciliations from source sheets to final answer cells.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/reserves-at-risk-calc/skills",
+      "executor_run_id": "reserves-at-risk-calc-original-skill-v11x-20260903-r001"
+    },
+    {
+      "task_id": "fix-druid-loophole-cve",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The task is explicitly an empty-string JSON key (\"\") deserialization loophole; the produced mitigation (annotation tweaks) did not change exploit behavior, indicating the skill content does not adequately translate the empty-key concept into actionable remediation steps. It under-specifies how empty keys can be accepted and routed (e.g., permissive object-node/Map binding, @JsonAnySetter, creator-based binding), why annotation-only approaches can fail, and what concrete pre-deserialization or mapper-level protections to apply and how to test them.\nRepair instruction: Augment the skill with an operational remediation workflow for empty-key/unknown-property vectors: (1) explain the concrete routing mechanisms for empty field names in Jackson (Map binding, @JsonAnySetter, JsonNode/ObjectNode to POJO conversion, creator properties) and how they can bypass injected-value expectations; (2) prescribe rejecting field names == \"\" before binding using a streaming parser pass or a Jackson hook (custom JsonFactory/JsonParser decorator, DeserializationProblemHandler, or module that errors on empty currentName), with code snippets; (3) add strict ObjectMapper configuration guidance where applicable (e.g., FAIL_ON_UNKNOWN_PROPERTIES, limiting permissive any-setter patterns, avoiding broad JsonNode->POJO conversions for security-sensitive configs); (4) include a validation/testing checklist tailored to CVE-2021-25646-style payloads: confirm the exact deserialization entry point used by the endpoint, ensure exploit returns 4xx with explicit error, and ensure legitimate sampler requests still succeed.",
+          "locations": [
+            {
+              "file": "jackson-security/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Part of the failure is likely applying the mitigation at the wrong layer or not affecting the ObjectMapper/deserialization path actually exercised by the exploit endpoint, a common issue in large Java services. The current skill package is broad, but it lacks targeted guidance for locating and hardening the specific HTTP/Jackson binding path in a multi-module system like Druid, and for scoping a fix to one request type without unintended breakage.\nRepair instruction: Add a task-focused section on implementing and verifying Jackson hardening in real services: (1) how to trace which endpoint/controller/resource method is hit and which ObjectMapper (or json mapper utility) is used on that code path; (2) how to apply endpoint-scoped vs global Jackson changes (custom Module/DeserializationProblemHandler/BeanDeserializerModifier vs per-reader ObjectReader) and choose the least risky scope; (3) patterns for security-critical DTO validation at the boundary (reject malformed keys/unknown structures) while maintaining backward compatibility; (4) an integration-test recipe that asserts the exploit payload is blocked (4xx) and baseline functionality remains (200).",
+          "locations": [
+            {
+              "file": "senior-java/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "This task is directly about an empty-key (\"\") deserialization loophole where post-deserialization validation or annotation tweaks are ineffective. The exploit still succeeded, implying the mitigation either didn’t run on the true parsing/binding path (e.g., readTree/Map/convertValue flows) or wasn’t enforced early enough. A later parser-wrapper approach aligns with correct timing, but the skill lacks concrete, integration-safe patterns for rejecting empty field names during tokenization and for ensuring the custom JsonFactory/JsonParser is actually used by all relevant ObjectMappers in a framework like Druid.\nRepair instruction: Add a task-oriented section on CVE-style empty-field-name bypasses with actionable remediation patterns: (1) enforce fail-fast rejection of empty FIELD_NAME tokens at the earliest possible layer (streaming pre-parse over raw request bytes/stream, or a JsonFactory/JsonParserDelegate that throws JsonParseException when currentName() is empty, at any nesting depth); (2) explicitly cover common binding paths that bypass annotation/unknown-property checks (JsonNode/ObjectNode, Map binding, @JsonAnySetter, treeToValue/convertValue), and state which defenses do/do not cover each; (3) provide safe wiring examples for global vs endpoint-scoped enforcement (ObjectMapper setFactory, provider-level JsonFactory, per-endpoint pre-parse guard) with notes on preserving codec/configuration delegation to avoid runtime breakage; (4) include verification checklist: how to prove the guard is invoked and that exploit payloads yield 4xx (not 200), plus regression tests for normal payloads.",
+          "locations": [
+            {
+              "file": "jackson-security/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "A repair attempt destabilized Druid startup (connection refused), and evidence suggests fixes may have been applied to the wrong mapper/provider or not deployed on the runtime classpath actually serving requests. The skill package is broad but under-emphasizes practical procedures for tracing the real HTTP deserialization pipeline in large Jersey/Guice services, scoping Jackson changes to reduce blast radius, and performing build/deploy/runtime sanity checks to ensure the patched code is the one executed.\nRepair instruction: Add focused guidance for patching and verifying low-level Jackson changes in enterprise Java services: (1) trace endpoint→provider→ObjectMapper wiring in Jersey/Guice (identify the handler method signature, the Jackson provider, and the exact injected mapper/factory used); (2) prefer endpoint-scoped hardening (per-endpoint ObjectReader/ObjectMapper.copy() or raw-byte pre-parse validation) before global changes; (3) integration safety: preserve ObjectMapper defaults, avoid replacing shared JsonFactory without delegation compatibility, and add startup smoke checks; (4) runtime verification steps (logging mapper identity/module IDs, confirming jar/classpath precedence, restart/port checks) and a minimal curl/JUnit black-box test loop proving exploit=4xx and baseline=200.",
+          "locations": [
+            {
+              "file": "senior-java/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/fix-druid-loophole-cve/skills",
+      "executor_run_id": "fix-druid-loophole-cve-original-skill-server-r006"
+    },
+    {
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill guidance is too broad and lacks task-specific Flink patterns for correlating task-event and job-event streams so that results are emitted only for the intended job population. The current implementation likely fails to (a) enforce inner-join semantics on a qualifying terminal event, (b) correctly interpret/filter terminal job event types per the dataset schema, and (c) prevent emitting default/zero rows for jobs without qualifying termination or without relevant SUBMIT activity in-scope. It also likely misses best practices around event-time ordering (watermarks/timers) when one stream must gate emission of aggregates from the other.\nRepair instruction: Add a focused Flink section for “emit-on-termination” queries over dual streams (tasks + jobs): (1) explicitly require inner-join/qualification: only emit for jobIds that appear in job_events with a qualifying terminal state within the processed slice; do not output (jobId,0) for missing/never-terminated jobs; optionally require at least one SUBMIT before termination. (2) Provide a concrete implementation pattern using KeyedCoProcessFunction (or interval join + window) with per-job state: buffered task/session aggregates + flags like seenSubmit, seenTerminal(+terminalTs); emission conditioned on both the terminal event and event-time watermark passing terminalTs; include state TTL/cleanup. (3) Include event-time/watermark guidance for out-of-order arrivals and late data (bounded out-of-orderness, timer registration on terminalTs, and guarding against premature emission). (4) Add a schema checklist for the Google cluster trace: validate which job event_type codes count as terminal (FINISH vs KILL vs FAIL/others) per provided docs, and highlight common pitfalls that create extra outputs (wrong terminal filter, partial slices missing terminal events, multiple terminal events, incorrect timer logic).",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill discusses Flink and streaming broadly but lacks concrete guidance for keyed event-time sessionization and gated result emission using correlated task_events and job_events streams. Evidence suggests the implementation overgeneralized terminal filtering (e.g. using eventType>=3), emitted rows for jobs without qualifying terminal events or submits, mishandled inactivity-gap/session boundaries, and produced duplicate or zero-count outputs. The skill also does not clearly explain handling partial datasets, microsecond timestamps, watermarking, out-of-order data, or deterministic one-output-per-key finalization semantics.\nRepair instruction: Expand the Flink/data-streaming sections with a benchmark-oriented pattern for dual-stream keyed processing. Include explicit guidance for: (1) event-time sessionization on SUBMIT events using inactivity gaps with exact boundary semantics (>= gap starts a new session/stage); (2) keyed state plus KeyedCoProcessFunction or equivalent patterns to join task_events with job_events and emit exactly one result only after a qualifying terminal event is observed; (3) suppressing outputs for jobs lacking terminal events in the provided slice and avoiding default zero-result emission; (4) dataset-specific event filtering, clarifying that terminal semantics must be validated from the schema rather than inferred from broad predicates like eventType>=3; (5) watermarking, microsecond timestamp handling, allowed lateness, late-event policy, and state cleanup/TTL; and (6) worked examples demonstrating largest-session-per-job calculations and validation of expected output cardinality.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/flink-query/skills",
+      "executor_run_id": "flink-query-original-skill-v11x-20260903-r002"
+    },
+    {
+      "task_id": "azure-bgp-oscillation-route-leak",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill covers oscillation/leak detection and warns against prohibited fixes, but lacks explicit, benchmark-aligned guidance for evaluating remediation proposals. In particular, it does not clearly state that Virtual WAN routing intent and UDR/route-table next-hop overrides can be considered valid cycle breakers (oscillation_resolved) and can also prevent hub-to-hub transit/leaks (route_leak_resolved) in the simplified benchmark model. It also under-specifies how to treat security validation like RPKI origin validation, which the benchmark may credit as leak-mitigating even if it’s not classic valley-free enforcement. This ambiguity leads to systematic misclassification of valid mitigations as False/False.\nRepair instruction: Add a dedicated “Solution Classification (Benchmark-Aligned)” section that maps common Azure Virtual WAN mitigation phrases to expected boolean outcomes. Include:\n1) Decision rules:\n- Set oscillation_resolved=True when the action breaks a preference cycle or enforces deterministic next-hop/path selection (e.g., routing intent that constrains inter-hub routing, UDR/route-table override forcing a stable next hop, export/import policy that removes one competing path, communities that change availability).\n- Set route_leak_resolved=True when the action stops hub-to-hub propagation/acceptance of provider-learned routes (e.g., export policy blocking provider routes to peer hub, ingress filtering rejecting routes with specific ASNs/AS_PATH patterns, no-export/no-advertise communities, routing intent enforcing centralized routing constraints).\n- Treat RPKI origin validation as route_leak_resolved=True when it would reject illegitimate/leaked prefixes per the benchmark’s simplified semantics; typically oscillation_resolved remains False unless it also changes path preference.\n2) Worked examples/matrix: Provide example solution strings for Virtual WAN routing intent, UDR override, export/ingress filtering, no-export communities, and RPKI with expected (oscillation_resolved, route_leak_resolved).\n3) Explicit non-fixes list for this benchmark: timers, dampening, ECMP tweaks, restarts, max-prefix, generic ‘tune BGP’ suggestions that don’t alter policy/propagation should default to False/False.\n4) Reinforce invariants: do not propose/credit disabling BGP sessions, shutting down peerings, or removing connectivity; these remain invalid even if they would stop symptoms.",
+          "locations": [
+            {
+              "file": "azure-bgp/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/azure-bgp-oscillation-route-leak/skills",
+      "executor_run_id": "azure-bgp-oscillation-route-leak-skillopt-20261017T180938Z"
+    },
+    {
+      "task_id": "bike-rebalance",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Guidance is adequate for producing feasible MIPs but under-emphasizes benchmark-competitive solving: SCIP parameterization, warm-starting with a constructed incumbent, and post-solve polishing/improvement. This can yield a feasible but slightly worse incumbent than the verifier’s SCIP run under similar limits.\nRepair instruction: Add a 'competitive solving for benchmark tasks' section: recommend SCIP params for routing/flow MIPs (time limit, mip emphasis, heuristics frequency/emphasis, presolve/separating, propagation, symmetry settings, gap/absgap), show how to provide an initial solution (set initial values for route/flow variables), and include an incumbent-polishing loop (extract routes, apply simple local search like 2-opt/relocate/swap, then re-solve with some decisions fixed or as a MIP start). Also add a checklist to recompute and compare objective components (travel vs unmet-demand penalties) before writing report.json.",
+          "locations": [
+            {
+              "file": "scip-opt/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The bike-rebalancing problem requires a tight integrated inventory-routing formulation (pickup/dropoff coupling, load propagation, conservation, penalties). The near-miss suggests the translation guidance may permit weaker formulations (loose linking/bounds, poor penalty tradeoff modeling) that degrade solution quality within runtime constraints.\nRepair instruction: Add a dedicated 'inventory rebalancing + routing' modeling pattern: explicit station inventory balance with targets, vehicle load propagation along the route, strong linking between visiting a station and allowed pickup/dropoff amounts, and clear modeling of unmet-demand/overfill slack with penalties. Include formulation strengthening tips: tight variable bounds from station surplus/deficit and vehicle capacity; avoid big-M where possible; coordinate multi-vehicle service jointly (not greedy); and optionally decompose to quickly get a good incumbent (decide net service amounts, then route) followed by integrated re-optimization.",
+          "locations": [
+            {
+              "file": "logistics-rules-to-optimization/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Even when subtours are not present in the final solution, a weak routing connectivity/order formulation can slow SCIP and lead to slightly inferior incumbents under time limits. The task is VRP-like with multiple vehicles, so performance-oriented connectivity tightening matters for objective quality.\nRepair instruction: Extend the skill beyond 'prevent subtours' to 'improve VRP search quality': provide guidance on choosing/strengthening MTZ vs single-commodity flow constraints, adding depot connectivity tightening, symmetry breaking for identical vehicles, and arc pruning/preprocessing (remove dominated or overly long arcs) to reduce search space and improve incumbent quality.",
+          "locations": [
+            {
+              "file": "routing-subtour-elimination/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Operational bike-rebalancing rules were not fully or correctly translated into algebraic constraints. A key hard constraint was violated (station net pickup exceeded initial inventory), implying missing station inventory conservation/bounds (final inventory within [0, capacity]), unclear sign conventions for net change, and/or inadequate linking between visit decisions and pickup/dropoff quantities. The model also needs clearer treatment of unmet targets via explicit slack/penalty variables to preserve feasibility without illegal pickups/dropoffs.\nRepair instruction: Add a bike-rebalancing constraint template and checklist: define station variables (pickup_s, dropoff_s, final_s), enforce final_s = initial_s - pickup_s + dropoff_s with 0 <= final_s <= capacity_s (equivalently pickup_s <= initial_s and dropoff_s <= capacity_s - initial_s when aggregated), and ensure any per-stop quantities are linked to visit binaries (quantity <= M * visit). If pickups/dropoffs are exclusive at a stop, encode mutual exclusivity with a binary. Model unmet targets with linearized absolute slack (u_pos/u_neg) and include in objective with penalties. Include common failure modes (over-pick, over-fill, sign mistakes on net change, aggregating per-stop actions incorrectly).",
+          "locations": [
+            {
+              "file": "logistics-rules-to-optimization/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The SCIP/PySCIPOpt workflow did not ensure both benchmark-competitive objective quality and strict feasibility. One solution was slightly suboptimal vs the benchmark threshold, and another was infeasible on hard inventory bounds, indicating insufficient emphasis on (a) tight formulations/bounds and (b) mandatory independent post-solve validation before emitting the report.\nRepair instruction: Extend guidance for routing+inventory MIPs: tighten variable bounds and add linking/indicator constraints; recommend practical SCIP settings for competitiveness (time limit, emphasis on heuristics/cuts, reasonable mipgap) and simple polishing strategies (fix route/visit structure then reoptimize flows; or local route improvement while preserving feasibility). Add a required post-solve validator step: recompute station final inventories and vehicle load propagation from the solution and abort/report infeasible if any hard constraint (inventory, capacity, visit-linking) is violated; also independently recompute objective components to catch modeling/report mismatches.",
+          "locations": [
+            {
+              "file": "scip-opt/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "While no explicit subtour/connectivity failure was reported, the task is a multi-vehicle routing problem where formulation strength impacts solution quality relative to a tight benchmark. A weak/loose routing formulation can yield longer routes even if technically feasible.\nRepair instruction: Add guidance to strengthen VRP connectivity beyond basic degree constraints: recommend MTZ/flow-based subtour elimination or lazy cuts as appropriate, ensure single-visit enforcement and depot start/end structure are correct, and include route-extraction checks to confirm each vehicle route is a single connected depot-to-depot path. Emphasize that stronger connectivity constraints/cuts can materially improve incumbent quality in benchmark-gated tasks.",
+          "locations": [
+            {
+              "file": "routing-subtour-elimination/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/bike-rebalance/skills",
+      "executor_run_id": "bike-rebalance-skillopt-20261017T204220Z"
+    },
+    {
+      "task_id": "energy-market-pricing",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The dominant failure pattern is an objective-value mismatch (~3.6% above the verifier optimum), consistent with incorrect generator cost evaluation or dispatch formulation. Likely issues include mis-parsing MATPOWER gencost rows (NCOST handling and coefficient order), inconsistent MW vs per-unit scaling in the objective, accidental inclusion of startup/shutdown costs in a single-period ED formulation, or incorrect treatment of generator limits. Current guidance is not explicit enough about these common pitfalls.\nRepair instruction: Expand the skill with precise MATPOWER-compatible objective construction guidance: (1) explicitly convert Pg in pu to MW exactly once before evaluating costs (Pg_MW = Pg_pu * baseMVA); (2) document coefficient ordering for NCOST=1/2/3+ polynomial costs with examples and exact array indexing; (3) state clearly when STARTUP/SHUTDOWN terms should be ignored; (4) add a complete reference objective implementation for linear and quadratic costs; (5) include a numerical self-check comparing solved Pg against direct polynomial evaluation of total cost; (6) add solver-status and optimality-gap checks appropriate for convex QP DC-OPF.",
+          "locations": [
+            {
+              "file": "economic-dispatch/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "A mis-specified DC network model can change the feasible region and produce a different optimum even when the solution is internally feasible. Repeated evidence points to incomplete handling of MATPOWER branch conventions such as transformer tap ratios, phase shifters, line flow formulas, slack/reference treatment, and RATE_A thermal limits. Treating TAP=0 literally instead of as 1.0 is a particularly likely edge-case source of distorted flows and congestion.\nRepair instruction: Extend the skill with DC-OPF-ready branch modeling details: (1) specify that MATPOWER branch TAP=0 must be interpreted as 1.0; (2) include phase-shift handling using SHIFT in degrees converted to radians; (3) provide the canonical DC branch flow equation including tap and shift terms; (4) define RATE_A thermal constraints as symmetric +/- flow limits in MW; (5) clarify slack-bus/reference-angle handling and sign conventions for injections/flows; (6) add validation procedures comparing computed flows against B*theta/PTDF results and checking consistency with MATPOWER conventions.",
+          "locations": [
+            {
+              "file": "dc-power-flow/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Subtle MATPOWER parsing mistakes can produce a feasible but non-equivalent optimization model. Common risks include incorrect column indices for Pd, PMAX/PMIN, BR_X, RATE_A, TAP, SHIFT, or inconsistent baseMVA scaling. The benchmark relies on MATPOWER conventions that are not fully emphasized in the current data guidance.\nRepair instruction: Add a concise MATPOWER edge-case and indexing section covering the exact bus/gen/branch/gencost columns needed for DC-OPF. Explicitly document that TAP=0 implies 1.0 and SHIFT is in degrees. Include recommended sanity checks such as total load MW, total generation capacity, counts of RATE_A==0 or TAP==0 branches, and verification that branch modifications target the intended line identifiers.",
+          "locations": [
+            {
+              "file": "power-flow-data/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "LMP extraction itself was not the primary failure source, but repeated diagnoses noted that incorrect nodal balance sign conventions or scaling can simultaneously distort both dual prices and the underlying optimization model. Ambiguity in balance-equation direction may contribute to implementation inconsistencies.\nRepair instruction: Clarify the canonical DC-OPF nodal balance equation and associated sign conventions for injections, withdrawals, and B*theta terms. Explicitly note that reversing equality direction flips dual/LMP signs. Reinforce baseMVA scaling when converting duals to $/MWh and provide a consistency check linking marginal generator costs and uncongested system energy prices.",
+          "locations": [
+            {
+              "file": "locational-marginal-prices/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The persistent optimality gap strongly suggests the generator objective is being evaluated incorrectly relative to MATPOWER conventions. Common causes include wrong gencost coefficient ordering, incorrect handling of NCOST=2 vs 3, double application of baseMVA scaling, evaluating costs in per-unit instead of MW, or mishandling constant terms. Because this benchmark uses tight optimality tolerances, even small objective inconsistencies cause failure.\nRepair instruction: Add a dedicated DC-OPF objective construction section that explicitly shows how to evaluate MODEL=2 polynomial costs from MATPOWER gencost data. Clarify coefficient ordering (highest degree first), NCOST handling, and whether c0 should be included in total cost. State that costs should be evaluated in MW exactly once (e.g., Pg_MW = Pg_pu * baseMVA if variables are in pu) and warn against rescaling coefficients. Include a worked example and a validation checklist comparing computed generator costs against MATPOWER on a small test case.",
+          "locations": [
+            {
+              "file": "economic-dispatch/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "The dispatch mismatch is also consistent with a DC network model that does not fully match MATPOWER conventions. Likely issues include incorrect bus-number indexing, incomplete handling of transformer taps and phase shifters, incorrect Bbus assembly, wrong branch flow equations, or inconsistent RATE_A enforcement. These alter congestion patterns and feasible dispatch, producing systematically higher costs.\nRepair instruction: Expand the MATPOWER DC conventions guidance into a complete end-to-end formulation. Include explicit formulas for Bbus and branch flows with TAP handling (TAP=0 interpreted as 1.0), phase-shift conversion from degrees to radians, and correct sign conventions. Emphasize non-contiguous bus-number mapping and proper thermal limit enforcement using RATE_A. Add a validation procedure comparing computed Bbus matrices and branch flows against MATPOWER or PYPOWER outputs for a small reference case.",
+          "locations": [
+            {
+              "file": "dc-power-flow/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "LMPs with magnitudes around 1e4–1e6 indicate incorrect dual scaling and/or sign conventions. This commonly occurs when balance equations are written in per-unit but duals are interpreted directly as $/MWh, or when equality orientation flips dual signs. These issues often accompany broader unit inconsistencies in the OPF formulation.\nRepair instruction: Add an explicit units-and-dual-scaling section describing how to convert balance-constraint duals into $/MWh under MW and per-unit formulations. Provide a canonical balance equation convention and explain how solver dual signs depend on equality orientation. Include dimensional-analysis examples and sanity checks: uncongested systems should produce nearly uniform prices near marginal generation costs, and realistic LMP magnitudes should typically be tens to hundreds of $/MWh rather than orders of magnitude larger.",
+          "locations": [
+            {
+              "file": "locational-marginal-prices/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P008",
+          "description": "Subtle MATPOWER parsing mistakes can create a feasible but different optimization problem from the verifier’s benchmark. Common sources include incorrect column indices for Pd, PMIN/PMAX, BR_X, RATE_A, TAP, SHIFT, or ignoring element status fields and unit conventions.\nRepair instruction: Add a compact MATPOWER index/reference table for all DC-OPF-relevant fields in bus, generator, branch, and gencost arrays. Explicitly document units (MW, radians/degrees), non-contiguous bus numbering, handling of out-of-service elements, RATE_A interpretation, and TAP=0 behavior. Include a parser self-check snippet that verifies totals, ranges, and sampled entries before optimization.",
+          "locations": [
+            {
+              "file": "power-flow-data/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/energy-market-pricing/skills",
+      "executor_run_id": "energy-market-pricing-skillopt-20261017T181033Z"
+    },
+    {
+      "task_id": "seismic-phase-picking",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill explains SeisBench APIs conceptually but lacks concrete guidance for high-accuracy phase-picking inference. It likely encouraged naive use of `model.annotate(stream)` followed by global-maximum selection, without explaining preprocessing, probability calibration, peak extraction, multi-pick handling, temporal constraints, or comparison/tuning of pretrained pickers such as PhaseNet vs EQTransformer. Missing details around converting NumPy 3C arrays into correctly configured ObsPy streams, handling sampling rates/channel ordering, and extracting picks from probability traces likely caused low F1 and localization accuracy.\nRepair instruction: Add a dedicated end-to-end seismic phase-picking workflow section. Include: constructing ObsPy Streams from NumPy arrays with correct metadata (`sampling_rate`, `delta`, channel codes, starttime); recommended preprocessing for 3C traces (demean/detrend, taper, optional bandpass, normalization/standardization, resampling); efficient `annotate` usage with batching/GPU; and robust conversion of probability traces into picks using thresholding and `scipy.signal.find_peaks` with prominence/min-distance controls, multi-pick support, and optional onset refinement. Document practical defaults for 100 Hz data and ±0.1 s evaluation tolerance, P-before-S constraints with fallbacks, confidence thresholds, and common failure modes such as incorrect channel ordering or sampling-rate mismatch.",
+          "locations": [
+            {
+              "file": "seisbench-model-api/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill provides only high-level tradeoffs between STA/LTA, template matching, manual review, and deep learning, but lacks actionable guidance for benchmark-style automatic phase picking where F1 under strict tolerance is the objective. It does not sufficiently emphasize that pretrained deep-learning pickers require careful preprocessing and post-processing, nor explain how thresholding, multiple-candidate emission, abstention logic, or hybrid refinement strategies affect precision/recall.\nRepair instruction: Extend the guide with a practical 'high-accuracy automatic picking' section focused on offline benchmark evaluation. Explain how tolerance-based F1 interacts with pick thresholds, multiple candidate picks, and abstention. Recommend calibrated workflows using pretrained deep pickers (PhaseNet/EQTransformer) combined with robust post-processing and optional classical refinement (e.g. STA/LTA or AIC around ML picks). Include concrete decision rules for top-k peak selection, per-phase thresholds, plausible P-S separation windows, ensemble/consensus strategies, and concise parameter checklists for 100 Hz seismic data.",
+          "locations": [
+            {
+              "file": "seismic-picker-selection/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The skill documents ObsPy structures and methods but does not sufficiently connect them to modern ML-based phase-picking pipelines. The task depended on correct waveform preprocessing and conversion from raw NumPy arrays into well-formed `Trace`/`Stream` objects for downstream SeisBench inference. Missing guidance on detrending, filtering, normalization, component ordering, and preserving timing alignment may have contributed to mismatched model inputs and degraded picks.\nRepair instruction: Add ML-oriented preprocessing examples showing how to build `Trace`/`Stream` objects from NumPy waveform arrays for seismic inference workflows. Include recommended preprocessing steps (`detrend`, `taper`, `filter`, `resample`, normalization), handling of 3-component traces and channel ordering (E/N/Z), preservation of timing/index consistency, and setting metadata such as `sampling_rate`, `delta`, and `starttime` correctly before passing data into SeisBench models.",
+          "locations": [
+            {
+              "file": "obspy-data-api/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The skill is the primary gap across all samples. It documents annotate/classify conceptually but lacks current API details and task-oriented workflows for high-accuracy phase picking. Evidence included runtime/API confusion around outdated classify outputs, naive global-max pick selection, reliance on default thresholds, and insufficient guidance on converting NPZ waveform arrays into correctly configured ObsPy Streams. The skill does not adequately cover probability-trace postprocessing, threshold calibration, multi-pick handling, temporal constraints, or practical preprocessing needed to maximize F1.\nRepair instruction: Expand the skill into a complete seismic phase-picking workflow guide centered on PhaseNet/EQTransformer. Document current SeisBench inference APIs explicitly, including `out = model.classify(stream)` and `out.picks`, pick object fields, and differences between `annotate()` probability traces and `classify()` outputs. Add robust examples for converting raw NumPy/NPZ arrays into ObsPy Streams with correct `sampling_rate`, `delta`, `starttime`, and channel metadata. Include preprocessing defaults (demean/detrend, tapering, optional bandpass filtering, normalization, resampling, channel ordering) and detailed pick extraction recipes using probability peaks, threshold tuning, non-maximum suppression, minimum separation, top-k candidate handling, abstention logic, and enforcing S-after-P constraints. Add practical parameter guidance for 100 Hz data and strict ±0.1 s evaluation tolerances.",
+          "locations": [
+            {
+              "file": "seisbench-model-api/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The selection guide is too high-level for benchmark-style automatic phase-picking tasks. It explains broad tradeoffs between STA/LTA, template matching, and deep learning, but does not operationalize how to maximize F1 with pretrained ML pickers. The agent lacked actionable guidance on choosing between PhaseNet and EQTransformer, calibrating thresholds, handling duplicate peaks, using abstention, or combining seismic constraints with ML outputs.\nRepair instruction: Add an operational playbook for benchmark-oriented phase picking. Include concrete recommendations for pretrained deep-learning pickers available through SeisBench, criteria for selecting models under different noise/event conditions, and practical tuning strategies for balancing recall and precision. Cover probability-threshold calibration, peak finding, duplicate suppression, top-k candidate policies, abstention for low-confidence traces, and physical constraints such as P-before-S and plausible P-S separation windows. Include compact recommended parameter ranges for 100 Hz local-event data and explain when emitting multiple candidate picks helps or hurts F1.",
+          "locations": [
+            {
+              "file": "seismic-picker-selection/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/seismic-phase-picking/skills",
+      "executor_run_id": "seismic-phase-picking-original-skill-v11x-20260903-r001-recovery001"
+    },
+    {
+      "task_id": "exceltable-in-ppt",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The spreadsheet skill lacks explicit guidance on safely editing existing formula-driven workbooks—especially embedded XLSX files—while preserving cached formula results, calculation state, numeric cell readability, and dependent values after save. Verification tools reading the workbook with data_only semantics encountered NaN values because recalculation or cache persistence was not handled robustly.\nRepair instruction: Add dedicated instructions for modifying existing XLSX workbooks with formulas inside OOXML containers such as PPTX. Emphasize preserving all workbook parts (sheets, styles, shared strings, defined names, calculation chain) and editing cells in-place rather than rebuilding sheets/dataframes. Document that libraries like openpyxl may clear cached formula results, causing downstream readers to see blanks/NaN. Include techniques for forcing recalculation metadata, retaining cached values, or using recalculation-capable engines before save. Add validation guidance: reload the workbook with both data_only=False and data_only=True to confirm formulas, dependent numeric values, and untouched cells remain valid after round-trip.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The PPTX skill does not sufficiently cover safe extraction, modification, and reinsertion of embedded Excel workbooks located in ppt/embeddings/*. Guidance is missing for preserving workbook integrity, OOXML relationships, and downstream-readable workbook contents during PPTX repackaging.\nRepair instruction: Extend the embedded-object editing section with a dedicated workflow for embedded Excel files in PPTX presentations. Describe how to unzip the PPTX, locate the embedded workbook, modify the existing XLSX in-place, and replace only the target embedding bytes while preserving all other ZIP entries and relationships. Include warnings against rebuilding the PPTX or workbook from scratch, and add verification steps comparing archive contents before/after repackaging and confirming the embedded workbook remains readable through common extraction paths (e.g., pandas/openpyxl with data_only=True).",
+          "locations": [
+            {
+              "file": "pptx/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The skill explains where embedded workbooks reside in PPTX files but lacks concrete guidance for safely editing embedded XLSX content and validating the result. It does not clearly instruct agents to locate embeddings via slide relationship files, map slide content to workbook cells, preserve workbook integrity during re-packaging, handle direct/inverse FX pairs, or verify that downstream extraction still returns numeric values instead of NaNs after modification.\nRepair instruction: Add a dedicated section for editing embedded Excel workbooks inside PPTX files. Instruct agents to: locate the embedded workbook through ppt/slides/_rels/*.rels; map nearby slide text to workbook cells; update both direct and inverse FX cells when appropriate; preserve formulas if inverse cells are formula-driven; repackage the PPTX without altering unrelated ZIP entries/metadata; and validate the final PPTX by re-extracting the embedded workbook and checking both formula definitions and value-based extraction outputs for unexpected blanks or NaNs.",
+          "locations": [
+            {
+              "file": "pptx/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The skill emphasizes preserving formulas and workbook structure but does not adequately cover recalculation and cached-value behavior after programmatic edits with libraries such as openpyxl. In this task, formulas were preserved but cached or computed values were not usable to the verifier, leading dependent cells to appear as NaN. The guidance also lacks explicit instructions for safely updating existing FX tables and verifying inverse-rate consistency.\nRepair instruction: Expand spreadsheet-editing guidance to cover formula recalculation and cached values. Document that openpyxl preserves formulas but does not recalculate workbook results or reliably refresh cached values. Recommend workflows that either use a recalculating engine or explicitly update required non-formula dependent cells while preserving formulas. Add instructions to modify only target cells, preserve all workbook structures/styles/types, avoid rewriting whole ranges, and verify after save by reopening the workbook and checking that expected numeric cells—including inverse FX rates and unaffected cells—remain numeric and non-NaN under value-based extraction.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/exceltable-in-ppt/skills",
+      "executor_run_id": "exceltable-in-ppt-skillopt-20261017T205910Z"
+    },
+    {
+      "task_id": "paper-anonymizer",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill’s rules (though mentioning preserving References and targeting acknowledgements/arXiv/DOIs) are not operationally strict enough to prevent global/broad identifier redaction. This led to over-redaction of arXiv/URL tokens across the document (including bibliographic entries), producing large word loss, while simultaneously failing to ensure systematic scanning/redaction of personal names in Acknowledgements (e.g., specific thanked individuals), causing identity leakage.\nRepair instruction: Amend the skill with verifier-aligned, section-aware procedures: (1) Mandatory boundarying: detect the page/position of the “References” (and “Bibliography”) heading and prohibit any redactions at/after that point; provide a concrete implementation hint (stop searching pages once heading found, or restrict search to pre-References pages only). (2) Tighten identifier policy: redact arXiv/DOI/URL/venue strings only when they refer to the current paper or appear in author-identifying front matter/footers/headers, and explicitly preserve arXiv/DOI/URLs that are part of cited works in References. Warn against regex/global redaction of all arXiv patterns. (3) Acknowledgements handling: require scanning “Acknowledgements/Thanks/We thank” sections for personal names and redacting full-name exact matches (collect candidate full names from that section, then redact only those exact strings). (4) Add a validation checklist: confirm no remaining ack names/emails/affiliations/footnote equal-contribution markers before References, confirm References text unchanged, and confirm 80%+ text retention with minimal unexpected deletions.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill guidance is not precise enough about balancing exhaustive identifier removal before References/Bibliography with strict preservation of bibliography content. Failures included over-redaction of reference-section arXiv/URL/DOI strings and under-redaction of identifiers such as 'arXiv:2509.26542', DOI '10.21437/Interspeech.2024-33', and acknowledgement names like 'Shengyuan Xu' and 'Pengcheng Zhu'. The workflow likely lacks sufficiently explicit operational guidance for computing and enforcing the stop-page boundary, scanning acknowledgements and footnotes, handling venue/preprint identifiers outside references, and performing exact-match redactions without global removal patterns.\nRepair instruction: Strengthen the skill with explicit procedures for: (1) computing and enforcing a strict stop_page at the first References/Bibliography page and prohibiting any redactions on that page or later pages; (2) scanning all pre-reference pages, including acknowledgements, footnotes, correspondence notes, and metadata blocks, for deanonymizing identifiers; (3) redacting exact-match identifiers only, including full author names, acknowledgement names, affiliations, venue identifiers, DOI strings, arXiv IDs, and submission-related preprint references appearing before References; and (4) preserving all bibliography citation content verbatim, including cited-work URLs, DOI strings, and arXiv identifiers inside References/Bibliography. Add verification steps that compare extracted text against a checklist of targeted identifiers to confirm recall while ensuring most original text and all bibliography entries remain intact. Include explicit examples distinguishing prohibited pre-reference identifier leaks from allowed citation content in references.",
+          "locations": [
+            {
+              "file": "academic-pdf-redaction/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/paper-anonymizer/skills",
+      "executor_run_id": "paper-anonymizer-skillopt-20261017T183108Z"
+    },
+    {
+      "task_id": "fix-build-agentops",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Current guidance is too generic for diagnosing and fixing pytest failures driven by shared mutable global/singleton state (session client lifecycle), order dependence, and side effects that change outbound request counts or persisted config. It also under-emphasizes async/sync boundary pitfalls (e.g., time.sleep in async contexts), decorator interactions, and making tests deterministic when background queues/flush behavior exists.\nRepair instruction: Add a dedicated section on debugging stateful libraries under pytest: (1) identifying global/singleton state leakage and enforcing isolation (autouse fixtures to reset singletons/module globals, monkeypatch, explicit teardown hooks, avoiding hidden cached clients), (2) diagnosing order-dependent failures (run with -k, --maxfail=1, --ff/--lf, random-order), (3) async/decorator-specific debugging (ensure async-safe waits; avoid time.sleep in async tests; prefer events/flush hooks), and (4) aligning fixes to behavioral contracts (idempotent start_session semantics, preserving request emission/tag behavior). Include concrete examples for verifying mocked outbound calls/request_history and for implementing reliable reset/flush helpers used by tests.",
+          "locations": [
+            {
+              "file": "testing-python/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill focuses on summarizing logs but lacks actionable guidance for converting GitHub Actions/tox failures into a pinpointed root cause and local reproduction, especially when multiple Python versions fail with the same underlying behavioral regression. It also doesn’t emphasize finding the first causal assertion failure vs cascaded follow-on failures.\nRepair instruction: Expand CI triage guidance with an execution-focused workflow: (1) identify the earliest/most specific assertion failure across jobs and treat repeats as the same root cause, (2) group failures by test file/symptom (e.g., session lifecycle warnings, request_history count diffs), (3) reproduce locally by running the same tox env(s) and isolating with pytest -k / -x, (4) check for state leakage indicators (warnings like “already started”, unexpected extra/missing HTTP calls), and (5) distinguish infra/setup issues from deterministic behavioral regressions. Add a checklist for common CI-only Python issues: shared singleton state, background worker queues, timing flakiness, and request-mocking mismatches due to endpoint/headers changes.",
+          "locations": [
+            {
+              "file": "analyze-ci/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The task depends on reading build logs from a harness that runs tox across multiple Python versions and recognizing that failures are due to missing interpreters/unsupported envs rather than failing tests. Current guidance is oriented to GitHub Actions URLs and general log summarization, and is weaker at tox-specific matrix triage and classifying infra vs code regressions when multiple envs fail for setup reasons.\nRepair instruction: Add a tox/matrix-focused CI triage section: how to read the tox summary to identify which env(s) failed and why; common pattern \"InterpreterNotFound\"/missing py37/py38/py39 as infra; how to separate test failures from environment creation failures; recommended remediations (e.g., skip_missing_interpreters, envlist/CI matrix adjustments, conditional factors), and a minimal local reproduction checklist (tox -e <env> -vv, check installed interpreters). Emphasize that local pytest success is insufficient if tox still returns nonzero.",
+          "locations": [
+            {
+              "file": "analyze-ci/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Some failures involved pytest flakiness from shared mutable/global state (singleton session/client), order dependence, and request-history count mismatches. The skill is generic and doesn’t strongly emphasize patterns for resetting global session state, making async/background flushing deterministic, and diagnosing tests that pass alone but fail in suite.\nRepair instruction: Strengthen guidance on state isolation and order-dependent failures: autouse fixtures to reset module-level singletons/caches, deterministic setup/teardown of sessions, clearing request histories, and waiting for background uploads/flushes without sleeps. Include a short section on verifying behavior under tox (not just pytest) and commands to reproduce the first failing test and detect order coupling.",
+          "locations": [
+            {
+              "file": "testing-python/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/fix-build-agentops/skills",
+      "executor_run_id": "fix-build-agentops-original-skill-v11x-20260903-r001"
+    },
+    {
+      "task_id": "energy-unit-commitment",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The workflow guidance was enough to build/solve a feasible MILP, but did not adequately force objective/model-equivalence validation, solver-quality diagnostics, or competitive-solution practices. The agent can return a mathematically ‘optimal’ solution to the wrong/weak objective (or with mis-linearized costs), yielding a large benchmark gap.\nRepair instruction: Add an explicit ‘Objective & Benchmark Equivalence Debug Loop’ to the workflow: (1) print and sanity-check objective coefficient summaries by variable family (startup, no-load, energy segments, reserves, curtailment penalties) before solve; (2) recompute total cost from extracted variables (using the same accounting as the benchmark) and assert it matches solver objective within tolerance; (3) include spot-checks for piecewise segments (activation, slopes, intercepts) and pmin-related terms; (4) require post-solve economic sanity checks (merit-order consistency, overcommitment detection, renewable utilization) and comparison against a lower bound (e.g., LP relaxation or ED without min-up/down) to detect gross suboptimality; (5) solver settings guidance for quality (time limit, target mip gap, presolve/cuts/heuristics) plus warnings against stopping at the first feasible incumbent.",
+          "locations": [
+            {
+              "file": "milp-solver-workflow/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill emphasizes feasibility and operating constraints but underemphasizes economically correct UC execution and, critically, cost-model consistency with reporting conventions. Common failure modes include omitting/incorrectly applying piecewise variable costs, double-counting or missing pmin energy, mishandling no-load and startup/shutdown costs, or overly conservative reserve/commitment choices that remain feasible but very expensive.\nRepair instruction: Add a dedicated ‘Cost Modeling & Economic UC Sanity’ section: (1) explicit formulas for total cost components (no-load, startup/shutdown, variable energy cost via piecewise segments) tied to a clearly defined actual MW output; (2) a worked example showing conversion between actual_output and above-minimum variables and where each must be used in ramping, capacity, reserves, and costs (to avoid double-counting pmin energy); (3) guidance on co-optimizing energy and reserves without forcing unnecessary commitment; (4) a checklist of economic red flags (too many units online, excessive starts, renewable curtailment when thermal marginal cost is higher) and how to diagnose them from schedules; (5) require recomputing and reconciling reported cost from the final schedule before submission.",
+          "locations": [
+            {
+              "file": "unit-commitment-operating-rules/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Even with feasibility passing, a large cost gap can arise from subtle mis-parsing/normalization of economic inputs: piecewise cost blocks interpreted incorrectly (total vs incremental), $/MWh scaling, breakpoints not aligned with pmin/pmax convention, or startup tiers/initial conditions mapped wrong in a way that inflates cost or distorts decisions.\nRepair instruction: Extend parsing guidance with cost-structure validation: (1) normalize piecewise cost curves into consistent breakpoints and marginal slopes (convert (MW,total_cost) blocks into incremental slopes if needed); (2) validate units and per-interval scaling (e.g., $/MWh * duration); (3) ensure curve endpoints and breakpoints align with whether production variables represent actual MW or above-minimum; (4) verify startup cost tiers and initial on/off time mapping; (5) emit a per-generator audit table (pmin/pmax, no-load, startup, first/last segment slopes, implied total cost at pmax) to catch misreads early.",
+          "locations": [
+            {
+              "file": "unit-commitment-data-modeling/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The workflow guidance did not sufficiently enforce benchmark-equivalent objective accounting and post-solve validation. The agent generated schedules with large cost divergence from benchmark and later reported objectives inconsistent with verifier recomputation, suggesting missing cost terms, inconsistent actual-vs-above-minimum accounting, stale incumbent values, or extraction/report mismatches after solving.\nRepair instruction: Strengthen the objective-equivalence and validation workflow by requiring deterministic recomputation of the final objective directly from exported report arrays before output generation. Add UC-specific checks for startup costs, no-load costs, piecewise production costs, reserve conventions, renewable curtailment accounting, and actual-MW versus above-minimum formulations. Require independent validation of all operational inequalities after incumbent extraction, especially when using rounded binaries or time-limited incumbents, and warn about stale objective values after schedule edits.",
+          "locations": [
+            {
+              "file": "milp-solver-workflow/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The operating-rules guidance did not adequately specify startup/shutdown derated capacity constraints and reserve deliverability during transition periods. The failures show production plus reserve exceeded startup-limited capability during startup hours, indicating incorrect interaction between commitment status, startup variables, reserve scheduling, and above-minimum production conventions.\nRepair instruction: Add explicit formulations and verifier-style validation checks for startup/shutdown-limited capability, including constraints such as p_above_min + reserve <= cap*u - startup_reduction*startup - shutdown_reduction*shutdown. Clarify throughout the skill whether variables represent actual MW or above-minimum MW and show how that convention propagates into ramping, reserve, and cost equations. Include a dedicated section on reserve deliverability during startup/shutdown transitions plus a final exported-schedule feasibility audit covering all transition-linked constraints.",
+          "locations": [
+            {
+              "file": "unit-commitment-operating-rules/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/energy-unit-commitment/skills",
+      "executor_run_id": "energy-unit-commitment-skillopt-20261017T192330Z"
+    },
+    {
+      "task_id": "simpo-code-reproduction",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill stresses matching Python/dependencies but did not prevent a common pitfall: creating the correct Python (3.10) yet continuing to run key commands (especially generating `/root/python_info.txt`) with the system default Python (3.12). This mismatch directly caused the task failure.\nRepair instruction: Add mandatory, explicit guidance that after creating the target environment, every subsequent command (logging, installs, running scripts/tests) must use the same interpreter—either by activating the venv or by invoking the interpreter via an absolute path. Require examples like `/opt/py310/bin/python -VV > /root/python_info.txt`, `/opt/py310/bin/python -m pip --version >> /root/python_info.txt`, `/opt/py310/bin/python -m pip freeze >> /root/python_info.txt`, and running tests as `/opt/py310/bin/python -m unit_test.unit_test_1`. Add a validation step: open/grep the generated `/root/python_info.txt` to confirm it contains the expected Python version before concluding.",
+          "locations": [
+            {
+              "file": "nlp-research-repo-package-installment/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill emphasizes matching repository Python versions and recording environment information, but it does not explicitly require that the logging commands, package installs, and test execution all use the same activated target interpreter. This allowed a workflow where Python 3.10 was installed and used for execution while /root/python_info.txt was regenerated using the default system Python 3.12, causing verifier failure despite otherwise successful reproduction.\nRepair instruction: Amend the skill to require strict interpreter consistency after environment creation. Explicitly instruct users to create and activate the target environment first, then run all installs, unit tests, and logging commands using that environment’s python executable (for example `/opt/py310/bin/python` or activated `python`). Add mandatory verification steps such as `which python` and `python -VV` before running tests or generating `/root/python_info.txt`. Include a concrete example showing how to generate `/root/python_info.txt` from the activated environment and confirm it contains the expected version string (e.g. `Python 3.10.x`). Add a warning not to switch back to system `python3` after setup, since evaluators may assert exact version substrings in the log output.",
+          "locations": [
+            {
+              "file": "nlp-research-repo-package-installment/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/simpo-code-reproduction/skills",
+      "executor_run_id": "simpo-code-reproduction-skillopt-20261017T225440Z"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill emphasizes concepts, equations, and handbook terminology but does not sufficiently prescribe the benchmark’s required end-to-end execution flow. The agent failed to operationalize handbook retrieval, representative thermocouple selection, TAL/peak/ramp calculations, conveyor feasibility analysis, and generation of the five required JSON outputs. The absence of explicit sequencing, file-output requirements, validation steps, and environment/tool usage guidance likely contributed to complete artifact omission.\nRepair instruction: Add a mandatory 'Evaluation Protocol' section that explicitly sequences the workflow: verify /app/data inputs; extract numeric limits/definitions from handbook.pdf into a cfg object; load CSVs; compute Q1–Q5 deterministically; and always write /app/output/q01.json–q05.json even if values are null or partial. Include concrete guidance for representative thermocouple selection (cold spot/worst case), TAL interpolation, peak aggregation, ramp-region filtering, conveyor-speed feasibility equations, tie-break logic, handling missing TC data, and ranking best runs. Add terminal usage examples showing one command per execution or safe chaining with &&/;, plus a minimal Python template for reading data, computing metrics, rounding to 2 decimals, sorting outputs, validating JSON parseability, and writing files.",
+          "locations": [
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill contains the deterministic computation framework needed for ramp, TAL, peak, and feasibility metrics, but it is not prescriptive enough as an operational benchmark playbook. It lacks explicit output contracts for q01–q05, schema/rounding/write-path instructions, completion checks, and sufficiently detailed integration guidance between handbook-derived config objects and thermocouple/MES processing. This likely allowed the agent to stall before generating outputs.\nRepair instruction: Extend the toolkit with explicit task-output contracts mapping computations to q01–q05 schemas, including mandatory file creation under /app/output/*.json, rounding to 2 decimals, sorting requirements, null handling, and final validation checks. Provide canonical implementations for handbook-config extraction, TAL segment interpolation above liquidus, max-ramp computation within handbook-defined regions, representative-TC/cold-spot peak selection, conveyor feasibility from heated length and speed, and best-run tie-break logic. Add a concise completion checklist emphasizing that successful execution requires all five JSON artifacts to exist and load successfully before termination.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/manufacturing-equipment-maintenance/skills",
+      "executor_run_id": "manufacturing-equipment-maintenance-skillopt-20261017T185557Z"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill’s plan saving/output requirements are not explicit enough about the exact textual grammar that unified_planning’s PDDLReader.parse_plan (and downstream verifiers) accepts. This likely led to emitting planner/operator strings in function-call syntax (e.g., name(args...)) instead of one-action-per-line s-expressions '(name arg1 ... argN)', causing UPException during plan parsing.\nRepair instruction: Update SKILL.md to add/strengthen a dedicated 'Plan Saving / Serialization' section that (1) explicitly requires sequential plans to be written one action per line in canonical PDDL plan syntax: '(action-name param1 ... paramN)' with whitespace-separated args inside parentheses; (2) explicitly forbids 'action(param,...)' or 'action(params...)' function-call formatting; (3) notes any casing/normalization expectations (e.g., lowercase) to match parser behavior; (4) optionally documents the temporal/timed line format only if relevant. Include a canonical formatter snippet that converts a unified_planning SequentialPlan into these lines, and require a post-save syntactic check by re-parsing the saved plan with unified_planning.io.PDDLReader.parse_plan before returning/accepting the output.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/pddl-airport-planning/skills",
+      "executor_run_id": "pddl-airport-planning-skillopt-20261017T194134Z"
+    },
+    {
+      "task_id": "organize-messy-files",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill guidance did not enforce deterministic, content-validated classification and a mandatory end-to-end reconciliation after moves. The agent relied on partial checks (e.g., folder counts) and missed wrong-subject placements and missing/incorrectly placed items. It also failed to anticipate verifiers that scan broadly for allowed extensions, missing stray .docx files outside the target dataset.\nRepair instruction: Add a 'dataset-scoped organization protocol' and 'mandatory reconciliation checklist' for taxonomy sorting tasks: (1) define a single ROOT (e.g., /root/papers) and restrict all find/Glob/Grep/moves to ROOT; explicitly forbid scanning /root, ~/.cache, or site-packages and warn that global scans can surface unrelated files. (2) Two-pass workflow: build an inventory of all allowed-extension files under ROOT/all with basenames + quick content snippet, assign a target folder, then move using exact basenames. (3) Reconciliation step before finishing: verify every seen filename exists exactly once in the five target folders, produce a missing/wrong-subject report, and iterate until clean. (4) Final safety scan within ROOT to ensure no allowed extensions remain outside the five folders; if the task’s verifier is known to scan globally, add instructions to detect/mitigate stray extension files introduced by tooling (avoid creating/copying templates; if safe, remove unintended artifacts). Include example shell commands for inventory, diffing, and safe mv.",
+          "locations": [
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Accurate sorting depended on quickly extracting enough PDF text/metadata to identify topics, but the workflow likely used insufficient or unreliable signals, leading to multiple subject misclassifications (e.g., QC vs music_history, LLM vs DNA).\nRepair instruction: Add a 'batch PDF topic classification' section: recommend extracting title/abstract/first 1–2 pages via pdftotext or pypdf (with guidance on handling empty extract_text() and scanned/OCR cases), and using lightweight keyword heuristics aligned to the task taxonomy. Provide a batch snippet to generate per-file text previews for human/LLM review prior to moving, and emphasize read-only processing (no rewriting PDFs) during classification.",
+          "locations": [
+            {
+              "file": "pdf/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Verifier failures were triggered by stray .docx files outside the intended folders (likely from installed packages/templates/caches), but the workflow did not warn that filesystem-wide extension checks can penalize unrelated DOCX artifacts created or present in the environment.\nRepair instruction: Add explicit guidance for tasks with filesystem-wide verification: avoid unnecessary package/tool installation that may introduce .docx templates; keep all DOCX-related artifacts confined to the dataset/project directory; and, when safe, locate and remove unintended .docx files outside the allowed folders (or ensure the task workflow never creates them). Include a note to scope searches to the dataset root unless the task explicitly requires global scans.",
+          "locations": [
+            {
+              "file": "docx/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The skill provides general organization guidance but lacks a rigorous workflow for high-accuracy semantic classification of large academic document collections. Repeated wrong-folder placements indicate insufficient emphasis on extracting document content, confidence scoring, reconciliation passes, and verifier-style auditing of final placements.\nRepair instruction: Add a dedicated workflow for organizing research/document corpora by topic: extract lightweight signals such as PDF titles, abstracts, keywords, and first-page text; define deterministic keyword/topic heuristics with tie-break rules; avoid filename-only classification; generate an explicit mapping file before moving files; stage and reconcile assignments with checks that every file appears exactly once in the correct folder; flag low-confidence classifications for manual review; and include iterative auditing steps for outliers and folder-level consistency validation.",
+          "locations": [
+            {
+              "file": "file-organizer/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "Filesystem-wide verifier precautions exist but were not strong or operational enough to prevent stray .docx artifacts from appearing under global cache/site-package directories such as ~/.cache and ~/.local. Tool installation or DOCX-related libraries likely created template files that triggered recursive verifier scans.\nRepair instruction: Front-load and strengthen filesystem-wide verification guidance for tasks that scan /root recursively. Explicitly warn against installing or using DOCX tooling that creates template/cache files outside the project directory unless strictly necessary. Add a verifier-safe checklist with concrete commands to locate and remove stray *.docx/*.pptx/*.pdf artifacts in common cache and package locations, emphasize keeping all Office files confined to the dataset root, and recommend extraction workflows that avoid generating Office templates or global cache files.",
+          "locations": [
+            {
+              "file": "docx/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "The skill focuses on PDF extraction mechanics but does not sufficiently connect extraction workflows to reliable semantic classification and organization tasks. Misclassified papers suggest inadequate guidance for deriving topics from academic PDFs at scale.\nRepair instruction: Add a 'PDF semantic classification' workflow covering batch extraction of titles, abstracts, metadata, and first-page text for research papers; keyword/topic inference examples; reconciliation against expected mappings; fallback OCR/text handling for poor PDFs; and practical batching scripts that output structured mappings for downstream organization and review.",
+          "locations": [
+            {
+              "file": "pdf/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/organize-messy-files/skills",
+      "executor_run_id": "organize-messy-files-skillopt-20261017T190449Z"
+    },
+    {
+      "task_id": "syzkaller-ppdev-syzlang",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill explains manual .const files and even references PPCLAIM/PPRELEASE, but it does not strongly enforce that every ioctl constant referenced by syzlang descriptions or expected by verifiers must appear explicitly in the .const file with exact identifier names and valid parseable formatting. The observed failure (PPCLAIM parsed as None) indicates users can still omit constants, misname them, misplace the file, or rely on extraction assumptions without a clear validation workflow.\nRepair instruction: Expand the skill with a dedicated validation and troubleshooting section for manual .const workflows. Add an explicit ppdev example checklist requiring PPCLAIM=28811 and PPRELEASE=28812, explain that all ioctl constants used in ioctl$ definitions must exist in sys/linux/<file>.txt.const with exact names, and document common failure causes: wrong filename/path, missing arches line, malformed key=value formatting, duplicate keys, or missing entries. Include a recommended verification step such as grepping const[...] usages from the .txt file and confirming every referenced symbol exists in the .const file before running tests.",
+          "locations": [
+            {
+              "file": "syz-extract-constants/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The build workflow guidance focuses on compilation-time constant failures, but this task exposed a verifier-stage issue where compilation succeeded even though a required constant was absent from the .const file. The skill lacks proactive guidance for validating constant coverage and diagnosing verifier assertions related to missing constants.\nRepair instruction: Extend the workflow with a pre-test constants validation step. Recommend checking that every constant referenced in ioctl definitions, flags, or verifier expectations exists in the colocated .const file and matches exact identifier spelling. Add an example workflow using grep/diff to compare const[...] references against .const entries, and document that some missing constants may only surface during tests even when make descriptions succeeds.",
+          "locations": [
+            {
+              "file": "syzkaller-build-loop/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Guidance/examples bias toward ioctl patterns that always include an `arg`, which led to modeling `_IO()` no-data ioctls (PPCLAIM/PPRELEASE/PPYIELD/PPEXCL) with a placeholder third parameter (e.g., `arg const[0]`). This violates verifier expectations for a 2-argument signature and triggers signature regex/check failures.\nRepair instruction: Add a dedicated section explaining how `_IO`, `_IOR`, `_IOW`, `_IOWR` map to syzlang signatures. Explicitly state that `_IO` ioctls must be defined with NO third argument: `ioctl$CMD(fd ..., cmd const[CMD])`. Warn against adding placeholder args like `arg const[0]`. Include concrete ppdev examples for PPCLAIM/PPRELEASE/PPYIELD/PPEXCL and a note that verifiers commonly enforce these signatures.",
+          "locations": [
+            {
+              "file": "syzlang-ioctl-basics/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The `.const` guidance wasn’t strong enough to prevent missing required ioctl constants (e.g., PPCLAIM) and to highlight that tests/verifiers may assert the presence (and sometimes values) of key constants even if `make descriptions` succeeds. Exact identifier matching between `.txt` and `.const` is a frequent failure mode.\nRepair instruction: Strengthen the rule: every ioctl constant used in `const[...]` or `ioctl$... cmd const[...]` must exist in the matching `.txt.const` with identical spelling. Add a ppdev-focused example showing PPCLAIM/PPRELEASE in both files. Add a short checklist/audit step (grep/diff) to confirm constant coverage for all ioctl commands and any required mode/flag constants, and explicitly warn that compilation can succeed while verifier/tests fail if any constant is absent/misspelled.",
+          "locations": [
+            {
+              "file": "syz-extract-constants/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The workflow emphasizes build steps but underemphasizes verifier-aligned semantic validation; as a result, changes compiled yet regressed required ioctl signatures and/or constant completeness. Some failures surfaced only during verifier/test stages rather than during `make descriptions`.\nRepair instruction: Augment the workflow with a pre-verifier validation step: (1) review ioctl$ definitions and ensure `_IO` commands have 2-arg form, `_IOR/_IOW/_IOWR` have appropriate `ptr[in/out]` payloads; (2) run a constant-coverage audit to ensure every referenced constant exists in `.txt.const` with exact identifiers; (3) then run `make descriptions` followed by `make all` as the final gate. Emphasize that passing `make descriptions` alone is insufficient.",
+          "locations": [
+            {
+              "file": "syzkaller-build-loop/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/syzkaller-ppdev-syzlang/skills",
+      "executor_run_id": "syzkaller-ppdev-syzlang-skillopt-20261017T190059Z"
+    },
+    {
+      "task_id": "drone-planning-control",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Most failures are consistent with infeasible or overly aggressive desired trajectories (spline second-derivative exceeding accel_limit_up/down/horiz) and an outer-loop controller that lacks prescriptive guidance for gravity compensation, acceleration feedforward, thrust saturation, and anti-windup/reset. The current guidance does not clearly define boundary conditions per mode (takeoff/land/hover/fly), how to time-scale segments to satisfy acceleration constraints at every sample, nor a tuning workflow targeted at the <0.05 m per-timestep error requirement.\nRepair instruction: Extend the skill to be test-aligned and implementation-ready: (1) specify a concrete acceleration-limiting strategy in the planner (e.g., iterative time-scaling per segment until sampled |ax,ay|<=accel_limit_horiz and az within up/down limits; or clamp spline-derived acceleration with a continuity-preserving time-stretch fallback); (2) explicitly define desired-state construction for all 15 rows per timestep (pos/vel/acc, yaw/yaw-rate) and mode-specific boundary conditions (typically zero end vel/acc for takeoff/land/fly unless commanded; hover constant); (3) provide the full position-controller equations including desired-acceleration feedforward, gravity compensation, thrust computation and saturation, and a clear anti-windup pattern (integrator clamping/back-calculation + reset on mode changes or saturation); (4) add a practical tuning workflow (initial gain ranges, axis-wise scaling, derivative filtering, and an objective tied to verifier constraints: max per-step error, overshoot, steady-state error).",
+          "locations": [
+            {
+              "file": "position-controller-trajectory-planner/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Inner-loop tracking quality likely limits worst-case commands. The attitude planner mapping from desired acceleration to roll/pitch is presented ambiguously (signs/frames, small-angle vs full mapping) and the skill excerpt appears truncated mid 'Critical Design Rules', omitting key pitfalls (yaw wrapping, saturation, anti-windup). These gaps can cause oscillation/overshoot and insufficient attitude tracking, degrading position tracking even when the outer loop is correct.\nRepair instruction: Complete and disambiguate the skill: (1) state exact coordinate-frame conventions (world vs body, gravity direction) and provide unambiguous formulas (with signs) for mapping desired world-frame horizontal acceleration and yaw into desired φ/θ; include whether small-angle approximation is assumed and how g is incorporated; (2) specify yaw error handling with angle wrapping and define desired yaw-rate usage; (3) add saturation limits for desired angles and commanded moments plus an integral reset/clamping (anti-windup) recipe; (4) clarify derivative term source (use measured body rates vs finite-diff Euler angles) and inertia scaling; (5) restore/finish the truncated 'Critical Design Rules' section and include recommended starter gain ranges + a tuning procedure aimed at meeting tight per-timestep tracking without overshoot.",
+          "locations": [
+            {
+              "file": "attitude-controller-planner/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Mixed pass/fail across commands can come from edge cases in allocation and dynamics: negative rpm_sq handling, RPM clipping leading to infeasible requested [F,M] and mismatch between commanded vs achieved moments, or unclear frame/unit conventions. The excerpt is truncated, risking ambiguity about state ordering and force/moment application that can subtly destabilize some trajectories.\nRepair instruction: Harden and fully specify the physics layer: (1) explicitly require clamping rpm_sq to nonnegative before sqrt, then clipping RPMs, and recomputing the actually achieved [F,M] after clipping to feed into dynamics; (2) document motor ordering and yaw-torque sign conventions in the allocation matrix, and ensure moment axes match the dynamics Euler/body-rate conventions; (3) complete the dynamics section with the full 16-state layout, world↔body rotation usage, Euler-rate mapping, and gravity term; (4) add numeric-stability notes (conditioning/solve method for allocation, unit consistency RPM vs rad/s, and guidance for motor lag constant ranges and integration step sizing aligned with sample_rate).",
+          "locations": [
+            {
+              "file": "motor-model-dynamics/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Not the main driver of 16/30 successes, but ambiguous metric computation (settling-band definition, overshoot window, entry detection) can mislead tuning loops and mask why certain commands fail. Tight thresholds make small definition mismatches costly during optimization.\nRepair instruction: Clarify the metric implementation to match verifier expectations: (1) define settling band precisely using settling_threshold=0.02 relative to initial 3D distance; (2) specify how to detect first entry into the band and how overshoot is measured afterward; (3) define behavior for non-monotone trajectories and cases where the band is never entered; (4) provide reference pseudocode and explicitly state when to use 1D z stepinfo vs 3D stepinfo_3d so tuning aligns with evaluation.",
+          "locations": [
+            {
+              "file": "stepinfo-3d/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "Non-land commands appear to be misclassified or their mode metadata is not propagated consistently, causing the verifier’s per-mode aggregation to only recognize 'land'. The parser guidance likely under-specifies strict normalization/robust regex (floats, signs, whitespace) and the requirement that each command yields exactly one correctly named mode segment with strictly increasing cumulative times.\nRepair instruction: Require exact lowercase mode strings ('takeoff','hover','fly','land') and mandate propagating them unchanged downstream (trajectory generation and metrics output). Strengthen parsing rules: regex must accept signed floats/ints and variable whitespace; normalize input to lowercase; ensure waypoint_times are cumulative and strictly increasing; never overwrite prior modes when auto-inserting the initial waypoint. Add explicit examples for each command type showing: start waypoint initialization at t=0, end waypoint appended per command, duration handling, and default yaw handling.",
+          "locations": [
+            {
+              "file": "flight-plan-parser/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "Broad failures in takeoff/hover/fly are consistent with planned trajectories that violate accel_limit_up/down/horiz or produce splines that are difficult to track within the <0.05 m error constraint. Current guidance mentions cubic splines but does not make accel-limit enforcement and mode-specific semantics explicit enough for verifier alignment.\nRepair instruction: Add explicit accel-limit enforcement in the planned 15×N desired state: at every timestep enforce sqrt(ax^2+ay^2) ≤ accel_limit_horiz and -accel_limit_down ≤ az ≤ accel_limit_up. Recommend time-stretching/rescaling segment durations until limits are met (preferred) rather than naive clamping that breaks spline consistency. Clarify per-mode trajectory semantics: hover => constant pos with zero vel/acc; takeoff/land => vertical spline with zero lateral motion; fly => spline between 3D endpoints with smooth yaw interpolation. Also specify outer-loop controller structure with feedforward from planned acceleration + PD/PID feedback, anti-windup, and saturation consistent with thrust bounds.",
+          "locations": [
+            {
+              "file": "position-controller-trajectory-planner/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "Even with correct trajectories, commands can be marked unsuccessful if metrics_3d.json is computed with the wrong schema, wrong metric definitions, or missing/incorrect 'mode' fields. The skill likely under-emphasizes schema fidelity and mode annotation as required by the verifier.\nRepair instruction: Add an explicit metrics_3d.json schema example that includes a required 'mode' field populated with exactly the segment mode string. Reiterate when to use 3D metrics vs 1D and require consistent computation of rise time, settling time, overshoot %, and steady-state error based on Euclidean distance to the final 3D target for non-pure-vertical moves. Warn that incorrect/missing mode labels can cause the verifier to report only one mode succeeding even if the flight is correct.",
+          "locations": [
+            {
+              "file": "stepinfo-3d/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P008",
+          "description": "Poor tracking in fly/takeoff/hover can stem from incorrect acceleration→attitude mapping (frame/sign/Euler-convention mismatch) or incomplete thrust-direction construction, especially when yaw is nonzero. This would disproportionately hurt lateral segments and could contribute to non-land failures.\nRepair instruction: Make the mapping fully explicit and convention-locked: specify the project’s Euler rotation order and handedness; provide the complete b3_des construction using a_total = a_des - g_vec and the b1_yaw/cross-product method to form R_des; include the exact formulas to extract (φ_des, θ_des, ψ_des) from R_des under that convention. Clarify thrust computation consistency (e.g., F = m * dot(a_total, b3_current or b3_des) with correct sign for z-up), include near-zero-norm fallback for a_total, and recommend limiting φ/θ to feasible bounds to avoid destabilizing commands.",
+          "locations": [
+            {
+              "file": "attitude-controller-planner/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/drone-planning-control/skills",
+      "executor_run_id": "drone-planning-control-skillopt-20261017T195153Z"
+    },
+    {
+      "task_id": "fix-build-google-auto",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill focuses on dependency declaration and conflict management but lacks practical guidance for diagnosing and repairing dependency resolution failures caused by legacy JDK/Maven TLS incompatibilities and Maven Central transport issues. It undercovers repository/mirror configuration, HTTP vs HTTPS handling in constrained CI environments, settings.xml mirror setup, forcing TLS behavior, and troubleshooting commands for failed artifact transfer.\nRepair instruction: Add a dedicated troubleshooting section for legacy Maven/JDK repository resolution failures. Cover recognition of errors such as \"Unrecognized SSL message, plaintext connection?\" and artifact transfer failures; configuring <repositories> and settings.xml mirrors; differences between repo.maven.apache.org and repo1.maven.org; when HTTP mirrors may be temporarily required in isolated CI; forcing TLS versions and using -Dmaven.wagon.http.ssl.* flags; clearing local caches and forcing updates; and diagnostic commands such as mvn -X, dependency:tree, help:effective-settings, and help:effective-pom. Include concrete XML examples and guidance on pinning dependency versions compatible with Java 7-era toolchains.",
+          "locations": [
+            {
+              "file": "maven-dependency-management/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill does not sufficiently address plugin resolution failures in legacy environments, especially around maven-dependency-plugin and maven-enforcer-plugin retrieval. It lacks coverage of pluginRepositories, plugin version pinning for older Maven/JDK combinations, compatibility constraints, and mitigation strategies for flaky or TLS-incompatible plugin downloads.\nRepair instruction: Extend the skill with guidance on plugin resolution and compatibility in constrained CI environments. Cover configuring <pluginRepositories> separately from <repositories>, pinning plugin versions through <pluginManagement>, selecting plugin versions compatible with Java 7 and older Maven releases, and handling dependency:go-offline or resolve-plugins failures. Include examples for maven-enforcer-plugin and maven-dependency-plugin, troubleshooting for PluginResolutionException and DependencyResolutionException, and strategies such as temporarily skipping enforcer rules or isolating plugin download steps during bootstrap/debugging.",
+          "locations": [
+            {
+              "file": "maven-plugin-configuration/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The skill lacks guidance on CI lifecycle/goal sequencing issues that amplify repository and TLS failures, particularly around dependency:go-offline, verify, clean ordering, and test skipping semantics. Users may not understand how offline-prefetch goals can fail independently of compilation and testing.\nRepair instruction: Add a subsection on lifecycle and goal sequencing pitfalls in CI pipelines. Explain how goals like dependency:go-offline and resolve-plugins interact with the lifecycle, why clean should generally precede build/test phases, and how -DskipTests differs from -Dmaven.test.skip. Include recommendations for isolating dependency-prefetch steps from verify/package during troubleshooting and note that offline/prefetch goals can expose repository or TLS incompatibilities before compilation begins.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Evidence repeatedly shows Maven plugin resolution and plugin execution failures (dependency:go-offline/resolve-plugins, enforcer, surefire, invoker, compiler/annotation processing). The skill mentions pluginRepositories but lacks actionable troubleshooting for plugin resolution vs dependency resolution, legacy TLS/JDK compatibility, pinning compatible plugin versions, and handling plugin classpath/transitive dependency issues that can surface as NoClassDefFoundError during build steps.\nRepair instruction: Add a focused troubleshooting section covering: (1) differentiating pluginRepositories vs repositories and when to use settings.xml mirrors vs POM changes; (2) diagnosing plugin transfer/TLS failures in legacy environments (e.g., old JDKs/Maven) including repository URL/protocol checks and when environment flags/settings are required; (3) overriding/pinning plugin versions via <pluginManagement> for JDK compatibility; (4) excluding/overriding problematic transitive plugin dependencies when plugin classpath failures occur; (5) CI-stability controls for common plugins (surefire/invoker/enforcer) including safe, profile-guarded skips (e.g., -DskipTests, enforcer.skip, invoker.skip) and criteria for when temporary skips are acceptable. Include concrete POM snippets for pluginManagement overrides and profile-based executions.",
+          "locations": [
+            {
+              "file": "maven-plugin-configuration/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "Failures include dependency descriptor transfer errors (TLS/SSL) and downstream compilation/runtime missing-class symptoms (e.g., NoClassDefFoundError for auto-common/MoreElements) consistent with unresolved or misaligned transitive dependencies. The skill covers basic dependency declaration but lacks practical guidance for diagnosing resolution failures in constrained/legacy CI, fixing transitive dependency mismatches, and applying cross-JDK compatibility shims (adding/replacing JDK-removed artifacts, excluding obsolete deps) commonly needed in these builds.\nRepair instruction: Add practical troubleshooting guidance for: (1) repository transport/TLS resolution failures (how to confirm what failed with -X/-U and dependency:tree/resolve, and when to use mirrors/settings vs POM); (2) interpreting missing-class errors as dependency graph problems and fixing them with explicit deps, exclusions, and version alignment; (3) using <dependencyManagement> to force consistent versions across multi-module projects; (4) cross-JDK compatibility patterns (replacing removed JDK-provided artifacts, adding javax/jakarta annotation APIs when needed, excluding obsolete tools.jar-era deps). Provide examples for dependency:tree-driven diagnosis, an exclusion snippet, and a dependencyManagement alignment snippet.",
+          "locations": [
+            {
+              "file": "maven-dependency-management/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "Command usage and logs indicate confusion/fragility around mixing lifecycle phases with plugin goals and multi-module reactor behavior (e.g., go-offline/test/clean ordering, verify vs install impacts, reactor cascades and banned modules). The skill is largely a phase list and lacks pragmatic guidance for diagnosing reactor failures, resuming builds, and choosing correct phase/goal sequences for CI, especially in multi-module projects with integration-test/invoker steps.\nRepair instruction: Add a lifecycle debugging subsection: explain why clean should typically precede compile/test and how mixing plugin goals (e.g., dependency:go-offline) with phases affects outcomes; provide recommended CI command patterns (e.g., go-offline before build, then clean verify/install as appropriate). Include multi-module reactor troubleshooting: reading the reactor summary, isolating modules with -pl/-am, resuming with -rf, and understanding how early-module failures cause downstream skips/bans (and when install is required for modules/tests that expect artifacts in the local repo).",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/fix-build-google-auto/skills",
+      "executor_run_id": "fix-build-google-auto-skillopt-20261017T192638Z"
+    },
+    {
+      "task_id": "shock-analysis-supply",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The agent failed to populate and/or preserve the Excel workbook’s required data and formulas. Reported missing elements include populated PWT/CFC data, WEO projection formulas, the depreciation formula in Production!B3, LN/EXP/TREND/AVERAGE formula families used for extensions/filters, and references from the Investment sheet. This indicates insufficient enforcement of: (1) writing formulas into the specified cells/ranges (not leaving blanks or hardcoding), (2) maintaining cross-sheet references, and (3) validating that formulas persist and recalculate after saving.\nRepair instruction: Augment the xlsx workflow with an explicit end-to-end build-and-verify checklist for multi-sheet economic/financial models: (1) Populate all required source tables/ranges (e.g., PWT/WEO) and confirm non-empty coverage across the expected years/countries; (2) Implement projections/extensions using formulas (not pasted values), specifically ensuring required formula families are present where instructed (LN, EXP, TREND, AVERAGE, ratio/division calculations, depreciation/capital accumulation); (3) Ensure cross-sheet links are created and intact (e.g., Investment -> Production/WEO_Data), using consistent absolute/relative references and fill-down/right across required ranges; (4) Recalculate the workbook, scan for any formula errors (#REF!, #DIV/0!, #VALUE!, #NAME?, #N/A), and confirm key sentinel cells like Production!B3 contain formulas; (5) After saving/exporting, re-open and re-check that formulas and links persisted and that expected ranges still contain formulas (not blanks).",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Workbook outputs were not fully populated and not test-compatible: missing PWT!C labor values, missing HP-filter objective formula in the expected cell, and Production!B3 evaluating as text rather than a numeric value. Additionally, widespread #NAME?/#DIV/0! during recalc suggests unsupported functions (in the checker’s Excel engine) and/or unguarded denominators. The current skill guidance under-specifies (1) verifying required ranges are non-empty, (2) ensuring verifier-checked cells contain formulas that evaluate numerically, (3) using a conservative function set for compatibility, and (4) running an explicit pre-submit error audit until zero formula errors.\nRepair instruction: Update xlsx/SKILL.md with benchmark-oriented spreadsheet QA and compatibility rules:\n1) Required-range completeness: before submission, confirm all specified source/input series ranges are populated with numeric values (e.g., PWT columns B/C across the checked rows); forbid leaving blanks/placeholders in verifier-checked ranges.\n2) Verifier-critical cells: explicitly require that all named/expected objective/parameter cells (e.g., HP-filter objective cell, depreciation-rate cell) contain formulas (or fixed numeric values) that evaluate to finite numerics without needing manual Solver execution.\n3) Numeric type enforcement: add a rule that any cell used in numeric comparisons must be numeric (not stored as text). Provide coercion patterns: VALUE(x), --x, N(x); avoid quoting numbers; align number formats but prioritize stored type.\n4) Compatibility function set: warn against functions that can produce #NAME? in alternate evaluators (e.g., LET/LAMBDA/XLOOKUP/dynamic arrays unless explicitly allowed). Prefer broadly supported constructs (INDEX/MATCH, SUMPRODUCT, IF/IFERROR, OFFSET only if necessary, LN/EXP, TREND).\n5) Zero-error process: mandate a final full recalc + scan for #NAME?/#DIV/0!/#REF!/#VALUE!/#N/A; fix by guarding denominators, using IFERROR where appropriate, and ensuring no required inputs are blank—iterate until zero formula errors.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/shock-analysis-supply/skills",
+      "executor_run_id": "shock-analysis-supply-skillopt-20261017T194321Z"
+    },
+    {
+      "task_id": "jpg-ocr-stat",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The task centered on OCR extraction from many receipt images, but the workflow appears to have stalled before completion or final save. The current skill emphasizes OCR extraction itself but lacks operational guidance for efficient batch processing, timeout-aware execution, receipt-specific preprocessing, structured field extraction, and guaranteed downstream artifact persistence.\nRepair instruction: Extend the skill with explicit batch OCR workflow guidance for directories of receipt images: recommend single-pass OCR with tuned Tesseract configs, lightweight preprocessing (grayscale/threshold/resize), and avoiding excessive repeated OCR variants. Add receipt-focused extraction heuristics for dates and totals using keyword prioritization and fallback parsing. Include timeout-safe execution patterns, progress checkpoints, incremental/intermediate saves, and mandatory postconditions such as verifying output artifacts exist with `os.path.exists()` and validating expected row counts before task completion.",
+          "locations": [
+            {
+              "file": "image-ocr/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The evaluator required a deterministic XLSX workbook with exactly one sheet and exact columns, but no workbook was produced. The skill currently lacks sufficiently explicit guidance on evaluator-sensitive workbook generation, strict sheet constraints, deterministic saving, and post-save validation.\nRepair instruction: Add a benchmark-oriented XLSX recipe covering: creating exactly one worksheet with the required sheet name, enforcing exact column ordering, writing rows deterministically (e.g. sorted by filename), handling null values cleanly, removing default extra sheets, saving to the required absolute path, and immediately reopening/verifying the workbook exists and is readable. Include recommendations for incremental saves or exception-safe finalization during long-running pipelines.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 1 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Guidance is too generic and JSON-oriented for a receipt-stat extraction task. It under-specifies receipt-oriented preprocessing (contrast/threshold/denoise/deskew), Tesseract configuration for receipts and numeric fields (PSM/OEM selection, digit/currency whitelists), multi-pass/ROI strategies (e.g., bottom-of-receipt totals), and—critically—deterministic field extraction logic for date and total with validation. It also lacks operational guidance for batch reliability (per-image timeout, progress logging/checkpointing) which correlates with the observed missing output artifact in baseline.\nRepair instruction: Extend the skill with a focused 'Receipt OCR pipeline for (date, total_amount)' section: (1) lightweight preprocessing recipe (grayscale→autocontrast→optional upscale→adaptive threshold/denoise; optional rotation/deskew cues), (2) recommended Tesseract configs for receipts with examples (e.g., --oem 1 and psm {6,4,11}, preserve_interword_spaces; separate numeric-focused config with whitelist for digits/currency/.,-), (3) bounded multi-pass strategy (try 1–2 configs; optional ROI second pass on bottom 30–40% for totals) selecting best output via confidence (image_to_data mean/conf filtering), (4) robust parsing heuristics: keyword-tier search for totals with exclusion keywords (subtotal/tax/change/discount), same-line + next-line fallback, money regex supporting thousands separators, and plausibility rules (prefer largest plausible total near bottom; avoid unit prices), (5) date extraction supporting multiple formats + month names and normalization to ISO with year-range plausibility checks, (6) batch reliability: per-image timeouts, progress checkpoints, and guarantee final artifact creation even with partial failures (record warnings per file).",
+          "locations": [
+            {
+              "file": "image-ocr/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Current Excel guidance is broad/modeling-focused and does not strongly emphasize benchmark-style strictness: exact single-sheet constraint, exact headers/columns, deterministic row ordering, correct null handling (empty cells rather than literal strings), and post-save verification/atomic write. This maps to both the 'file not found' failure mode and line-by-line oracle mismatches caused by structural/representation differences.\nRepair instruction: Add a 'Benchmark/SkillsBench strict-output mode' subsection: (1) create exactly one worksheet with the required name; remove extras; (2) write the exact header row and column order only—no helper sheets/columns/formatting artifacts; (3) sort rows deterministically (e.g., by filename) before writing; (4) represent missing values as true empty cells (None) and never write 'null'/'N/A' unless explicitly required; (5) save to the exact required path and use atomic save (tmp then rename) to avoid partial/missing files; (6) immediately validate after save (file exists, can be reopened, sheetnames match, expected row count). Include a minimal openpyxl example implementing these checks.",
+          "locations": [
+            {
+              "file": "xlsx/SKILL.md",
+              "section": "SkillOpt round 2 diagnosis"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/jpg-ocr-stat/skills",
+      "executor_run_id": "jpg-ocr-stat-original-skill-v11x-20260903-r001-recovery001"
+    }
+  ]
+}

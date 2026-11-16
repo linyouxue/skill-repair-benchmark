@@ -1,0 +1,25 @@
+{
+  "task_id": "flink-query",
+  "fallback_used": false,
+  "overall_diagnosis": "The Flink job’s failure is semantic rather than runtime: it emits results for many extra jobIds (often with count=0/low counts) that the benchmark does not expect. This strongly suggests incorrect stream correlation and emission criteria—outputs are being produced for jobs that do not meet the task’s “once the job has finished (in-scope)” definition, likely due to missing inner-join/qualification on terminal job events, mishandling of which terminal event types qualify, and/or event-time/watermark/timer logic that allows emitting for partial or out-of-slice jobs. The issue is in Flink streaming semantics (sessionization/stage counting + termination-gated output), not PDF processing.",
+  "diagnosed_skills": [
+    {
+      "path": "senior-data-engineer/SKILL.md",
+      "confidence": "0.8",
+      "diagnosis": "The skill guidance is too broad and lacks task-specific Flink patterns for correlating task-event and job-event streams so that results are emitted only for the intended job population. The current implementation likely fails to (a) enforce inner-join semantics on a qualifying terminal event, (b) correctly interpret/filter terminal job event types per the dataset schema, and (c) prevent emitting default/zero rows for jobs without qualifying termination or without relevant SUBMIT activity in-scope. It also likely misses best practices around event-time ordering (watermarks/timers) when one stream must gate emission of aggregates from the other.",
+      "repair_instruction": "Add a focused Flink section for “emit-on-termination” queries over dual streams (tasks + jobs): (1) explicitly require inner-join/qualification: only emit for jobIds that appear in job_events with a qualifying terminal state within the processed slice; do not output (jobId,0) for missing/never-terminated jobs; optionally require at least one SUBMIT before termination. (2) Provide a concrete implementation pattern using KeyedCoProcessFunction (or interval join + window) with per-job state: buffered task/session aggregates + flags like seenSubmit, seenTerminal(+terminalTs); emission conditioned on both the terminal event and event-time watermark passing terminalTs; include state TTL/cleanup. (3) Include event-time/watermark guidance for out-of-order arrivals and late data (bounded out-of-orderness, timer registration on terminalTs, and guarding against premature emission). (4) Add a schema checklist for the Google cluster trace: validate which job event_type codes count as terminal (FINISH vs KILL vs FAIL/others) per provided docs, and highlight common pitfalls that create extra outputs (wrong terminal filter, partial slices missing terminal events, multiple terminal events, incorrect timer logic)."
+    }
+  ],
+  "unselected_skills": [
+    "pdf/SKILL.md"
+  ],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": false,
+  "shared_diagnosis_source": null,
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true
+}

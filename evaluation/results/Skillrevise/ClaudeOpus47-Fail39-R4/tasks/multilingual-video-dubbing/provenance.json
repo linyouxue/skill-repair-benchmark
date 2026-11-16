@@ -1,0 +1,30 @@
+{
+  "task_id": "multilingual-video-dubbing",
+  "initial_run_id": "multilingual-video-dubbing-original-skill-v11x-20260903-r001",
+  "selected_run_id": "multilingual-video-dubbing-bundle-1-published-original-revi-c8540962c317",
+  "selected_reward": 0.0,
+  "selected_success": false,
+  "selected_is_method_rollout": true,
+  "selected_bundle_source": "/home/eraser/benchmark-candidates/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/multilingual-video-dubbing/bundle-1-published-original-revised-b224376e306dc8cd/full-skills",
+  "selected_rollout_source": "/home/eraser/benchmark-jobs/tatu-claude-opus47-fail39-published-trace-r4-replay27-resume13/skillrevise-bundle-claude-opus47-fail39-published-trace-top3-r4-replay27-resume13/multilingual-video-dubbing-bundle-1-published-original-revi-c8540962c317",
+  "selected_overrides": {
+    "text-to-speech/SKILL.md": "# Multilingual TTS Dubbing Pipeline\n\n## Purpose\nProduce dubbed audio aligned to timed segments (e.g., SRT windows) over a target video, using a neural TTS engine, with verifiable placement precision, drift bounds, and a schema-conformant report artifact.\n\n## When to Use\nTrigger when the task requires generating per-segment speech aligned to a timing file and a target video, delivering both audio and a structured report describing placement, duration control, and drift per segment.\n\n## Procedure\n- Discover inputs and environment: use `ffprobe` on the target video to read duration, sample rate, and channel count; parse the timing file (e.g., SRT) into segments with `window_start`, `window_end`, and text; read acceptance criteria to extract loudness target, drift tolerance, placement precision, and allowed `duration_control` values; if any are unspecified, default to |drift_sec| <= 0.2s and placed_start precision <= 10 ms.\n- Validate TTS engine before committing: enumerate available neural TTS options (offline model or cloud) in the environment; synthesize a short probe clip and confirm it is voiced (non-trivial spectral energy above ~4 kHz); if only a formant synthesizer (e.g., espeak-ng) is available, STOP and report a quality-gate failure instead of silently falling back.\n- Synthesize per segment with the chosen engine at its native sample rate; record engine identity and sample rate; resample/mix to match the video's audio properties only once, as a final step.\n- Place each segment: compute required duration = `window_end - window_start`; choose `duration_control` by rule - if synthesized length is within tolerance, place as-is; if shorter, `pad_silence`; if slightly longer (within a small ratio), `rate_adjust`; if far longer, `trim` with boundary fades. Set `placed_start = window_start` with precision <= 10 ms; apply short fades at boundaries to avoid clicks.\n- Normalize and verify: measure integrated loudness and normalize to the task-declared target (do not assume a value); then reload `report.json` and assert required fields exist, `duration_control` is within the declared enum, `|placed_start - window_start| <= 0.01s`, and `drift_sec = placed_end - min(window_end, video_duration)` with `|drift_sec| <= 0.2s`. Log and fail on any segment that violates these.\n\n## Constraints / Pitfalls\n- Do not use formant/prototyping TTS (e.g., espeak-ng) for final delivery; neural engines only. If none are available, fail loudly rather than degrade quality.\n- Do not hardcode loudness, filter, or fade literals; derive loudness target from the task spec and apply cleanup only if required by the acceptance criteria. Always compute drift against `min(window_end, video_duration)`, not the raw window end, and re-normalize after any tempo change."
+  },
+  "selection": {
+    "targets": [
+      "text-to-speech/SKILL.md"
+    ],
+    "rationale": "The agent switched to espeak-ng (a prototyping/formant TTS the skill explicitly warns against) producing low-quality audio, and had loudnorm compatibility issues—both covered by the TTS mastering skill which specifies engine choice (neural offline/cloud over espeak-ng) and the loudness normalization workflow.",
+    "raw_response": "{\"targets\":[\"text-to-speech/SKILL.md\"],\"rationale\":\"The agent switched to espeak-ng (a prototyping/formant TTS the skill explicitly warns against) producing low-quality audio, and had loudnorm compatibility issues—both covered by the TTS mastering skill which specifies engine choice (neural offline/cloud over espeak-ng) and the loudness normalization workflow.\"}"
+  },
+  "episodes": [
+    {
+      "target_skill": "text-to-speech/SKILL.md",
+      "accepted": true,
+      "accepted_revision": true,
+      "decision": "accepted_revision",
+      "score_before": 0.0,
+      "score_after": 0.0
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "ok": true,
+  "update_mode": "patch",
+  "edits": [
+    {
+      "op": "insert_after",
+      "target": "async def test_async_raises():\n    with pytest.raises(ConnectionError):\n        await connect_to_invalid_host()\n```",
+      "content": "\n## Debugging Timing-Sensitive Test Failures\n\nWhen a test asserts that two timestamps differ (e.g. `assert event.init_timestamp != event.end_timestamp`) and fails with **equal values** after a `sleep`, this is a **real bug**, not a flake. Do not dismiss it as \"pre-existing\" or \"unrelated\" — if the build/verifier runs this test, you must fix it.\n\nThe fix almost always belongs in the **production helper that generates the timestamp**, not in the test. Investigate in this order:\n\n1. **Precision/truncation in the helper.** Check for `isoformat(timespec='milliseconds')` or `'seconds'`. If `sleep` duration (e.g. `0.15s` = 150ms) is near or below the precision window, two calls can produce identical strings. Prefer `timespec='microseconds'`.\n2. **Deprecated datetime APIs.** `datetime.utcfromtimestamp(...)` is deprecated. Replace with timezone-aware `datetime.now(timezone.utc)` (and format accordingly). A `DeprecationWarning` in the captured output is a strong hint.\n3. **Sleep vs. precision window.** Confirm the test's `sleep` is longer than the helper's resolution. If not, either increase precision or (less preferred) use `time.monotonic_ns()` for ordering.\n4. **Monotonicity.** If strict ordering matters, back the helper with a monotonic counter or `time.perf_counter_ns()` so repeated rapid calls are guaranteed distinct.\n\nExample fix pattern (in `helpers.py`, not the test):\n\n```python\n# Before (deprecated + millisecond truncation causes equal timestamps)\nreturn datetime.utcfromtimestamp(time.time()).isoformat(timespec='milliseconds') + 'Z'\n\n# After\nreturn datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')\n```\n\n**Rule of thumb:** if a test asserts \"A happened before B\" and the assertion fails because the recorded times are equal, the recorder is lossy — fix the recorder."
+    },
+    {
+      "op": "insert_after",
+      "target": "- [ ] Separate tests for different behaviors",
+      "content": "\n- [ ] Timestamp-equality failures investigated as source-helper bugs (precision, deprecated `utcfromtimestamp`), not dismissed as flakes"
+    }
+  ],
+  "edit_reports": [
+    {
+      "index": 1,
+      "op": "insert_after",
+      "target": "async def test_async_raises():\n    with pytest.raises(ConnectionError):\n        await connect_to_invalid_host()\n```",
+      "content_preview": "\n## Debugging Timing-Sensitive Test Failures\n\nWhen a test asserts that two timestamps differ (e.g. `assert event.init_timestamp != event.end_timestamp`) and fails with **equal values** after a `sleep`",
+      "status": "applied_insert_after"
+    },
+    {
+      "index": 2,
+      "op": "insert_after",
+      "target": "- [ ] Separate tests for different behaviors",
+      "content_preview": "\n- [ ] Timestamp-equality failures investigated as source-helper bugs (precision, deprecated `utcfromtimestamp`), not dismissed as flakes",
+      "status": "applied_insert_after"
+    }
+  ],
+  "applied_count": 2,
+  "usage": {
+    "prompt_tokens": 8089,
+    "completion_tokens": 1044,
+    "total_tokens": 9133
+  },
+  "raw_text_prefix": "{\"reasoning\":\"Add a section on debugging timing-sensitive tests before the Checklist, and add a checklist item. The agent in baseline dismissed the timestamp failure as 'pre-existing/unrelated' — the skill needs to explicitly warn against this and guide fixing the source helper (helpers.py) with microsecond precision and non-deprecated APIs.\",\"edits\":[{\"op\":\"insert_after\",\"target\":\"async def test_async_raises():\\n    with pytest.raises(ConnectionError):\\n        await connect_to_invalid_host()\\n```\",\"content\":\"\\n## Debugging Timing-Sensitive Test Failures\\n\\nWhen a test asserts that two timestamps differ (e.g. `assert event.init_timestamp != event.end_timestamp`) and fails with **equal values** after a `sleep`, this is a **real bug**, not a flake. Do not dismiss it as \\\"pre-existing\\\" or \\\"unrelated\\\" — if the build/verifier runs this test, you must fix it.\\n\\nThe fix almost always belongs in the **production helper that generates the timestamp**, not in the test. Investigate in this order:\\n\\n1. **Precision/truncation in the helper.** Check for `isoformat(timespec='milliseconds')` or `'seconds'`. If `sleep` duration (e.g. `0.15s` = 150ms) is near or below the precision window, two calls can produce identical strings. Prefer `timespec='microseconds'`.\\n2. **Deprecated datetime APIs.** `datetime.utcfromtimestamp(...)` is deprecated. Replace with timezone-aware `datetime.now(timezone.utc)` (and format accordingly). A `DeprecationWarning` in the captured output is a strong hint.\\n3. **Sleep vs. precision window.** Confirm the test's `sleep` is longer than the helper's resolution. If not, either increase precision or (less preferred) use `time.monotonic_ns()` for ordering.\\n4. **Monotonicity.** If strict ordering matters, back the helper with a monotonic counter or `time.perf_counter_ns()` so repeated rapid calls are guaranteed distinct.\\n\\nExample fix pattern (in `helpers.py`, not the test):\\n\\n```python\\n# Before (deprecated + millisecond truncation causes equal timestamps)\\nreturn datetime.utcfromtimestamp(time.time()).isoformat(timespec='milliseconds') + 'Z'\\n\\n# After\\nreturn datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')\\n```\\n\\n**Rule of thumb:** if a test asserts \\\"A happened before B\\\" and the assertion fails because the recorded times are equal, the recorder is lossy — fix the recorder.\"},{\"op\":\"insert_after\",\"target\":\"- [ ] Separate tests for different behaviors\",\"content\":\"\\n- [ ] Timestamp-equality failures investigated as source-helper bugs (precision, deprecated `utcfromtimestamp`), not dismissed as flakes\"}]}",
+  "reasoning": "Add a section on debugging timing-sensitive tests before the Checklist, and add a checklist item. The agent in baseline dismissed the timestamp failure as 'pre-existing/unrelated' — the skill needs to explicitly warn against this and guide fixing the source helper (helpers.py) with microsecond precision and non-deprecated APIs."
+}

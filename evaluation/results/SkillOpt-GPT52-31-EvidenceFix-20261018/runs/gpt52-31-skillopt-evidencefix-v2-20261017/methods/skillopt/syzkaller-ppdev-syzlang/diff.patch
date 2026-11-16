@@ -1,0 +1,111 @@
+--- before/syz-extract-constants/SKILL.md
++++ after/syz-extract-constants/SKILL.md
+@@ -33,6 +33,18 @@
+ 
+ The `arches` line declares which architectures these constants are valid for. For architecture-independent constants (like ioctls), list all architectures.
+ 
++
++
++Every constant referenced anywhere in the syzlang `.txt` file must appear explicitly in the matching `.const` file with the exact same identifier spelling. This includes all constants used in `ioctl$...` definitions, `const[...]` expressions, flags, and verifier-checked values. Syzkaller does not automatically infer missing ioctl constants from the `.txt` file.
++
++For example, if `dev_ppdev.txt` references `PPCLAIM` or `PPRELEASE`, then `dev_ppdev.txt.const` must contain lines exactly like:
++
++```text
++PPCLAIM = 28811
++PPRELEASE = 28812
++```
++
++If the symbol name differs even slightly, is omitted, or is malformed, parsers/verifiers may behave as if the constant is undefined (`None`).
+ ### Calculating ioctl values
+ 
+ Linux ioctl numbers are encoded as:
+@@ -44,6 +56,8 @@
+ For ppdev (type='p'=0x70):
+ - `PPCLAIM = _IO('p', 0x8b)` = `0x708b` = `28811`
+ 
++
++- `PPRELEASE = _IO('p', 0x8c)` = `0x708c` = `28812`
+ ## Method 2: Using syz-extract (Requires kernel source)
+ 
+ If kernel source is available:
+@@ -59,6 +73,28 @@
+ 
+ ## After Defining Constants
+ 
++
++
++Before running `make descriptions` or tests, verify that every referenced constant exists in the `.const` file.
++
++Recommended workflow:
++
++```bash
++# List referenced const symbols from the syzlang file
++grep -o 'const\[[A-Za-z0-9_]*\]' sys/linux/dev_ppdev.txt
++
++# Verify each symbol exists in the companion .const file
++grep '^PPCLAIM[[:space:]]*=' sys/linux/dev_ppdev.txt.const
++grep '^PPRELEASE[[:space:]]*=' sys/linux/dev_ppdev.txt.const
++```
++
++For ppdev manual constants, confirm at minimum:
++
++```text
++arches = amd64, 386
++PPCLAIM = 28811
++PPRELEASE = 28812
++```
+ After creating the `.const` file, build syzkaller:
+ 
+ ```bash
+@@ -74,6 +110,11 @@
+ - Add the missing constant to your `.const` file
+ - Ensure `arches` line lists the target architectures
+ PPCLAIM is defined for none of the arches
++
++- Ensure the `.const` filename exactly matches the `.txt` filename (for example `dev_ppdev.txt.const`)
++- Ensure entries use valid parseable `NAME = value` formatting
++- Ensure there are no duplicate keys or misspelled identifiers
++- Ensure every ioctl constant referenced by `ioctl$...` definitions exists explicitly in the `.const` file
+ ```
+ 
+ Solution: Run `make extract` with the correct kernel source path and FILES parameter.
+--- before/syzkaller-build-loop/SKILL.md
++++ after/syzkaller-build-loop/SKILL.md
+@@ -20,6 +20,17 @@
+ # 3. Compile descriptions
+ make descriptions
+ 
++
++
++# 3a. Validate constant coverage before testing/building
++# Check that every const[...] reference or ioctl constant used in your .txt
++# exists in the matching .const file with the exact same identifier spelling.
++# Some missing constants only surface during verifier/tests even when
++# `make descriptions` succeeds.
++# Example workflow:
++#   grep -o 'const\[[^]]*\]\|[A-Z][A-Z0-9_]*' sys/linux/your_file.txt | sort -u
++#   grep '^[A-Z]' sys/linux/your_file.txt.const | cut -d'=' -f1 | tr -d ' ' | sort -u
++#   diff -u <(grep -o 'const\[[^]]*\]\|[A-Z][A-Z0-9_]*' sys/linux/your_file.txt | sed 's/const\[\([^]]*\)\]/\1/' | sort -u) <(grep '^[A-Z]' sys/linux/your_file.txt.const | cut -d'=' -f1 | tr -d ' ' | sort -u)
+ # 4. Build syzkaller
+ make all
+ ```
+@@ -35,6 +46,8 @@
+ 
+ If you add new constants, update the `.const` file first.
+ 
++
++Re-run a constant coverage check after renaming ioctl identifiers, flags, or verifier-facing constants. Exact spelling mismatches between the `.txt` and `.const` files can pass compilation but fail later during tests.
+ ## Common Errors
+ 
+ ### Unknown type
+@@ -51,6 +64,10 @@
+ - The constant isn't in the `.const` file
+ - Add it to `sys/linux/your_file.txt.const` with the correct value
+ 
++
++- Also verify the identifier spelling exactly matches the `.txt` references
++- Constants referenced only in ioctl definitions or verifier checks may not fail until runtime tests
++- Compare referenced constants against `.const` entries with `grep`/`diff` before running full builds
+ ### Missing reference
+ ```
+ undefined reference to 'some_type'

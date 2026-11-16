@@ -1,0 +1,445 @@
+--- before/cvss-score-extraction/SKILL.md
++++ after/cvss-score-extraction/SKILL.md
+@@ -62,11 +62,67 @@
+ 
+ ## Source Priority Strategy
+ 
++
++
++## Deterministic Identifier + Score Selection (Required)
++
++When Trivy reports multiple identifiers (e.g., GHSA plus CVE aliases) and multiple CVSS providers, your extraction **must be deterministic** so repeated runs produce identical `CVE_ID` and `CVSS_Score` outputs.
++
++### Canonical vulnerability identifier (`CVE_ID`) selection
++Use the following strict priority:
++
++1. **Prefer a CVE** if available:
++   - If `VulnerabilityID` starts with `CVE-`, use it.
++   - Else, if `Aliases` contains any `CVE-....`, choose the **lexicographically smallest** CVE (string sort) for stability.
++2. If no CVE exists, use `VulnerabilityID` (e.g., `GHSA-xxxx-....`) as a fallback.
++
++**Deduplication rule (package/version scoped):**
++- For the same `(PkgName, InstalledVersion)`, deduplicate records that refer to the same underlying vulnerability by mapping each finding to the canonical ID above, then keep **one** record per `(PkgName, InstalledVersion, canonical_id)`.
++- If multiple Trivy findings collapse to the same canonical ID, keep the one with the **best available CVSS selection** (see below). If still tied, keep the one with the **lexicographically smallest** original `VulnerabilityID`.
++
++### Canonical CVSS score selection
++Select **one** score using this strict priority order:
++
++1. **NVD CVSS v3.1/v3**: `CVSS.nvd.V3Score` (and vector if needed)
++2. **GHSA CVSS v3.1/v3**: `CVSS.ghsa.V3Score`
++3. **Vendor v3** (e.g., RedHat): `CVSS.redhat.V3Score` (and other vendors if present)
++4. **NVD CVSS v2** fallback: `CVSS.nvd.V2Score`
++5. Else: `N/A`
++
++**Tie-breakers (deterministic):**
++- If multiple v3 scores exist at the same priority level (rare), choose the **maximum numeric score**; if equal, choose the one whose vector string is lexicographically smallest.
++- Always validate the score is numeric (int/float) before using.
++
++### Trivy JSON fields to parse (examples)
++Trivy JSON often contains `Aliases` and provider-scoped CVSS blocks:
++
++```json
++{
++  "VulnerabilityID": "GHSA-xxxx-yyyy-zzzz",
++  "Aliases": ["CVE-2026-23745"],
++  "PkgName": "tar",
++  "InstalledVersion": "6.1.11",
++  "CVSS": {
++    "nvd": {"V3Score": 8.2, "V3Vector": "CVSS:3.1/..."},
++    "ghsa": {"V3Score": 7.5}
++  }
++}
++```
++
++**Normalization:**
++- Output `CVSS_Score` as a stringified decimal (e.g., `"8.2"`) or `N/A`.
++- Output `CVE_ID` as the canonical ID chosen above (prefer CVE, else stable alias).
++
+ When multiple sources provide scores, use a **priority cascade**:
+ 
+ ```
+-NVD → GHSA → RedHat → N/A
+-```
++CVSS selection priority (deterministic):
++NVD v3.1/v3 → GHSA v3.1/v3 → Vendor v3 (e.g., RedHat) → NVD v2 → N/A
++```
++
++Identifier priority (deterministic):
++- Prefer `CVE-*` (from `VulnerabilityID`, else from `Aliases`), else fall back to `VulnerabilityID`.
++
+ 
+ **Rationale**: NVD is the most comprehensive and authoritative, followed by community sources, then vendor-specific databases.
+ 
+@@ -99,38 +155,52 @@
+ ### Basic Score Extraction
+ 
+ ```python
++def get_canonical_id(vuln_data):
++    """Return a deterministic canonical identifier.
++
++    Priority: CVE in VulnerabilityID -> CVE in Aliases (lexicographically smallest) -> VulnerabilityID.
++    """
++    vid = vuln_data.get('VulnerabilityID') or 'N/A'
++    if isinstance(vid, str) and vid.startswith('CVE-'):
++        return vid
++
++    aliases = vuln_data.get('Aliases') or []
++    if isinstance(aliases, list):
++        cves = sorted(a for a in aliases if isinstance(a, str) and a.startswith('CVE-'))
++        if cves:
++            return cves[0]
++
++    return vid
++
++
+ def get_cvss_score(vuln_data):
+-    """
+-    Extract CVSS v3 score from vulnerability data.
+-    Uses priority: NVD > GHSA > RedHat
+-    
+-    Args:
+-        vuln_data: Dictionary containing vulnerability information
+-        
+-    Returns:
+-        CVSS v3 score as float, or 'N/A' if not available
++    """Extract one deterministic CVSS score.
++
++    Priority: NVD v3 -> GHSA v3 -> RedHat(vendor) v3 -> NVD v2 -> N/A
++    Returns a float or 'N/A'.
+     """
+     cvss = vuln_data.get('CVSS', {})
+-    
+-    # Priority 1: NVD (National Vulnerability Database)
+-    if 'nvd' in cvss:
+-        score = cvss['nvd'].get('V3Score')
+-        if score is not None:
+-            return score
+-    
+-    # Priority 2: GHSA (GitHub Security Advisory)
+-    if 'ghsa' in cvss:
+-        score = cvss['ghsa'].get('V3Score')
+-        if score is not None:
+-            return score
+-    
+-    # Priority 3: RedHat
+-    if 'redhat' in cvss:
+-        score = cvss['redhat'].get('V3Score')
+-        if score is not None:
+-            return score
+-    
+-    # No score available
++    if not isinstance(cvss, dict):
++        return 'N/A'
++
++    def num(x):
++        return x if isinstance(x, (int, float)) else None
++
++    # v3.x preferred
++    for source in ['nvd', 'ghsa', 'redhat']:
++        block = cvss.get(source)
++        if isinstance(block, dict):
++            s = num(block.get('V3Score'))
++            if s is not None:
++                return s
++
++    # v2 fallback (NVD only)
++    nvd = cvss.get('nvd')
++    if isinstance(nvd, dict):
++        s2 = num(nvd.get('V2Score'))
++        if s2 is not None:
++            return s2
++
+     return 'N/A'
+ ```
+ 
+@@ -181,7 +251,7 @@
+                 record = {
+                     'Package': vuln.get('PkgName'),
+                     'Version': vuln.get('InstalledVersion'),
+-                    'CVE_ID': vuln.get('VulnerabilityID'),
++                    'CVE_ID': get_canonical_id(vuln),
+                     'Severity': vuln.get('Severity'),
+                     'CVSS_Score': get_cvss_score(vuln),  # Use extraction function
+                     'Fixed_Version': vuln.get('FixedVersion', 'N/A'),
+--- before/trivy-offline-vulnerability-scanning/SKILL.md
++++ after/trivy-offline-vulnerability-scanning/SKILL.md
+@@ -37,10 +37,39 @@
+ 
+ Database location: `<cache-dir>/db/trivy.db`
+ 
++
++
++For reproducible benchmark-safe scans, treat the Trivy binary version and vulnerability database snapshot as pinned inputs. Different Trivy releases or newer database snapshots can change CVE IDs, severities, fix versions, and package matching behavior.
++
++Deterministic offline requirements:
++- Pin an explicit Trivy version across all environments (for example, `trivy --version` should report the same version everywhere).
++- Use a fixed database snapshot and preserve both `trivy.db` and `metadata.json`.
++- Always use `--offline-scan` together with `--skip-db-update`.
++- Use a fixed cache path via `--cache-dir` or `TRIVY_CACHE_DIR`.
++- Do not allow network access during verification scans.
++- Scan only the intended lock file target (`package-lock.json`) to avoid filesystem expansion or additional dependency discovery.
++- Do not run `trivy fs .` for benchmark comparisons because scanning the entire repository can produce different findings.
+ ## Offline Scanning Workflow
+ 
+ ### Step 1: Verify Database Existence
+ 
++
++
++For deterministic scans, also verify the database metadata before execution:
++
++```bash
++export TRIVY_CACHE_DIR=/opt/trivy-cache
++trivy --version
++cat "$TRIVY_CACHE_DIR/db/metadata.json"
++```
++
++Record the following values alongside scan results:
++- Trivy version
++- Database `Version`
++- Database `NextUpdate`
++- Database `UpdatedAt`
++
++If these values differ between systems or runs, vulnerability results may also differ.
+ Before scanning, ensure the offline database is available:
+ 
+ ```python
+@@ -90,6 +119,26 @@
+ ]
+ ```
+ 
++
++
++Equivalent deterministic CLI command:
++
++```bash
++export TRIVY_CACHE_DIR=/opt/trivy-cache
++trivy fs package-lock.json \
++  --scanners vuln \
++  --format json \
++  --output trivy_report.json \
++  --offline-scan \
++  --skip-db-update \
++  --cache-dir "$TRIVY_CACHE_DIR"
++```
++
++Important:
++- Target the lock file directly (`package-lock.json`) instead of the repository root.
++- Avoid commands such as `trivy fs .` because they may analyze additional files and produce non-reproducible results.
++- `--skip-db-update` alone is insufficient if the environment still has network access and a different cache directory is used.
++- Reusing the same `TRIVY_CACHE_DIR` across runs is required for stable CVE output.
+ ### Step 3: Execute Scan
+ 
+ ```python
+@@ -207,6 +256,34 @@
+ 
+ ## Common Issues
+ 
++
++
++## Reproducibility Verification Checklist
++
++Use this checklist when scan results do not match expected benchmark outputs:
++
++```bash
++# Verify Trivy version
++trivy --version
++
++# Verify offline DB snapshot metadata
++cat "$TRIVY_CACHE_DIR/db/metadata.json"
++
++# Confirm database files exist
++ls -l "$TRIVY_CACHE_DIR/db/"
++
++# Confirm deterministic target selection
++test -f /root/package-lock.json && echo "lock file present"
++
++# Run scan with explicit offline flags
++trivy fs /root/package-lock.json \
++  --scanners vuln \
++  --offline-scan \
++  --skip-db-update \
++  --format json
++```
++
++Warning: live database updates will change vulnerability sets over time. If reproducibility is required for evaluation or regression testing, never refresh the DB snapshot during the task.
+ ### Issue: "failed to initialize DB"
+ **Cause**: Database not found or corrupted  
+ **Solution**: Re-download database or check `--cache-dir` path
+--- before/vulnerability-csv-reporting/SKILL.md
++++ after/vulnerability-csv-reporting/SKILL.md
+@@ -141,6 +141,49 @@
+ 
+ ### Extracting Fields from Scanner Output
+ 
++
++### Canonical row construction (normalization + dedup)
++
++Benchmark-stable CSV output requires deterministic **row identity**, **normalization**, and **deduplication**. Apply these rules before writing rows:
++
++#### 1) Row identity (what counts as “the same” row)
++Use a stable row key:
++- **Primary key**: `(Package, Version, CVE_ID)`
++  - This preserves multiple CVEs for the same package/version as separate rows.
++- If a scanner reports the same CVE multiple times (e.g., via multiple paths/targets), **deduplicate** by this key.
++
++> If your benchmark expects at most one row per `(Package, Version)`, add an explicit collapsing step and document it. Otherwise, default to `(Package, Version, CVE_ID)`.
++
++#### 2) Normalization rules (make values comparable)
++- `Package`: use `PkgName` as-is but `strip()` whitespace.
++- `Version`: use `InstalledVersion` as-is but `strip()` whitespace.
++- `Severity`: `upper().strip()`. Keep only `HIGH` and `CRITICAL` (exact strings).
++- `Fixed_Version`: if missing/empty/None → exactly `N/A`.
++- `CVSS_Score`: 
++  - Prefer a numeric string with a single decimal where possible (e.g., `"8.2"`).
++  - If no score is available → exactly `N/A`.
++- `Title`: pick a single-line string; if missing → `No description`.
++- `Url`: pick a single stable reference (see below); if missing → `N/A`.
++
++#### 3) Deterministic selection when multiple candidates exist
++Scanners may provide multiple references/scores/fix versions. Use deterministic priority:
++- **CVE_ID**: `VulnerabilityID` (do not invent/translate IDs).
++- **Url**: `PrimaryURL` if present else first entry of `References` sorted lexicographically else `N/A`.
++- **Fixed_Version**: 
++  1) use `FixedVersion` if present and non-empty
++  2) else `N/A` (do not guess from other fields)
++- **CVSS_Score**: choose first available in this fixed order of sources: `nvd`, then `ghsa`, then `redhat`.
++  - Use `V3Score` if present, else `V2Score` if present, else `N/A`.
++- **Title**: `Title` if present else `Description` if present else `No description`.
++
++#### 4) Stable output ordering
++Even if the verifier is order-independent, stable sorting prevents accidental drift and helps debugging:
++- Sort by `Package`, then `Version`, then `Severity` (CRITICAL before HIGH), then `CVE_ID`.
++
++#### 5) Avoid introducing extra records
++- Do not emit rows for severities outside `HIGH`/`CRITICAL`.
++- Do not emit both a GHSA and CVE row for the same underlying ID unless the scanner’s `VulnerabilityID` differs (treat IDs literally).
++- Do not emit one row per reference/advisory; keep exactly one row per `(Package,Version,CVE_ID)` key.
+ ```python
+ import json
+ 
+@@ -176,18 +219,102 @@
+     return records
+ 
+ def extract_cvss_score(vuln):
+-    """Extract CVSS score (from cvss-score-extraction skill)."""
+-    cvss = vuln.get('CVSS', {})
++    """Extract CVSS score with deterministic source + version priority.
++
++    Priority: nvd > ghsa > redhat; prefer V3Score then V2Score.
++    Return 'N/A' if unavailable.
++    """
++    cvss = vuln.get('CVSS', {}) or {}
+     for source in ['nvd', 'ghsa', 'redhat']:
+-        if source in cvss:
+-            score = cvss[source].get('V3Score')
+-            if score is not None:
+-                return score
++        if source in cvss and isinstance(cvss[source], dict):
++            for field in ('V3Score', 'V2Score'):
++                score = cvss[source].get(field)
++                if score is not None and score != '':
++                    return score
+     return 'N/A'
+ ```
+ 
+ ## Complete Vulnerability CSV Report Generator
+ 
++
++### Deterministic mapping + dedup example (Trivy JSON)
++
++Use a canonicalization pass that (a) filters to `HIGH`/`CRITICAL`, (b) normalizes fields, (c) deduplicates by `(Package,Version,CVE_ID)`, and (d) sorts stably.
++
++```python
++SEV_ORDER = {'CRITICAL': 0, 'HIGH': 1}
++
++def pick_url(vuln):
++    primary = (vuln.get('PrimaryURL') or '').strip()
++    if primary:
++        return primary
++    refs = vuln.get('References') or []
++    refs = sorted(r.strip() for r in refs if isinstance(r, str) and r.strip())
++    return refs[0] if refs else 'N/A'
++
++def pick_title(vuln):
++    t = (vuln.get('Title') or '').strip()
++    if t:
++        return t
++    d = (vuln.get('Description') or '').strip()
++    return d if d else 'No description'
++
++def normalize_record(vuln):
++    pkg = (vuln.get('PkgName') or '').strip()
++    ver = (vuln.get('InstalledVersion') or '').strip()
++    vid = (vuln.get('VulnerabilityID') or '').strip()
++    sev = (vuln.get('Severity') or 'UNKNOWN').strip().upper()
++
++    fixed = (vuln.get('FixedVersion') or '').strip() or 'N/A'
++    return {
++        'Package': pkg,
++        'Version': ver,
++        'CVE_ID': vid,
++        'Severity': sev,
++        'CVSS_Score': extract_cvss_score(vuln),
++        'Fixed_Version': fixed,
++        'Title': pick_title(vuln),
++        'Url': pick_url(vuln),
++    }
++
++def canonicalize(records):
++    # filter to intended severities only
++    records = [r for r in records if r.get('Severity') in ('HIGH', 'CRITICAL')]
++
++    # dedup by (Package, Version, CVE_ID)
++    dedup = {}
++    for r in records:
++        key = (r['Package'], r['Version'], r['CVE_ID'])
++        # keep first occurrence (deterministic because upstream iteration order is stable)
++        # alternatively, implement a deterministic “best row” selector if needed.
++        dedup.setdefault(key, r)
++
++    out = list(dedup.values())
++    out.sort(key=lambda r: (r['Package'], r['Version'], SEV_ORDER.get(r['Severity'], 9), r['CVE_ID']))
++    return out
++```
++
++#### Example: exact CSV row
++Given a Trivy vulnerability object:
++
++```json
++{
++  "PkgName": "tar",
++  "InstalledVersion": "6.1.11",
++  "VulnerabilityID": "CVE-2026-23745",
++  "Severity": "HIGH",
++  "FixedVersion": "7.5.3",
++  "Title": "...",
++  "PrimaryURL": "https://...",
++  "CVSS": {"nvd": {"V3Score": 8.2}}
++}
++```
++
++The canonical CSV record must be:
++
++`tar,6.1.11,CVE-2026-23745,HIGH,8.2,7.5.3,<Title>,https://...`
++
++…and **must not** be duplicated due to multiple targets/paths or multiple references.
+ ```python
+ import json
+ import csv
+@@ -359,10 +486,12 @@
+ 1. **Always write headers**: Makes CSV self-documenting
+ 2. **Use UTF-8 encoding**: Handles international characters
+ 3. **Set newline=''**: Prevents blank lines on Windows
+-4. **Validate data**: Check for None/null values before writing
+-5. **Add timestamp**: Include scan date for tracking
+-6. **Document schema**: Maintain a data dictionary
+-7. **Test with edge cases**: Empty results, missing fields
++4. **Canonicalize before writing**: normalize strings, set exact `N/A` sentinels
++5. **Deduplicate deterministically**: typically by `(Package,Version,CVE_ID)`
++6. **Be deterministic with multi-source fields**: fixed priority for CVSS/title/url/fix
++7. **Filter only intended severities**: emit only `HIGH`/`CRITICAL` rows
++8. **Stable sorting**: sort rows by package/version/severity/CVE to avoid drift
++9. **Test edge cases**: empty results, duplicate findings, missing `CVSS`/`FixedVersion`
+ 
+ ## Dependencies
+ 

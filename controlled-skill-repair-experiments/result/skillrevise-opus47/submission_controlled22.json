@@ -1,0 +1,1143 @@
+{
+  "method_id": "skillrevise-controlled-opus47-native",
+  "benchmark_version": "skill-repair-controlled-datasets-20261020",
+  "not_compatible_with_gold31_evaluator": true,
+  "tasks": [
+    {
+      "trial_id": "location-data-to-d3",
+      "task_id": "data-to-d3",
+      "diagnoses": [],
+      "repaired_bundle": "trials/location-data-to-d3/candidate/skills",
+      "executor_run_id": "data-to-d3-original-skill-285bf449819b",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "location-dialogue-parser",
+      "task_id": "dialogue-parser",
+      "diagnoses": [],
+      "repaired_bundle": "trials/location-dialogue-parser/candidate/skills",
+      "executor_run_id": "dialogue-parser-original-skill-3c3e7ccd4db3",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "location-flink-query",
+      "task_id": "flink-query",
+      "diagnoses": [],
+      "repaired_bundle": "trials/location-flink-query/candidate/skills",
+      "executor_run_id": "flink-query-original-skill-5992e3a18732",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "location-manufacturing-equipment-maintenance",
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Skill forced value-based tie-break for 'representative sensor' instead of using handbook-defined worst-case location (largest_mass), causing Q02 (and related) answers to use the wrong tc_id/TAL; compounded by vague deliverables/completion criteria that skipped a verification step.",
+          "diagnosis": {
+            "labels": [
+              "wrong_abstraction_level",
+              "false_certainty"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "If selecting maximum metric (e.g., ramp): choose (max_value, smallest_tc_id). If selecting minimum metric (e.g., 'coldest' TAL or peak): choose (min_value, smallest_tc_id).",
+                "reason": "The skill hardcodes a value-based tie-break for 'representative sensor', but the handbook (p.8) and the thermocouples.csv tc_location field ('largest_mass','smallest_mass','center_BGA',...) indicate the representative/worst-case sensor is chosen by physical placement (largest_mass = worst-case for TAL/peak). Using min/max value instead of tc_location drives Q02 (and Q03) to the wrong TC per run."
+              },
+              {
+                "source": "trace",
+                "snippet": "Q2 non-compliant count: 51 ... {'run_id':'R0001','tc_id':'TC3','tal_s':129.95,...}",
+                "reason": "Executor picked TC by 'min TAL' tie-break; for R0001 TC1 is on 'largest_mass' but TC3 (center_BGA) was selected, yielding an unrepresentative TAL and inflating non-compliance count."
+              },
+              {
+                "source": "skill",
+                "snippet": "## Minimal end-to-end scaffold ... # 4) Write outputs into /app/output",
+                "reason": "Deliverables and completion conditions are implicit; the skill never enumerates the required q01.json..q05.json schema invariants or an explicit verification step before finishing, so the executor finalized without checking sensor-selection semantics against handbook."
+              },
+              {
+                "source": "skill",
+                "snippet": "Thermocouple placement: 'cold spot', 'worst case', 'representative sensor'.",
+                "reason": "The skill flags the handbook section to read but then overrides it with a numeric tie-break rule, exhibiting false certainty about sensor-selection semantics without validating against tc_location."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=19.6202",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill's deterministic sensor-selection rule (min/max value with tc_id tiebreak) overrode the handbook-grounded notion of 'representative thermocouple' (location-based, i.e., largest_mass = worst-case). This produced wrong tc_id and TAL/peak values for Q02 (and likely Q03), and the under-specified deliverables/completion-conditions block let the executor stop without a schema+semantics verification pass.",
+            "rewrite_targets": [
+              "SKILL.md sensor-selection section: replace unconditional value-based tie-break with a handbook-grounded rule that first filters by tc_location ('largest_mass' for worst-case TAL/peak, with fallback order largest_mass → center_BGA → min-value), applied specifically in Q02/Q03.",
+              "SKILL.md deliverables/completion block: list the five required outputs with their schemas and add an explicit pre-finish verification checklist (schema shape, sort order, sensor-selection rule applied per question, null handling)."
+            ],
+            "summary": "Skill forced value-based tie-break for 'representative sensor' instead of using handbook-defined worst-case location (largest_mass), causing Q02 (and related) answers to use the wrong tc_id/TAL; compounded by vague deliverables/completion criteria that skipped a verification step."
+          },
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Skill failed Q02 (and likely Q03/Q05) because it hard-coded 'largest_mass' + worst_case_min as the TAL/peak representative-TC rule, presenting it as handbook-grounded when the extracted handbook text does not support that specific choice. Deliverables/verification did not catch the unsupported assumption. Fix: derive the representative-TC rule per metric from quoted handbook text, keep TAL and peak rules separate, and enforce the grounding in the pre-finish check.",
+          "diagnosis": {
+            "labels": [
+              "false_certainty",
+              "over_specificity"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "\"representative_tc_location_order_tal\":  [\"largest_mass\"], \"representative_tc_location_order_peak\": [\"largest_mass\"]",
+                "reason": "SKILL.md hard-codes largest_mass as the single representative placement for both TAL and peak and prescribes 'worst_case_min' semantics, even though the handbook text extracted in the trace only says 'thermocouple a lead on the largest and smallest device' for measuring mass differential - it does not uniquely designate largest_mass as the TAL/peak representative. This is an unsupported certainty baked into the skill."
+              },
+              {
+                "source": "trace",
+                "snippet": "Non-compliant TAL runs: ['R0001', ... 51 of 60 runs]",
+                "reason": "Choosing largest_mass + worst_case_min pushes ~85% of runs out of the 30-60s window, strongly suggesting the representative-TC rule used for Q02 is wrong (either the location preference or the min/max semantics is misread)."
+              },
+              {
+                "source": "repair_hint",
+                "snippet": "SKILL.md 中 Q02 的代表热电偶选择部分",
+                "reason": "Repair hint explicitly flags the Q02 representative-sensor selection in the skill as the problem area."
+              },
+              {
+                "source": "repair_hint",
+                "snippet": "SKILL.md 中交付物和任务完成条件",
+                "reason": "Repair hint also flags the deliverables / completion-condition language, indicating the current pre-finish verification does not catch that the location-preference rule for TAL is unsupported by the handbook retrieval."
+              },
+              {
+                "source": "skill",
+                "snippet": "Rule: the \"representative\" or \"worst-case\" thermocouple for TAL and peak compliance is defined by the handbook ... Do not pick by raw metric value as the primary criterion.",
+                "reason": "The skill mandates handbook-grounded placement selection but then supplies a fixed literal ['largest_mass'] rather than deriving it per metric from the handbook, contradicting its own 'handbook decides this list; do not invent entries' rule."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=29.4845",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The dominant cause of failure is a false-certainty, over-specific representative-thermocouple rule for Q02 (and Q03) that is hard-coded in SKILL.md as largest_mass with worst_case_min semantics. The handbook retrieval in the trace never actually anchors this choice; the skill asserted it as if handbook-grounded. This mislabels most runs as TAL non-compliant and plausibly also distorts Q03/Q05, driving the 0.0 verifier score. The deliverables/completion-condition section compounded this by letting the agent 'pass' its own verification without checking that the location-preference list was literally derived from retrieved handbook text.",
+            "rewrite_targets": [
+              "SKILL.md: replace the hard-coded representative_tc_location_order_tal/peak literals with a discovery step that extracts (and quotes) the handbook sentence that names the representative/worst-case TC for TAL and for peak; if the handbook does not name one, fall back to an explicit, documented rule (e.g., for TAL use the max TAL across TCs because 'excessive wetting time causes intermetallics' is the stated hazard, and record this reasoning).",
+              "SKILL.md Q02 section: separate TAL representative selection from peak representative selection; make the min-vs-max worst-case direction explicit per metric and tied to a handbook hazard, not reused blindly.",
+              "SKILL.md deliverables / pre-finish verification: add a hard check that each recorded tc_id in q02.json and q03.json is justified by a quoted handbook snippet captured in cfg; if the snippet is empty, the run must be flagged for review rather than silently defaulted."
+            ],
+            "summary": "Skill failed Q02 (and likely Q03/Q05) because it hard-coded 'largest_mass' + worst_case_min as the TAL/peak representative-TC rule, presenting it as handbook-grounded when the extracted handbook text does not support that specific choice. Deliverables/verification did not catch the unsupported assumption. Fix: derive the representative-TC rule per metric from quoted handbook text, keep TAL and peak rules separate, and enforce the grounding in the pre-finish check."
+          },
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/location-manufacturing-equipment-maintenance/candidate/skills",
+      "executor_run_id": "manufacturing-equipment-maintenance-bundle-1-v0-revised-f2de9307623b",
+      "category": "valid_failure"
+    },
+    {
+      "trial_id": "location-pddl-airport-planning",
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Plans were produced and accepted by the library's own validator but rejected by the task verifier because the saved lines used pyperplan's grounded action identifiers (segment/direction/type baked into the action name) instead of the original domain action names with lifted parameters. The skill's Plan Saving / Example Workflow / save_plan inputs do not pin down the required on-disk format, and over-specify a toolchain whose default output does not match the task example.",
+          "diagnosis": {
+            "labels": [
+              "environment_mismatch",
+              "over_specificity",
+              "false_certainty",
+              "wrong_abstraction_level"
+            ],
+            "evidence": [
+              {
+                "source": "trace",
+                "snippet": "move_seg_rw_0_400_seg_rww_0_50_south_south_medium(airplane_cfbeg)",
+                "reason": "Output actions have segment/direction/type names fused into the action identifier with only the airplane as a parameter. The underlying PDDL domain defines actions like `move` with multiple typed parameters; the saved plan does not reference the actual domain action names, so the task-level verifier rejects it even though up's validator accepts it. This is a direct consequence of the skill prescribing unified_planning + pyperplan, whose grounding/compilation produces synthesized ground-action names."
+              },
+              {
+                "source": "skill",
+                "snippet": "Default planner: `pyperplan`. ... save-plan ... Uses `unified_planning.io.PDDLWriter`.",
+                "reason": "Plan Saving and Example Workflow prescribe up/pyperplan tooling and PDDLWriter without any contract on the required textual format of the plan file. The skill does not specify that each line must use the domain's original action name and original object parameters, matching the task's example `action_name(arg1, arg2, ...)`. This is a wrong_abstraction_level / over_specific tool choice that controls output format implicitly through tooling."
+              },
+              {
+                "source": "trace",
+                "snippet": "status: PlanGenerationResultStatus.SOLVED_SATISFICING / valid: ValidationResultStatus.VALID",
+                "reason": "The skill treats up's internal PlanValidator as the acceptance oracle. The agent reported success based on it, exhibiting false_certainty — the authored validation step is unrelated to the task verifier, which checks the written plan file against the raw PDDL domain."
+              },
+              {
+                "source": "skill",
+                "snippet": "save-plan(plan_object, output_path) ... Uses `unified_planning.io.PDDLWriter`.",
+                "reason": "The save_plan inputs/notes bind to a library writer whose output does not match the task's required `action(args, ...)` surface form derived from the original domain; environment_mismatch between the skill's save contract and the executor-visible plan file requirement."
+              },
+              {
+                "source": "trace",
+                "snippet": "Repair-only location hint ... Plan Saving, Example Workflow, and save_plan.skill inputs definition",
+                "reason": "The repair hint localizes the fault to exactly these sections, confirming the failure stems from how plans are produced/formatted on disk rather than from planning capability."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=28.8318",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill fixed a specific toolchain (unified_planning + pyperplan + PDDLWriter) and conflated 'validation' with 'verifier acceptance'. Pyperplan returns ground actions whose names splice segment/direction/type literals into the action identifier, so the written plan uses synthetic action names not present in the PDDL domain. The verifier parses the saved plan against the domain's actual action schemas and rejects it. The skill's Plan Saving / Example Workflow / save_plan inputs do not define a required line-level format that preserves the domain's original action name and parameter list.",
+            "rewrite_targets": [
+              "Plan Saving section: require that each line of the output file be `<original_domain_action_name>(<obj1>, <obj2>, ...)` using the exact action and object identifiers from the domain/problem, independent of the planner's internal representation.",
+              "save_plan inputs: add a required `problem_object` (or equivalent) input and specify that saving must reverse any grounding compilation, mapping back to the original action symbol and lifted parameters before writing.",
+              "Example Workflow: remove the implicit assumption that up's PlanValidator == task verifier; add a step that re-reads the written plan file and parses each line as `name(args)` matching domain actions, and treat that as the pre-submit check.",
+              "Replace hard-coded planner literal (`pyperplan`) with a discovery rule: pick any OneshotPlanner that preserves the original (non-grounded) action schema, or post-process ground actions into lifted form before saving.",
+              "Trim background prose to stay within the word budget and keep only execution-affecting rules."
+            ],
+            "summary": "Plans were produced and accepted by the library's own validator but rejected by the task verifier because the saved lines used pyperplan's grounded action identifiers (segment/direction/type baked into the action name) instead of the original domain action names with lifted parameters. The skill's Plan Saving / Example Workflow / save_plan inputs do not pin down the required on-disk format, and over-specify a toolchain whose default output does not match the task example."
+          },
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill produced a format-correct plan but relied on pyperplan, whose compiled semantics do not cover the full IPC airport domain, and treated semantic validation as optional. The failure is false_certainty in the acceptance oracle combined with an environment_mismatch between the only available planner and the task family's PDDL features.",
+          "diagnosis": {
+            "labels": [
+              "false_certainty",
+              "environment_mismatch"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "C8. Optional semantic check — If a validator (e.g. VAL `validate`, or a library validator) is available, run it against the domain, problem, and written file. Treat its result as advisory; the line-format contract in C7 is the gating check.",
+                "reason": "The skill elevates the line-format regex check to the gating check while making actual plan-execution validation optional. For the airport domain the trace confirms no validator is on PATH (`validate could not be found on the PATH so the plan can not be validated.`), so a syntactically well-formed but semantically invalid plan is written and declared successful."
+              },
+              {
+                "source": "trace",
+                "snippet": "pyperplan ... 39 Actions parsed ... Plan length: 8 ... validate could not be found on the PATH so the plan can not be validated.",
+                "reason": "Pyperplan compiles the IPC airport domain (which uses ADL features such as negative preconditions and conditional effects) into its own grounded model and can produce a plan that satisfies its internal compilation but fails on the raw PDDL executed by the task verifier. The skill does not warn about or guard against this pyperplan/airport mismatch."
+              },
+              {
+                "source": "skill",
+                "snippet": "Treat (1)-(3) as the acceptance oracle. Any library-internal validator is advisory only.",
+                "reason": "The skill expresses high confidence that satisfying the line-format contract is sufficient for acceptance. The verifier gave reward 0.0 even though every line matched the declared `(:action NAME :parameters (?a - airplane))` schema with correct arity and declared objects, showing that format-only verification is not sufficient; semantic executability must be checked."
+              },
+              {
+                "source": "trace",
+                "snippet": "cmd = [\"pyperplan\", \"-s\", \"astar\", \"-H\", \"hff\", domain_path, problem_path]",
+                "reason": "The skill nudges toward 'whatever planner is available' but the realized environment only exposes pyperplan, whose feature coverage is a known mismatch for IPC airport. The skill offers no fallback (Fast Downward, ENHSP, etc.) or domain-feature probe to detect and reject this situation."
+              },
+              {
+                "source": "skill",
+                "snippet": "Grounded-name resolution fails for a step: fail the task rather than write a line whose `name` is not in `action_schema`.",
+                "reason": "The skill's anti-pattern language assumes grounded action identifiers are an artifact of the backend. In the airport family they are the actual lifted action symbols (`move_seg_pp_0_60_..._medium` with `:parameters (?a - airplane)`), so the skill's framing confuses the author about what to normalize and does not catch that the planner is semantically unsound for this family."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=45.0545",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The written plan satisfied the skill's own C7 line-format contract (correct lifted action name, correct arity 1, declared `airplane_*` argument) but still scored 0.0. The remaining explanation is that pyperplan's compiled plan was not actually executable against the raw IPC airport PDDL semantics, and the skill treated the format check as the oracle and the real semantic validation as optional, so an unsound plan was emitted with full confidence.",
+            "rewrite_targets": [
+              "Promote C8 from 'optional' to a mandatory execution-time check: simulate the plan against the parsed PDDL (apply each action's preconditions/effects on the init state and confirm the goal holds) before considering the output acceptable; if simulation fails, do not write / overwrite the plan.",
+              "Add an environment-mismatch guard: before using pyperplan, detect PDDL features it is known to mis-handle (negative preconditions, conditional effects, universal/existential quantifiers, equality) and, if present, require a stronger backend (e.g. Fast Downward, ENHSP) or abort the task rather than trust pyperplan's output.",
+              "Clarify in the Plan Saving / Example Workflow sections that for domains whose declared action names already encode grounded parameters, 'lifted' means literally the `(:action NAME ...)` symbol with its declared `:parameters` arity — not an attempt to decompose the name — and that semantic validity, not just token-format validity, is the acceptance signal.",
+              "Trim the SKILL.md to the executable workflow (discover inputs, pick planner with feature compatibility, generate, semantically validate, write, reload-check) and remove duplicated prose to stay within the word budget."
+            ],
+            "summary": "The skill produced a format-correct plan but relied on pyperplan, whose compiled semantics do not cover the full IPC airport domain, and treated semantic validation as optional. The failure is false_certainty in the acceptance oracle combined with an environment_mismatch between the only available planner and the task family's PDDL features."
+          },
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/location-pddl-airport-planning/candidate/skills",
+      "executor_run_id": "pddl-airport-planning-bundle-1-v0-revised-075473c7204e",
+      "category": "valid_failure"
+    },
+    {
+      "trial_id": "single-fix-build-google-auto-RI-001",
+      "task_id": "fix-build-google-auto",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-fix-build-google-auto-RI-001/candidate/skills",
+      "executor_run_id": "fix-build-google-auto-original-skill-c3a4b25b6001",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-fix-build-google-auto-RI-002",
+      "task_id": "fix-build-google-auto",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-fix-build-google-auto-RI-002/candidate/skills",
+      "executor_run_id": "fix-build-google-auto-original-skill-36eb4a042541",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-fix-build-google-auto-all",
+      "task_id": "fix-build-google-auto",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Skill was too empty to enforce iteration and lacked JDK-migration/nested-IT guidance, so the agent fixed only the first surface error (tools.jar exclusion) and declared success while two reactor modules still failed.",
+          "diagnosis": {
+            "labels": [
+              "over_generality",
+              "false_certainty",
+              "wrong_abstraction_level"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "## Minimal diagnostic sequence\n\n```bash\ncd /home/travis/build/failed/google/auto\n\n```\n\n## General Maven lifecycle reminders",
+                "reason": "The skill body is essentially empty — no concrete build command, no fallback for JDK-migration failures, no rule to iterate until a green reactor. This over-generality left the agent without guidance on how to tell 'fixed' from 'partially fixed'."
+              },
+              {
+                "source": "trace",
+                "snippet": "AutoFactory FAILURE ... cannot find symbol class Generated ... VisibilityTest ... <<< FAILURE! ... Build error analysis and fix complete.",
+                "reason": "After one fix the reactor still shows two FAILUREs, but the agent declared completion. The skill lacks a hard precondition like 'do not stop while any reactor module reports FAILURE' — a false_certainty failure enabled by the skill."
+              },
+              {
+                "source": "skill",
+                "snippet": "2. Create at least one non-empty standard unified diff ... 3. Apply that patch ... 4. Check `git diff`/`git status` and ensure the intended project file ... was changed.",
+                "reason": "The artifact contract only requires 'at least one' diff and a changed file; it does not require re-running the build to green or iterating on newly surfaced errors. This wrong_abstraction_level encourages stopping after the first partial fix."
+              },
+              {
+                "source": "skill",
+                "snippet": "(no section covering nested IT projects such as factory/src/it/* or value/src/it/*, and no guidance on JDK-version mismatches like missing tools.jar / javax.annotation.Generated)",
+                "reason": "Repair-location hint explicitly asked for guidance on toolchain selection, failure reproduction, and nested-test dependency resolution; the skill omits all of these, so the agent treated downstream JDK-9+ breakages as out of scope."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=21.0018",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill is so sparse that it offers no workflow, no completion criterion, and no handling of nested IT modules or JDK-migration side effects. Combined with a contract that only requires one applied diff, the agent reasonably stopped after fixing the surface tools.jar error even though two of the three originally failing modules still fail. The missing constraints and missing JDK/IT-module guidance directly caused the task failure.",
+            "rewrite_targets": [
+              "Add an explicit workflow: (a) detect build file (build-pom.xml vs pom.xml) and JDK version, (b) reproduce failure with the project-native command, (c) iterate fix → rebuild until every reactor module is SUCCESS or explicitly skipped.",
+              "Add a hard stop-condition: do not finish while any reactor module reports FAILURE; downstream errors uncovered after the first fix must also be addressed.",
+              "Add a section on nested Maven Invoker / IT projects (factory/src/it/*, value/src/it/*) covering how dependencies are resolved and which POMs may need parallel edits.",
+              "Add a JDK-migration fallback checklist for pre-JDK-9 builds running on JDK 11: tools.jar system dependency, javax.annotation.Generated, source/target 1.6, --release flags, add-exports.",
+              "Replace hard-coded path literal '/home/travis/build/failed/google/auto' with discovery (find the single repo under /home/travis/build/failed) and derive the patch output path from it."
+            ],
+            "summary": "Skill was too empty to enforce iteration and lacked JDK-migration/nested-IT guidance, so the agent fixed only the first surface error (tools.jar exclusion) and declared success while two reactor modules still failed."
+          },
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Skill described the right failure families but at too high an abstraction level and in too much prose, so the agent spent its turn budget rediscovering concrete fixes (tools.jar exclusion, javax.annotation-api dep, ElementKind.MODULE guard) and producing malformed POM edits, ultimately hitting max_iterations before the second patch landed.",
+          "diagnosis": {
+            "labels": [
+              "context_pollution",
+              "wrong_abstraction_level"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "Prefer `build-pom.xml` if present (common in legacy Travis configs), otherwise `pom.xml`.",
+                "reason": "Skill treats build descriptor choice as a single step but does not warn that the local parent pom is often shadowed by a resolved external parent (auto-parent:3 from m2), so the agent spent many turns chasing the wrong pom before locating the transitive com.sun:tools dep."
+              },
+              {
+                "source": "skill",
+                "snippet": "When a fix touches a shared API, grep the whole repo for every `pom.xml` and `*.java` under `src/it` and patch them in parallel.",
+                "reason": "Skill flags IT-pom mirroring but omits the more common root cause here: transitive system-scope deps declared in third-party parent/dependency POMs (compile-testing) that must be excluded in every consumer module. Agent had to discover this ad hoc."
+              },
+              {
+                "source": "trace",
+                "snippet": "str_replace left duplicate <dependency> tags and dropped junit block in service/pom.xml",
+                "reason": "Skill prescribes `git diff` patch authoring but does not require re-validating POM well-formedness after edits, causing repeated malformed edits and wasted iterations."
+              },
+              {
+                "source": "trace",
+                "snippet": "iterations_used: 60, stop_reason: max_iterations",
+                "reason": "Skill's workflow (reproduce full reactor, download deps, run help:effective-pom, iterate per module) is too heavyweight given the 60-turn budget; agent exhausted turns before finishing patch_2."
+              },
+              {
+                "source": "skill",
+                "snippet": "861 words / Fallbacks when the planned route fails ...",
+                "reason": "Prior violation unchanged: skill still long and prose-heavy, pushing concrete heuristics (tools.jar exclusion, Generated migration, MODULE element kind) into generic checklists instead of actionable rules."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=25.3134",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill correctly named the JDK-migration failure families (tools.jar, javax.annotation.Generated) but at too generic an abstraction level: it told the agent what classes of problems to look for without giving the concrete repair recipe (exclude com.sun:tools on every compile-testing consumer; add javax.annotation-api dep in modules importing Generated; handle ElementKind.MODULE by name). Combined with a verbose multi-step workflow that forced full reactor reproduction and effective-pom introspection, the agent burned its 60-turn budget on discovery and sloppy POM edits and never finished the second patch. The repair-only hint explicitly points at 'toolchain selection, failure reproduction, build command conventions' and 'nested test project dependency resolution and modification scope', matching context_pollution (too much prose, not enough executable rules) and wrong_abstraction_level (classification checklist instead of concrete fix templates).",
+            "rewrite_targets": [
+              "Replace the JDK-migration checklist with concrete, copy-pasteable rules: (a) for every module declaring com.google.testing.compile:compile-testing, add <exclusions><exclusion><groupId>com.sun</groupId><artifactId>tools</artifactId></exclusion></exclusions>; (b) for every module importing javax.annotation.Generated, add javax.annotation:javax.annotation-api:1.3.2 as a compile dep; (c) when code calls Visibility/Element APIs, guard ElementKind.MODULE by name string to stay source-6 safe.",
+              "Shorten the workflow: single reproduction command discovered from .travis.yml, then classify failures from the Reactor Summary grep, then apply fixes in one combined patch; drop the lengthy fallback and anti-regression prose.",
+              "Add a hard rule: after each POM edit, run `xmllint --noout <pom>` (or `mvn -q -f <pom> help:effective-pom -Doutput=/dev/null`) before writing the diff, to prevent malformed <dependency> blocks.",
+              "Add an explicit note that the effective parent POM may be an already-published artifact in ~/.m2 (not the local pom.xml); inspect `~/.m2/repository/<group>/<artifact>/<version>/*.pom` of the declared <parent> before assuming local parent is authoritative.",
+              "Trim the skill well below the 220-word prior by removing background commentary and keeping only triggers, ordered steps, and the concrete repair recipes."
+            ],
+            "summary": "Skill described the right failure families but at too high an abstraction level and in too much prose, so the agent spent its turn budget rediscovering concrete fixes (tools.jar exclusion, javax.annotation-api dep, ElementKind.MODULE guard) and producing malformed POM edits, ultimately hitting max_iterations before the second patch landed."
+          },
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/single-fix-build-google-auto-all/candidate/skills",
+      "executor_run_id": "fix-build-google-auto-bundle-1-v0-revised-0a75ed6002fc",
+      "category": "valid_failure"
+    },
+    {
+      "trial_id": "single-flink-query-RI-001",
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Workflow 2's completion-event rule is too generic ('lifecycle event' with no event-type disambiguation), so the agent widened 'finished' from FINISH to all terminal states (FAIL/KILL/LOST), producing 902 rows instead of the FINISH-only expected set and failing the verifier.",
+          "diagnosis": {
+            "labels": [
+              "wrong_abstraction_level",
+              "over_generality"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "Semantic Contract Gate for Keyed Event Aggregations ... Contributing-event predicate ... Output-eligibility predicate ... Likewise, receiving a completion event does not by itself create an aggregate",
+                "reason": "Workflow 2's completion-event guidance stays at an abstract 'lifecycle/completion event' level. It never tells the implementer how to pick the specific completion event type when the lifecycle has several terminal states (FINISH vs FAIL vs KILL vs LOST). The agent had to guess."
+              },
+              {
+                "source": "trace",
+                "snippet": "Final decision: filter by terminal events ... use any terminal event (3, 4, 5, 6). ... expected count: 902, actual count: 902 ... value diffs: 0 ... Candidate verifier score: 0.0",
+                "reason": "The agent oscillated between 'FINISH only (type 4)' and 'any terminal event (3/4/5/6)' and committed to the latter. The verifier rejected the output, strongly indicating the task's '一旦 job 已经 finished' meant FINISH (event type 4) only. The skill gate did not disambiguate 'finished' vs 'terminated'."
+              },
+              {
+                "source": "trace",
+                "snippet": "Distinct jobs with FINISH (type 4): 698 ... Intersection (should match output count 644): 644 ... 902 jobs vs 644 vs 1234",
+                "reason": "The agent originally produced the strict interpretation (644 jobs via FINISH=4) and then widened the filter to 902. The repair hint explicitly points to '完成事件判定' in Workflow 2, confirming the completion-event criterion itself was wrong."
+              },
+              {
+                "source": "skill",
+                "snippet": "a key with the required completion event but no qualifying activity must not be emitted ... compare the output key set as well as aggregate values",
+                "reason": "The gate enforces negative-side eligibility (no activity => no output) but does not define a positive-side criterion that distinguishes 'successful completion' from 'any terminal state'. This leaves the agent with no rule when the domain has multiple terminal event types."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=22.6081",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The failure is directly caused by Workflow 2's completion-event rule being pitched at too generic an abstraction level: it specifies 'lifecycle/completion event' without instructing the implementer to identify the exact event type that encodes 'finished' for the task domain. For the Google cluster trace, 'finished' means FINISH (eventType=4) only, not any terminal state; the skill's generality let the agent widen the filter to FAIL/KILL/LOST, producing extra output rows that the verifier rejected.",
+            "rewrite_targets": [
+              "Workflow 2 → 'Semantic Contract Gate for Keyed Event Aggregations': add a mandatory step requiring the implementer to enumerate every terminal/lifecycle event type in the source schema and pick the single predicate that matches the task's completion wording; forbid defaulting to 'any terminal event' when the task says 'finished/completed'.",
+              "Non-negotiable Flink Emission Gate: add a sibling 'Completion-Predicate Specification' clause that mandates writing down (a) the exact event-type value(s) that satisfy 'finished', (b) a justification citing the task text, and (c) a counter-example event type that must be excluded.",
+              "Remove the broad 'lifecycle event controls when finalization runs' phrasing in favor of 'the completion predicate P_finish must be a single, documented event-type set' to prevent over-generalization."
+            ],
+            "summary": "Workflow 2's completion-event rule is too generic ('lifecycle event' with no event-type disambiguation), so the agent widened 'finished' from FINISH to all terminal states (FAIL/KILL/LOST), producing 902 rows instead of the FINISH-only expected set and failing the verifier."
+          },
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Verifier passed: no SkillRevise diagnosis or further revision was run.",
+          "diagnosis": {
+            "labels": [],
+            "evidence": [],
+            "causal_judgment": "Verifier accepted this Skill version; the paper protocol stops before diagnosis or revision.",
+            "rewrite_targets": [],
+            "summary": "Verifier passed: no SkillRevise diagnosis or further revision was run."
+          },
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/single-flink-query-RI-001/candidate/skills",
+      "executor_run_id": "flink-query-bundle-1-v0-revised-d2abba55e961",
+      "category": "revised_pass"
+    },
+    {
+      "trial_id": "single-flink-query-RI-002",
+      "task_id": "flink-query",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-flink-query-RI-002/candidate/skills",
+      "executor_run_id": "flink-query-original-skill-ca008d9c82e2",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-flink-query-all",
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The Skill's Semantic Contract Gate under-specifies the completion-event predicate and omits the output-eligibility predicate, letting the agent choose FINISH-only and emit zero-count rows for jobs with no SUBMITs — both of which diverge from the verifier's expected key set and counts.",
+          "diagnosis": {
+            "labels": [
+              "over_specificity",
+              "false_certainty"
+            ],
+            "evidence": [
+              {
+                "source": "trace",
+                "snippet": "if (ev != null && ev.eventType == JobEvent.FINISH) out.collect(ev);",
+                "reason": "The implementation treats only JobEvent.FINISH (event_type==4) as the job-completion predicate. Jobs that terminate via KILL/FAIL/EVICT/LOST are never emitted, so the output omits valid finished jobs that the verifier expects."
+              },
+              {
+                "source": "trace",
+                "snippet": "--- stats --- 698 /tmp/out.txt   54 0  622 1 ...",
+                "reason": "54 emitted rows have count 0 — jobs whose FINISH timestamp was seen but which have no SUBMITs in this partition. The output qualification rule should require that the job had at least one SUBMIT (contributing event) before being emitted, otherwise unrelated zero rows pollute the result and the row set does not match the expected key set."
+              },
+              {
+                "source": "trace",
+                "snippet": "actually the task says literally \"once the job has finished\" - let's use FINISH event type (4) specifically... I'll stick with FINISH (4) since that's the literal interpretation.",
+                "reason": "The agent recognized ambiguity between literal FINISH vs any terminal event but committed to a single interpretation without validating with the Semantic Contract Gate (completion-event predicate + positive/negative fixtures). This is false_certainty enabled by an under-specified Skill rule."
+              },
+              {
+                "source": "skill",
+                "snippet": "Semantic Contract Gate for Keyed Event Aggregations ... 1. Contributing-event predicate: which event types add observations ...",
+                "reason": "The Skill lists only the contributing-event predicate (incomplete bullet list — 'two' and 'three' are missing). It never defines the completion-event predicate nor the output-eligibility predicate, which are exactly the two decisions the agent got wrong. The Skill is too general at the decision point the task hinges on."
+              },
+              {
+                "source": "skill",
+                "snippet": "- a key with qualifying activity and the required completion event must be emitted; compare the output key set as well as aggregate values ...",
+                "reason": "The validation guidance mentions key-set comparison but does not state that keys without any contributing event must be excluded, nor that completion must cover all terminal event types. The missing constraints caused context_pollution-tolerant but wrong behavior to pass the agent's self-check."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=21.4269",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The verifier failure is caused by two under-specified rules in Workflow 2's Semantic Contract Gate: (a) the completion-event predicate was left to the agent's interpretation and it narrowed it to FINISH only, dropping jobs that end with KILL/FAIL/EVICT/LOST; (b) the output-eligibility predicate was never stated, so the agent emitted (jobId,0) rows for jobs that had a terminal job-event but zero task SUBMITs. Both symptoms are over-specific/under-specified rules in the Skill text rather than environment or abstraction errors.",
+            "rewrite_targets": [
+              "senior-data-engineer/SKILL.md — Workflow 2 → 'Semantic Contract Gate for Keyed Event Aggregations': complete the three-predicate list. Explicitly define (2) completion-event predicate as the set of all terminal lifecycle events (not a single enum value) and require the author to enumerate them from the schema; and (3) output-eligibility predicate requiring at least one contributing event before emission.",
+              "senior-data-engineer/SKILL.md — Workflow 2 validation bullets: add a hard constraint 'Do NOT emit a key that has a completion event but zero contributing events' and 'Do NOT equate \\\"finished\\\" with a single event-type literal; derive the terminal-event set from the schema and justify it.'",
+              "senior-data-engineer/SKILL.md — add a positive/negative fixture requirement: before declaring done, run a hand-check where (i) a job terminating via a non-FINISH terminal event is still emitted, and (ii) a job with completion but no contributing events is NOT emitted."
+            ],
+            "summary": "The Skill's Semantic Contract Gate under-specifies the completion-event predicate and omits the output-eligibility predicate, letting the agent choose FINISH-only and emit zero-count rows for jobs with no SUBMITs — both of which diverge from the verifier's expected key set and counts."
+          },
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill's Semantic Contract Gate encodes two over-general, universally-asserted predicates (full terminal set for 'finished'; mandatory contributing-event gate) with false certainty, forbidding narrower alternatives as anti-patterns. The agent followed them exactly and the verifier still failed; the repair hints target precisely these two rules.",
+          "diagnosis": {
+            "labels": [
+              "over_generality",
+              "false_certainty"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "Do NOT equate a natural-language phrase (\"once finished\", \"when done\", \"on completion\") with a single enum literal. Natural language is almost always the union of all terminal lifecycle states (e.g., FINISH, KILL, FAIL, EVICT, LOST...).",
+                "reason": "The skill asserts a hard rule that natural-language 'finished' must expand to the full terminal set. The repair hint flags exactly this rule (Workflow 2 完成事件判定). For this task, the ground-truth completion predicate was narrower (likely FINISH only or a different subset), so this over-broad universal collapsed task-specific semantics into an incorrect default."
+              },
+              {
+                "source": "skill",
+                "snippet": "A key is eligible only if BOTH (a) at least one contributing event has been observed for it AND (b) the completion-event predicate has fired for it. ... A key seen only through completion events (zero contributing events) must NOT be emitted.",
+                "reason": "The repair hint flags Workflow 2 结果输出资格的规定. The skill mandates a hasContributingEvent gate as a universal rule; coupled with the broad terminal set this changed which jobIds appear in output. The agent faithfully applied the rule (dropped 85 jobs, included 258 non-FINISH terminals) and still scored 0.0, indicating the eligibility rule as written does not match the task family's expected key set."
+              },
+              {
+                "source": "trace",
+                "snippet": "Positive-non-primary candidates: 258 ... Negative-empty candidates: 85 ... Positive-non-primary job 6252021948 in output? True ... Negative-empty jobs leaked to output: 0",
+                "reason": "The agent proved its output exactly matches the skill-prescribed predicates (full terminal set + hasContributingEvent gate), yet verifier returned 0.0. This localizes the failure to the skill-level predicate specifications, not to agent reasoning or implementation."
+              },
+              {
+                "source": "skill",
+                "snippet": "Anti-patterns that this gate forbids: - \"The task says 'finished' so I'll use eventType == FINISH.\" Wrong - derive the terminal set from the schema.",
+                "reason": "The skill explicitly forbids the (apparently correct) narrow interpretation and brands it an anti-pattern with false certainty. This blocked the agent from considering FINISH-only or any other narrower terminal subset even when the task's single-word 'finished' may have warranted it."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=28.4781",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill's Semantic Contract Gate hard-codes two universal defaults—(1) 'finished' always expands to the full terminal lifecycle set, and (2) emission requires a hasContributingEvent gate—and brands the alternatives as forbidden anti-patterns. The agent followed these rules precisely and produced output that validated against its own reference implementation, yet the verifier failed, and the repair hints point at exactly these two rules. The failure is caused by the skill asserting over-general, universally-applied semantic predicates with false certainty, rather than instructing the agent to derive the predicates from task-specific signals (e.g., presence of a job-events input, task wording cues, acceptance of empty-stage rows).",
+            "rewrite_targets": [
+              "Workflow 2 / Semantic Contract Gate: replace the universal 'natural-language finished = full terminal set' rule with a decision procedure that enumerates the terminal set from the schema AND then tests task-specific signals (singular vs plural phrasing, presence of lifecycle codes in the data, acceptance criteria) before choosing between the full set and a narrower subset such as {FINISH}.",
+              "Workflow 2 / Output-eligibility predicate: downgrade the hasContributingEvent gate from a mandatory rule to a conditional one; require the agent to first check whether the task family's expected key set includes keys with zero contributing events (e.g., emit (key,0)) before applying the gate.",
+              "Remove the 'Anti-patterns that this gate forbids' block or rephrase it as 'patterns to justify in writing', so narrow interpretations remain available when the task warrants them.",
+              "Add an explicit instruction: when both interpretations are plausible, construct both candidate outputs and reconcile against any provided acceptance fixtures or sample expected rows before finalizing."
+            ],
+            "summary": "The skill's Semantic Contract Gate encodes two over-general, universally-asserted predicates (full terminal set for 'finished'; mandatory contributing-event gate) with false certainty, forbidding narrower alternatives as anti-patterns. The agent followed them exactly and the verifier still failed; the repair hints target precisely these two rules."
+          },
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/single-flink-query-all/candidate/skills",
+      "executor_run_id": "flink-query-bundle-1-v0-revised-b914ac9cd4bc",
+      "category": "valid_failure"
+    },
+    {
+      "trial_id": "single-manufacturing-equipment-maintenance-RI-001",
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-manufacturing-equipment-maintenance-RI-001/candidate/skills",
+      "executor_run_id": "manufacturing-equipment-maintenance-original-skill-76ab246204fd",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-manufacturing-equipment-maintenance-RI-002",
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Q02 failed because the skill's representative-TC rule is a wrong-abstraction, over-certain numeric tie-break ('min TAL, smallest tc_id') instead of a handbook-location-based selection (cold spot / largest_mass), causing the executor to pick the wrong tc_id and TAL value.",
+          "diagnosis": {
+            "labels": [
+              "wrong_abstraction_level",
+              "false_certainty"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "If selecting minimum metric (e.g., \"coldest\" TAL or peak): choose `(min_value, smallest_tc_id)`.",
+                "reason": "Skill prescribes picking the TC with the minimum TAL as the representative for Q02, but the location hint flags Q02's representative-TC selection as wrong. The handbook's 'cold spot/worst-case' guidance for TAL likely means the TC at the largest_mass location (coldest physical point), not the TC with the numerically smallest TAL."
+              },
+              {
+                "source": "trace",
+                "snippet": "\"run_id\": \"R0001\", \"tc_id\": \"TC3\", \"tal_s\": 129.95",
+                "reason": "Agent selected TC3 (smallest TAL) rather than the handbook-indicated representative sensor (e.g., TC at tc_location=='largest_mass'), producing an incorrect tc_id and tal_s for Q02."
+              },
+              {
+                "source": "skill",
+                "snippet": "Thermocouple placement: \"cold spot\", \"worst case\", \"representative sensor\"",
+                "reason": "Skill lists handbook cues for representative sensor placement but does not operationalize them; instead it falls back to a generic min/max tie-break rule, bypassing handbook-defined location semantics."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=12.93",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill's Q02 representative-TC rule operates at the wrong abstraction level: it reduces 'representative thermocouple per handbook' to a generic numeric min/tc_id tie-break instead of binding selection to the handbook's physical-location semantics (cold spot / largest_mass). This directive is stated with unconditional certainty, so the executor applied it without consulting tc_location, yielding wrong Q02 tc_id and tal_s values.",
+            "rewrite_targets": [
+              "Replace the generic 'min TAL + smallest tc_id' rule for TAL representative selection with a handbook-grounded rule: prefer the TC whose tc_location matches the handbook's representative/worst-case placement (e.g., largest_mass / cold spot); only fall back to numeric min + tc_id tie-break if no such location exists.",
+              "Convert the sensor-selection section from unconditional directives into if/then rules keyed on handbook location cues, with explicit fallback order.",
+              "Add a validation step that logs the chosen tc_location per run so representative-sensor choice is auditable."
+            ],
+            "summary": "Q02 failed because the skill's representative-TC rule is a wrong-abstraction, over-certain numeric tie-break ('min TAL, smallest tc_id') instead of a handbook-location-based selection (cold spot / largest_mass), causing the executor to pick the wrong tc_id and TAL value."
+          },
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Q02 fails because the skill asserts, without handbook support, that largest_mass is the TAL representative TC and encodes it as a fixed location token; in this dataset largest_mass is actually the hottest sensor, so every Q02 tc_id/tal_s is wrong. Fix by driving TAL representative selection from the metric (min TAL worst case) rather than a hard-coded location literal.",
+          "diagnosis": {
+            "labels": [
+              "false_certainty",
+              "wrong_abstraction_level"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "\"tal\":  [\"largest_mass\"],    # hardest to heat, coldest point",
+                "reason": "The skill hard-codes a single location token for the TAL representative TC and asserts that largest_mass is the 'coldest / hardest-to-heat point'. The handbook never explicitly names a representative TC for TAL; this is an unsupported inference presented as fact."
+              },
+              {
+                "source": "execution_trace",
+                "snippet": "R0001 tal tc=TC1 loc=largest_mass val=132.61 ... R0049 tal tc=TC1 loc=largest_mass val=128.823 ... Peak=352.49 required 203.0",
+                "reason": "In this dataset the TC at largest_mass consistently shows very HIGH TAL and HIGH peak values (hundreds of seconds over liquidus, >340°C peak), i.e. it is actually the hottest sensor, not the coldest. The skill's a priori mapping of largest_mass→'coldest' contradicts the data, so the picked tc_id and tal_s are wrong for Q02 even though the location policy 'matched'."
+              },
+              {
+                "source": "skill",
+                "snippet": "For each run, iterate the policy tokens in order. ... If no token in the policy matches any TC for that run, fall back ... 'min' metric (coldest TAL, coldest peak): choose lowest value",
+                "reason": "The skill conflates two different abstractions: a static location-name policy and a value-driven worst-case rule. For TAL the handbook's 'representative' concept is the worst-case solder joint (min TAL = greatest risk of poor wetting), which should be derived from the metric itself; forcing a location-name shortcut skips the correct abstraction level."
+              },
+              {
+                "source": "verifier",
+                "snippet": "reward 0.0; hint: Q02 的代表热电偶选择部分",
+                "reason": "Repair hint pinpoints Q02 representative-sensor selection as the failure region, consistent with the above false-certainty mapping."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=29.5232",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill's Q02 output is wrong because it declares with false certainty that the largest_mass TC is the representative sensor for TAL and encodes this as a hard-coded location token. The handbook does not state this, and the actual data shows largest_mass behaves as the hottest, not coldest, sensor—so the location-based policy returns the wrong tc_id/tal_s for every run. The abstraction level is also wrong: TAL's 'representative' TC should be derived from the metric (worst-case / min TAL across TCs, with handbook-anchored tie-breaks) rather than a fixed location string.",
+            "rewrite_targets": [
+              "Representative thermocouple selection (handbook-grounded) section: remove the hard-coded 'largest_mass' assumption for TAL. Define the TAL representative TC as the worst-case for wetting, i.e. the TC with the minimum TAL across all TCs in that run (ties broken by smallest tc_id), unless the handbook explicitly names a location.",
+              "cfg representative_tc_policy for 'tal': replace the fixed token list with a metric-driven rule ('direction=min' on tal_s) and only use location tokens if they are literally quoted from the handbook.",
+              "Add a guard that cross-checks the chosen TC against the metric extremum, so a location match that disagrees with the handbook-defined worst-case direction is overridden or flagged.",
+              "Shorten the skill (prior violation: >1900 words) by collapsing the Q02 selection rule to one explicit paragraph and removing speculative commentary about largest/smallest mass semantics."
+            ],
+            "summary": "Q02 fails because the skill asserts, without handbook support, that largest_mass is the TAL representative TC and encodes it as a fixed location token; in this dataset largest_mass is actually the hottest sensor, so every Q02 tc_id/tal_s is wrong. Fix by driving TAL representative selection from the metric (min TAL worst case) rather than a hard-coded location literal."
+          },
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/single-manufacturing-equipment-maintenance-RI-002/candidate/skills",
+      "executor_run_id": "manufacturing-equipment-maintenance-bundle-1-v0-revised-316dfad8cf0c",
+      "category": "valid_failure"
+    },
+    {
+      "trial_id": "single-manufacturing-equipment-maintenance-all",
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-manufacturing-equipment-maintenance-all/candidate/skills",
+      "executor_run_id": "manufacturing-equipment-maintenance-original-skill-e5b686c3f6fc",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-sec-financial-report-RI-001",
+      "task_id": "sec-financial-report",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-sec-financial-report-RI-001/candidate/skills",
+      "executor_run_id": "sec-financial-report-original-skill-4718c4e0c488",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-sec-financial-report-RI-002",
+      "task_id": "sec-financial-report",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-sec-financial-report-RI-002/candidate/skills",
+      "executor_run_id": "sec-financial-report-original-skill-7ace3f702107",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-sec-financial-report-RI-003",
+      "task_id": "sec-financial-report",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-sec-financial-report-RI-003/candidate/skills",
+      "executor_run_id": "sec-financial-report-original-skill-c00de25f1a19",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-sec-financial-report-all",
+      "task_id": "sec-financial-report",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-sec-financial-report-all/candidate/skills",
+      "executor_run_id": "sec-financial-report-original-skill-ca4b3bfa6b33",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-video-silence-remover-RI-001",
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The opening was over-cut because the silence detector reported the smoothed-energy crossing index as the raw timeline end without compensating for the 30s moving-average lag, and the skill's unconditional 'use defaults' guidance suppressed any sanity check. Fix the index-to-timestamp mapping, add plausibility/fallback rules in silence-detector, and require segment validation in video-processor.",
+          "diagnosis": {
+            "labels": [
+              "false_certainty",
+              "wrong_abstraction_level"
+            ],
+            "evidence": [
+              {
+                "source": "trace",
+                "snippet": "Initial silence detected: 221s (3.68 min) ... parameters: multiplier=1.5, initial=60s, smoothing=30s",
+                "reason": "A 10-minute teaching video with a reported opening of ~221s (36.8% of total) is implausible; the opening is typically a few to tens of seconds. The detector reported this with no sanity check and the executor accepted it."
+              },
+              {
+                "source": "skill",
+                "snippet": "--smoothing-window: Moving average window (default: 30) ... Find where smoothed energy exceeds baseline x multiplier",
+                "reason": "A 30s moving average over per-second energies introduces a large lag/offset: the crossing index in the smoothed series does not correspond to the real transition timestamp. SKILL.md documents the window but gives no rule for mapping smoothed-crossing index back to a true timestamp (e.g., subtract window/2), so the end-of-opening is systematically pushed later."
+              },
+              {
+                "source": "skill",
+                "snippet": "Run the documented defaults first. Change thresholds only when signal or visual evidence contradicts that candidate",
+                "reason": "The skill asserts defaults as authoritative and discourages adjustment, so the executor never questioned a 221s opening despite its magnitude being an obvious contradiction (should be a decision point / fallback)."
+              },
+              {
+                "source": "trace",
+                "snippet": "Compression: 41.5% ... Removed: 249.00s",
+                "reason": "The 221s opening dominates the 249s removed total; the pause detection (28s) is reasonable, so the compression failure is attributable to the mis-timed smoothed-crossing in silence-detector."
+              },
+              {
+                "source": "skill",
+                "snippet": "video-processor ... (no explicit guidance on validating segment start/end against smoothing offset)",
+                "reason": "video-processor's SKILL.md does not instruct callers to compensate for smoothing lag when consuming silence-detector output, so the error propagates unchecked."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=22.2161",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The silence-detector's smoothed-energy crossing index was used directly as the opening end-time, with no correction for the 30s moving-average lag and no sanity bound on opening length. Combined with the skill's unconditional 'use defaults' directive, this produced a 221s opening cut that over-removed teaching content and caused the verifier to fail. The pause detection and video processing steps were correct; the defect is specifically in how the smoothing window maps to timestamps and in the absence of a plausibility fallback.",
+            "rewrite_targets": [
+              "silence-detector/scripts/detect_silence.py: when locating the first index where smoothed energy exceeds threshold, convert back to the original timeline by subtracting (smoothing_window // 2) or by evaluating the raw energy around the crossing to pick the first raw-energy rise; clamp end to that corrected timestamp.",
+              "silence-detector/SKILL.md: document the timestamp-correction rule for the smoothing window; add an if/then plausibility check (e.g., if detected opening > X% of total or > N seconds, re-run with smaller smoothing_window or fall back to raw-threshold crossing); replace unconditional 'use defaults' language with validate-then-adjust rules; trim word count by removing redundant Use Cases / Example / Tuning table prose.",
+              "video-processor/SKILL.md: add a precondition that consumed segment timestamps be validated (non-overlap, within duration, and opening length within a plausible bound) before cutting; specify fallback when validation fails."
+            ],
+            "summary": "The opening was over-cut because the silence detector reported the smoothed-energy crossing index as the raw timeline end without compensating for the 30s moving-average lag, and the skill's unconditional 'use defaults' guidance suppressed any sanity check. Fix the index-to-timestamp mapping, add plausibility/fallback rules in silence-detector, and require segment validation in video-processor."
+          },
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "SKILL.md promises lag-corrected, plausibility-gated opening detection, but the script neither applies the documented timestamp correction nor enforces MAX_OPENING fallback. The default run returned a 221s opening on a 600s video and halving smoothing moved it the wrong way (230s), indicating a smoothing_window↔timestamp semantics mismatch. The video-processor consumed this inflated opening unchecked, cutting into real teaching content and producing a 41.5% compression that failed the verifier. Fix by aligning script semantics with SKILL (units, trailing-mode correction), implementing the retry/fallback/empty-segment contract, and requiring the consumer to validate opening length before cutting.",
+          "diagnosis": {
+            "labels": [
+              "wrong_abstraction_level",
+              "false_certainty"
+            ],
+            "evidence": [
+              {
+                "source": "trace",
+                "snippet": "Detecting initial silence from: energies.json\\nParameters: multiplier=1.5, initial=60s, smoothing=30s\\n\\nInitial silence detected: 221s (3.68 min)",
+                "reason": "The SKILL.md procedure specifies step 5 plausibility (MAX_OPENING=max(60,0.15*total)=90s for 600s video), with retry+fallback+empty-segment fallback. The script emitted end=221 without triggering any of those paths and with no `notes`, so the documented workflow is not actually executed by the script—a false_certainty gap between SKILL and implementation."
+              },
+              {
+                "source": "trace",
+                "snippet": "python3 /skills/silence-detector/scripts/detect_silence.py ... --smoothing-window 15 ... Initial silence detected: 230s",
+                "reason": "Halving the smoothing window increased (not decreased) the reported silence end. If step 4 lag correction `t = max(0, (i* - W // 2) * seconds_per_sample)` were applied, smaller W should give a smaller t. The script's smoothing_window-to-timestamp mapping disagrees with the SKILL.md description—exactly the repair hint about 平滑窗口与时间戳对应."
+              },
+              {
+                "source": "trace",
+                "snippet": "Mean 0-74:   1238\\nMean 75-220: 603\\nMean 221-240:1040\\nMean 240-600:1626",
+                "reason": "Signal evidence shows the noisy intro is really 0–74s and 75–220s is a long pause within the content, yet the detector collapses the whole 0–221s block into a single opening segment because its smoothing/baseline (mean of first 60s = 1146) is contaminated by the noisy intro. SKILL does not force the script to use a baseline that excludes the intro region, so the abstraction (energy_threshold + smoothing) is at the wrong level for 'static-frames-with-noise' openings."
+              },
+              {
+                "source": "trace",
+                "snippet": "Compression: 41.5% ... Original: 600.0s ... Removed: 249.0s ... score 0.0",
+                "reason": "A 41.5% compression driven by a 221s single 'opening' segment indicates the opening boundary is wrong (teaching content from the 0–74s intro region or the 221–240s transition was likely cut). Verifier rejection is consistent with wrong opening endpoint, which stems from the SKILL/script mismatch above."
+              },
+              {
+                "source": "skill",
+                "snippet": "Centered smoothing avoids systematic lag; if only a trailing moving average is available, you MUST compensate (see step 4).",
+                "reason": "SKILL.md leaves which mode the script uses implicit and relies on the LLM to infer and apply correction. Trace shows no correction occurring (behavior monotone-up as smoothing shrinks), proving the script is trailing without compensation—false_certainty about what the script guarantees."
+              },
+              {
+                "source": "skill",
+                "snippet": "If still implausible, return `segments: []` and set `notes` to describe the fallback outcome. Never emit an implausible opening silently.",
+                "reason": "The script returned a 221s opening (>MAX_OPENING=90s) with no notes and no empty-segment fallback. SKILL promises a safety net that the script does not enforce—wrong_abstraction_level: SKILL documents behavior above what the script implements."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=47.5787",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The SKILL.md documents a lag-corrected, plausibility-gated procedure, but the backing script does neither: (a) the smoothing_window units/semantics (seconds vs. samples) and trailing-vs-centered mode do not match the SKILL's lag-correction formula, so reducing smoothing shifted t the wrong direction; (b) the step-5 MAX_OPENING retry+fallback+empty-segment path is not actually implemented, so an implausible 221s opening was emitted silently. The video-processor consumed this inflated opening, producing a 41.5% compression that cut real teaching content and failed the verifier.",
+            "rewrite_targets": [
+              "silence-detector/SKILL.md: unambiguously fix the units of smoothing_window (seconds, converted internally to samples), require seconds_per_sample to be read from energies.json, and specify which smoothing mode (trailing) the script uses so the lag-correction formula is unconditional and testable.",
+              "silence-detector/SKILL.md: move the plausibility check (MAX_OPENING, retry with halved window, raw-energy fallback, empty-segment emission with notes) from procedure prose into a mandatory contract that the script output must satisfy; include a self-check assertion the caller must verify.",
+              "silence-detector/scripts/detect_silence.py: implement the lag correction `t = max(0, (i* - W//2) * seconds_per_sample)`, the retry/fallback ladder, and the empty-segment-with-notes exit when MAX_OPENING is exceeded; also use a baseline that excludes the detected high-variance intro region (e.g., trimmed-mean baseline) to avoid intro contamination.",
+              "video-processor/SKILL.md: add an explicit precondition that the caller must drop or truncate any silence-detector opening whose end > MAX_OPENING or whose notes field is set, before feeding segments into the cutter.",
+              "Trim SKILL.md context pollution: remove the 'How Smoothing Lag Arises' background paragraph and consolidate dependency/checkpoint sections to keep executable rules first."
+            ],
+            "summary": "SKILL.md promises lag-corrected, plausibility-gated opening detection, but the script neither applies the documented timestamp correction nor enforces MAX_OPENING fallback. The default run returned a 221s opening on a 600s video and halving smoothing moved it the wrong way (230s), indicating a smoothing_window↔timestamp semantics mismatch. The video-processor consumed this inflated opening unchecked, cutting into real teaching content and producing a 41.5% compression that failed the verifier. Fix by aligning script semantics with SKILL (units, trailing-mode correction), implementing the retry/fallback/empty-segment contract, and requiring the consumer to validate opening length before cutting."
+          },
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Smoothing-window/timestamp misalignment in the silence detector produced a 221s 'opening' for a 600s video; the video-processor skill's over-general 'trust the detector' directive and lack of a validation/fallback rule let the agent accept it with false certainty, removing teaching content and failing the verifier.",
+          "diagnosis": {
+            "labels": [
+              "false_certainty",
+              "wrong_abstraction_level",
+              "over_generality"
+            ],
+            "evidence": [
+              {
+                "source": "trace",
+                "snippet": "Initial silence detected: 221s (3.68 min) ... Parameters: multiplier=1.5, initial=60s, smoothing=30s",
+                "reason": "The silence detector returned a 221s opening with a 30s smoothing window. The hint explicitly flags the smoothing-window / timestamp correspondence as the bug: smoothed detection shifts the crossing far past the true opening boundary (true content transition is ~70s per the agent's own 10s rolling analysis)."
+              },
+              {
+                "source": "trace",
+                "snippet": "first 10s window above 1687: index 65 (center ~70s) ... Mean 0-74: 1238, Mean 75-220: 603",
+                "reason": "Signal evidence actually indicates the opening (noisy intro) ends near 75s; the quiet 75–220s is low-volume teaching/preamble content. The detector's 221s boundary results from the smoothing-window alignment bug, not real silence."
+              },
+              {
+                "source": "trace",
+                "snippet": "Both the default (221) and the retry with halved smoothing (230) are > MAX_OPENING (90) ... I'll trust the 221s opening detection.",
+                "reason": "The video-processor SKILL's gate says 'Run the documented detector defaults before considering any tuning' and warns against choices driven by target totals, but offers no concrete remedy when the detector violates MAX_OPENING. The agent chose false_certainty: overriding plausibility with a self-constructed rationale rather than correcting the window/timestamp mapping or escalating the fallback."
+              },
+              {
+                "source": "trace",
+                "snippet": "Compression: 41.5% ... Removed: 249.0s",
+                "reason": "The resulting 41.5% compression (dominated by the inflated 221s opening) sits well outside the expected range for a 10-min teaching video with a short opening + minor pauses, driving the 0.0 verifier score."
+              },
+              {
+                "source": "skill",
+                "snippet": "Detect the non-teaching opening with the silence detector's result, then start long-pause detection at that returned boundary. Run the documented detector defaults before considering any tuning.",
+                "reason": "video-processor/SKILL.md over-generally mandates trusting the detector's returned boundary without specifying how to correct the smoothing-window-induced offset, i.e., the skill lacks a concrete fallback/validation rule for when the boundary is implausibly late."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=24.1352",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The silence-detector's smoothing-window arithmetic produces a boundary timestamp that is offset by roughly the smoothing length (reporting 221s when sustained high energy actually begins near 70–75s). video-processor/SKILL.md tells the agent to adopt that boundary and discourages tuning, and provides no verified correction path when the plausibility bound is exceeded. The agent therefore accepted the inflated 221s opening with false certainty, removing ~150s of real teaching content and causing the verifier to fail.",
+            "rewrite_targets": [
+              "silence-detector/scripts/detect_silence.py: fix smoothing window ↔ timestamp alignment (compensate for smoothing lead/lag so the reported boundary matches the raw crossing index, or report the first-raw-crossing-above-threshold timestamp directly).",
+              "silence-detector/SKILL.md: document the window-to-timestamp relationship explicitly and specify a required cross-check (raw first-crossing vs smoothed boundary) with a tolerance.",
+              "video-processor/SKILL.md: replace the unconditional 'trust detector defaults' directive with an if/then rule — if opening > max(60, 0.15·duration), require a validated fallback (raw crossing, rolling-window agreement) before accepting it; otherwise cap or reject.",
+              "video-processor/SKILL.md: shrink and de-duplicate the completion-gate prose; move invariants into checklist items and remove background."
+            ],
+            "summary": "Smoothing-window/timestamp misalignment in the silence detector produced a 221s 'opening' for a 600s video; the video-processor skill's over-general 'trust the detector' directive and lack of a validation/fallback rule let the agent accept it with false certainty, removing teaching content and failing the verifier."
+          },
+          "locations": [
+            {
+              "file": "video-processor/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The skill's opening-boundary gate rejected the silence detector's result based on a rigid plausibility cap without first correcting for the detector's smoothing-window lag, then fell back to a raw-crossing rule that assumes a low→high opening transition. For this high-energy-intro video the fallback landed on a transient dip inside the opening (s75), under-trimming the intro and producing a verifier score of 0.",
+          "diagnosis": {
+            "labels": [
+              "false_certainty",
+              "over_specificity",
+              "wrong_abstraction_level"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "C = plausibility cap for the opening = max(60 s, 0.15 * total_duration_seconds). ... If B <= C and |B - R| <= W: accept B* = B. Else if R <= C: use B* = R",
+                "reason": "Hard-coded cap and acceptance rule treat the plausibility bound as ground truth. For this 600 s video the detector returned B=221 s (which, after accounting for the detector's 30 s smoothing-window lag the hint explicitly flags, would correspond to a true boundary roughly 15–30 s earlier). The skill's cap of 90 s forces rejection without first applying the smoothing-window→timestamp correction, so a plausible detector output is discarded."
+              },
+              {
+                "source": "trace",
+                "snippet": "Initial silence detected: 221s ... B=221 rejected (> plausibility cap C=90). Raw energy shows sustained >1300 through s74 then sharp drop at s75 (311.3)",
+                "reason": "The agent faithfully executed the skill's rule and overrode B to 75 s. s75 is a one-sample dip inside the loud intro (e[76]=1073, e[77]=1018 immediately rebound), not the true opening end. The skill never told the agent to subtract the smoothing-window offset from B before overriding, so the fallback picked a transient trough instead of the detector's smoothed boundary shifted by W."
+              },
+              {
+                "source": "skill",
+                "snippet": "For a short (~10 min) teaching video with a brief opening and sparse pauses, expect predicted_ratio roughly in [0.02, 0.30].",
+                "reason": "The predicted_ratio of 0.175 fell inside the band, so the plausibility gate did not trigger a re-check even though the chosen boundary was wrong. The band is wide enough that it rubber-stamps any decision the override rule produces; it does not actually verify opening-end correctness."
+              },
+              {
+                "source": "skill",
+                "snippet": "R = first timestamp where the raw (unsmoothed) rolling energy sustains above the detector's threshold for at least one window.",
+                "reason": "The 'raw-crossing' definition is tied to the detector's threshold (baseline × 1.5). When the opening is itself high-energy (intro music), the raw signal is above threshold throughout the opening, so R lands inside the opening rather than at its end. The skill assumes a monotonic low→high transition and offers no inversion-aware alternative, which is the exact smoothing/timestamp mismatch the hint calls out."
+              },
+              {
+                "source": "trace",
+                "snippet": "'segments_removed': [ {'start': 0, 'end': 75, 'duration': 75}, ... ] Compression: 17.5%",
+                "reason": "Final compression under-removes the opening relative to the expected removal that the detector's smoothed boundary (adjusted for its 30 s window) would have produced, yielding verifier reward 0.0."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=40.2673",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The skill's opening-boundary validation treats the plausibility cap as an absolute truth and never applies a smoothing-window→timestamp correction before accepting or rejecting B. Consequently, a detector output that only needed a W/2-type offset correction was discarded, and the fallback (raw-crossing R) placed B* inside the opening rather than at its end. The downstream pipeline then produced a correctly-formed but under-trimmed video, which the verifier scored 0.",
+            "rewrite_targets": [
+              "Opening-boundary validation in video-processor/SKILL.md: before any accept/reject decision, convert the detector's smoothed B to a timestamp-aligned candidate B_adj = B − k·W (k derived from the detector's smoothing scheme described in silence-detector/SKILL.md) and evaluate the plausibility and raw-crossing checks against B_adj, not B.",
+              "silence-detector/SKILL.md and scripts/detect_silence.py: document (and expose in the output JSON) the exact timestamp semantics of the smoothed series — whether the reported index refers to the end, center, or start of the smoothing window — and emit both the smoothed index and the window-corrected timestamp so callers can use them without guessing.",
+              "Soften the hard-coded cap C = max(60, 0.15·total) and the [0.02, 0.30] plausibility band into verification-with-fallback rules: when B_adj violates the cap, require an explicit evidence check (raw-signal sustained-level change over ≥W seconds in the correct polarity) before overriding, and support both low→high and high→low opening polarities.",
+              "Remove the implicit assumption that the opening is lower-energy than teaching; add a polarity-detection step (compare first-N-seconds energy distribution to the global distribution) that selects the appropriate crossing direction before computing R."
+            ],
+            "summary": "The skill's opening-boundary gate rejected the silence detector's result based on a rigid plausibility cap without first correcting for the detector's smoothing-window lag, then fell back to a raw-crossing rule that assumes a low→high opening transition. For this high-energy-intro video the fallback landed on a transient dip inside the opening (s75), under-trimming the intro and producing a verifier score of 0."
+          },
+          "locations": [
+            {
+              "file": "video-processor/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/single-video-silence-remover-RI-001/candidate/skills",
+      "executor_run_id": "video-silence-remover-bundle-2-v0-revised-5bb3aaa771c2",
+      "category": "valid_failure"
+    },
+    {
+      "trial_id": "single-video-silence-remover-RI-002",
+      "task_id": "video-silence-remover",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-video-silence-remover-RI-002/candidate/skills",
+      "executor_run_id": "video-silence-remover-original-skill-bc92d5387c41",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-video-silence-remover-RI-003",
+      "task_id": "video-silence-remover",
+      "diagnoses": [],
+      "repaired_bundle": "trials/single-video-silence-remover-RI-003/candidate/skills",
+      "executor_run_id": "video-silence-remover-original-skill-bec39efdf5c9",
+      "category": "initial_pass_no_revision"
+    },
+    {
+      "trial_id": "single-video-silence-remover-all",
+      "task_id": "video-silence-remover",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The skill's opening-detection abstraction (low-energy prefix → transition to high energy) contradicts the task's noisy-static opening, so it reported a 221s opening and removed ~140s of teaching content. Combined with no plausibility check, no fallback, and under-specified inter-skill unit/parameter contracts, the pipeline produced a mathematically consistent but semantically wrong compression. Fix by re-grounding the detector in the real signal, adding validation/fallbacks, and tightening parameter and boundary contracts across silence-detector, pause-detector, segment-combiner, and video-processor.",
+          "diagnosis": {
+            "labels": [
+              "wrong_abstraction_level",
+              "false_certainty",
+              "over_specificity"
+            ],
+            "evidence": [
+              {
+                "source": "task_instruction",
+                "snippet": "The opening usually is of static frames with noise.",
+                "reason": "Task explicitly states the opening contains noise (not pure silence), so an energy-threshold detector that assumes 'low energy → silence/opening' is modeling the wrong phenomenon."
+              },
+              {
+                "source": "skill",
+                "snippet": "Calculate baseline from first N seconds (likely silent) ... Find where smoothed energy exceeds baseline x multiplier",
+                "reason": "silence-detector hard-codes the assumption that the first window is near-silent and content starts when energy rises. The task's opening is noisy static, so the baseline itself contains noise, and the 'transition' detected is actually a mid-content jump — a wrong abstraction for the opening-removal subtask."
+              },
+              {
+                "source": "trace",
+                "snippet": "0s: 1059.7 ... 70s: 1385.0 ... 80s: 365.2 ... 240s: 401.9 ... 250s: 3270.7 ... Initial silence detected: 221s",
+                "reason": "The real opening (noise ~1000-1400) ends near 70-80s where energy drops to ~400. The detector instead reported 221s because it waited for energy to rise above a baseline that already included the noisy opening — producing a boundary 2–3x too large."
+              },
+              {
+                "source": "trace",
+                "snippet": "221s opening seems large for a 600s video (37%) ... but the skill specifies starting pause detection at the returned boundary, so I'll trust it.",
+                "reason": "Agent recognized the result was suspicious but accepted it anyway. The skill provides no sanity check, fallback, or validation rule for the opening-length, exhibiting false_certainty."
+              },
+              {
+                "source": "skill",
+                "snippet": "--threshold-multiplier (default: 1.5), --initial-window (default: 60), --smoothing-window (default: 30)",
+                "reason": "Defaults are presented as task-ready knobs with no guidance on when they are invalid. The 30s smoothing window and 60s initial baseline interact with the per-second timestamps in a way that is not grounded (per the repair hint about smoothing-window vs. timestamp correspondence)."
+              },
+              {
+                "source": "skill",
+                "snippet": "Output format compatible with segment-combiner",
+                "reason": "Over-specific coupling claim without specifying unit/boundary conventions (seconds vs. frame index, inclusive/exclusive ends), which is exactly the inter-skill contract called out by the repair hint."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=31.2574",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "silence-detector's core model — 'initial segment is low-energy, content begins when smoothed energy exceeds baseline × multiplier' — contradicts the task's documented reality that the opening is noisy static. Because the baseline window (first 60s) sat entirely inside the noisy opening, the threshold was inflated and the detector mislabeled 0–221s as 'silence,' deleting ~140s of actual teaching content. The skill offered no validation, no fallback (e.g., detect energy drop into content, or cross-check with video-frame variance), and no guidance on when its assumption is invalid, so the agent propagated the bad boundary into pause detection and final cutting. Over-specific default parameters and under-specified unit/boundary contracts with pause-detector and segment-combiner compound the failure, matching the repair-hint locations.",
+            "rewrite_targets": [
+              "Reframe silence-detector around the actual phenomenon: detect the opening as a prefix whose characteristic differs from teaching speech (e.g., energy drop into content, or variance/spectral change), not simply 'low energy then high energy'.",
+              "Add explicit input-validation and sanity checks: reject or flag opening lengths beyond a plausibility bound (e.g., >20% of total duration) and require a secondary signal (frame-difference, spectral flatness) before accepting.",
+              "Document the time-unit and boundary contract (seconds, inclusive start / exclusive end) and how smoothing-window interacts with per-second energy indices; mirror this in video-processor and segment-combiner call notes.",
+              "Replace hard-coded defaults (1.5 / 60 / 30) with discovery rules or adaptive estimation tied to observed energy distribution; keep literals only if proven task-family invariant.",
+              "Add a fallback path: if detector output is implausible, fall back to frame-based static-opening detection or to a conservative short opening cut.",
+              "Clarify pause-detector threshold_ratio semantics (relative to local window mean? median?) and align the description across silence-detector and video-processor so parameters mean the same thing end-to-end.",
+              "Trim background prose to stay under the 220-word prior and tighten to an explicit workflow with checkpoints."
+            ],
+            "summary": "The skill's opening-detection abstraction (low-energy prefix → transition to high energy) contradicts the task's noisy-static opening, so it reported a 221s opening and removed ~140s of teaching content. Combined with no plausibility check, no fallback, and under-specified inter-skill unit/parameter contracts, the pipeline produced a mathematically consistent but semantically wrong compression. Fix by re-grounding the detector in the real signal, adding validation/fallbacks, and tightening parameter and boundary contracts across silence-detector, pause-detector, segment-combiner, and video-processor."
+          },
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md"
+            }
+          ],
+          "iteration": 0
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Script/skill drift: SKILL.md describes validated, parameter-discovered regime-change detection, but the actual silence script uses fixed 1.5/60/30 and no validation field; the agent then overrode the documented 20% plausibility cap with false certainty, producing an over-aggressive 221s opening cut and 41.5% compression that failed the verifier.",
+          "diagnosis": {
+            "labels": [
+              "environment_mismatch",
+              "false_certainty",
+              "over_specificity"
+            ],
+            "evidence": [
+              {
+                "source": "skill",
+                "snippet": "Do not hard-code 1.5 / 60 / 30. Derive: smoothing_window_sec: max(5, round(0.03 * total_duration)) ... threshold multiplier k: start 3.0, decrease stepwise to 1.5 only if no crossing found",
+                "reason": "SKILL.md forbids hard-coded literals and prescribes dynamic parameter discovery, regime-change detection, and validation checkpoints."
+              },
+              {
+                "source": "trace",
+                "snippet": "Parameters: multiplier=1.5, initial=60s, smoothing=30s\\n\\nInitial silence detected: 221s (3.68 min)",
+                "reason": "The actual detect_silence.py script uses the exact literals the SKILL.md tells authors to avoid, and lacks the documented 'drop-into-content' regime-change detection, validation checkpoint, and fallback branch. The runtime behavior does not match the authored workflow — environment_mismatch between SKILL.md contract and script implementation."
+              },
+              {
+                "source": "trace",
+                "snippet": "\"method\": \"energy_threshold\", ... \"analysis\": {\"initial_avg\": 1145.6, \"threshold\": 1718.4}",
+                "reason": "Output JSON has no 'validation' field with 'plausible'/'reason' and no 'method' value from the documented enum (primary|fallback_frame_drop|fallback_conservative). Script returns a single answer with false certainty — the plausibility_cap_ratio=0.2 check from SKILL.md was never enforced, so 221s (36.8% of 600s) was emitted without a validation failure signal."
+              },
+              {
+                "source": "trace",
+                "snippet": "221s/600s = 36.8% which exceeds the 20% plausibility cap in the skill doc, but visually this is where the actual teaching begins. ... The 20% cap in the skill doc is just a heuristic guideline",
+                "reason": "Because the script did not surface a validation.plausible=false, the agent rationalized overriding the documented hard constraint and shipped a 221s opening cut, yielding ~41.5% compression likely far above the expected range. false_certainty: the detector presented an under-validated result as authoritative."
+              },
+              {
+                "source": "skill",
+                "snippet": "pause-detector: its threshold_ratio is a multiplier on the LOCAL window median energy ... Document this when invoking from video-processor",
+                "reason": "Inter-skill note exists only in silence-detector/SKILL.md; pause-detector and video-processor SKILL.md are not shown to document the same convention, matching the location hint about threshold_ratio semantics and smoothing-window/time-unit coordination being under-specified across skills."
+              },
+              {
+                "source": "llm_metadata",
+                "snippet": "latency_seconds=27.586",
+                "reason": "LLM diagnosis call completed."
+              }
+            ],
+            "causal_judgment": "The authored SKILL.md promises regime-change opening detection with parameter discovery, a 0.2 plausibility cap, and a mandatory validation record, but the shipped detect_silence.py implements only a fixed energy-threshold rule with hard-coded 1.5/60/30 and emits no validation field. This environment_mismatch between skill description and script, combined with over_specificity in the script, produced a 221s (36.8%) opening cut that silently violated the documented plausibility constraint; the agent then exhibited false_certainty, explicitly dismissing the SKILL.md cap as a 'heuristic', keeping the aggressive cut, and inflating removed_duration to 249s / 41.5% — out of the expected compression range. Cross-skill ambiguity around threshold_ratio and smoothing-window units did not change this run's numerical result but reinforces that the authored contracts and the executable scripts are decoupled.",
+            "rewrite_targets": [
+              "silence-detector/SKILL.md: align documented workflow with what detect_silence.py actually does, or require the script to implement regime-change detection, parameter discovery (no 1.5/60/30 literals), plausibility_cap_ratio enforcement, and emit a validation.{plausible,reason} field; make the smoothing-window unit (seconds vs. frames vs. energy-index) explicit and asserted at load.",
+              "silence-detector/scripts/detect_silence.py: replace hard-coded multiplier/initial_window/smoothing with the derivation rules in SKILL.md; add the validation checkpoint that returns method=fallback_conservative when boundary > 0.2 * total_duration or no regime change is confirmed.",
+              "pause-detector/SKILL.md: state explicitly that threshold_ratio multiplies the LOCAL window median (not global baseline), and document how start_time interacts with the opening boundary chosen by silence-detector.",
+              "segment-combiner/SKILL.md: pin the interval convention (inclusive-start, exclusive-end), merging/adjacency rule, and overlap handling so video-processor can rely on it; add a self-check that total removed matches sum of merged durations.",
+              "video-processor/SKILL.md: add a pre-flight check that silence.json.validation.plausible is true (or method is a documented fallback) before accepting the opening cut, and surface a warning when combined removal exceeds a configurable fraction of total duration."
+            ],
+            "summary": "Script/skill drift: SKILL.md describes validated, parameter-discovered regime-change detection, but the actual silence script uses fixed 1.5/60/30 and no validation field; the agent then overrode the documented 20% plausibility cap with false certainty, producing an over-aggressive 221s opening cut and 41.5% compression that failed the verifier."
+          },
+          "locations": [
+            {
+              "file": "silence-detector/SKILL.md"
+            }
+          ],
+          "iteration": 1
+        }
+      ],
+      "repaired_bundle": "trials/single-video-silence-remover-all/candidate/skills",
+      "executor_run_id": "video-silence-remover-bundle-1-v0-revised-ec4d1a72f8ea",
+      "category": "valid_failure"
+    }
+  ]
+}

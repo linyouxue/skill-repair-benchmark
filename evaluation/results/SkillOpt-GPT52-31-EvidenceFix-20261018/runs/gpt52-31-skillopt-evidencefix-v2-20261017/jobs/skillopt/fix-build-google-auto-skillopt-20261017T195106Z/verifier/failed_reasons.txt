@@ -1,0 +1,18 @@
+Repository: /home/travis/build/failed/google/auto
+
+Observed build failure:
+- Running `mvn -f build-pom.xml test` fails in module `auto-common`.
+- Maven error:
+  `Could not find artifact com.sun:tools:jar:11.0.27 at specified path /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar`
+
+Root cause:
+- The root pom.xml defines legacy profiles that set a `toolsjar` property when `tools.jar` or Apple's `classes.jar` exists.
+- The inherited Sonatype OSS parent uses this property to add a system-scoped dependency on `com.sun:tools`.
+- JDK 9 and newer removed `tools.jar`. Java compiler APIs are now part of the JDK modules.
+- On Java 11 the build still tries to resolve `/lib/tools.jar`, which no longer exists.
+
+Fix plan:
+1. Add a Java 9+ Maven profile in the root pom.xml.
+2. Override the inherited `toolsjar` property with an empty value for modern JDKs.
+3. Keep the existing legacy profiles unchanged for older JDKs.
+4. Re-run `mvn -f build-pom.xml test` to confirm the reactor build succeeds.

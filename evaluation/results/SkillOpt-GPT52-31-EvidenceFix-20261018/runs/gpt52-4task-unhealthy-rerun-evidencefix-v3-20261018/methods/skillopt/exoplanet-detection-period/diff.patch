@@ -1,0 +1,403 @@
+--- before/box-least-squares/SKILL.md
++++ after/box-least-squares/SKILL.md
+@@ -196,6 +196,37 @@
+ 
+ To compare multiple peaks:
+ 
++
++### Validation & common failure modes (read before trusting the max peak)
++
++**BLS often returns a highest-power peak that is *not* the true orbital period.** The top peak can be a **harmonic/subharmonic** (e.g., P/2, P/3, 2P, 3P) or a **window/cadence alias** caused by gaps, sampling, or detrending leakage—especially in TESS light curves with residual stellar variability.
++
++**Do this validation checklist for each candidate period (at least the top N peaks):**
++1. **Inspect top N peaks (not just argmax)** and keep the best few candidates for follow-up.
++2. **Harmonic / subharmonic sweep:** explicitly evaluate **P, 2P, 3P, P/2, P/3** using the *same duration prior/grid* and compare objective values and folded coherence.
++3. **Phase-fold + bin + model overlay:** confirm a coherent, repeatable **box-shaped dip** at the candidate period.
++4. **Odd/even depth test + secondary eclipse check:** odd/even mismatch or a significant secondary at phase ~0.5 suggests an eclipsing binary or wrong period.
++5. **Duration sanity:** reject solutions that require implausibly long durations for the period/star (see duration guidance below).
++6. **Assess robustness:** if available, use `compute_stats()` SNR, try bootstrap/FAP-like checks, and verify the signal persists under reasonable detrending choices.
++
++**Concrete harmonic test snippet (use on each top peak):**
++```python
++# Given a candidate period P0 (Quantity), evaluate common aliases/harmonics
++candidates = [P0, 2*P0, 3*P0, P0/2, P0/3]
++rows = []
++for P in candidates:
++    # Reuse the same durations you used in the period search
++    pgP = model.power([P], durations, objective='likelihood')
++    st = model.compute_stats(pgP.period[0], pgP.duration[0], pgP.transit_time[0])
++    rows.append((P.to_value(u.day), float(pgP.power[0]), float(st['depth_snr']), int(st['transit_count'])))
++
++# Sort by power (or depth_snr) and then *still* verify by folded plots
++rows = sorted(rows, key=lambda r: r[1], reverse=True)
++for r in rows:
++    print(f"P={r[0]:.6f} d  power={r[1]:.2f}  depth_snr={r[2]:.2f}  Ntr={r[3]}")
++```
++
++**Example failure mode:** It is common for the maximum-power BLS peak to land near a shorter period (e.g., ~1.4 d) while the true planet period is longer (e.g., ~5.36 d) because the shorter period aligns dips from stellar variability residuals or matches a harmonic. Checking **2P, 3P** and inspecting the **folded, binned** transit shape typically reveals the correct longer period.
+ ```python
+ # Find top 5 peaks
+ sorted_idx = np.argsort(periodogram.power)[::-1]
+@@ -220,6 +251,34 @@
+ 
+ After finding a candidate, phase-fold to visualize the transit:
+ 
++
++**Strong recommendation:** always **bin** the folded light curve and overlay a box model. Unbinned scatter can hide that the dip is not coherent.
++
++```python
++import numpy as np
++import matplotlib.pyplot as plt
++
++P = best_period
++t0 = best_t0
++phase = ((time - t0 + 0.5*P) % P) / P - 0.5  # center transit near 0
++
++# Bin
++nbin = 80
++bins = np.linspace(-0.5, 0.5, nbin+1)
++idx = np.digitize(phase.to_value(u.dimensionless_unscaled) if hasattr(phase,'to_value') else phase, bins) - 1
++bin_x = 0.5*(bins[:-1] + bins[1:])
++bin_y = np.array([np.nanmedian(flux[idx==k]) if np.any(idx==k) else np.nan for k in range(nbin)])
++
++plt.figure(figsize=(7,4))
++plt.plot(phase, flux, '.', ms=2, alpha=0.3)
++plt.plot(bin_x, bin_y, '-', lw=2)
++plt.xlabel('Phase')
++plt.ylabel('Flux')
++plt.title(f'Folded at P={P.to_value(u.day):.5f} d')
++plt.show()
++```
++
++If the binned curve does **not** show a stable box-like dip near phase 0, treat the period as suspect and revisit other peaks/harmonics.
+ ```python
+ # Fold the light curve at the best period
+ phase = ((time.value - best_t0.value) % best_period.value) / best_period.value
+@@ -279,6 +338,17 @@
+ - BLS needs reasonable period and duration ranges
+ - Always validate with multiple metrics (power, SNR, odd-even)
+ 
++
++
++### Duration sanity guidance (especially for TESS)
++Overly permissive duration grids can inflate spurious BLS power. In most TESS planet cases, transit durations are **hours-scale**, not fractions of a day approaching half a day.
++
++**Practical bounds (rule-of-thumb):**
++- Start with durations spanning roughly **0.5–10 hours** (≈ 0.02–0.4 d) for many short-to-moderate periods.
++- Avoid allowing durations that are a large fraction of the period (e.g., **duration >~ 0.2·P**) unless you have strong justification.
++- If stellar parameters are available, tie bounds to geometry: transit duration scales with **P** and **stellar density**; very long durations at short periods are usually unphysical.
++
++**Implementation tip:** use a duration grid that scales with period when doing follow-up `power()` calls around a candidate period, rather than a single very long fixed duration.
+ ## Common Issues
+ 
+ ### Issue: No clear peak
+@@ -294,16 +364,18 @@
+ - Use less aggressive `flatten()` window
+ - Check raw data for transits
+ 
+-### Issue: Period is 2× or 0.5× expected
++### Issue: Highest BLS peak is a harmonic/subharmonic (P/2, P/3, 2P, 3P) or an alias
+ **Causes:**
+-- Missing alternating transits
+-- Data gaps
+-- Period aliasing
+-
+-**Solutions:**
+-- Check both periods manually
+-- Examine odd-even statistics
+-- Look at phase-folded plots for both periods
++- True signal produces strong power at harmonics/subharmonics (common for box models)
++- Residual stellar variability after detrending creates repeatable dips at shorter aliases
++- Data gaps / window function and cadence artifacts
++- Detrending leakage (overfitting trends can distort transit shape)
++
++**Solutions (systematic, not ad hoc):**
++- Review the **top N peaks**, then for each candidate explicitly test **P, 2P, 3P, P/2, P/3** with the **same duration grid**.
++- Require a coherent **phase-folded + binned** transit shape with a model overlay.
++- Use `compute_stats()` for **odd/even** depth comparison and check for a **secondary eclipse** near phase ~0.5.
++- Prefer candidates with realistic **duration** and sufficient **transit_count**.
+ 
+ ### Issue: High odd-even mismatch
+ **Cause:**
+--- before/exoplanet-workflows/SKILL.md
++++ after/exoplanet-workflows/SKILL.md
+@@ -92,6 +92,42 @@
+ 
+ ## Signal Validation
+ 
++
++
++### Strong Stellar Variability Workflow
++
++When stellar rotation or activity dominates the light curve, use an iterative workflow instead of trusting the highest BLS/TLS peak.
++
++1. **Estimate the stellar rotation timescale first**
++   - Use a Lomb-Scargle periodogram or autocorrelation on the raw/cleaned light curve.
++   - Use the dominant variability timescale to guide detrending window sizes.
++   - Detrending windows should usually be substantially longer than the expected transit duration so transits are not removed.
++
++2. **Apply transit-preserving detrending**
++   - Prefer methods that preserve short-duration dips (e.g. spline/Savitzky-Golay/high-pass filtering with conservative windows).
++   - Document detrending choices and window heuristics.
++   - After detrending, inspect the residual periodogram to confirm strong rotational power is reduced.
++
++3. **Run TLS or BLS on the detrended light curve**
++   - TLS is usually preferred for shallow transit signals.
++   - Search a broad enough period range to include harmonics and aliases.
++
++4. **Validate every candidate before reporting a period**
++   - Phase-fold the light curve and inspect transit morphology visually.
++   - Check harmonics and aliases explicitly (P, 2P, P/2, daily cadence aliases, gaps).
++   - Compare odd/even transit depths.
++   - Verify the inferred period is consistent with the number and spacing of observed transits.
++   - Confirm transit duration is physically plausible for the candidate period.
++
++5. **Iterate after detecting a candidate**
++   - Mask detected transit windows.
++   - Recompute the detrending on the masked light curve.
++   - Rerun TLS/BLS on the updated residuals.
++   - Repeat until candidate periods and transit shapes stabilize.
++
++6. **Refine the final ephemeris**
++   - Refine period and epoch using a folded transit fit around the best candidate.
++   - Report the refined period only after validation checks pass.
+ ### Strong Candidate (TLS)
+ - **SDE > 9**: Very strong candidate
+ - **SDE > 6**: Strong candidate
+@@ -99,7 +135,10 @@
+ 
+ ### Warning Signs
+ - **Low SDE (<6)**: Weak signal, may be false positive
+-- **Period exactly half/double expected**: Check for aliasing
++
++- **Strongest peak changes after detrending**: residual stellar variability may still dominate the search
++- **Transit shape looks inconsistent across folds**: candidate may be an alias or harmonic rather than the physical orbital period
++- **Period exactly half/double expected**: Check harmonics and aliases before accepting the candidate period
+ - **High odd-even mismatch**: May not be planetary transit
+ 
+ ### How to Validate
+@@ -145,6 +184,16 @@
+ 
+ ### Issue: Results vary with preprocessing
+ **Diagnosis:**
++
++**Common cause in active stars:**
++- Residual rotational variability can create stronger BLS/TLS peaks than the true transit signal.
++- The highest-power peak may be non-physical if preprocessing leaves stellar activity power in the residuals.
++
++**Recommended troubleshooting sequence:**
++- Estimate the stellar rotation period with Lomb-Scargle.
++- Increase detrending window length cautiously to suppress rotational modulation while preserving transits.
++- Compare folded light curves at the top several candidate periods, including harmonics.
++- Re-detrend after masking candidate transits and rerun the search.
+ - Compare results with different preprocessing
+ - Plot each preprocessing step
+ - Ensure you're not over-smoothing
+--- before/light-curve-preprocessing/SKILL.md
++++ after/light-curve-preprocessing/SKILL.md
+@@ -15,38 +15,56 @@
+ 3. Handle data quality flags
+ 4. Remove stellar variability (optional)
+ 
++
++
++### Transit-preserving principle (critical for period searches)
++When your goal is **transit detection**, detrending must remove variability on timescales **much longer** than the expected transit duration, otherwise you can create/strengthen short-period aliases.
++
++- Choose detrending/flattening windows **~5–20× the expected transit duration** (and preferably longer if stellar rotation is strong).
++- Avoid methods/parameters that can fit away short dips (overfitting) or that introduce ringing near sharp features.
++- Prefer **segment-wise detrending** when there are gaps/discontinuities (e.g., between TESS orbits/sectors) so the filter does not bridge gaps.
+ ## Outlier Removal
+ 
+-### Using Lightkurve
++**Caution (transits can look like outliers):** sigma-clipping on the **raw flux** can remove real in-transit points, biasing BLS/Lomb–Scargle results. Prefer clipping on **detrended residuals**, and/or use asymmetric clipping that targets only positive excursions (flares).
++
++### Using Lightkurve (recommended pattern)
+ 
+ ```python
+ import lightkurve as lk
+ 
+-# Remove outliers using sigma clipping
+-lc_clean, mask = lc.remove_outliers(sigma=3, return_mask=True)
+-outliers = lc[mask]  # Points that were removed
+-
+-# Common sigma values:
+-# sigma=3: Standard (removes ~0.3% of data)
+-# sigma=5: Conservative (removes fewer points)
+-# sigma=2: Aggressive (removes more points)
+-```
+-
+-### Manual Outlier Removal
++# 0) Apply quality flags first (see next section)
++
++# 1) Light detrend/flatten (transit-preserving window; see guidance below)
++lc_flat = lc.flatten(window_length=500)
++
++# 2) Sigma-clip on residuals (lc / lc_flat) rather than raw flux
++resid = lc / lc_flat
++resid_clean, mask = resid.remove_outliers(sigma=5, return_mask=True)
++
++# Apply the same mask back to original series
++lc_clean = lc[~mask]
++```
++
++### Manual approach (clip residuals, not raw flux)
+ 
+ ```python
+ import numpy as np
+ 
+-# Calculate median and standard deviation
+-median = np.median(flux)
+-std = np.std(flux)
+-
+-# Remove points beyond 3 sigma
+-good = np.abs(flux - median) < 3 * std
++# Given a detrended baseline model 'trend' (e.g., from smoothing)
++resid = flux / trend
++med = np.median(resid)
++mad = np.median(np.abs(resid - med))
++robust_sigma = 1.4826 * mad
++
++# Conservative clipping to avoid removing transits
++good = np.abs(resid - med) < 5 * robust_sigma
++
+ time_clean = time[good]
+ flux_clean = flux[good]
+ error_clean = error[good]
+ ```
++
++**Do not treat in-transit points as outliers.** If you see clusters of negative residuals at a consistent phase, mask them as candidate transits (see iterative workflow below) rather than clipping them away.
+ 
+ ## Removing Long-Term Trends
+ 
+@@ -65,6 +83,18 @@
+ 
+ The `flatten()` method uses a Savitzky-Golay filter to remove trends while preserving transit signals.
+ 
++
++
++#### Choosing `window_length` to preserve transits
++`window_length` is in **cadences**, so convert an expected transit duration (hours) into cadences for your data cadence.
++
++- Rule of thumb for transit searches: set the smoothing window to **5–20× transit duration**.
++- If `window_length` is too short, the filter will partially remove the dip and can push period searches toward **short aliases**.
++
++If cadence is 2 min, then 1 hour ≈ 30 cadences; a 3-hour transit is ≈ 90 cadences, so a safe starting window might be 500–2000 cadences (depending on variability strength).
++
++#### Gaps and discontinuities
++For light curves with gaps or jumps, do **piecewise normalization/detrending** (e.g., by orbit/sector or by contiguous time segments) and then stitch the normalized segments. Avoid smoothing across large gaps.
+ ### Iterative Sine Fitting
+ 
+ For removing high-frequency stellar variability (rotation, pulsation):
+@@ -121,6 +151,21 @@
+ 3. **Trend removal**: Remove long-term variations (stellar rotation, instrumental drift)
+ 4. **Optional second pass**: Additional outlier removal after detrending
+ 
++
++
++### Iterative workflow to prevent variability leakage into the periodogram
++A robust transit-search loop is:
++
++1. **Quality flags → initial detrend/flatten** (window ≫ transit duration)
++2. **Initial search (e.g., BLS)** to get a candidate period
++3. **Mask in-transit cadences** using the candidate ephemeris (and a generous duration window)
++4. **Re-detrend using only out-of-transit points** (reduces the filter being pulled down by transits)
++5. **Re-run the search** and compare aliases (check for peaks at P, 1/2 P, 2P)
++
++Require **before/after plots** at each major step (raw, detrended, masked detrend) to verify:
++- transits are not flattened away
++- detrending removed rotational variability without introducing short-timescale structure
++- no systematic over-clipping of negative dips
+ ### Important Principles
+ 
+ - **Always include flux_err**: Critical for proper weighting in period search algorithms
+--- before/transit-least-squares/SKILL.md
++++ after/transit-least-squares/SKILL.md
+@@ -70,6 +70,27 @@
+ )
+ ```
+ 
++
++
++### Constraining the Search Space
++
++Constraining the period and duration ranges is important for avoiding aliases and harmonics.
++
++```python
++# Example: constrain both period and duration ranges
++out_tls = pg_tls.power(
++    period_min=0.5,
++    period_max=15.0,
++    duration_grid_step=1.05,
++    show_progress_bar=False
++)
++```
++
++Practical guidance:
++- Use the narrowest physically reasonable `period_min` and `period_max`
++- Restrict duration ranges to realistic transit durations for the observing cadence and stellar type
++- After a broad search, rerun TLS in a narrower window around promising peaks
++- If a strong stellar variability signal is present, detrend first and then rerun TLS on the flattened light curve
+ ## Period Refinement Strategy
+ 
+ **Best Practice**: Broad search first, then refine for precision.
+@@ -193,9 +214,16 @@
+ 
+ 1. **Data quality**: Filter by quality flags before analysis
+ 2. **Preprocessing order**: Remove outliers → flatten/detrend → search for transits
+-3. **Initial search**: Use broad period range to find candidates
++3. **Initial search**: Use TLS as the primary transit search method, or use TLS to cross-check BLS candidates
+ 4. **Refinement**: Narrow search around candidates for better precision
+-5. **Validation**: Check SDE, SNR, and visual inspection of phase-folded data
++5. **Validation**: Check SDE, SNR, number of observed transits, transit duration consistency, and visual inspection of phase-folded data
++6. **Alias rejection**: Explicitly test harmonics and subharmonics (`P/2`, `2P`, `3P/2`, etc.) before accepting a final period
++
++When TLS and BLS disagree, do not automatically trust the highest peak. Fold the light curve at the TLS period, the BLS period, and simple harmonic alternatives. Prefer the period that produces:
++- Consistent transit depth and duration across events
++- Repeated transit morphology at each epoch
++- Multiple distinct transit events instead of alternating deep/shallow structures
++- Better alignment with the TLS transit model and higher-quality phase-folded transit shape
+ 
+ ### Typical Parameter Ranges
+ 
+@@ -227,10 +255,18 @@
+ 
+ ## When to Use TLS vs. Lomb-Scargle
+ 
+-- **Use TLS**: When specifically searching for exoplanet transits
+-- **Use Lomb-Scargle**: For general periodic signals (rotation, pulsation, eclipsing binaries)
+-
+-TLS is optimized for transit-shaped signals and is typically more sensitive for exoplanet detection.
++- **Use TLS**: As the preferred method for exoplanet transit searches, especially for shallow box- or transit-shaped signals
++- **Use TLS after BLS**: To validate or refine candidate periods from BLS searches
++- **Use Lomb-Scargle**: For sinusoidal or quasi-sinusoidal variability (rotation, pulsation, stellar activity)
++
++TLS is optimized for transit morphology and is typically more sensitive than Lomb-Scargle for exoplanet detection.
++
++If TLS identifies a candidate period:
++- Inspect `SDE` and `SNR` together rather than relying on a single metric
++- Verify that the inferred duration is physically plausible and stable across transits
++- Check the number of observed transits and whether any are missing because of data gaps
++- Fold the light curve at `P`, `2P`, and `P/2` to reject harmonics and subharmonics
++- Prefer the period with consistently repeating transit morphology and cleaner phase-folded alignment
+ 
+ ## Common Issues
+ 
+@@ -238,7 +274,16 @@
+ Always pass flux uncertainties to TLS! Without them, TLS cannot properly weight data points.
+ 
+ ### Period is 2x or 0.5x expected
+-Check for period aliasing - the true period might be double or half of what TLS reports. Also check the SDE for both periods.
++Check for period aliasing carefully — the true period may be a harmonic or subharmonic of the strongest peak.
++
++Validation recipe:
++1. Fold the light curve at the reported period `P`
++2. Also inspect `P/2`, `2P`, and nearby strong peaks
++3. Compare whether transits repeat with consistent depth and duration
++4. Reject periods that produce alternating transit shapes or inconsistent spacing
++5. Prefer the solution with the cleanest repeated transit morphology and strongest combined TLS diagnostics (`SDE`, `SNR`, transit count)
++
++This is especially important when BLS and TLS return different best periods.
+ 
+ ### Low SDE (<6)
+ - Signal may be too weak

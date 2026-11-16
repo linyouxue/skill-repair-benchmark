@@ -1,0 +1,266 @@
+Hit:1 http://ports.ubuntu.com/ubuntu-ports noble InRelease
+Hit:2 http://ports.ubuntu.com/ubuntu-ports noble-updates InRelease
+Hit:3 http://ports.ubuntu.com/ubuntu-ports noble-backports InRelease
+Hit:4 http://ports.ubuntu.com/ubuntu-ports noble-security InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (8.5.0-2ubuntu10.16).
+0 upgraded, 0 newly installed, 0 to remove and 29 not upgraded.
+downloading uv 0.9.7 aarch64-unknown-linux-gnu
+no checksums to verify
+installing to /root/.local/bin
+  uv
+  uvx
+everything's installed!
+
+To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+    source $HOME/.local/bin/env (sh, bash, zsh)
+    source $HOME/.local/bin/env.fish (fish)
+Downloading pygments (1.2MiB)
+ Downloading pygments
+Installed 6 packages in 5ms
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-8.4.1, pluggy-1.7.0
+rootdir: /app/workspace
+configfile: ../../dev/null
+plugins: json-ctrf-0.3.5
+collected 3 items
+
+. FFF                                                                    [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_maven_build _______________________________
+
+    def test_maven_build():
+        # Print the generated LongestSessionPerJob.java for debugging
+        java_path = "/app/workspace/src/main/java/clusterdata/query/LongestSessionPerJob.java"
+        if os.path.isfile(java_path):
+            with open(java_path, "r") as f:
+                print(f"\n=== Content of LongestSessionPerJob.java ===\n{f.read()}\n=== End of LongestSessionPerJob.java ===\n")
+        else:
+            print(f"Warning: {java_path} not found")
+    
+        """Test that Maven build compiles successfully."""
+        result = subprocess.run(
+            "cd /app/workspace && mvn clean package -q",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+>       assert result.returncode == 0, f"Maven build failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+E       AssertionError: Maven build failed:
+E         stdout: 
+E         stderr: The JAVA_HOME environment variable is not defined correctly,
+E         this environment variable is needed to run this program.
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args='cd /app/workspace && mvn clean package -q', returncode=1, stdout='', stderr='The JAVA_HOME environment variable is not defined correctly,\nthis environment variable is needed to run this program.\n').returncode
+
+/verifier/test_outputs.py:28: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+=== Content of LongestSessionPerJob.java ===
+package clusterdata.query;
+
+import clusterdata.datatypes.JobEvent;
+import clusterdata.datatypes.TaskEvent;
+import clusterdata.utils.AppBase;
+import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
+import org.apache.flink.util.Collector;
+
+import java.time.Duration;
+
+public class LongestSessionPerJob extends AppBase {
+
+    private static final int TASK_SUBMIT = 0;
+    private static final long MICROS_PER_SECOND = 1_000_000L;
+
+    public static void main(String[] args) throws Exception {
+
+        ParameterTool params = ParameterTool.fromArgs(args);
+        String taskInput = params.get("task_input", null);
+        String jobInput = params.get("job_input", null);
+        String outputPath = params.get("output", null);
+        final long sessionGapMicros = params.getInt("sesssize", 600) * MICROS_PER_SECOND;
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(1);
+
+        WatermarkStrategy<TaskEvent> taskWatermarks = WatermarkStrategy
+                .<TaskEvent>forBoundedOutOfOrderness(Duration.ofMinutes(1))
+                .withTimestampAssigner((SerializableTimestampAssigner<TaskEvent>) (event, timestamp) -> event.timestamp);
+
+        WatermarkStrategy<JobEvent> jobWatermarks = WatermarkStrategy
+                .<JobEvent>forBoundedOutOfOrderness(Duration.ofMinutes(1))
+                .withTimestampAssigner((SerializableTimestampAssigner<JobEvent>) (event, timestamp) -> event.timestamp);
+
+        DataStream<TaskEvent> taskEvents = env
+                .readTextFile(taskInput)
+                .map(TaskEvent::fromCsvLine)
+                .filter(event -> event.eventType == TASK_SUBMIT)
+                .assignTimestampsAndWatermarks(taskWatermarks);
+
+        DataStream<JobEvent> jobEvents = env
+                .readTextFile(jobInput)
+                .map(JobEvent::fromCsvLine)
+                .filter(event -> event.eventType >= 3)
+                .assignTimestampsAndWatermarks(jobWatermarks);
+
+        DataStream<Tuple2<Long, Integer>> results = taskEvents
+                .keyBy(event -> event.jobId)
+                .connect(jobEvents.keyBy(event -> event.jobId))
+                .process(new LongestStageFunction(sessionGapMicros));
+
+        results
+                .map(result -> "(" + result.f0 + "," + result.f1 + ")")
+                .writeAsText(outputPath, FileSystem.WriteMode.OVERWRITE);
+
+        env.execute("LongestSessionPerJob");
+    }
+
+    private static class LongestStageFunction extends KeyedCoProcessFunction<Long, TaskEvent, JobEvent, Tuple2<Long, Integer>> {
+
+        private final long sessionGapMicros;
+
+        private transient ValueState<Long> lastSubmitTs;
+        private transient ValueState<Integer> currentStageCount;
+        private transient ValueState<Integer> maxStageCount;
+        private transient ValueState<Long> terminalTs;
+        private transient ValueState<Boolean> emitted;
+
+        private LongestStageFunction(long sessionGapMicros) {
+            this.sessionGapMicros = sessionGapMicros;
+        }
+
+        @Override
+        public void open(Configuration parameters) {
+            lastSubmitTs = getRuntimeContext().getState(new ValueStateDescriptor<>("lastSubmitTs", Long.class));
+            currentStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("currentStageCount", Integer.class));
+            maxStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("maxStageCount", Integer.class));
+            terminalTs = getRuntimeContext().getState(new ValueStateDescriptor<>("terminalTs", Long.class));
+            emitted = getRuntimeContext().getState(new ValueStateDescriptor<>("emitted", Boolean.class));
+        }
+
+        @Override
+        public void processElement1(TaskEvent event, Context ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
+            Long lastTs = lastSubmitTs.value();
+            Integer currentCount = defaultInt(currentStageCount.value());
+            Integer maxCount = defaultInt(maxStageCount.value());
+            Long terminal = terminalTs.value();
+
+            if (terminal != null && event.timestamp > terminal) {
+                return;
+            }
+
+            if (lastTs != null && event.timestamp - lastTs >= sessionGapMicros) {
+                maxCount = Math.max(maxCount, currentCount);
+                currentCount = 0;
+            }
+
+            currentCount++;
+            currentStageCount.update(currentCount);
+            maxStageCount.update(Math.max(maxCount, currentCount));
+            lastSubmitTs.update(event.timestamp);
+        }
+
+        @Override
+        public void processElement2(JobEvent event, Context ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
+            Long existingTerminal = terminalTs.value();
+            if (existingTerminal == null || event.timestamp < existingTerminal) {
+                terminalTs.update(event.timestamp);
+                ctx.timerService().registerEventTimeTimer(event.timestamp + 1);
+            }
+        }
+
+        @Override
+        public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
+            if (Boolean.TRUE.equals(emitted.value())) {
+                return;
+            }
+
+            Integer currentCount = defaultInt(currentStageCount.value());
+            Integer maxCount = Math.max(defaultInt(maxStageCount.value()), currentCount);
+
+            if (maxCount > 0) {
+                out.collect(Tuple2.of(ctx.getCurrentKey(), maxCount));
+            }
+
+            emitted.update(true);
+            clearState();
+        }
+
+        private void clearState() throws Exception {
+            lastSubmitTs.clear();
+            currentStageCount.clear();
+            maxStageCount.clear();
+            terminalTs.clear();
+            emitted.clear();
+        }
+
+        private int defaultInt(Integer value) {
+            return value == null ? 0 : value;
+        }
+    }
+}
+
+=== End of LongestSessionPerJob.java ===
+
+_____________________________ test_flink_job_runs ______________________________
+
+    def test_flink_job_runs():
+        """Test that the Flink job runs without error."""
+        result = subprocess.run(
+            "cd /opt/flink/bin && ./flink run -t local "
+            "-c clusterdata.query.LongestSessionPerJob "
+            "/app/workspace/target/LongestSessionPerJob-jar-with-dependencies.jar "
+            "--task_input /app/workspace/data/task_events/part-00001-of-00500.csv.gz "
+            "--job_input /app/workspace/data/job_events/part-00001-of-00500.csv.gz "
+            "--output /app/workspace/out.txt",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+>       assert result.returncode == 0, f"Flink job failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+E       AssertionError: Flink job failed:
+E         stdout: Could not get job jar and dependencies from JAR file: JAR file does not exist: /app/workspace/target/LongestSessionPerJob-jar-with-dependencies.jar
+E         
+E         Use the help option (-h or --help) to get help on the command.
+E         
+E         stderr: 
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args='cd /opt/flink/bin && ./flink run -t local -c clusterdata.query.LongestSessionPerJob /app/worksp...essionPerJob-jar-with-dependencies.jar\n\nUse the help option (-h or --help) to get help on the command.\n', stderr='').returncode
+
+/verifier/test_outputs.py:44: AssertionError
+_________________________ test_output_matches_expected _________________________
+
+    def test_output_matches_expected():
+        """Test that the output file matches the expected output. This testcase also check the query semantics."""
+        expected_path = os.path.join(os.path.dirname(__file__), "out_lsj_001a.txt")
+        actual_path = "/app/workspace/out.txt"
+    
+>       assert os.path.isfile(actual_path), f"Output file {actual_path} does not exist"
+E       AssertionError: Output file /app/workspace/out.txt does not exist
+E       assert False
+E        +  where False = <function isfile at 0xffff9543cb80>('/app/workspace/out.txt')
+E        +    where <function isfile at 0xffff9543cb80> = <module 'posixpath' (frozen)>.isfile
+E        +      where <module 'posixpath' (frozen)> = os.path
+
+/verifier/test_outputs.py:52: AssertionError
+=========================== short test summary info ============================
+FAILED ::test_maven_build - AssertionError: Maven build failed:
+FAILED ::test_flink_job_runs - AssertionError: Flink job failed:
+FAILED ::test_output_matches_expected - AssertionError: Output file /app/work...
+============================== 3 failed in 0.95s ===============================

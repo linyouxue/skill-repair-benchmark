@@ -1,0 +1,330 @@
+--- before/logistics-rules-to-optimization/SKILL.md
++++ after/logistics-rules-to-optimization/SKILL.md
+@@ -107,7 +107,7 @@
+ | Choose at most one option | `x[i,j]` binary | `sum_j x[i,j] <= 1` |
+ | Open facility before assigning to it | `open[j]`, `assign[i,j]` binary | `assign[i,j] <= open[j]` |
+ | Resource capacity | quantity variable | `sum_i q[i,j] <= capacity[j]` |
+-| Quantity only if selected | `q[i]`, `use[i]` | `q[i] <= M * use[i]` |
++| Quantity only if selected (use tight, data-driven M) | `q[i]`, `use[i]` | `q[i] <= upper_bound[i] * use[i]` (avoid generic big-M) |
+ | Fixed cost if used | `use[i]` binary | add `fixed_cost[i] * use[i]` to objective |
+ | Mutually exclusive modes | mode binaries | `sum_m mode[i,m] <= 1` |
+ | Incompatible pair | two binaries | `x[a] + x[b] <= 1` |
+@@ -219,6 +219,26 @@
+ 
+ If `state[j] = state[i] + change[j]` when arc `(i, j)` is used:
+ 
++
++**Formulation strengthening tips (critical for runtime + solution quality)**
++
++- **Tighten big-M aggressively** using real bounds:
++  - For load transitions, M can often be `max_Δ = max_pickup_at_node + max_dropoff_at_node` or simply `Q`, not `2Q`.
++  - If using `pu/do`, then `|load[j]-load[i]| ≤ ub_pu[j] + ub_do[j]`.
++- **Bind quantities to station-specific bounds**, not vehicle capacity:
++  - `pu[v,i] ≤ inv0[i]*visit[v,i]` and `do[v,i] ≤ (cap[i]-inv0[i])*visit[v,i]` are much tighter than `Q*visit`.
++- **Do not decouple vehicles greedily** when the objective includes unmet-target penalties:
++  - Net service decisions at one station interact with feasibility and penalties at others through vehicle capacities and route structure. Model all vehicles jointly.
++- **Avoid weak “visit implies service” only via loose bounds**:
++  - If a station is visited, the model may still choose zero service; that’s fine. But if service occurs, it must imply a visit (e.g., `pu[v,i] ≤ ub*visit[v,i]`, `do[v,i] ≤ ub*visit[v,i]`).
++- **Use split-service deliberately**:
++  - Allow multiple vehicles to serve the same station unless explicitly forbidden. The “at most once per vehicle” rule does not imply “globally once”.
++- **Incumbent-first decomposition (optional, practical)**:
++  1) Solve a fast relaxation/LP or small MIP to decide approximate `net[i]` (how much to pick/drop at each station) subject to global stock/space and vehicle capacity totals.
++  2) Build initial routes that realize those net moves (e.g., cluster surpluses/deficits, greedy insertion).
++  3) Warm-start the integrated IRP MIP with that incumbent and re-optimize.
++
++These steps often close small benchmark gaps when time-limited.
+ ```python
+ M = 2 * vehicle_capacity
+ 
+@@ -254,6 +274,63 @@
+ - `service[v, i] > 0`: pickup from location `i`, vehicle load increases, location inventory decreases.
+ - `service[v, i] < 0`: dropoff to location `i`, vehicle load decreases, location inventory increases.
+ 
++
++### Bike / Station Rebalancing = Integrated Inventory-Routing Pattern (IRP)
++
++When a problem couples **routing** (which stations are visited, in what order) with **inventory rebalancing** (how many units picked up/dropped off at each station), model it as an integrated IRP, not as a loose “route then adjust” rule-of-thumb.
++
++**Core variables** (single time period, nightly rebalance):
++- Route arcs: `x[v,i,j] ∈ {0,1}`
++- Visit indicator: `visit[v,i] ∈ {0,1}` (optional but convenient)
++- Pickup / dropoff amounts (nonnegative, avoids sign confusion):
++  - `pu[v,i] ≥ 0` bikes picked up by vehicle `v` at station `i`
++  - `do[v,i] ≥ 0` bikes dropped off by vehicle `v` at station `i`
++  - Enforce “not both at same stop” via a mode binary `y[v,i] ∈ {0,1}` if needed
++- Vehicle load after servicing node `i`: `load[v,i] ∈ [0, Q]`
++- Station final inventory: `inv_final[i] ∈ [0, cap[i]]`
++- Unmet target absolute deviation: `unmet[i] ≥ 0`
++
++**Station inventory balance and targets**
++
++Let station net change be `net[i] = Σ_v (pu[v,i] - do[v,i])` (positive means removed from station).
++
++- Final inventory (single period):
++  - `inv_final[i] = inv0[i] - Σ_v pu[v,i] + Σ_v do[v,i]`
++  - `0 ≤ inv_final[i] ≤ cap[i]`
++- Absolute deviation from rebalancing target `tgt[i]`:
++  - `net[i] - tgt[i] ≤ unmet[i]`
++  - `tgt[i] - net[i] ≤ unmet[i]`
++
++**Vehicle load propagation (coupled to route order)**
++
++If `load[v,i]` is the load after servicing node `i` (and depot is a node too), then along each selected arc `(i,j)`:
++- `load[v,j] = load[v,i] + pu[v,j] - do[v,j]` when `x[v,i,j]=1`
++- Implement with tight big-M using known bounds (see strengthening tips below).
++
++Also enforce load bounds at every node: `0 ≤ load[v,i] ≤ Q`.
++
++**Strong linking between visit and allowed quantities (avoid loose formulations)**
++
++Use **tight, data-driven upper bounds** instead of generic `Q` when possible:
++- Station pickup cannot exceed available bikes:
++  - `Σ_v pu[v,i] ≤ inv0[i]`
++- Station dropoff cannot exceed free space:
++  - `Σ_v do[v,i] ≤ cap[i] - inv0[i]`
++
++Per-vehicle/per-visit linking:
++- `pu[v,i] ≤ ub_pu[i] * visit[v,i]`, where `ub_pu[i] = inv0[i]`
++- `do[v,i] ≤ ub_do[i] * visit[v,i]`, where `ub_do[i] = cap[i] - inv0[i]`
++
++“No pickup and dropoff at the same stop”:
++- Introduce `y[v,i] ∈ {0,1}` where `y=1` means pickup-mode.
++- `pu[v,i] ≤ ub_pu[i] * y[v,i]`
++- `do[v,i] ≤ ub_do[i] * (1 - y[v,i])`
++- Also link mode to visit: `y[v,i] ≤ visit[v,i]` (optional but strengthens relaxation)
++
++**Objective (travel + unmet penalty)**
++- `min Σ_{v,i,j} dist[i,j]*x[v,i,j] + penalty_weight * Σ_i unmet[i]`
++
++This matches bike-sharing scoring where each unit of unmet target incurs a penalty.
+ ```python
+ service = {
+     (v, i): model.addVar(vtype="I", lb=-vehicle_capacity, ub=vehicle_capacity, name=f"service_{v}_{i}")
+@@ -275,6 +352,15 @@
+     model.addCons(net_change >= -free_space)           # dropoff cannot exceed space
+ ```
+ 
++
++**Prefer disaggregated pickup/dropoff variables when you must enforce “no both”**
++
++A single signed `service[v,i]` is compact, but it makes the “not both pick up and drop off at a single stop” rule awkward. If that rule is present (as in bike rebalancing), use `pu[v,i]` and `do[v,i]` with a mode binary `y[v,i]` as shown above.
++
++If you keep signed `service[v,i]`, enforce non-simultaneity with split variables:
++- `service[v,i] = pu[v,i] - do[v,i]`, `pu,do ≥ 0`
++- then apply the mode constraints to `pu/do`.
++
+ If the target is a desired net pickup/dropoff:
+ 
+ ```python
+--- before/routing-subtour-elimination/SKILL.md
++++ after/routing-subtour-elimination/SKILL.md
+@@ -71,6 +71,36 @@
+ 
+ Use MTZ first when correctness and implementation speed matter more than best possible MIP strength.
+ 
++
++
++### MTZ Strengthening Tips
++
++Weak MTZ formulations can noticeably slow SCIP on VRP-style benchmarks even when the final incumbent has no subtours.
++
++Tighten MTZ with additional structure:
++
++```python
++# activate order only if station is visited
++for v in vehicles:
++    for i in stations:
++        visit_i = quicksum(x[v, i, j] for j in to_nodes if j != i)
++        model.addCons(order[v, i] >= visit_i)
++        model.addCons(order[v, i] <= n * visit_i)
++```
++
++Also tighten depot connectivity:
++
++```python
++# if a vehicle is used, force at least one station-to-station move
++for v in vehicles:
++    model.addCons(
++        quicksum(x[v, i, j] for i in stations for j in stations if i != j)
++        >=
++        quicksum(x[v, START, j] for j in stations) - 1
++    )
++```
++
++Use tighter big-M values whenever route-length bounds or maximum stops per vehicle are known. Avoid unnecessarily large `n` constants.
+ ## 2. Single-Commodity Flow Connectivity
+ 
+ Add an artificial connectivity flow that starts at the depot and sends one unit to every visited station. This flow is not physical vehicle load.
+@@ -116,6 +146,16 @@
+ 
+ Use this when MTZ gives weak incumbents or slow progress and the instance is still modest in size.
+ 
++
++
++Single-commodity flow is often a better default than MTZ for medium-size VRPs when objective quality under time limits matters more than raw model size. The stronger LP relaxation frequently improves incumbent discovery and reduces disconnected partial-route artifacts during search.
++
++If memory allows, prefer flow connectivity over bare MTZ when:
++
++- vehicles are interchangeable and many route combinations exist
++- pickup/dropoff balance constraints already make the model hard
++- SCIP spends substantial time proving connectivity
++- small incumbent-quality improvements matter
+ ## 3. DFJ Subset Cuts
+ 
+ For every nonempty proper subset `S` of stations, selected station-to-station arcs inside `S` cannot form a closed cycle:
+@@ -219,6 +259,34 @@
+ 
+ Use this when static MTZ is too weak and the solver environment does not make lazy callbacks convenient.
+ 
++
++
++## Symmetry Breaking for Identical Vehicles
++
++Identical vehicles create many equivalent depot-to-route assignments. Add light symmetry breaking to reduce branch-and-bound duplication.
++
++Example: enforce nondecreasing first visited station IDs.
++
++```python
++first_visit = {}
++for v in vehicles:
++    first_visit[v] = model.addVar(vtype="I", lb=0, ub=n, name=f"first_{v}")
++
++    model.addCons(
++        first_visit[v] == quicksum(
++            j * x[v, START, j] for j in stations
++        )
++    )
++
++for v in vehicles[:-1]:
++    model.addCons(first_visit[v] <= first_visit[v + 1])
++```
++
++Other simple symmetry breakers:
++
++- require lower-index vehicles to be used before higher-index vehicles
++- cap unused vehicles to appear only at the end of the fleet ordering
++- fix one canonical vehicle to serve the smallest-index mandatory station
+ ## Method Choice
+ 
+ | Method | Best For | Avoid When |
+@@ -253,3 +321,32 @@
+ ```
+ 
+ Fail fast if a selected solution has a disconnected cycle, repeated station, missing depot start, or missing depot end.
++
++
++## Arc Pruning and Routing Preprocessing
++
++Reducing the arc set can improve both incumbent quality and solve time.
++
++Before building routing variables:
++
++- remove self-loops and obviously dominated arcs
++- remove arcs that are much longer than a depot-mediated alternative
++- restrict each station to its nearest `k` candidate successors when geography is dense
++- remove arcs that can never satisfy load or inventory feasibility
++- precompute unreachable transitions caused by capacity bounds or mandatory pickup/dropoff direction
++
++Example dominated-arc filter:
++
++```python
++candidate_arcs = []
++for i, j in arcs:
++    direct = dist[i, j]
++
++    # if routing through depot is nearly always cheaper, prune direct move
++    via_depot = dist[i, END] + dist[START, j]
++
++    if direct <= 1.5 * via_depot:
++        candidate_arcs.append((i, j))
++```
++
++Aggressive pruning can remove optimal routes, so keep filters conservative unless exact optimality is not required.
+--- before/scip-opt/SKILL.md
++++ after/scip-opt/SKILL.md
+@@ -225,3 +225,85 @@
+ ```
+ 
+ Treat SCIP feasibility as necessary but not sufficient. The final reported file still needs independent checks for schema, route reconstruction, capacity, inventory, penalties, and objective arithmetic.
++
++
++## Competitive Solving For Benchmark Tasks
++
++For benchmark-style routing and flow MIPs, solver configuration and incumbent construction often matter as much as the base formulation.
++
++### SCIP Parameterization
++
++Use explicit limits and emphasis settings instead of relying on defaults.
++
++```python
++set_if_available(model, "limits/time", 300.0)
++set_if_available(model, "limits/gap", 0.01)
++set_if_available(model, "limits/absgap", 1e-6)
++
++# Push SCIP toward finding and improving incumbents quickly.
++set_if_available(model, "emphasis/mip", 1)
++set_if_available(model, "heuristics/emphasis", "fast")
++set_if_available(model, "heuristics/rens/freq", 10)
++set_if_available(model, "heuristics/undercover/freq", 10)
++set_if_available(model, "heuristics/zeroobj/freq", 5)
++
++# Presolve, cuts, and propagation are usually valuable for routing/flow models.
++set_if_available(model, "presolving/maxrounds", 10)
++set_if_available(model, "separating/maxrounds", 10)
++set_if_available(model, "propagating/maxrounds", 10)
++
++# Symmetry handling can help on multi-vehicle formulations.
++set_if_available(model, "misc/usesymmetry", 1)
++```
++
++### Construct And Inject An Initial Incumbent
++
++Do not rely exclusively on SCIP to discover the first feasible routing plan.
++Construct a greedy or repair-based incumbent first, then pass it into SCIP as a MIP start.
++
++```python
++sol = model.createSol()
++
++for (k, i, j), var in x.items():
++    model.setSolVal(sol, var, initial_arc_values.get((k, i, j), 0.0))
++
++for key, var in flow.items():
++    model.setSolVal(sol, var, initial_flow_values.get(key, 0.0))
++
++accepted = model.addSol(sol, free=True)
++print("initial solution accepted:", accepted)
++```
++
++A simple nearest-neighbor route construction plus greedy pickup/dropoff balancing is often enough to give SCIP a strong incumbent.
++
++### Incumbent Polishing And Re-Solve
++
++After the first solve, extract routes and improve them outside the solver.
++
++- Apply lightweight local search such as 2-opt, relocate, swap, or station reassignment.
++- Recompute travel distance and unmet-demand penalties after every modification.
++- Feed the improved incumbent back as another MIP start.
++- Optionally fix stable routing decisions to reduce search space during polishing.
++
++```python
++# Example: fix selected incumbent arcs during a polishing solve.
++for key, var in x.items():
++    if incumbent_arc_values[key] > 0.5:
++        model.fixVar(var, 1.0)
++
++model.optimize()
++```
++
++On small benchmark instances, one or two polish-and-resolve iterations can close the gap between a merely feasible answer and a verifier-competitive incumbent.
++
++### Final Objective Reconciliation Checklist
++
++Before writing `report.json`, independently recompute and compare:
++
++- total great-circle travel distance using radius 3960.0;
++- station net bike changes and unmet amounts;
++- unmet-demand penalty;
++- objective = travel distance + penalty;
++- vehicle load transitions and final station inventories.
++
++Reject the export if any reconstructed component differs from the reported values by more than a small floating-point tolerance.

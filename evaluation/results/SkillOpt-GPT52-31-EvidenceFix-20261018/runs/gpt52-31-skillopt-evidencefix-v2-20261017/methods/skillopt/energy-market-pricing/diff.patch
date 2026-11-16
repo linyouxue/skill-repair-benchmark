@@ -1,0 +1,463 @@
+--- before/dc-power-flow/SKILL.md
++++ after/dc-power-flow/SKILL.md
+@@ -28,27 +28,45 @@
+ t = bus_num_to_idx[int(br[1])]
+ ```
+ 
+-## Susceptance Matrix (B)
+-
+-Build from branch reactances using bus number mapping:
+-
+-```python
+-# Run: scripts/build_b_matrix.py
+-# Or inline:
++## Susceptance Matrix (B) — MATPOWER DC conventions
++
++Build from branch reactances using bus number mapping **and** MATPOWER transformer/phase-shifter conventions.
++
++MATPOWER `branch` columns used here:
++- `X` = `branch[:, 3]`
++- `TAP` = `branch[:, 8]` (transformer off-nominal tap; **if 0, interpret as 1.0**)
++- `SHIFT` = `branch[:, 9]` (phase shift in **degrees**)
++
++For DC, the series susceptance is `b = 1/X` and transformer tap modifies the “from-side” coupling. For building the B (Bbus) matrix consistent with MATPOWER’s DC model:
++- use `tau = (TAP if TAP != 0 else 1.0)`
++- add to diagonals/off-diagonals using `b/tau^2` on the from-bus diagonal and `b/tau` on the off-diagonal terms.
++- `SHIFT` affects the *right-hand-side injection* terms, not the symmetric B matrix (see Line Flow section for explicit flow equation).
++
++```python
++import numpy as np
++
+ bus_num_to_idx = {int(buses[i, 0]): i for i in range(n_bus)}
+ B = np.zeros((n_bus, n_bus))
+ 
+ for br in branches:
+-    f = bus_num_to_idx[int(br[0])]  # Map bus number to index
++    f = bus_num_to_idx[int(br[0])]
+     t = bus_num_to_idx[int(br[1])]
+-    x = br[3]  # Reactance
+-    if x != 0:
+-        b = 1.0 / x
+-        B[f, f] += b
+-        B[t, t] += b
+-        B[f, t] -= b
+-        B[t, f] -= b
+-```
++    x = float(br[3])
++    if x == 0:
++        continue
++    b = 1.0 / x
++
++    tap = float(br[8]) if len(br) > 8 else 0.0
++    tau = tap if tap not in (0.0, -0.0) else 1.0  # MATPOWER: TAP=0 means 1.0
++
++    # Bbus contributions (MATPOWER-style DC with taps)
++    B[f, f] += b / (tau * tau)
++    B[t, t] += b
++    B[f, t] -= b / tau
++    B[t, f] -= b / tau
++```
++
++If you also build an injection offset vector for phase shifters (recommended for OPF): for each branch, add `(+b*shift_rad/tau)` to the from-bus injection and `(-b*shift_rad/tau)` to the to-bus injection (see canonical flow equation below).
+ 
+ ## Power Balance Equation
+ 
+@@ -59,30 +77,64 @@
+ - Pd = load at bus (pu)
+ - θ = vector of bus angles (radians)
+ 
+-## Slack Bus
+-
+-One bus must have θ = 0 as reference. Find slack bus (type=3):
++## Slack/Reference Bus and Sign Conventions
++
++One bus angle must be fixed as the reference (θ = 0) to remove the singularity of B.
++
++- Use MATPOWER bus type `type=3` as the reference if present.
++- Sign convention: **net injection** at bus *i* is `Pinj_i = Pg_i - Pd_i` (MW or pu consistently). Positive means net generation.
++- Line flow sign: `P_ft` is positive when flowing **from** bus `F_BUS` **to** bus `T_BUS`.
+ 
+ ```python
+ slack_idx = None
+ for i in range(n_bus):
+-    if buses[i, 1] == 3:
++    if int(buses[i, 1]) == 3:
+         slack_idx = i
+         break
++if slack_idx is None:
++    raise ValueError("No slack/reference bus (type=3) found")
+ constraints.append(theta[slack_idx] == 0)
+ ```
+ 
+-## Line Flow Calculation
+-
+-Flow on branch from bus f to bus t (use bus number mapping):
+-
+-```python
++Implementation note: If you instead solve a reduced system, remove the slack row/column of B and the slack entry of θ, then back-fill θ_slack=0.
++
++## Line Flow Calculation (canonical DC with TAP and SHIFT)
++
++Use MATPOWER’s DC branch flow convention including transformer off-nominal tap and phase shifter.
++
++Given:
++- `b = 1/X`
++- `tau = (TAP if TAP != 0 else 1.0)`
++- `phi = SHIFT * pi/180` (radians)
++
++Canonical DC real-power flow **from f to t**:
++
++`P_ft (pu) = (b / tau) * ( theta[f] - theta[t] - phi )`
++
++Convert to MW by multiplying by `baseMVA`.
++
++```python
++import numpy as np
++
+ f = bus_num_to_idx[int(br[0])]
+ t = bus_num_to_idx[int(br[1])]
+-b = 1.0 / br[3]  # Susceptance = 1/X
+-flow_pu = b * (theta[f] - theta[t])
++
++x = float(br[3])
++b = 1.0 / x
++
++tap = float(br[8]) if len(br) > 8 else 0.0
++	au = tap if tap not in (0.0, -0.0) else 1.0  # MATPOWER: TAP=0 means 1.0
++
++shift_deg = float(br[9]) if len(br) > 9 else 0.0
++phi = shift_deg * np.pi / 180.0
++
++flow_pu = (b / tau) * (theta[f] - theta[t] - phi)
+ flow_MW = flow_pu * baseMVA
+ ```
++
++Notes:
++- If `SHIFT=0` and `TAP=1`, this reduces to `b*(θf-θt)`.
++- The opposite-direction flow is `P_tf = -P_ft` under this DC model.
+ 
+ ## Line Loading Percentage
+ 
+@@ -114,3 +166,40 @@
+ constraints.append(flow <= rate)
+ constraints.append(flow >= -rate)
+ ```
++
++## Thermal Limits (RATE_A) for OPF
++
++MATPOWER `RATE_A` (`branch[:,5]`) is a long-term MVA rating; under DC with |V|≈1 it is treated as an MW limit. Enforce it as a **symmetric** bound on real-power flow:
++
++- If `RATE_A <= 0` (or missing), treat as **no binding thermal limit** (skip constraint).
++- Otherwise enforce: `-RATE_A <= P_ft_MW <= RATE_A`.
++
++```python
++rate = float(br[5])
++if rate > 0:
++    constraints.append(flow_MW <= rate)
++    constraints.append(flow_MW >= -rate)
++```
++
++## Validation / Consistency Checks (recommended)
++
++To avoid “internally feasible but wrong optimum” outcomes, validate DC network modeling against MATPOWER conventions:
++
++1. **Tap/shift sanity**
++   - Verify all `TAP==0` are interpreted as `1.0`.
++   - Convert `SHIFT` from degrees to radians.
++
++2. **Flow consistency checks**
++   - After solving for θ, compute each branch flow using the canonical formula above.
++   - Independently compute flows using an incidence-based formulation or PTDF (if available) and confirm max absolute difference is small (numerical tolerance).
++
++3. **Nodal balance check**
++   - Compute net injections `Pinj = Pg - Pd`.
++   - Compute implied injections from network: `B @ theta + Pshift`, where `Pshift` is the phase-shift injection offset vector (from the B-building section).
++   - Confirm `Pinj` matches within tolerance at all buses (except for any modeled slack/penalty mechanisms).
++
++4. **Binding line identification**
++   - Use the same `P_ft_MW` that appears in constraints.
++   - Mark binding if `abs(P_ft_MW) >= 0.99 * RATE_A` (and `RATE_A > 0`).
++
++These checks catch the most common MATPOWER DC edge cases (TAP=0, phase shifters, sign conventions, and inconsistent constraint vs reporting flows).
+--- before/economic-dispatch/SKILL.md
++++ after/economic-dispatch/SKILL.md
+@@ -43,8 +43,86 @@
+ 
+ Cost = c₂·P² + c₁·P + c₀ ($/hr) where P is in MW.
+ 
++
++### MATPOWER-compatible cost construction (common pitfalls)
++
++1) **Units: convert exactly once.** If your decision variable is per-unit, compute
++`Pg_MW = Pg_pu * baseMVA` **once** and evaluate the polynomial in **MW**. Do **not** also scale coefficients.
++
++2) **Coefficient ordering & indexing (MODEL=2):**
++- `NCOST = 1`: `cost = c0` where `c0 = gencost[i, 4]`
++- `NCOST = 2`: `cost = c1*P + c0` where `[c1, c0] = gencost[i, 4:6]`
++- `NCOST = 3`: `cost = c2*P^2 + c1*P + c0` where `[c2, c1, c0] = gencost[i, 4:7]`
++- `NCOST = k >= 1`: coefficients occupy `gencost[i, 4:4+k]` and are **highest-order first**:
++  `cost = sum_{m=0..k-1} coeff[m] * P^(k-1-m)`.
++
++Example (cubic, NCOST=4): `coeff=[c3,c2,c1,c0]` at indices 4..7, cost = `c3*P^3 + c2*P^2 + c1*P + c0`.
++
++3) **STARTUP/SHUTDOWN:** In **single-period** ED/DC-OPF (no unit commitment binaries, no on/off transitions), **ignore** `STARTUP` and `SHUTDOWN` in the objective. Only include them in multi-period UC formulations where start/stop decisions exist.
++
++4) **Convexity:** DC-OPF ED is typically a convex QP when `c2 >= 0` for all gens. If you see negative quadratic coefficients, the problem may be non-convex; do not expect QP solvers to match a verifier optimum that assumes convexity.
+ ## Optimization Formulation
+ 
++
++### Reference objective implementations (linear/quadratic + generic polynomial)
++
++Use one of the following patterns to avoid NCOST/order/unit mistakes.
++
++```python
++import cvxpy as cp
++import numpy as np
++
++def matpower_poly_cost_expr(Pg_pu, gencost, baseMVA):
++    """Return CVXPY expression for sum of MATPOWER MODEL=2 polynomial costs.
++    Pg_pu is per-unit; cost is evaluated in MW with coefficients as-given.
++    STARTUP/SHUTDOWN are ignored for single-period ED/DC-OPF.
++    """
++    cost = 0
++    for i in range(gencost.shape[0]):
++        model = int(gencost[i, 0])
++        if model != 2:
++            raise ValueError(f"Unsupported gencost MODEL={model} (expected 2)")
++        ncost = int(gencost[i, 3])
++        P = Pg_pu[i] * baseMVA  # MW (convert exactly once)
++        if ncost <= 0:
++            continue
++        coeff = gencost[i, 4:4+ncost]  # highest order first
++
++        # Fast paths for common cases
++        if ncost == 1:
++            cost += coeff[0]
++        elif ncost == 2:
++            c1, c0 = coeff
++            cost += c1 * P + c0
++        elif ncost == 3:
++            c2, c1, c0 = coeff
++            cost += c2 * cp.square(P) + c1 * P + c0
++        else:
++            # Generic polynomial: sum coeff[m] * P^(k-1-m)
++            k = ncost
++            term = 0
++            for m in range(k):
++                power = k - 1 - m
++                cm = coeff[m]
++                if power == 0:
++                    term += cm
++                elif power == 1:
++                    term += cm * P
++                elif power == 2:
++                    term += cm * cp.square(P)
++                else:
++                    # Higher powers are rare in ED; ensure solver supports this (may be non-DCP).
++                    # Prefer rewriting/approximating if encountered.
++                    term += cm * cp.power(P, power)
++            cost += term
++    return cost
++
++# Usage
++Pg = cp.Variable(n_gen)  # per-unit
++cost = matpower_poly_cost_expr(Pg, gencost, baseMVA)
++```
++
++If your formulation uses `Pg_MW` directly as the decision variable, then **do not** multiply by baseMVA in the cost (and keep generator limits/power balance in MW consistently).
+ ```python
+ import cvxpy as cp
+ 
+@@ -171,3 +249,48 @@
+ ```
+ 
+ Note: OSQP may fail on ill-conditioned problems. CLARABEL is more robust for DC-OPF with reserves.
++
++
++## Numerical self-checks (catch objective mismatches)
++
++After solving, directly recompute total cost from the obtained dispatch and compare to `prob.value`.
++
++```python
++def matpower_poly_cost_value(Pg_MW, gencost):
++    """Numeric total cost for MATPOWER MODEL=2 polynomial (STARTUP/SHUTDOWN ignored)."""
++    total = 0.0
++    for i in range(gencost.shape[0]):
++        ncost = int(gencost[i, 3])
++        if ncost <= 0:
++            continue
++        coeff = np.asarray(gencost[i, 4:4+ncost], dtype=float)
++        P = float(Pg_MW[i])
++        # highest order first
++        k = ncost
++        val = 0.0
++        for m, cm in enumerate(coeff):
++            val += cm * (P ** (k - 1 - m))
++        total += val
++    return total
++
++Pg_MW = Pg.value * baseMVA
++cost_check = matpower_poly_cost_value(Pg_MW, gencost)
++print('solver objective', float(prob.value))
++print('direct cost eval', float(cost_check))
++print('abs diff', abs(float(prob.value) - float(cost_check)))
++```
++
++If these disagree materially, you almost certainly have a unit conversion or NCOST parsing bug.
++
++## Solver status & optimality-gap checks (convex QP DC-OPF)
++
++Always verify optimality before trusting prices/costs.
++
++```python
++prob.solve(solver=cp.CLARABEL)  # or another convex QP solver
++if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
++    raise RuntimeError(f"Solve failed: {prob.status}")
++
++# For interior-point solvers, also monitor reported gap/accuracy when available.
++# As a crude check, ensure constraint residuals are small and objective self-check matches.
++```
+--- before/locational-marginal-prices/SKILL.md
++++ after/locational-marginal-prices/SKILL.md
+@@ -7,6 +7,21 @@
+ 
+ LMPs are the marginal cost of serving one additional MW of load at each bus. In optimization terms, they are the **dual values** (shadow prices) of the nodal power balance constraints.
+ 
++
++
++A canonical DC-OPF nodal balance equation is:
++
++```python
++# Net injection equals net network export
++pg_at_bus - pd == B[i, :] @ theta
++```
++
++where:
++- `pg_at_bus` is total generation injection at the bus (positive)
++- `pd` is load withdrawal at the bus (positive demand)
++- `B[i, :] @ theta` is net export from the bus into the network
++
++Equivalent rearrangements such as `pg_at_bus - pd - B[i, :] @ theta == 0` are fine if used consistently. However, reversing the equality direction (for example `B[i, :] @ theta == pg_at_bus - pd` versus `pg_at_bus - pd == B[i, :] @ theta`) changes the sign convention of the reported dual values in some solvers. Always verify the resulting LMP sign convention against economic intuition.
+ ## LMP Extraction from CVXPY
+ 
+ To extract LMPs, you must:
+@@ -39,9 +54,22 @@
+     bus_num = int(buses[i, 0])
+     dual_val = balance_constraints[i].dual_value
+ 
+-    # Scale: constraint is in per-unit, multiply by baseMVA to get $/MWh
++    # Scale carefully:
++    # - if the optimization is written in per-unit on a baseMVA base,
++    #   duals are typically in $/p.u.-MWh and must be multiplied by baseMVA
++    #   to obtain $/MWh
++    # - if power variables are already modeled directly in MW, do NOT apply
++    #   an additional baseMVA scaling
+     lmp = float(dual_val) * baseMVA if dual_val is not None else 0.0
+     lmp_by_bus.append({
++
++
++    # If your balance equation orientation is reversed, the economically
++    # correct LMP may require a sign flip.
++    # Example consistency check in an uncongested system:
++    # - all buses should have nearly identical LMPs
++    # - the common LMP should approximately match the marginal generator cost
++    #   of the marginal unit serving an incremental MW of demand
+         "bus": bus_num,
+         "lmp_dollars_per_MWh": round(lmp, 2)
+     })
+@@ -52,6 +80,8 @@
+ For a balance constraint written as `generation - load == net_export`:
+ - **Positive LMP**: Increasing load at that bus increases total cost (typical case)
+ - **Negative LMP**: Increasing load at that bus *decreases* total cost
++
++If you instead formulate the balance equation with the opposite orientation, many solvers will return duals with the opposite sign. A quick validation is to solve an uncongested case: all buses should clear at approximately the same energy price, and that price should align with the marginal production cost of the marginal generator.
+ 
+ Negative LMPs commonly occur when:
+ - Cheap generation is trapped behind a congested line (can't export power)
+--- before/power-flow-data/SKILL.md
++++ after/power-flow-data/SKILL.md
+@@ -56,6 +56,12 @@
+ S_pu = S_MVA / baseMVA
+ ```
+ 
++
++
++Be consistent about units throughout the optimization model:
++- MATPOWER bus loads (`Pd`) and generator limits (`PMAX`, `PMIN`) are typically stored in MW.
++- If branch susceptance matrices or flows are modeled in per-unit, convert consistently using `baseMVA`.
++- A common bug is mixing MW-valued generation/load variables with per-unit branch equations.
+ ## Loading Network Data
+ 
+ ```python
+@@ -94,6 +100,42 @@
+ 
+ ## Bus Number Mapping
+ 
++
++
++## MATPOWER DC-OPF Column Conventions and Edge Cases
++
++For DC-OPF formulations, use MATPOWER column positions exactly as defined by the case format. Subtle indexing mistakes can produce a feasible but non-equivalent optimization model.
++
++Key columns used most often:
++
++| Matrix | Column | Meaning |
++|---|---|---|
++| bus | 0 | BUS_I (bus number) |
++| bus | 1 | BUS_TYPE |
++| bus | 2 | Pd (MW demand) |
++| gen | 0 | GEN_BUS |
++| gen | 1 | Pg |
++| gen | 8 | PMAX |
++| gen | 9 | PMIN |
++| branch | 0 | F_BUS |
++| branch | 1 | T_BUS |
++| branch | 2 | BR_R |
++| branch | 3 | BR_X |
++| branch | 5 | RATE_A (MVA thermal limit) |
++| branch | 8 | TAP |
++| branch | 9 | SHIFT (degrees) |
++| branch | 10 | BR_STATUS |
++
++For DC power flow and DC-OPF, branch reactance uses `BR_X = branch[:,3]`. Do not accidentally use resistance `BR_R`.
++
++Transformer handling follows MATPOWER conventions:
++- `TAP == 0` means the transformer tap ratio should be treated as `1.0`.
++- `SHIFT` is stored in degrees, not radians.
++- Many benchmark cases contain lines with `TAP == 0`; this is normal and should not disable the branch.
++
++Thermal limits:
++- `RATE_A == 0` conventionally means no active thermal limit (effectively unconstrained flow) unless the task explicitly overrides this behavior.
++- Apply branch limits consistently in MW or per-unit after scaling by `baseMVA`.
+ Power system bus numbers may not be contiguous. Always create a mapping:
+ 
+ ```python
+@@ -149,3 +191,28 @@
+     """Calculate total system load in MW."""
+     return sum(bus[2] for bus in buses)  # Column 2 = Pd
+ ```
++
++
++## Recommended Parsing and Model Sanity Checks
++
++Before solving a DC-OPF or market-clearing model, verify:
++
++```python
++print('baseMVA', data['baseMVA'])
++print('total load MW', sum(bus[2] for bus in data['bus']))
++print('total PMAX MW', sum(gen[8] for gen in data['gen']))
++print('RATE_A == 0 branches', sum(br[5] == 0 for br in data['branch']))
++print('TAP == 0 branches', sum(br[8] == 0 for br in data['branch']))
++```
++
++When modifying a specific transmission line, verify that the intended branch was selected using the exact MATPOWER bus identifiers:
++
++```python
++matches = [
++    br for br in data['branch']
++    if (int(br[0]), int(br[1])) in [(64, 1501), (1501, 64)]
++]
++print('matching branches', len(matches))
++```
++
++This helps catch accidental edits to the wrong parallel line or to a remapped internal index instead of the original bus identifiers.

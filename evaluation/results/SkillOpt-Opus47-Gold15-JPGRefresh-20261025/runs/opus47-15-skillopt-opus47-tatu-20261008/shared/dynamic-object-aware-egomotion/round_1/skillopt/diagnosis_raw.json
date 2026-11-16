@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "raw_text_prefix": "{\n  \"overall_diagnosis\": \"Across all three samples, motion-label classification (Macro-F1 ~0.86) and all format/structure checks pass. The sole consistent failure is dynamic-object mask quality (Mean IoU ~0.014, Boundary IoU ~0.0008, far below the 0.1 threshold). The agent's pipeline (Farneback optical flow + affine warp residual + MAD threshold + morphology + area filter) is overwhelmed by parallax in walking/dolly POV scenes and produces masks that barely overlap GT moving objects. The dyn-object-masks skill needs stronger, parallax-aware guidance with concrete, resolution-normalized parameters, temporal consistency, and sensible handling of the first frame.\",\n  \"diagnosed_skills\": [\n    {\n      \"path\": \"dyn-object-masks/SKILL.md\",\n      \"confidence\": \"0.95\",\n      \"diagnosis\": \"The current recipe (affine warp + absdiff + median+3*MAD threshold + morphology + CC area filter) is fragile under forward/dolly camera motion where 2D affine/homography cannot compensate parallax. All three samples hit Mean IoU ~0.014, indicating masks are dominated by parallax speckle and miss the actual moving pedestrians/vehicles. The skill lacks: (a) parallax-aware motion modeling (homography fallback and flow-direction consistency), (b) concrete resolution-normalized thresholds/area defaults, (c) temporal consistency to suppress flicker/parallax, (d) a non-empty policy for frame 0, (e) sanity checks on mask coverage.\",\n      \"repair_instruction\": \"Rewrite dyn-object-masks/SKILL.md with: (1) Prefer cv2.findHomography (RANSAC) over affine for global motion when forward/dolly motion is likely; explicitly warn that 2D warping cannot remove parallax, so rely on flow-residual AND flow-direction deviation from the globally-fit flow field, not just residual magnitude. (2) Compute dense optical flow and residual = flow_observed - flow_predicted_from_H (project pixel grid through H). (3) Concrete 720p defaults: residual-magnitude threshold = max(1.5 px, median + 4*MAD); min_area ≈ 0.3–1.0% of H*W (≈2500–7000 px at 720p); MORPH_OPEN 3x3 then MORPH_CLOSE 11x11–15x15; dilate final mask by 2–3 px to improve IoU/Boundary-IoU. (4) Temporal consistency: require a candidate component to persist across ≥2 consecutive sampled frames; optionally temporal-median masks across a small window. (5) Frame-0 policy: copy the mask computed from (frame 0, frame 1) instead of leaving empty, so frame 0 IoU is not automatically zero. (6) Add self-check: if mean per-frame mask coverage is <0.1% or >20% of pixels, re-tune thresholds; overlay masks on frames and verify they cover people/vehicles rather than building edges/ground texture. (7) Warn against over-aggressive morphology/area filtering collapsing small pedestrians to zero—prefer tighter thresholds with modest min_area over heavy smoothing.\"\n    }\n  ],\n  \"unselected_skills\": [\n    {\n      \"path\": \"egomotion-estimation/SKILL.md\",\n      \"reason\": \"Motion labeling achieved Macro-F1 0.86 across all samples; no repair needed.\"\n    },\n    {\n      \"path\": \"sampling-and-indexing/SKILL.md\",\n      \"reason\": \"All sampling and indexing format checks passed in every sample.\"\n    },\n    {\n      \"path\": \"output-validation/SKILL.md\",\n      \"reason\": \"All format/structure/validation checks passed; the failure is purely semantic mask quality, not output format.\"\n    }\n  ]\n}",
+  "usage": {
+    "prompt_tokens": 6975,
+    "completion_tokens": 1322,
+    "total_tokens": 8297
+  },
+  "duration_sec": 13.597,
+  "parsed_keys": [
+    "diagnosed_skills",
+    "diagnosis_n",
+    "diagnosis_sample_count",
+    "edit_budget_l",
+    "fallback_used",
+    "merge_samples",
+    "merged_from_samples",
+    "overall_diagnosis",
+    "producer_backend",
+    "repair_round",
+    "shared_diagnosis",
+    "shared_diagnosis_source",
+    "task_id",
+    "unselected_skills"
+  ],
+  "shared": true,
+  "shared_source": "fresh"
+}

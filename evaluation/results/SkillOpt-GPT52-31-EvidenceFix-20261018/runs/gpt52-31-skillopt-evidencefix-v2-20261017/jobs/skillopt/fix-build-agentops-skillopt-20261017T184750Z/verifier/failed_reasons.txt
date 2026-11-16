@@ -1,0 +1,28 @@
+Repo: /home/github/build/failed/AgentOps-AI/agentops
+
+Observed failures
+- pytest fails during test collection with ImportError:
+  ModuleNotFoundError: No module named 'langchain.callbacks'
+  Trigger:
+    agentops/__init__.py imports LangchainCallbackHandler from agentops/langchain_callback_handler.py
+    langchain_callback_handler.py does: from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+Root cause
+- Code/config mismatch with LangChain packaging.
+  The project’s tox.ini installs both langchain-core and langchain, but the import path used is for older langchain versions.
+  In current langchain distributions, the callbacks live under langchain_core.callbacks (and/or the full langchain package may not expose langchain.callbacks).
+- Also, importing the optional LangChain integration unconditionally in agentops/__init__.py makes base package import fail when LangChain is absent or incompatible.
+  This breaks all tests since they import agentops.
+
+Plan
+1) Make LangChain integration optional:
+   - In agentops/__init__.py, wrap the import of LangchainCallbackHandler / AsyncLangchainCallbackHandler in try/except.
+   - If unavailable, set them to None and/or provide a small error message.
+2) Make langchain_callback_handler.py compatible across versions:
+   - Prefer importing BaseCallbackHandler/AsyncCallbackHandler from langchain_core.callbacks.base.
+   - Fallback to older location (langchain.callbacks.base) when needed.
+3) Re-run pytest in a clean venv to ensure collection works and all tests pass.
+
+Expected outcome
+- agentops can be imported without LangChain installed.
+- Tests no longer fail at collection.

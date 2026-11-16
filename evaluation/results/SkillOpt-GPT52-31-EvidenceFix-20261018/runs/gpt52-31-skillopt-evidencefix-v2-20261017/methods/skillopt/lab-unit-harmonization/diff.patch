@@ -1,0 +1,171 @@
+--- before/lab-unit-harmonization/SKILL.md
++++ after/lab-unit-harmonization/SKILL.md
+@@ -47,6 +47,22 @@
+ 
+ Some features have more than two possible unit representations:
+ 
++
++### High-Risk Mixed-Unit Features (must use analyte-specific rules)
++
++The following analytes commonly appear in multiple unit systems and are frequent sources of incorrect scaling if handled with generic heuristics:
++- **BUN / Urea**
++- **Total calcium vs ionized calcium**
++- **Triglycerides / Cholesterol fractions**
++- **Ferritin**
++- **Troponin I/T**
++- **Arterial blood gases (pO2, pCO2)**
++- **Urine protein and urine creatinine (and derived ratios)**
++- **Lactate**
++- **Hemoglobin / Prealbumin**
++- **Vitamin D (25-OH vs 1,25-OH) and PTH**
++
++If these fail range checks, **assume unit mismatch first** and try the specific conversions listed in the reference section below.
+ **Three-Unit Features (8 total):**
+ | Feature | Unit 1 | Unit 2 | Unit 3 |
+ |---------|--------|--------|--------|
+@@ -135,15 +151,19 @@
+     df[col] = df[col].apply(parse_value)
+ ```
+ 
+-### Step 2: Unit Conversion (Range-Based Detection)
+-
+-**Key Principle**: If a value falls outside the expected range (Min/Max) defined in `reference/ckd_lab_features.md`, it likely needs unit conversion.
+-
+-The algorithm:
+-1. Check if value is within expected range → if yes, keep as-is
+-2. If outside range, try each conversion factor from the reference
+-3. Return the first converted value that falls within range
+-4. If no conversion works, return original (do NOT clamp)
++### Step 2: Unit Conversion (Analyte-Specific, Plausibility-Based)
++
++**Key principle**: Mixed-unit detection must be **analyte-specific**. Use (a) explicit unit conventions and (b) physiologic plausibility checks that evaluate **both excessively low and excessively high** values.
++
++**Do not rely on a single threshold** or a generic “first factor that fits” rule when multiple alternate units are plausible (e.g., troponins; urine protein; calcium total vs ionized). Prefer a **priority-ordered list of candidate unit systems per analyte** (see *Analyte-Specific Harmonization Reference* below).
++
++Algorithm (per value, per analyte):
++1. If value is within the target-unit physiologic range → keep as-is.
++2. If value is **below** the physiologic minimum or **above** the maximum → try candidate conversions in a **defined priority order**.
++3. Score each candidate by: (i) whether it lands inside the physiologic range; (ii) distance to a typical range (if provided); (iii) unit convention likelihood.
++4. Select the best-scoring candidate. If none are plausible, keep original and flag for review (do **not** clamp).
++
++**Tolerance**: You may use a small numeric tolerance (≤5%) only to handle floating point edge effects at boundaries, but not to force obviously implausible values into range.
+ 
+ ```python
+ def convert_unit_if_needed(value, column, reference_ranges, conversion_factors):
+@@ -243,12 +263,13 @@
+ 
+ ## Best Practices
+ 
+-1. **Parse formats first**: Always clean up scientific notation and European decimals before attempting unit conversion
+-2. **Use range-based detection**: Values outside expected ranges likely need unit conversion
+-3. **Try all conversion factors**: Some features have multiple alternative units - try each factor until one brings the value into range
+-4. **Handle floating point precision**: Due to format conversions, some values may end up slightly outside range boundaries. Use a 5% tolerance when checking ranges and clamp edge cases to boundaries
+-5. **Round to 2 decimal places**: Standard precision for clinical lab results
+-6. **Validate results**: After harmonization, check that values are within expected physiological ranges
++1. **Parse formats first**: Normalize scientific notation, decimal separators, and whitespace before conversion.
++2. **Use analyte-specific unit rules**: For high-risk analytes (BUN/urea, calcium total vs ionized, troponins, ABGs, urine protein/creatinine, lipids, lactate, vitamin D forms, PTH), follow the explicit conversion table.
++3. **Evaluate BOTH low and high outliers**: Physiologic plausibility checks must catch values that are too small *and* too large (baseline failures included both).
++4. **Avoid “first factor that fits”**: When multiple alternate units could map into range, use priority order + plausibility scoring; otherwise you can produce systematic wrong scaling.
++5. **Minimal tolerance only**: Use ≤5% tolerance solely for boundary floating point issues; do not clamp to force plausibility.
++6. **Round last**: Only after all conversions, format to exactly two decimals (`X.XX`).
++7. **Audit converted subsets**: For each analyte, summarize how many values were converted by each rule; large converted fractions often indicate a source-level unit convention.
+ 
+ 
+ 
+@@ -257,3 +278,96 @@
+ - `reference/ckd_lab_features.md`: Complete feature dictionary with all conversion factors
+ - [KDIGO Guidelines](https://kdigo.org/): Clinical guidelines for CKD management
+ - [UCUM](https://ucum.org/): Unified Code for Units of Measure standard
++
++
++
++## Analyte-Specific Harmonization Reference (Target: US Conventional Units)
++
++Use this section as the primary conversion source when harmonizing multi-system CKD lab datasets.
++
++### Conventions
++- **Target units** are US conventional units as used in many US EHRs.
++- **Common alternates** list the most frequent SI/other reporting units.
++- **Conversion** provides exact factor(s) to convert *alternate → target*.
++- **Physiologic range** is an ETL plausibility window (broad, not “normal range”). Always check both low and high outliers.
++
++> Important: When the same numeric value could plausibly be in more than one unit, prefer the conversion that yields values in a clinically typical band and matches assay conventions.
++
++### Renal / Nitrogen
++| Analyte (column) | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes / pitfalls |
++|---|---:|---|---:|---:|---|
++| BUN | mg/dL | **Urea** mmol/L; urea mg/dL | urea mmol/L × **2.801** = BUN mg/dL; urea mg/dL ÷ **2.14** = BUN mg/dL | **5–200** | Many systems label “urea” but map to BUN. Very low BUN (<5) often indicates urea mmol/L left unconverted. |
++| Serum_Creatinine | mg/dL | µmol/L | µmol/L × **0.011312** = mg/dL | 0.2–20 | Common mixed-unit. |
++
++### Minerals / Bone
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| Serum_Calcium (total) | mg/dL | mmol/L | mmol/L × **4.008** = mg/dL | **5–15** | Do not confuse with ionized calcium. Total Ca mmol/L ~2.0–3.0 corresponds to ~8–12 mg/dL. |
++| Ionized_Calcium | mmol/L | mg/dL; mg/L | mg/dL × **0.2495** = mmol/L (i.e., mg/dL ÷ 4.008); mg/L × **0.02495** = mmol/L | **0.8–2.0** | Baseline failures with values ~4–6 indicate mg/dL mistakenly treated as mmol/L; convert mg/dL → mmol/L. |
++| Phosphorus | mg/dL | mmol/L | mmol/L × **3.097** = mg/dL | 1–20 | |
++| Magnesium | mg/dL | mmol/L; mEq/L | mmol/L × **2.43** = mg/dL; mEq/L × **1.215** = mg/dL | 0.5–10 | |
++| Intact_PTH | pg/mL | pmol/L | pmol/L × **9.43** = pg/mL | **5–2500** | Some assays report pmol/L; small values (e.g., 1–5) may be pmol/L unconverted. |
++
++### Vitamins / Endocrine
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| Vitamin_D_25OH | ng/mL | nmol/L | nmol/L × **0.4** = ng/mL | 5–200 | |
++| Vitamin_D_1_25OH | pg/mL | pmol/L | pmol/L × **0.4167** = pg/mL (i.e., ÷2.4) | **5–100** | Baseline failures slightly above 100 often indicate **pmol/L** not converted (e.g., 160 pmol/L ≈ 66.7 pg/mL). |
++
++### Hematology / Nutrition Proteins
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| Hemoglobin | g/dL | g/L; mmol/L | g/L × **0.1** = g/dL; mmol/L × **1.611** = g/dL | **3–20** | Very low values (2–3) may be true severe anemia; only convert if alternate unit is likely (e.g., 80–200 g/L). |
++| Prealbumin (transthyretin) | mg/dL | g/L; mg/L | g/L × **100** = mg/dL; mg/L × **0.1** = mg/dL | **5–50** | Baseline failures near 0.2–0.5 suggest **g/L** unconverted (0.2 g/L = 20 mg/dL). |
++| Albumin_Serum | g/dL | g/L | g/L × **0.1** = g/dL | 1–6 | |
++
++### Iron Studies
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| Ferritin | ng/mL | µg/L | µg/L × **1** = ng/mL | **5–5000** | ng/mL and µg/L are numerically identical; errors usually come from **pmol/L** or mis-parsing. If pmol/L present, conversion depends on calibrator and is not universally reliable—avoid guessing unless metadata confirms. |
++
++### Lipids
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| Total_Cholesterol / LDL / HDL / Non_HDL | mg/dL | mmol/L | mmol/L × **38.67** = mg/dL | 30–1000 | |
++| Triglycerides | mg/dL | mmol/L | mmol/L × **88.57** = mg/dL | **30–2000** | Baseline failures with ~20 mg/dL often reflect mmol/L values (~0.2–0.3 mmol/L) left unconverted; apply ×88.57. |
++
++### Cardiac Markers
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| Troponin_I | ng/mL | ng/L; pg/mL | ng/L ÷ **1000** = ng/mL; pg/mL ÷ **1000** = ng/mL | **0–50** | Baseline values 2,000–40,000 indicate **ng/L** that must be ÷1000. Some hs-assays report ng/L by default. |
++| Troponin_T | ng/mL | ng/L; pg/mL | ng/L ÷ **1000** = ng/mL; pg/mL ÷ **1000** = ng/mL | **0–10** | Same as above; hs-TnT often reported as ng/L. |
++
++### Blood Gases / Lactate
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| pCO2_Arterial | mmHg | kPa | kPa × **7.5006** = mmHg | **15–100** | Baseline values ~4–6 indicate kPa; multiply by 7.5006. |
++| pO2_Arterial | mmHg | kPa | kPa × **7.5006** = mmHg | **30–500** | Baseline values ~8–13 indicate kPa; multiply by 7.5006. |
++| Lactate | mmol/L | mg/dL | mg/dL × **0.1110** = mmol/L (i.e., mg/dL ÷ 9.009) | **0.3–20** | If lactate is extremely high in mg/dL (e.g., 50–60), convert to mmol/L by ÷9.009. |
++
++### Urine Protein / Creatinine (spot)
++| Analyte | Target unit | Common alternate(s) | Convert alternate → target | Plausibility range (target) | Notes |
++|---|---:|---|---:|---:|---|
++| Urine_Protein | mg/dL | mg/L; g/L; g/dL | mg/L × **0.1** = mg/dL; g/L × **100** = mg/dL; g/dL × **1000** = mg/dL | **0–3000** | Baseline failures 5,000–28,000 mg/dL strongly suggest **mg/L** (÷10) or **g/L** (×100 then check) mismatch; try mg/L → mg/dL first when values are huge. |
++| Urine_Creatinine | mg/dL | µmol/L; mmol/L | µmol/L × **0.011312** = mg/dL; mmol/L × **113.12** = mg/dL | **10–500** | Baseline includes too-low (~9) and too-high (~900–1000); try mmol/L → mg/dL (×113.12) for low values, and µmol/L → mg/dL for very high values depending on magnitude. |
++
++#### Derived ratios (if recalculating)
++- If you recompute ratios (optional): ensure both numerator/denominator are in consistent units.
++  - **UACR** commonly mg/g (albumin mg/L with creatinine mg/dL requires careful scaling). Prefer using provided ratio columns if already plausible.
++
++## Practical Decision Rules for the Baseline Failures
++Use these as explicit guards in ETL:
++- **BUN** < 5 mg/dL with otherwise plausible labs: likely urea mmol/L → multiply by **2.801**.
++- **Serum_Calcium (total)** < 5 mg/dL: likely mmol/L not converted → multiply by **4.008**.
++- **Ionized_Calcium** > 2.0 mmol/L: likely mg/dL reported → divide by **4.008**.
++- **Triglycerides** < 30 mg/dL with many values clustered ~0.2–2 (pre-conversion): likely mmol/L → × **88.57**.
++- **Troponin I/T** in thousands: likely ng/L → ÷ **1000**.
++- **pO2/pCO2** values ~3–15: likely kPa → × **7.5006**.
++- **Lactate** reported 20–60 but target mmol/L: likely mg/dL → ÷ **9.009**.
++- **Prealbumin** values < 1 mg/dL: likely g/L → × **100**.
++- **Vitamin D 1,25(OH)2** values > 100: likely pmol/L → × **0.4167**.
++
++## Best-Practice Warning
++- Never clamp large groups of values into range; that hides unit errors.
++- Prefer explicit analyte conversion tables over generic multiplicative “try list”.
++- Always check plausibility in both directions (too low and too high) before and after conversion.

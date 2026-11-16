@@ -1,0 +1,44 @@
+ipython — notes for fuzz testing
+================================
+
+Library: /app/ipython  (installable as `ipython` / package `IPython`)
+Runtime deps (minimum for the target below): no mandatory third-party
+imports — the TransformerManager pulls only `IPython.utils.tokenutil`,
+`ast`, `codeop`, `re`, `tokenize`. We still install the full dep set so
+`import IPython` works and the module graph is realistic.
+
+Primary FUT (fuzz target):
+  qualname: IPython.core.inputtransformer2.TransformerManager.transform_cell
+  file:line: IPython/core/inputtransformer2.py:635
+  signature: transform_cell(cell: str) -> str
+  input type: str (one IPython input cell: arbitrary user text that may
+    contain Python plus IPython magics like `%timeit`, `?help`, `!shell`,
+    cell magics `%%bash`, line continuations, etc.)
+  rationale: TransformerManager is the frontline cell-preprocessing stage
+    before Python compilation. It runs a chain of regex / tokenize-based
+    transforms over arbitrary user text — exactly the kind of boundary
+    where fuzzing is most useful. It also has an auxiliary method
+    `check_complete` with similar surface.
+
+Invalid-input exceptions (CAUGHT, early return in harness):
+  - SyntaxError                   (tokenizer rejects malformed source)
+  - IndentationError              (subclass of SyntaxError but listed)
+  - tokenize.TokenError           (unterminated multi-line construct)
+  - ValueError                    (NUL bytes etc.)
+  - UnicodeDecodeError            (bad text, defensive)
+
+Real-crash exceptions (PROPAGATE):
+  - any other uncaught exception (AssertionError, IndexError, KeyError,
+    AttributeError, TypeError, RecursionError, ...).
+
+Oracle: crash-only.
+
+Seeds (via FDP as a Unicode string):
+  "x = 1\n", "%timeit 1+1\n", "?print\n", "!ls\n",
+  "%%bash\necho hi\n", "a = b = 1\n", "def f():\n    pass\n".
+
+Fuzz entry (pseudocode):
+  fdp = FuzzedDataProvider(data)
+  s = fdp.ConsumeUnicodeNoSurrogates(fdp.remaining_bytes())
+  try: TM.transform_cell(s)
+  except INVALID_INPUT_EXCEPTIONS: return

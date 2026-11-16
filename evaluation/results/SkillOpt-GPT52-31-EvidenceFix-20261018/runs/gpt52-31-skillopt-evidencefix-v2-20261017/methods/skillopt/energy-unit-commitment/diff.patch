@@ -1,0 +1,281 @@
+--- before/milp-solver-workflow/SKILL.md
++++ after/milp-solver-workflow/SKILL.md
+@@ -22,6 +22,67 @@
+ 9. Recompute objective and summaries from extracted arrays.
+ 10. Write final output only after validation passes.
+ 
++
++
++### Objective & Benchmark Equivalence Debug Loop (do this before trusting “optimal”)
++
++A MILP can be mathematically optimal for the *wrong* objective (wrong units, missing intercepts, double-counted pmin, wrong piecewise convention, etc.). Use this loop to force equivalence with the benchmark/accounting used by the verifier/report.
++
++**A. Pre-solve: print objective coefficient summaries by variable family**
++
++Before calling the solver, compute and print/inspect totals like:
++
++- startup vars: min/median/max coefficient, count nonzeros, expected magnitude
++- shutdown vars (if costed)
++- no-load / online fixed cost terms (often proportional to commitment `u[g,t]`)
++- energy / dispatch vars (or segment vars): slope ranges and units ($/MWh)
++- reserve vars and penalties
++- curtailment / load-shed / slack penalties (should be “very large” if prohibited)
++
++Also check **signs** (penalties positive; revenues negative only if explicitly modeled) and **units** (MW vs MWh with time-step length).
++
++**B. Post-solve: recompute total cost from extracted variables and assert match**
++
++After extracting and converting to report conventions, recompute the full objective using the *same accounting as the benchmark/report*, then assert:
++
++- `abs(cost_recomputed - cost_solver) <= atol + rtol*max(1, abs(cost_solver))`
++
++If it fails, do not report a solution as competitive; fix the model/objective mapping first.
++
++**C. Piecewise / pmin / intercept spot-checks (common UC cost bugs)**
++
++For a few generators-hours, manually spot-check:
++
++- whether dispatch variable represents **total MW** or **MW above minimum**
++- whether pmin is enforced and whether its cost is captured as:
++  - no-load + incremental above pmin, or
++  - segment curve that already includes pmin output
++- piecewise segments:
++  - activation constraints (segment quantities within widths)
++  - slopes match the intended convention (incremental vs total-cost breakpoints)
++  - intercepts are not missed or double-counted
++
++If the data provides total cost at breakpoints, ensure you model either:
++- incremental segments with correct derived slopes, or
++- convex-combination/epigraph form consistent with totals.
++
++**D. Economic sanity checks (post-solve)**
++
++Run quick diagnostics that often reveal objective mistakes:
++
++- merit-order consistency: expensive units shouldn’t run while cheaper units are available (unless constrained by min-up/down, ramps, must-run, reserve deliverability)
++- overcommitment detection: too many online units at pmin with simultaneous renewable curtailment may indicate missing/low curtailment penalties or mis-modeled pmin costs
++- renewable utilization: if curtailment exists, confirm it is explainable by min generation/reserve/ramp constraints, not by objective sign errors
++
++**E. Compare against a lower bound / relaxed model to detect gross suboptimality**
++
++Compute at least one cheap bound/relaxation:
++
++- LP relaxation of the MILP (integrality off)
++- or ED ignoring min-up/down and startup costs but respecting pmin/pmax and demand balance
++
++If your MILP solution is far above a reasonable lower bound (e.g., >10–20% with mild constraints), suspect wrong objective or missing flexibility constraints.
++
+ ## Variable Map Pattern
+ 
+ Use helper functions or dictionaries, not scattered index arithmetic.
+@@ -124,12 +185,23 @@
+     integrality=integrality,
+     bounds=Bounds(lb, ub),
+     constraints=constraints,
+-    options={"time_limit": 600.0, "mip_rel_gap": 0.01, "disp": False},
++    options={
++        "time_limit": 600.0,
++        "mip_rel_gap": 0.001,  # tighten for quality-sensitive benchmarks
++        "disp": False,
++    },
+ )
+ 
+ if result.x is None:
+     raise RuntimeError(f"No incumbent: status={result.status}, message={result.message}")
+ ```
++
++### Solver-quality diagnostics and stopping rules
++
++- Do not stop at the first feasible incumbent when the task is judged on cost quality.
++- Record and report (when available): best incumbent objective, best bound, and relative gap.
++- Treat `time_limit` as acceptable **only** if you have a competitive incumbent and can state a nonnegative reported gap (or `null` if the solver gives no reliable bound).
++- If the cost is far from a quick lower bound (LP relaxation / relaxed ED), increase time limit, tighten `mip_rel_gap`, and consider enabling stronger presolve/cuts/heuristics when supported by the solver API.
+ 
+ Capture status, objective, incumbent values, and any reliable gap/bound. A time-limit status can be useful if a feasible incumbent exists; a failure with no incumbent is not a solution.
+ 
+@@ -143,6 +215,17 @@
+ - recompute objective from input data and extracted decisions;
+ - run validation that reads only input data plus extracted/report arrays;
+ - write `"pass"` self-checks only after validation passes.
++
++
++
++### Cost consistency is necessary but not sufficient
++
++Passing “reported cost matches extracted schedule” only proves internal consistency. Also require:
++
++- objective-equivalence: solver objective equals independently recomputed cost (same accounting as report/verifier)
++- competitiveness checks: compare against a lower bound/relaxation and run economic sanity checks (merit order, overcommitment, renewable utilization)
++
++If any of these fail, treat the run as a modeling/debug iteration, not a final answer.
+ 
+ ## Debugging Infeasibility
+ 
+--- before/unit-commitment-data-modeling/SKILL.md
++++ after/unit-commitment-data-modeling/SKILL.md
+@@ -110,8 +110,21 @@
+ 
+ Keep prior offline duration consistent with initial status and transition timing.
+ 
++
++Verify startup-tier mapping carefully when importing initial conditions. The prior on/off duration at the start of the horizon should determine which startup tier is eligible for the first startup event. Check that startup lags are interpreted in the same time units as the UC horizon intervals.
+ ## Cost Curves
+ 
++
++Normalize every production-cost representation into a consistent internal form before modeling. Determine whether the source provides:
++
++- total cost at breakpoints `(MW, total_cost)`
++- marginal/incremental segment slopes
++- cumulative segment costs
++- heat-rate data requiring fuel-price conversion
++
++If total-cost points are provided, convert them into incremental segment slopes for piecewise-linear UC formulations and verify nondecreasing breakpoints. Apply interval duration scaling consistently (for example, `$ / MWh * hours_per_period`). Keep a clear distinction between no-load cost and energy cost.
++
++When using an output-above-minimum formulation internally, shift breakpoints consistently so segment widths/slopes align with the chosen production convention instead of accidentally charging minimum-output energy twice.
+ Identify whether points are total cost, marginal cost, incremental segment cost, or heat-rate data. For total-cost breakpoints:
+ 
+ ```python
+@@ -130,6 +143,8 @@
+ 
+ If the first point is at minimum output, it may represent online minimum-output cost. Do not invent additional no-load or shutdown costs unless provided.
+ 
++
++Validate that the final curve endpoint matches `pmax` interpretation and that the first breakpoint matches either actual `pmin` output or zero above-minimum output, depending on the formulation. Watch for accidental MW scaling errors, duplicated minimum-generation charges, or interpreting cumulative costs as segment costs.
+ ## Renewables
+ 
+ - Parse hourly minimum and maximum output.
+@@ -153,6 +168,8 @@
+ 
+ Also check missing required fields, duplicate IDs, mismatched lengths, negative impossible limits, repeated cost points, nonmonotone startup lags, and inconsistent initial status/output.
+ 
++
++For economic debugging, emit a per-generator audit table before solving that includes at least: `pmin`, `pmax`, no-load cost, startup costs/tiers, first and last marginal segment slopes, and implied total production cost at `pmax`. This catches common parsing mistakes such as wrong units, malformed piecewise curves, or startup-cost misreads before they distort dispatch decisions.
+ ## Common Mistakes
+ 
+ - Hard-coding a familiar schema instead of inspecting the data.
+--- before/unit-commitment-operating-rules/SKILL.md
++++ after/unit-commitment-operating-rules/SKILL.md
+@@ -200,6 +200,97 @@
+ 
+ ## Production Costs
+ 
++
++
++## Cost Modeling & Economic UC Sanity
++
++Feasible but very expensive schedules usually come from cost-model inconsistencies (especially mixing actual-MW vs above-minimum conventions) or from reserve/commitment choices that ignore marginal costs. Use this section to ensure your UC objective matches the verifier’s accounting and your own report fields.
++
++### 1) Define the MW convention used by the cost curve
++
++Many instances provide piecewise **total-cost** points (\$/h) as a function of **actual output MW when online**. Others provide incremental/segment costs. You must map the schedule’s *actual* MW into the curve’s expected MW.
++
++Let:
++- `u[g,t] ∈ {0,1}`
++- `P[g,t]` = **actual** MW output (what the report requires)
++- `pmin[g], pmax[g]`
++- `p_above[g,t] = P[g,t] - pmin[g]*u[g,t]` (≥0)
++
++If you model dispatch above-minimum internally, always compute costs using the correct argument:
++
++```text
++P[g,t] = pmin[g]*u[g,t] + p_above[g,t]
++```
++
++### 2) Total cost decomposition (do not double count pmin)
++
++For each unit and hour, total operating cost typically has these components (only include components that exist in data/prompt):
++
++```text
++TotalCost = Σ_t Σ_g [ NoLoadCost[g]*u[g,t]
++                      + StartupCost[g,t]*start[g,t]
++                      + ShutdownCost[g]*stop[g,t]
++                      + VariableEnergyCost[g,t](P[g,t]) ]
++```
++
++Key rule to avoid pmin double counting:
++- If `VariableEnergyCost(P)` is a **total-cost curve** that already includes the cost of producing at `pmin` when `P=pmin`, then **do not add** an additional `NoLoadCost` unless the data explicitly defines it separately.
++- If variable costs are defined **only for energy above minimum** (e.g., segments in `p_above`), then you may need `NoLoadCost` (or a fixed cost at minimum) *if and only if* the dataset provides it.
++
++### 3) Piecewise variable costs: use segments, not a single slope
++
++If the data provides piecewise points for total cost `C(P)` (monotone increasing in `P`), compute hourly variable cost as:
++
++```text
++VariableEnergyCost[g,t] = C_g(P[g,t])    if u[g,t]=1
++                        = 0             if u[g,t]=0
++```
++
++If the data provides piecewise **incremental** costs over segments (common in UC MILPs), model energy in segments so the marginal cost changes with output. Do not approximate with an average slope across the whole range.
++
++### 4) Worked example: actual MW vs above-minimum and where each is used
++
++Suppose a unit has `pmin=50`, `pmax=100`, `u=1`.
++- If you decide `p_above=20`, then `P = 50 + 20 = 70 MW`.
++
++Use these consistently:
++- **Reporting**: report `P` (70 MW).
++- **Capacity**: `50 ≤ P ≤ 100` (or `0 ≤ p_above ≤ 50`).
++- **Reserve headroom** (deliverability): `P + R ≤ 100` (or `p_above + R ≤ 50`).
++- **Ramping**: if ramps are defined on above-minimum, ramp on `p_above` (but ensure you convert correctly from initial actual output). If ramps are defined on actual output, ramp on `P`.
++- **Costs**:
++  - If curve points are in **actual MW**, evaluate at `P=70`.
++  - If curve/segments are in **above-minimum**, evaluate at `p_above=20` and do *not* separately charge pmin energy unless specified.
++
++A common bug that produces very expensive schedules:
++- Charging `C(P)` (which already includes minimum-output cost) **and** adding `NoLoadCost*u` again.
++
++### 5) Co-optimizing energy and spinning reserve without forcing extra commitment
++
++Reserve must come from online thermal units, but it should be co-optimized with dispatch and commitment:
++- Allow the model to trade off: (a) holding headroom on already-online units vs (b) starting additional units.
++- In the objective, reserve is usually **free** unless the dataset includes a reserve cost. Therefore, commitment/dispatch must be allowed to adjust so that meeting reserve doesn’t require unnecessarily many online units.
++
++Practical guidance:
++- Enforce deliverability with `P + R ≤ pmax*u` and ramp on `P+R` (or above-min version) so reserve is feasible.
++- Do **not** add artificial constraints like `R ≥ α*P` or “keep N units online” unless explicitly required.
++- When reserve requirement is high, the cheapest solution may be: keep a few large/cheap units online with headroom and avoid many small expensive starts.
++
++### 6) Economic red flags & how to diagnose from schedules
++
++After you obtain a feasible schedule, scan for these red flags:
++- **Too many units online**: many `u=1` with `P=pmin` for long blocks → likely reserve/commitment is over-constrained.
++- **Excessive starts/stops**: frequent cycling without large demand swings → min up/down or startup-cost tiers misapplied, or objective missing startup costs.
++- **Renewable curtailment while thermal marginal cost is high**: indicates a modeling error (e.g., renewables incorrectly constrained, or thermal forced on for reserve when headroom could be provided differently).
++- **Flat dispatch despite piecewise costs**: suggests piecewise segments not modeled (or total-cost curve mistakenly linearized).
++- **Units producing above pmin while cheaper units have headroom**: suggests cost curve evaluated on wrong MW convention or pmin energy double-count.
++
++### 7) Required final step: recompute and reconcile reported cost before submission
++
++Before writing the final report:
++1. Recompute total cost from the exported arrays (`u,start,stop,P`) using the same conventions as the verifier expects.
++2. Reconcile each component (startup, shutdown, no-load, energy) against your objective value.
++3. If mismatch exists, fix the cost model (not the report). Only then set `summary.objective_cost`.
+ Use only cost components present in the data or required by the prompt. Do not invent no-load, reserve, curtailment, shutdown, or ramping costs.
+ 
+ For total-cost breakpoints:
+@@ -229,6 +320,15 @@
+ 6. Recompute costs and summaries from arrays.
+ 7. Write `"pass"` checks only after validation passes.
+ 
++
++
++Add an explicit economic sanity pass (recommended for this benchmarked task type):
++
++8. Compare your recomputed total cost against simple baselines:
++   - all-renewables-used + cheapest thermals to cover net load,
++   - no unnecessary startups,
++   - dispatch roughly follows marginal costs.
++   If cost is far above expectations, revisit piecewise cost modeling, pmin/no-load conventions, and reserve-driven commitment.
+ ## Common Pitfalls
+ 
+ - Treating UC as independent hourly dispatch.
+@@ -236,5 +336,9 @@
+ - Checking reserve headroom but forgetting startup or ramp deliverability.
+ - Ignoring initial output in first-period ramping.
+ - Ignoring initial on/off duration in minimum up/down constraints.
++- **Cost-curve convention mismatch** (evaluating curve on above-min when it expects actual MW, or vice versa).
++- **Double-counting minimum-output cost** (charging a total-cost curve at `P` and also adding a separate no-load/min-output cost).
++- **Omitting piecewise segments** and using a single marginal cost (often yields the wrong merit order and commitment).
++- **Over-committing to satisfy reserve** due to unnecessary constraints; failing to let energy+reserve co-optimize.
+ - Trusting a repair LP that omits a constraint family.
+ - Hard-coding `"pass"` fields before validation.

@@ -1,0 +1,80 @@
+Build failure analysis
+======================
+
+Repository: /home/github/build/failed/AgentOps-AI/agentops
+(The other directory /home/github/build/failed/cacher/env is only a Python
+virtualenv — pyvenv.cfg confirms it. No source code to fix there.)
+
+Observed failure
+----------------
+Running the project's test command (per tox.ini):
+    coverage run --source agentops -m pytest
+
+Pytest aborts during collection with 5 identical collection errors:
+
+    ModuleNotFoundError: No module named 'langchain.callbacks'
+
+The chain is:
+    tests/test_*.py -> import agentops
+    agentops/__init__.py -> from .langchain_callback_handler import ...
+    agentops/langchain_callback_handler.py (line 8):
+        from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+Root cause
+----------
+`langchain` installed in the environment is version 1.4.3 (the version
+range in tox.ini / pyproject.toml is `langchain>=0.0.354`, so the latest is
+pulled in). In recent langchain releases the `langchain.callbacks`
+sub-package has been removed; the classes live in `langchain_core.callbacks`.
+The file `agentops/langchain_callback_handler.py` already imports every
+other symbol from `langchain_core.*`, so the stray `langchain.callbacks.base`
+import is simply out of date.
+
+Verification:
+    python -c "from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler"
+succeeds in the same environment.
+
+This is a code-level error (a stale import), not a build-configuration
+error. The fix is a one-line change in
+`agentops/langchain_callback_handler.py`.
+
+Fix plan
+--------
+Change line 8 of `agentops/langchain_callback_handler.py` from
+    from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+to
+    from langchain_core.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
+
+After the fix, re-run the full test command and confirm it exits 0 with no
+`FAILED` lines in the pytest summary.
+
+Second failure (surfaces once imports are repaired)
+---------------------------------------------------
+After patch_1 fixes collection, 9 of 10 tests pass; the remaining failure is:
+
+    tests/test_events.py::TestEvents::test_record_timestamp
+    AssertionError: assert '2026-10-08T17:38:06.414Z' != '2026-10-08T17:38:06.414Z'
+
+The test instantiates `ActionEvent()` (which, via dataclass
+`field(default_factory=get_ISO_time)`, sets `init_timestamp` then
+`end_timestamp` back-to-back), then asserts the two are different.
+
+Root cause: `agentops/helpers.py::get_ISO_time` returns
+
+    datetime.utcfromtimestamp(time.time()).isoformat(timespec='milliseconds') + 'Z'
+
+Two issues:
+  1. `timespec='milliseconds'` truncates to 3-digit precision; two factory
+     calls executed microseconds apart collapse to the same string.
+  2. `datetime.utcfromtimestamp` is deprecated in Python 3.12+ (emits
+     DeprecationWarning); the modern form is
+     `datetime.now(timezone.utc)`.
+
+This is the exact timing-precision bug called out in the testing-python
+skill: fix the recorder (helper), not the test.
+
+Fix: change `get_ISO_time` to
+
+    datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+
+and add `timezone` to the `datetime` import.

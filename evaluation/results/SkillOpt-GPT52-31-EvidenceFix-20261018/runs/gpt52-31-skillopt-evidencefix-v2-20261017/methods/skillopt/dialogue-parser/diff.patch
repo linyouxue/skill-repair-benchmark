@@ -1,0 +1,86 @@
+--- before/dialogue-graph/SKILL.md
++++ after/dialogue-graph/SKILL.md
+@@ -50,6 +50,21 @@
+ graph.add_edge(Edge(source="Choices", target="End", text="1. Run away"))
+ ```
+ 
++
++
++### Terminal / Sentinel Targets (e.g., `End`)
++Some dialogue formats use a **sentinel terminal target** like `"End"` to mean "stop the conversation".
++
++**Convention for exported graphs:**
++- Treat sentinel terminals (commonly `"End"`) as **legal edge targets**.
++- **Do not emit** sentinel terminals as concrete nodes in `nodes` unless the downstream engine/evaluator explicitly treats them as traversable nodes.
++
++Why: some validators exclude traversal into `"End"` while still requiring every emitted node to be reachable; creating an `End` node can therefore guarantee an "unreachable node" failure.
++
++Practical rule:
++- Keep edges like `Choices -> End`.
++- Omit an `End` node from `nodes` for evaluators that treat `End` as a non-traversed terminal.
++
+ ### 4. Export
+ Serialize to JSON format for the engine.
+ 
+@@ -59,12 +74,61 @@
+ json_str = graph.to_json()
+ ```
+ 
++
++
++#### Schema mapping note (Python objects ↔ JSON)
++This skill uses `Edge(source, target)` in Python examples. Many tasks/export formats expect JSON edge keys named `"from"` and `"to"`.
++
++When exporting to such a schema, map:
++- `edge.source` → `edge_dict["from"]`
++- `edge.target` → `edge_dict["to"]`
++- `edge.text` → `edge_dict["text"]` (if present)
++
++Example JSON edge:
++```json
++{"from": "Choices", "to": "End", "text": "1. Run away"}
++```
++
+ ### 5. Validation
+ Check for integrity.
+ 
+ ```python
+ errors = graph.validate()
+ # Returns list of strings, e.g., ["Edge 'Start'->'Unk' points to missing node 'Unk'"]
++```
++
++
++
++#### Validator guidance for reachability with sentinel terminals
++If your format uses terminal sentinels (e.g., `"End"`), reachability checks should typically:
++- start from the entry node (often the first/`Start` node),
++- **not traverse into sentinel terminals**, and
++- **not require** sentinel terminals to be present in `nodes`.
++
++Illustrative pseudocode:
++```python
++SENTINELS = {"End"}
++
++# Edge targets must exist unless they are sentinels
++for e in edges:
++    if e.target not in SENTINELS:
++        assert e.target in node_ids
++
++# Reachability ignores sentinels
++reachable = set()
++queue = [start_id]
++while queue:
++    n = queue.pop(0)
++    if n in reachable:
++        continue
++    reachable.add(n)
++    for tgt in outgoing_targets.get(n, []):
++        if tgt not in SENTINELS:
++            queue.append(tgt)
++
++# Unreachable is computed over emitted nodes only
++unreachable = set(node_ids) - reachable
++assert not unreachable
+ ```
+ 
+ ### 6. Visualization
