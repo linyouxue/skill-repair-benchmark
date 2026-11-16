@@ -37,10 +37,20 @@ def finish(report, tests, started):
     reward = float(report["score"])
     strict_success = bool(tests) and passed == len(tests)
     report.update({"task_passed":strict_success,"strict_success":strict_success,
-                   "reward":reward,"data_version":"pilot-v2","scoring_version":"item-accuracy-v1"})
-    ctrf = {"results":{"tool":{"name":"generalization-item-accuracy-v1"},
+                   "reward":reward,"data_version":"flink-factorial-v2","scoring_version":"item-accuracy-v2"})
+    ctrf = {"results":{"tool":{"name":"generalization-item-accuracy-v2"},
         "summary":{"tests":len(tests),"passed":passed,"failed":len(tests)-passed,
                    "pending":0,"skipped":0,"other":0,"start":started,"stop":now},"tests":tests}}
+    stage_file = Path("/verifier/stage_job_ids.json")
+    if stage_file.exists():
+        stage_groups = json.loads(stage_file.read_text(encoding="utf-8"))
+        correct = {r["job_id"] for r in report.get("job_feedback", []) if r["correct"]}
+        feedback = {}
+        for name, members in stage_groups.items():
+            hits = len(correct.intersection(members))
+            feedback[name] = {"total": len(members), "correct": hits, "incorrect": len(members) - hits}
+        report["positive_by_stage"] = feedback
+        (LOG/"stage_feedback.json").write_text(json.dumps(feedback, indent=2) + "\n", encoding="utf-8")
     (LOG/"accuracy.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     (LOG/"ctrf.json").write_text(json.dumps(ctrf,indent=2)+"\n",encoding="utf-8")
     (LOG/"reward.txt").write_text(str(reward),encoding="utf-8")
@@ -50,7 +60,7 @@ def main():
     started = int(time.time()*1000)
     began = time.monotonic()
     LOG.mkdir(parents=True,exist_ok=True)
-    for stale in ["reward.txt","accuracy.json","ctrf.json","evaluation_error.json"]:
+    for stale in ["reward.txt","accuracy.json","ctrf.json","stage_feedback.json","evaluation_error.json"]:
         (LOG / stale).unlink(missing_ok=True)
     task = sys.argv[1]
     if task == "pddl-airport-planning":

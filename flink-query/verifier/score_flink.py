@@ -37,6 +37,9 @@ def score(actual, expected, negative_ids=None):
                 invalid_records += 1
             else:
                 rows.append((match[1], int(match[2])))
+    if readable_output and not rows:
+        issues.append("empty_output")
+        readable_output = False
     counts = Counter(job for job, _ in rows)
     predictions = dict(rows)
     duplicates = sorted(job for job,n in counts.items() if n > 1)
@@ -63,7 +66,7 @@ def score(actual, expected, negative_ids=None):
     strict_success = bool(expected) and correct == len(expected) and negative_correct == len(negative_feedback) and not issues
     key_precision = len(set(predictions) & set(expected))/len(predictions) if predictions else 0.0
     return {"score":accuracy,"accuracy":accuracy,"metric":"job_decision_accuracy",
-            "scoring_version":"item-accuracy-v1","correct_items":correct_items,"total_items":total_items,
+            "scoring_version":"item-accuracy-v2","correct_items":correct_items,"total_items":total_items,
             "extra_error_items":extra_error_items,"unknown_output_jobs":unknown_ids,
             "strict_success":strict_success,
             "job_accuracy":accuracy,
