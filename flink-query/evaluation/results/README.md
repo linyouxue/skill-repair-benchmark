@@ -10,20 +10,4 @@
 | `combined` | 72.58%、0.00%、0.00%（24.19%） | 72.47%、72.58%、0.00%（48.35%） | 100.00%、100.00%、100.00%（100.00%） |
 | 三组泛化均值 | **56.23%** | **64.14%** | **100.00%** |
 
-人工修复 r2 的 `repair` 第 3 条采用 [r04](../../result/manual/evidence/r2/repair/flink-human-r2-repair-r04/run.json)，`stages` 第 1 条采用 [r05](manual/r2/stages/flink-human-r2-stages-r05/run.json)。两条最终交付的回执均为 100%。
 
-## 试跑、开发和补测
-
-| 方法 | 数据集 | 已有得分 |
-|---|---|---|
-| Baseline 试跑 | `repair` | 0.00% |
-| SkillHone 开发 | `repair` | 0.00%、72.51%、95.77%、95.62%、95.62% |
-| SkillHone Maven 补测 | `scale` | 95.62% |
-| 人工修复 r1 | `repair` | 95.92% |
-| 人工修复 r1 | `scale` | 0.00%、95.92%、100.00% |
-
-SkillHone 的 `scale` 第 3 条原运行得 0.00%，Maven 补测得 95.62%。按运行记录中的替换口径，该组均值为 87.93%。主表的 SkillHone 列采用原三条运行，Maven 补测可在逐次索引中查阅。
-
-[逐次运行索引](runs.json)收录 47 条已有评分。[结构化汇总](summary.json)在 `manual-r2` 列出最终交付的运行 ID 和均值。45 条评分与现存 verifier 汇总核对，另 2 条来自保留的结果回执。[中断记录](interruptions.json)列出 15 条未评分的基础设施中断。
-
-[Baseline 测试](baseline/) · [SkillHone 测试](methods/skillhone-gpt5.2/) · [人工修复测试](manual/) · [Skill 和修复组证据](../../result/README.md)
