@@ -1,0 +1,147 @@
+{
+  "method_profile": {
+    "method_name": "skillopt",
+    "update_mode": "patch",
+    "merge_samples": true,
+    "strict_budget": true,
+    "budget_multiplier": 1.0,
+    "repair_rounds_bonus": 0,
+    "label": "skillopt-bounded-edit"
+  },
+  "smoke_mode": false,
+  "diagnosis_n_env": "SKILLOPT_EVA_DIAGNOSIS_N",
+  "edit_budget_l_env": "SKILLOPT_EVA_EDIT_BUDGET_L",
+  "repair_rounds_r": 2,
+  "rounds": [
+    {
+      "round": 1,
+      "candidate_id": "jpg-ocr-stat-round-1-candidate-1",
+      "decision": "keep",
+      "reason": "gate_improved",
+      "score": 0.9772727272727273,
+      "passed": false,
+      "comparable": true,
+      "best_score": 0.9772727272727273,
+      "best_passed": false,
+      "rollout_id": "jpg-ocr-stat-skillopt-20261025T073419Z",
+      "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/jobs/skillopt/jpg-ocr-stat-skillopt-20261025T073419Z",
+      "candidate_skill": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_1/candidate_skill",
+      "gate_result": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_1/gate_result.json",
+      "rejected_buffer_size": 0,
+      "failure_evidence_size": 1,
+      "gate_attempts": [
+        {
+          "attempt": 1,
+          "result": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_1/gate_attempts/attempt_1.json",
+          "rollout_id": "jpg-ocr-stat-skillopt-20261025T073419Z",
+          "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/jobs/skillopt/jpg-ocr-stat-skillopt-20261025T073419Z",
+          "valid": true,
+          "invalid_reason": null
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "candidate_id": "jpg-ocr-stat-round-2-candidate-1",
+      "decision": "revert",
+      "reason": "gate_no_improve",
+      "score": 0.8863636363636364,
+      "passed": false,
+      "comparable": true,
+      "best_score": 0.9772727272727273,
+      "best_passed": false,
+      "rollout_id": "jpg-ocr-stat-skillopt-20261025T075719Z",
+      "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/jobs/skillopt/jpg-ocr-stat-skillopt-20261025T075719Z",
+      "candidate_skill": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_2/candidate_skill",
+      "gate_result": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_2/gate_result.json",
+      "rejected_buffer_size": 1,
+      "failure_evidence_size": 2,
+      "gate_attempts": [
+        {
+          "attempt": 1,
+          "result": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_2/gate_attempts/attempt_1.json",
+          "rollout_id": "jpg-ocr-stat-skillopt-20261025T075719Z",
+          "rollout_dir": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/jobs/skillopt/jpg-ocr-stat-skillopt-20261025T075719Z",
+          "valid": true,
+          "invalid_reason": null
+        }
+      ]
+    }
+  ],
+  "rejected_buffer": [
+    {
+      "round": 2,
+      "reason": "gate_no_improve",
+      "method": "skillopt",
+      "update_mode": "patch",
+      "proposals": [
+        {
+          "path": "image-ocr/SKILL.md",
+          "update_mode_used": "patch",
+          "proposed_edits": [
+            {
+              "op": "replace",
+              "target": "def extract_date(text):\n    lines = text.splitlines()\n    # Prefer lines near Date/Tarikh/INV labels first\n    scored = []\n    for i, ln in enumerate(lines):\n        boost = 1 if re.search(r'date|tarikh|inv', ln, re.I) else 0\n        scored.append((boost, i, ln))\n    scored.sort(key=lambda x: (-x[0], x[1]))\n    for _, _, ln in scored:\n        for rx, kind in DATE_PATTERNS:\n            m = rx.search(ln)\n            if not m: continue",
+              "content": "def _strip_handwritten_tokens(ln):\n    # Remove alphanumeric tokens starting with letters followed by digits\n    # (e.g., 'GA1801', 'GB1801', 'A03041') which are handwritten annotations\n    # that can poison date extraction.\n    return ' '.join(t for t in ln.split()\n                    if not re.match(r'^[A-Za-z]{1,3}\\d{3,}$', t))\n\ndef extract_date(text, year_range=(2015, 2019)):\n    lines = text.splitlines()\n    # Prefer lines near Date/Tarikh/INV/Receipt/Dated labels first.\n    # When a label line contains both a date and a time, split on whitespace\n    # so the date substring is parsed independently of the time.\n    scored = []\n    for i, ln in enumerate(lines):\n        clean = _strip_handwritten_tokens(ln)\n        boost = 2 if re.search(r'\\b(date|tarikh|dated)\\b', clean, re.I) else (1 if re.search(r'receipt|inv', clean, re.I) else 0)\n        scored.append((boost, i, clean))\n        # Also enqueue each whitespace-separated chunk of label lines\n        # so 'Date: 09/03/2018  Time: 08:49:00' yields '09/03/2018' alone.\n        if boost >= 2:\n            for chunk in re.split(r'\\s{2,}|\\t', clean):\n                scored.append((boost + 1, i, chunk))\n    scored.sort(key=lambda x: (-x[0], x[1]))\n    ymin, ymax = year_range\n    for _, _, ln in scored:\n        for rx, kind in DATE_PATTERNS:\n            m = rx.search(ln)\n            if not m: continue"
+            },
+            {
+              "op": "replace",
+              "target": "            if _valid(y, mo, d):\n                return f'{y:04d}-{mo:02d}-{d:02d}'\n            fix = _try_swaps(y, mo, d)\n            if fix:\n                y, mo, d = fix\n                return f'{y:04d}-{mo:02d}-{d:02d}'\n    return None",
+              "content": "            if _valid(y, mo, d) and ymin <= y <= ymax:\n                return f'{y:04d}-{mo:02d}-{d:02d}'\n            fix = _try_swaps(y, mo, d)\n            if fix:\n                y, mo, d = fix\n                if ymin <= y <= ymax:\n                    return f'{y:04d}-{mo:02d}-{d:02d}'\n    # Second pass: relax the year-range sanity check if nothing matched.\n    for _, _, ln in scored:\n        for rx, kind in DATE_PATTERNS:\n            m = rx.search(ln)\n            if not m: continue\n            try:\n                if kind == 'dmy4':\n                    d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))\n                    if mo > 12 and d <= 12:\n                        d, mo = mo, d\n                elif kind == 'ymd':\n                    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))\n                elif kind == 'dmy2':\n                    d, mo, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))\n                    y = 2000 + yy if yy <= 49 else 1900 + yy\n                elif kind == 'dmony':\n                    d = int(m.group(1)); mo = MONTHS[m.group(2).lower()[:3]]; y = int(m.group(3))\n                if _valid(y, mo, d):\n                    return f'{y:04d}-{mo:02d}-{d:02d}'\n            except Exception:\n                continue\n    return None"
+            },
+            {
+              "op": "insert_after",
+              "target": "For ambiguous `DD/MM` vs `MM/DD`, default to `DD/MM/YYYY` (Malaysian/SEA convention). Example: `09/03/2018` → `2018-03-09` (NOT `2018-08-09`).",
+              "content": "\n\n#### Date extraction robustness notes\n\n- **Label priority is primary, voting is secondary.** Always prefer tokens on lines whose uppercased form contains `DATE`, `TARIKH`, `DATED`, or `RECEIPT`. Only fall back to unlabeled numeric scanning when no labeled line yields a valid parse. Do NOT majority-vote across OCR variants in a way that lets unlabeled numeric tokens outweigh a clean labeled read.\n- **Reject handwritten annotation tokens.** Receipts in this dataset (e.g., 039.jpg Perniagaan Zheng Hui) have handwritten short alphanumerics next to line items such as `GA1801`, `GB1801`, `A03041`. Strip any whitespace-separated token matching `^[A-Za-z]{1,3}\\d{3,}$` before running the date regex — otherwise fragments like `1801` can poison the parse.\n- **Split label lines containing both date and time.** When a line looks like `Date: 09/03/2018  Time: 08:49:00`, split on runs of 2+ spaces or tabs and parse each chunk independently so the time colons don't interact with slash-based date patterns.\n- **Year sanity window.** The dataset covers 2015–2019. Reject any first-pass parse whose year is outside `[2015, 2019]` (e.g., spurious `1801` → year 1801). Only relax this window on a second pass if no in-range candidate was found.\n- **Low-confidence fallback.** If the primary date vote has low confidence (no labeled match, no in-range candidate), re-run OCR on the top-right header crop (roughly the upper 30% × right 60% of the image) at 3× scale with `--psm 6`, since `Date:` on tax-invoice receipts almost always sits in that region."
+            }
+          ],
+          "edit_reports": [
+            {
+              "index": 1,
+              "op": "replace",
+              "target": "def extract_date(text):\n    lines = text.splitlines()\n    # Prefer lines near Date/Tarikh/INV labels first\n    scored = []\n    for i, ln in enumerate(lines):\n        boost = 1 if re.search(r'date|tari",
+              "content_preview": "def _strip_handwritten_tokens(ln):\n    # Remove alphanumeric tokens starting with letters followed by digits\n    # (e.g., 'GA1801', 'GB1801', 'A03041') which are handwritten annotations\n    # that can",
+              "status": "applied_replace"
+            },
+            {
+              "index": 2,
+              "op": "replace",
+              "target": "            if _valid(y, mo, d):\n                return f'{y:04d}-{mo:02d}-{d:02d}'\n            fix = _try_swaps(y, mo, d)\n            if fix:\n                y, mo, d = fix\n                return f'{",
+              "content_preview": "            if _valid(y, mo, d) and ymin <= y <= ymax:\n                return f'{y:04d}-{mo:02d}-{d:02d}'\n            fix = _try_swaps(y, mo, d)\n            if fix:\n                y, mo, d = fix\n    ",
+              "status": "applied_replace"
+            },
+            {
+              "index": 3,
+              "op": "insert_after",
+              "target": "For ambiguous `DD/MM` vs `MM/DD`, default to `DD/MM/YYYY` (Malaysian/SEA convention). Example: `09/03/2018` → `2018-03-09` (NOT `2018-08-09`).",
+              "content_preview": "\n\n#### Date extraction robustness notes\n\n- **Label priority is primary, voting is secondary.** Always prefer tokens on lines whose uppercased form contains `DATE`, `TARIKH`, `DATED`, or `RECEIPT`. Onl",
+              "status": "applied_insert_after"
+            }
+          ],
+          "suggestion_prefix": "{'type': 'clarify', 'title': 'Per-task SkillsBench update for jpg-ocr-stat', 'motivation': 'Adapt the shipped skill to the observed single-task execution evidence while keeping the SkillsBench task harness unchanged.', 'instruction': 'Rewrite only this diagnosed skill document (image-ocr/SKILL.md) so it better supports task `jpg-ocr-stat`. Diagnosis confidence: 0.85. Diagnosis: Date extraction heuristic fails on 039.jpg (Perniagaan Zheng Hui receipt). The receipt clearly shows \\'Date: 09/03/2018\\' adjacent to \\'Receipt #: CS00084670\\' and \\'Cashier: USER\\', with handwritten \\'GA1801\\'/\\'GB1801\\' annotations next to each line item that can mislead date voting. The skill likely either (a) picks a non-date numeric token biased by handwritten \\'1801\\' tokens, (b) fails to anchor to the \\'Date:",
+          "change_summary": [
+            "replace:applied_replace",
+            "replace:applied_replace",
+            "insert_after:applied_insert_after"
+          ],
+          "fallback_reason": null
+        }
+      ]
+    }
+  ],
+  "failure_evidence": [
+    {
+      "label": "round_1_gate",
+      "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_1/gate_result.json"
+    },
+    {
+      "label": "round_2_gate",
+      "path": "/Users/elsie/Desktop/SkillOpt-eva/experiments/opus47-gold15-jpg-refresh-v3-20261025/methods/skillopt/jpg-ocr-stat/workspace/round_2/gate_result.json"
+    }
+  ],
+  "final_best_score": 0.9772727272727273,
+  "final_best_passed": false,
+  "same_task_gate": true,
+  "same_task_gate_leakage": "Acceptance uses the same task that is reported (same-task leakage). This is NOT held-out val/test selection as in original SkillOpt / Lite.",
+  "note": "Gate uses the same task (not held-out val). n=independent diagnosis samples; R=progressive repair rounds; L=merge/edit budget. Rejected proposals feed the next round. All prior failure trajectories (baseline + failed gates) are accumulated into later-round diagnosis/edit evidence."
+}

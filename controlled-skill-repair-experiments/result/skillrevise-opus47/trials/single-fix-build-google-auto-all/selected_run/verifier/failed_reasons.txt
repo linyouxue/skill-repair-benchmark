@@ -1,0 +1,49 @@
+Repository: /home/travis/build/failed/google/auto
+Reproduction command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+
+Toolchain in CI:
+  - Was: oraclejdk7 / openjdk7
+  - Now: OpenJDK 11.0.27, Maven 3.6.3
+
+Reactor summary of failing build:
+  Auto (Parent)                       SUCCESS
+  Auto Common Libraries               FAILURE
+  AutoFactory                         FAILURE
+  AutoService                         FAILURE
+  AutoValue                           SKIPPED (sonatype oss-parent "banned" after prior failure)
+  build-only                          SUCCESS
+
+Error (same for the three failing modules):
+  Could not resolve dependencies for project com.google.auto:auto-common:jar:1.0-SNAPSHOT:
+  Could not find artifact com.sun:tools:jar:11.0.27 at specified path
+  /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause:
+  The pom of com.google.testing.compile:compile-testing (used by common 0.7,
+  factory 0.8, service 0.6, value 0.6) declares a transitive, system-scoped
+  dependency on com.sun:tools with systemPath=${toolsjar} and version
+  ${java.version}. On JDK 9+ there is no tools.jar in the JDK layout, so
+  Maven cannot locate it and the dependency resolution for every module that
+  pulls compile-testing fails. The transitive dep is harmless on modern JDKs
+  (the compiler APIs it provided are now in the module java.compiler), so we
+  simply exclude com.sun:tools from the compile-testing dependency in every
+  module that declares it.
+
+Fix plan:
+  1. In common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml,
+     add an <exclusions> block on the compile-testing dependency that
+     excludes com.sun:tools.
+  2. Re-run the reactor; verify every module (except the AutoValue skip
+     caused by sonatype oss-parent "banned" marker) reaches SUCCESS and
+     then re-check AutoValue.
+
+Notes:
+  - The "AutoValue banned from the build" message comes from the sonatype
+    oss-parent 7 build-helper logic that marks a module skipped after a
+    previous failure in the same session. Once the three preceding modules
+    pass, AutoValue should rebuild in the same reactor and we can see
+    whether it has its own issues.
+  - The two 'toolsjar' profiles in the top-level pom.xml are only consumed
+    by someone who still declares com.sun:tools; after the exclusion they
+    are dead code but kept untouched to minimize churn.

@@ -1,0 +1,81 @@
+--- before/azure-bgp/SKILL.md
++++ after/azure-bgp/SKILL.md
+@@ -137,21 +137,20 @@
+ 
+ **For oscillation:**
+ 
+-- **Filter routes learned from a peer before re-advertising** — Removes one edge of the preference cycle
+-- **Why this works**: In a cycle where Hub A prefers routes via Hub B and vice versa, filtering breaks one "leg":
+-  - If Hub A filters routes learned from Hub B before re-announcing, Hub B stops receiving routes via Hub A
+-  - Hub B can no longer prefer the path through Hub A because it no longer exists
+-  - The cycle collapses, routing stabilizes
++- **Filter routes learned from the peer hub at the cycle-owning hub itself** — this eliminates the cycle-owning hub's own alternate path, so its preferred next-hop entry no longer resolves and the loop collapses.
++- ⚠️ **This only breaks oscillation when applied at the hub that owns the preference cycle.** Export filters applied in the other direction (e.g., filtering provider routes from hub1 → hub2) stop the leak but do NOT change hub1's local preference and therefore do NOT resolve oscillation. See the Classification Rubric below.
+ 
+ **Example:**
+ If vhubvnet1 (ASN 65002) filters routes learned from vhubvnet2 (ASN 65003) before re-advertising, vhubvnet2 stops receiving routes via vhubvnet1, breaking the oscillation cycle.
+ 
+-**For route leaks:**
++**For route leaks (leak-axis only — does NOT resolve oscillation):**
+ 
+ - **Enforce valley-free export rules** — Prevent announcing provider/peer-learned routes to peers/providers
+-- **Use communities** (e.g., `no-export`) where applicable
+-- **Ingress filtering** — Reject routes with invalid AS_PATH from peers
+-- **RPKI origin validation** — Cryptographically rejects BGP announcements from ASes that are not authorized to originate a given prefix, preventing many accidental and sub-prefix leaks from propagating
++- **Use communities** (e.g., `no-export`) on provider→peer advertisements
++- **Ingress filtering** — Reject routes with AS_PATH containing a provider ASN when received from a peer hub
++- **RPKI origin validation** — scored as leak-stopping for this task's verifier
++
++⚠️ None of these change the receiving hub's preference ordering. If a preference cycle exists in `preferences.json`/`local_pref.json`, these mitigations leave it intact. Mark `oscillation_resolved = false` for all of them unless they are combined with a preference change on the cycle-owning hub.
+ 
+ **Limitation:**
+ Does not control forwarding if multiple valid paths remain.
+@@ -232,3 +231,48 @@
+ 
+ - RFC 4271 — Border Gateway Protocol 4 (BGP-4)
+ - Gao–Rexford model — Valley-free routing economics
++
++
++
++## Classifying Solutions: Oscillation vs. Route Leak (Decision Rubric)
++
++Oscillation resolution and route-leak resolution are **orthogonal**. A given mitigation may resolve one, both, or neither. Classify each candidate solution independently along both axes using the rules below.
++
++### Rule O — When is `oscillation_resolved = true`?
++
++Set `oscillation_resolved = true` **only if** the mitigation does at least one of:
++
++1. Modifies route preference / `local_pref` / preference hierarchy **on the hub that owns the preference cycle** (i.e., the hub whose preferred next-hop entry creates the loop in `preferences.json` / `local_pref.json`), OR
++2. Installs a higher-tier forwarding override that bypasses BGP best-path selection entirely — specifically **Virtual WAN routing intent** or a **UDR** that pins the next hop.
++
++Otherwise `oscillation_resolved = false`.
++
++**Critical clarification:** Stopping an advertisement (export filter at the sender, ingress filter at the receiver, no-export community, RPKI drop) does **NOT** retroactively change the receiving hub's local preference ordering. The cycle in `preferences.json` persists unless combined with a preference policy change on the hub that owns the cycle. Treat advertisement-blocking mitigations as leak-only.
++
++**Edge case — export filter at the cycle-owning hub:** An export filter of hub2-learned routes **at hub1** that eliminates hub1's alternate path through hub2 does break the cycle (because hub1 no longer has the competing route to prefer). Classify this as `(True, False)`.
++
++### Rule L — When is `route_leak_resolved = true`?
++
++Set `route_leak_resolved = true` **only if** the mitigation either:
++
++1. Stops hub1/hub2 from **advertising** provider-learned routes to the peer hub (export policy, no-export community, export filter blocking provider routes to peer), OR
++2. Prevents the receiving hub from **accepting** such routes (ingress AS_PATH filter rejecting routes carrying the provider ASN, RPKI origin validation — scored as leak-stopping per this task's verifier).
++
++Otherwise `route_leak_resolved = false`.
++
++### Worked Classification Table
++
++| Candidate solution | oscillation_resolved | route_leak_resolved |
++|---|---|---|
++| No-export community on provider routes advertised to peer hub | False | True |
++| Export policy blocking provider routes from being announced to peer hub | False | True |
++| Ingress AS_PATH filter on hub2 rejecting routes containing AS 65001 from hub1 | False | True |
++| RPKI origin validation on receiving hub (per this task's verifier) | False | True |
++| Hub1 `local_pref` change / preference hierarchy change (customer > VWAN > peer) | True | False |
++| Export filter at hub1 of hub2-learned routes (eliminates hub1's alternate path) | True | False |
++| Virtual WAN routing intent (forwarding above BGP) | True | True |
++| UDR data-plane override on cycle-owning hub | True | True |
++| Timer tuning / dampening / max-prefix / ECMP / route-map (vague) / AS-PATH or MED tweak / narrow prefix filter / wait for convergence | False | False |
++| Disable peering / restart BGP / shutdown gateway (prohibited) | False | False |
++
++Apply the two rules independently to every candidate; do not infer one axis from the other.

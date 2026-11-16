@@ -1,0 +1,30 @@
+{
+  "task_id": "flink-query",
+  "fallback_used": false,
+  "overall_diagnosis": "The Flink streaming job (Java) compiles and runs but produces semantically incorrect output. The task uses event-time session windows to detect job stages in Google cluster-trace data, counts SUBMIT events per stage, takes the max per job, and joins with job-finished events. Likely root causes: (1) incorrect session-gap boundary semantics or watermark handling for microsecond timestamps, (2) wrong terminal-state filter for 'job finished' (should likely be FINISH=4 only, not FAIL/KILL/LOST), (3) counting semantics for resubmitted tasks, (4) emission ordering issues on bounded input (end-of-time timer missing), and (5) possibly misreading the schema column indices from format.pdf. The senior-data-engineer skill is the primary target for repair since it owns Flink/streaming guidance; the pdf skill needs a smaller note about verifying tabular schema extraction.",
+  "diagnosed_skills": [
+    {
+      "path": "senior-data-engineer/SKILL.md",
+      "confidence": "0.8",
+      "diagnosis": "The skill lists Flink in its tech stack but contains only TODO placeholders — no concrete guidance for the exact patterns needed: event-time session windows with inactivity gaps on keyed streams, microsecond-timestamp handling from Google cluster traces, correct SUBMIT filtering with resubmission-preserving counts, precise 'job finished' terminal-state semantics, KeyedCoProcessFunction join with end-of-input timers for bounded sources, and single-file deterministic output. These gaps let the baseline produce output that diverges from expected results.",
+      "repair_instruction": "Add a 'Flink Session-Window Pipelines for Google Cluster-Trace Analytics' section covering: (a) Schema: task_events columns (timestamp, missing_info, job_id, task_index, machine_id, event_type, user, scheduling_class, priority, resource_request...); event_type codes SUBMIT=0, SCHEDULE=1, EVICT=2, FAIL=3, FINISH=4, KILL=5, LOST=6; same codes for job_events. (b) Timestamps are in microseconds — divide by 1000 for Flink event-time millis; use WatermarkStrategy.forBoundedOutOfOrderness with a small buffer. (c) Session-window semantics: EventTimeSessionWindows.withGap(Duration) starts a new session only when the gap STRICTLY EXCEEDS the given duration — for a '10-minute inactivity' spec use Time.minutes(10) directly (events exactly 10 min apart merge; >10 min splits). (d) Filter SUBMIT (event_type=0) only, keyBy(jobId), apply the session window with a ProcessWindowFunction counting every element (do NOT deduplicate by task_index — resubmitted tasks count separately); then keyBy(jobId)+maxBy(count) to find the longest stage. (e) 'Job finished' means FINISH (code 4) only — do NOT include FAIL/KILL/LOST unless the spec explicitly says so. (f) Join session-max stream with finished-jobs stream via KeyedCoProcessFunction with ValueState for running max and finished flag; register an event-time timer at Long.MAX_VALUE-1 so results flush when the watermark reaches end-of-stream on bounded input, and handle either arrival order. (g) Ensure source emits Watermark.MAX_WATERMARK on completion so sessions close. (h) env.setParallelism(1) and a single-writer sink to produce deterministic '(jobId,count)' lines. (i) Common pitfalls: processing-time windows, over-broad terminal-state filtering, deduplication of SUBMITs, missing end-of-time timer, forgetting watermark assignment."
+    },
+    {
+      "path": "pdf/SKILL.md",
+      "confidence": "0.3",
+      "diagnosis": "The pdf skill was used to read format.pdf describing the Google cluster trace schema. If column indices or event-type codes were misread via plain text extraction, downstream parsing produces wrong field assignments and incorrect counts.",
+      "repair_instruction": "Add a note: when a PDF describes a tabular data schema with column indices, prefer pdfplumber.extract_tables() or tabula over extract_text() (which can misorder multi-column tables), and cross-verify against companion docs (README.md, format.md) when present. Include a quick reference for Google cluster-trace event-type codes: SUBMIT=0, SCHEDULE=1, EVICT=2, FAIL=3, FINISH=4, KILL=5, LOST=6 (same family for task_events and job_events)."
+    }
+  ],
+  "unselected_skills": [],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": true,
+  "shared_diagnosis_source": "fresh",
+  "consumer_method": "skillopt",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true,
+  "producer_backend": "skillopt"
+}

@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "raw_text_prefix": "{\"overall_diagnosis\":\"Motion labeling passes (Macro-F1 0.86) and all format/validation checks pass across all three samples. The sole failure is dynamic-object mask accuracy: Mean IoU 0.014 vs threshold 0.1 — catastrophically low. All three diagnoses converge on dyn-object-masks/SKILL.md as the culprit: the current recipe (affine warp + absdiff + median+3*MAD threshold + small morphology + area filter) cannot handle walking-POV scenes with strong parallax, produces masks that barely overlap GT, and leaves frame 0 empty. A prior patch round attempted a comprehensive rewrite (flow-residual vs homography-projected flow, lower thresholds, dilation, temporal persistence, frame-0 policy) but was gated as no-improvement — so the next repair must take a different angle: focus on practical recall-oriented tuning and GT-granularity alignment rather than re-introducing the same flow-residual rewrite that already failed to improve the metric.\",\"diagnosed_skills\":[{\"path\":\"dyn-object-masks/SKILL.md\",\"confidence\":\"0.9\",\"diagnosis\":\"Mean IoU 0.014 << 0.1 across all samples. The skill's defaults are mis-calibrated for walking-POV / parallax scenes and for the GT mask granularity in this task. Specific gaps: (1) frame 0 is left empty (guaranteed IoU=0 on that frame); (2) threshold floor (20 on absdiff, 3*MAD) and min-area (~0.3% of image) are too aggressive, erasing pedestrians/small vehicles; (3) morphology kernels are too small (3×3 open, 7×7 close) — GT masks typically cover whole object extents, so output needs substantial dilation / larger closing; (4) no guidance to spot-check coverage fraction before submitting; (5) prior patch attempted a full flow-residual rewrite which did not improve the metric, so the next repair should emphasize recall-oriented knob tuning and output post-processing rather than restructuring the pipeline.\",\"repair_instruction\":\"Revise dyn-object-masks/SKILL.md with recall-oriented, GT-granularity-aware defaults, avoiding re-introducing the previously-rejected full flow-residual rewrite. Concretely: (1) **Frame-0 policy (mandatory)**: compute frame 0's mask from the pair (frame 0, frame 1) and assign it to frame 0; never emit an empty frame-0 mask. (2) **Threshold defaults**: lower the adaptive threshold to `median + 2*1.4826*MAD` with a floor of ~8 (not 20) on absdiff, or ~1.5 px on flow-residual magnitude if flow is used — because the IoU gate is only 0.1, favor recall. (3) **Min-area**: reduce to ~0.05–0.1% of H*W (not 0.3%) so distant pedestrians/vehicles survive. (4) **Morphology & dilation**: open 3×3, close 11×11 to 15×15, then **final dilation of 15–25 px** (or iterative 3×3 dilation ×5–8) to expand to full object extent — this is the single biggest IoU lever when GT masks are generous. (5) **Coverage sanity check (new self-check item)**: compute mean per-frame foreground fraction; expect ~1–15% for scenes with visible movers. If <0.5%, lower threshold and/or min-area and re-run; if >30%, global motion compensation failed — fall back to identity or re-estimate. (6) **Visual spot-check**: overlay 2–3 masks on RGB frames before finalizing; masks should land on pedestrians/vehicles, not borders or ground texture. (7) **Keep the existing warp+absdiff pipeline as the primary recipe** (do not restructure to flow-residual-only, since that rewrite was already rejected); add a brief note that for strong forward/dolly parallax, homography may slightly outperform affine, and that flow-residual against a projected global model is an optional alternative — but the main repair is tuning thresholds, min-area, and final dilation, plus the frame-0 fix.\"}],\"unselected_skills\":[\"egomotion-estimation/SKILL.md\",\"output-validation/SKILL.md\",\"sampling-and-indexing/SKILL.md\"]}",
+  "usage": {
+    "prompt_tokens": 12192,
+    "completion_tokens": 1469,
+    "total_tokens": 13661
+  },
+  "duration_sec": 18.843,
+  "parsed_keys": [
+    "consumer_method",
+    "diagnosed_skills",
+    "diagnosis_n",
+    "diagnosis_sample_count",
+    "edit_budget_l",
+    "fallback_used",
+    "merge_samples",
+    "merged_from_samples",
+    "overall_diagnosis",
+    "repair_round",
+    "shared_diagnosis",
+    "shared_diagnosis_source",
+    "task_id",
+    "unselected_skills"
+  ],
+  "shared": false,
+  "shared_source": null
+}

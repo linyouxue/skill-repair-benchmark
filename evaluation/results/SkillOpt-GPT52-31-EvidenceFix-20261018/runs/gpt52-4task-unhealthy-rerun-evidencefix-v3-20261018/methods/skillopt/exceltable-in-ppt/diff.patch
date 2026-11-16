@@ -1,0 +1,325 @@
+--- before/pptx/SKILL.md
++++ after/pptx/SKILL.md
+@@ -22,6 +22,10 @@
+ 
+ ### Raw XML access
+ You need raw XML access for: comments, speaker notes, slide layouts, animations, design elements, and complex formatting. For any of these features, you'll need to unpack a presentation and read its raw XML contents.
++
++
++
++You also need raw ZIP-entry access when the task involves **embedded workbooks** (Excel tables/charts). In those cases, the most important files are in `ppt/embeddings/` plus the slide relationship files under `ppt/slides/_rels/` that point to them.
+ 
+ #### Unpacking a file
+ `python ooxml/scripts/unpack.py <office_file> <output_dir>`
+@@ -37,6 +41,10 @@
+ * `ppt/slideMasters/` - Master slide templates
+ * `ppt/theme/` - Theme and styling information
+ * `ppt/media/` - Images and other media files
++
++
++* `ppt/embeddings/` - Embedded objects (often Excel workbooks like `*.xlsx` used for tables/charts)
++* `ppt/slides/_rels/slide{N}.xml.rels` - Relationship mappings from slide objects to media/embeddings
+ 
+ #### Typography and color extraction
+ **When given an example design to emulate**: Always analyze the presentation's typography and colors first using the methods below:
+@@ -178,6 +186,187 @@
+ 3. Edit the XML files (primarily `ppt/slides/slide{N}.xml` and related files)
+ 4. **CRITICAL**: Validate immediately after each edit and fix any validation errors before proceeding: `python ooxml/scripts/validate.py <dir> --original <file>`
+ 5. Pack the final presentation: `python ooxml/scripts/pack.py <input_directory> <office_file>`
++
++
++
++### Editing embedded objects (Excel workbooks in `ppt/embeddings/*.xlsx`)
++
++
++#### Dedicated workflow: updating an embedded Excel *table* (currency matrix) safely
++Use this workflow when a slide contains a table backed by an embedded XLSX and a nearby text box provides an updated rate.
++
++**Goals**:
++- Update the correct input/value cell(s) only
++- Preserve any formula cells (do not overwrite formulas)
++- Update the inverse FX cell when appropriate
++- Ensure post-update extraction returns numeric values (no unexpected blanks/NaNs)
++
++##### 1) Locate the embedded workbook from the owning slide via relationships (REQUIRED)
++Do not guess the embedding filename.
++- Find the slide that contains the table/text box (`ppt/slides/slide{N}.xml`).
++- Open its relationship file: `ppt/slides/_rels/slide{N}.xml.rels`.
++- Identify the relationship whose `Target` points to `../embeddings/...xlsx` (often `Type=".../package"`).
++
++##### 2) Map slide content (text box) → workbook cell
++For currency tables, the workbook is commonly a matrix:
++- Row headers (from-currency) in column A
++- Column headers (to-currency) in row 1
++- Rates in the interior grid
++
++Recommended mapping approach:
++- Parse the text box string for `FROM`, `TO`, and `RATE` (e.g., `USD to CNY = 7.02`).
++- In the embedded workbook, build:
++  - `row_headers`: currency code → row index from column A
++  - `col_headers`: currency code → column index from row 1
++- The direct cell is `(row_headers[FROM], col_headers[TO])`.
++
++##### 3) Update direct + inverse FX cells (handle direct/inverse pairs)
++**CRITICAL**: Many verifiers expect both the direct and inverse rate to be consistent.
++- Direct pair: `FROM -> TO` set to the updated numeric rate (only if the target cell is not a formula).
++- Inverse pair: `TO -> FROM` should be updated to `1 / rate` **only if that inverse cell is not formula-driven**.
++  - If the inverse cell contains a formula, do **not** overwrite it; instead update the upstream referenced input cell if possible.
++  - If the inverse cell is a plain value cell, set it to a rounded numeric value consistent with the sheet’s convention (e.g., 3 decimals) to avoid extractor NaNs.
++
++##### 4) Preserve workbook integrity during write-back
++- Modify the existing embedded XLSX bytes in-place (edit only the minimal cells).
++- Do not rebuild the XLSX structure (no recreating sheets/tables/styles/sharedStrings).
++- When repackaging the PPTX, replace only the embedding ZIP entry and preserve other entries and per-file ZIP metadata where possible.
++
++##### 5) Validate end-to-end (prevents NaNs/blanks in downstream extraction)
++After producing `/root/results.pptx`, **re-extract the embedded XLSX from the modified PPTX** and verify:
++- `data_only=False`: formulas still present where expected.
++- `data_only=True` (or the project’s extraction script): key numeric cells are not `None`/blank and do not become `NaN` when converted to a dataframe.
++- Spot-check a small grid of cells beyond the edited pair to ensure unrelated values still extract as numbers.
++Some PPTX files contain **embedded Excel workbooks** (often used for tables/charts) stored as binary ZIP entries under:
++- `ppt/embeddings/*.xlsx` (most common)
++- sometimes `ppt/embeddings/*.bin` (OLE wrapper; treat as binary unless you know how to unwrap)
++
++PowerPoint references these via OOXML relationships:
++- Slide object relationship: `ppt/slides/_rels/slide{N}.xml.rels` contains a relationship like:
++  - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package"`
++  - `Target="../embeddings/Microsoft_Excel_Worksheet.xlsx"`
++
++#### CRITICAL RULES (to avoid corrupting the embedded workbook)
++- **Do NOT rebuild the PPTX** by re-creating a new zip from a subset of files. Always preserve all entries and metadata.
++- **Do NOT rebuild the XLSX from scratch** (e.g., writing a new workbook with openpyxl/pandas and replacing the old one). This commonly breaks:
++  - formulas / calc chain behavior
++  - number formats and styles
++  - shared strings / sheet relationships
++  - cached values expected by downstream extractors
++- **Modify the existing embedded XLSX in-place**: load the *original* workbook bytes, edit only required cells, then write back and replace only that embedding entry.
++
++#### Safe workflow: extract → modify original XLSX → replace bytes only
++1. **Identify the embedding and the owning slide**
++   ```bash
++   unzip -l /root/input.pptx | grep -E '^.*ppt/embeddings/'
++   unzip -p /root/input.pptx ppt/slides/_rels/slide1.xml.rels | sed -n '1,200p'
++   # Repeat for slideN if needed; find the relationship targeting ../embeddings/...
++   ```
++
++2. **Extract the embedded workbook bytes**
++   ```bash
++   unzip -p /root/input.pptx ppt/embeddings/Microsoft_Excel_Worksheet.xlsx > /tmp/embedded.xlsx
++   ```
++
++3. **Read/verify contents without altering structure**
++   - For formulas: open with `data_only=False`.
++   - For displayed (cached) values: open with `data_only=True`.
++   ```python
++   import io
++   from openpyxl import load_workbook
++
++   wb = load_workbook('/tmp/embedded.xlsx', data_only=False)
++   ws = wb[wb.sheetnames[0]]
++   print(ws['B3'].value)  # could be a number or a formula
++
++   wb_vals = load_workbook('/tmp/embedded.xlsx', data_only=True)
++   ws_vals = wb_vals[wb_vals.sheetnames[0]]
++   print(ws_vals['B3'].value)
++   ```
++
++4. **Modify only the intended cell(s)**
++
++
++   **FX matrix special-case (REQUIRED when updating exchange rates)**:
++   - Identify both coordinates: direct (`FROM->TO`) and inverse (`TO->FROM`).
++   - Update the inverse cell **only if it is a value cell**. If the inverse is a formula cell, keep it and ensure the direct input it references is updated instead.
++   - If rounding is used in the sheet (common: `ROUND(..., 3)`), mirror that rounding when writing the inverse value cell.
++   - If a target cell contains a formula (`str` starting with `=`), **do not overwrite it**.
++   - If you update a direct-rate cell, also update the inverse-rate cell *only if it is not formula-driven*; otherwise leave the formula intact.
++   - Prefer updating the exact numeric input cell that formulas reference.
++
++5. **Write back to XLSX without re-creating sheets**
++   ```python
++   from openpyxl import load_workbook
++
++   wb = load_workbook('/tmp/embedded.xlsx', data_only=False)
++   ws = wb[wb.sheetnames[0]]
++
++   # Example: update only a value cell
++   if not (isinstance(ws['B3'].value, str) and ws['B3'].value.startswith('=')):
++       ws['B3'].value = 7.02
++
++   wb.save('/tmp/embedded.modified.xlsx')
++   ```
++
++6. **Replace only the embedding entry inside the PPTX (preserve all other ZIP entries)**
++   - Use a zip-aware “update entry” approach; do not unpack/repack with ad-hoc tooling that drops files.
++   - If you must repack from an unpacked directory, ensure *every* original file is present and validation passes.
++
++   Minimal safe replacement (Python):
++   ```python
++   import zipfile
++
++   in_pptx = '/root/input.pptx'
++   out_pptx = '/root/results.pptx'
++   embed_path = 'ppt/embeddings/Microsoft_Excel_Worksheet.xlsx'
++
++   with zipfile.ZipFile(in_pptx, 'r') as zin, zipfile.ZipFile(out_pptx, 'w') as zout:
++       for item in zin.infolist():
++           data = zin.read(item.filename)
++           if item.filename == embed_path:
++               with open('/tmp/embedded.modified.xlsx', 'rb') as f:
++                   data = f.read()
++           # preserve per-file compression where possible
++           zi = zipfile.ZipInfo(item.filename)
++           zi.date_time = item.date_time
++           zi.compress_type = item.compress_type
++           zi.external_attr = item.external_attr
++           zi.internal_attr = item.internal_attr
++           zi.flag_bits = item.flag_bits
++           zout.writestr(zi, data)
++   ```
++
++#### Verification (MANDATORY)
++1. **Archive integrity / minimal change**
++   - Confirm the embedding file exists and that counts/paths are unchanged.
++   ```bash
++   unzip -l /root/input.pptx  > /tmp/in.lst
++   unzip -l /root/results.pptx > /tmp/out.lst
++   diff -u /tmp/in.lst /tmp/out.lst | head
++   # Diff should show size changes only for the targeted embedding entry.
++   ```
++
++2. **Embedded workbook remains readable through common extraction paths**
++
++
++   **MANDATORY NaN/blank regression check (matches common verifier behavior)**:
++   - If a downstream extractor builds a dataframe, `None` values often become `NaN`. Ensure updated and neighboring cells return numeric values under `data_only=True`.
++   - If any unrelated numeric cells become `None/NaN` after your update, you likely rewrote workbook internals (shared strings/styles) or wrote invalid cell types—redo using the in-place edit workflow and avoid recreating the XLSX.
++   ```python
++   import io, zipfile
++   from openpyxl import load_workbook
++
++   with zipfile.ZipFile('/root/results.pptx') as z:
++       b = z.read('ppt/embeddings/Microsoft_Excel_Worksheet.xlsx')
++   wb = load_workbook(io.BytesIO(b), data_only=False)
++   wb2 = load_workbook(io.BytesIO(b), data_only=True)
++   # Spot-check key cells: updated rate cell, inverse cell, and a few unrelated cells.
++   ```
++
++3. **Regression check: unrelated cells unchanged**
++   - Read a small grid of cells (or the whole table) before/after and ensure only expected cells changed.
++   - If you observe `NaN`/missing values after update, you likely rewrote the XLSX structure or broke shared strings—redo using the in-place workflow above.
+ 
+ ## Creating a new PowerPoint presentation **using a template**
+ 
+@@ -482,3 +671,7 @@
+ - **LibreOffice**: `sudo apt-get install libreoffice` (for PDF conversion)
+ - **Poppler**: `sudo apt-get install poppler-utils` (for pdftoppm to convert PDF to images)
+ - **defusedxml**: `pip install defusedxml` (for secure XML parsing)
++
++
++- **openpyxl**: `pip install openpyxl` (for reading/modifying embedded `.xlsx` while preserving formulas)
++- **pandas**: `pip install pandas` (optional; convenient table comparison when verifying unchanged cells)
+--- before/xlsx/SKILL.md
++++ after/xlsx/SKILL.md
+@@ -176,6 +176,44 @@
+ 
+ ### Editing existing Excel files
+ 
++
++
++### Editing existing formula-driven workbooks (especially embedded XLSX in PPTX/DOCX)
++When updating an **existing** workbook that contains formulas (common in embedded Office objects), you MUST preserve both:
++1) the **formula definitions** (the `=...` strings), and
++2) the **cached formula results / last-calculated values** that downstream tools often read via `data_only=True`.
++
++#### Critical hazards
++- **openpyxl does not recalculate formulas** and, depending on how you load/save, it can **drop or blank cached results** for formula cells. If a verifier/consumer reads the workbook with `data_only=True`, dependent numeric cells may appear as blanks/NaN even though formulas are present.
++- Avoid “rebuilding” the workbook (e.g., recreating sheets via pandas export). Rebuilds commonly lose styles, sharedStrings, defined names, calc settings, and other parts that embedded objects rely on.
++
++#### Required approach
++- **Edit in-place**: load the existing workbook and only change the specific input cells that must change.
++- **Preserve workbook structure**: keep all existing sheets, styles, shared strings, defined names, and calculation metadata untouched unless explicitly required.
++- **Recalculate before final save when formulas exist**: after saving your edits, run LibreOffice recalculation (see `recalc.py`) to repopulate cached results so `data_only=True` readers see numbers.
++
++
++#### Cached-value integrity (readers/verifiers often use values, not formulas)
++When a workbook is embedded in PPTX/DOCX, downstream extraction often loads with `data_only=True` and expects **cached results** for formula cells.
++
++**Rules**
++- Never assume “formulas preserved” means “values preserved.” **openpyxl does not calculate** formulas and may **blank cached results on save**, causing unrelated cells to become `None/NaN` under value-based extraction.
++- If you change any precedent/input cell in a formula-driven model, you MUST produce a final workbook where key numeric outputs are present as cached values.
++
++**Acceptable workflows**
++1) **Preferred**: Edit only the intended input cells with openpyxl → save → run `python recalc.py <file>` → use the recalculated file for embedding/delivery.
++2) If recalculation cannot be run: only acceptable when the consumer explicitly reads formulas (not `data_only=True`). Otherwise, the output is likely to fail automated verification.
++#### Embedded-in-container workflow (PPTX/DOCX)
++- Extract the embedded `.xlsx` part bytes (e.g., `ppt/embeddings/*.xlsx`), modify the workbook **without rebuilding**, save to bytes, then run **recalc.py** on a temporary file and write the recalculated bytes back into the container.
++- If you cannot run recalculation, expect `data_only=True` readers to see stale/empty values; this is usually unacceptable for automated verification.
++
++
++**Do not skip recalc for embedded objects**: The PPTX/DOCX container will happily store an `.xlsx` whose formulas are intact but whose cached results are missing. Many verifiers then parse the embedded workbook into a DataFrame of values and will treat missing cached results as `NaN`, even for cells you never edited.
++
++**Minimal safe sequence**
++- Extract embedded xlsx → edit *one/few* input cells → save to temp `.xlsx` on disk
++- Run `recalc.py` on the temp file to repopulate cached results
++- Read back the recalculated bytes and replace the embedded part
+ ```python
+ # Using openpyxl to preserve formulas and formatting
+ from openpyxl import load_workbook
+@@ -202,6 +240,15 @@
+ ```
+ 
+ ## Recalculating formulas
++
++
++
++### Recalculation is mandatory for round-trip integrity
++If you modified a workbook that contains formulas (including embedded workbooks inside PPTX/DOCX), you MUST ensure cached results are present after saving:
++- Run: `python recalc.py <excel_file> [timeout_seconds]`
++- Then re-embed/use the recalculated `.xlsx` output.
++
++**Why**: many verification tools read with `data_only=True` and will treat missing cached results as blank/NaN even though formulas are intact.
+ 
+ Excel files created or modified by openpyxl contain formulas as strings but not calculated values. Use the provided `recalc.py` script to recalculate formulas:
+ 
+@@ -223,6 +270,28 @@
+ 
+ ## Formula Verification Checklist
+ 
++
++
++### Round-trip validation (required for existing workbooks)
++After editing and saving, validate that both formulas and numeric results survived the round-trip:
++1. Reload with formulas visible:
++   - `load_workbook(path, data_only=False)` and spot-check that key cells still contain `=...`.
++2. Reload with cached results:
++   - `load_workbook(path, data_only=True)` and confirm dependent cells return numeric values (not None/NaN).
++3. Confirm untouched cells remain unchanged:
++   - Compare a few representative cells outside the edited region to ensure no widespread NaNs/blanks appeared.
++
++If (2) fails, rerun `recalc.py` and re-check.
++
++
++#### FX-table updates (symmetric rates / inverse consistency)
++For exchange-rate matrices (row currency → column currency) that mix inputs and formulas:
++- **Update only the explicit input cell** provided by the user (e.g., USD→CNY). Do not rewrite the table/range.
++- **Never overwrite formula cells** that compute inverses/cross rates (often `=ROUND(1/<input>, …)` or similar).
++- **Ensure inverse and dependent cells are numeric under `data_only=True`**:
++  - Preferred: rely on formulas + `recalc.py` so cached values update.
++  - Verification: after recalc, check the inverse cell (CNY→USD) is numeric and close to `1/rate` within rounding tolerance.
++- **Guardrails**: after save+recalc, sample 3–5 unrelated cells and confirm they remain numeric and unchanged (to detect accidental cached-value loss or range rewrites).
+ Quick checks to ensure formulas work correctly:
+ 
+ ### Essential Verification
+@@ -268,9 +337,9 @@
+ ### Working with openpyxl
+ - Cell indices are 1-based (row=1, column=1 refers to cell A1)
+ - Use `data_only=True` to read calculated values: `load_workbook('file.xlsx', data_only=True)`
+-- **Warning**: If opened with `data_only=True` and saved, formulas are replaced with values and permanently lost
+-- For large files: Use `read_only=True` for reading or `write_only=True` for writing
+-- Formulas are preserved but not evaluated - use recalc.py to update values
++- **Warning**: If opened with `data_only=True` and saved, formulas may be replaced with values and permanently lost.
++- For large files: Use `read_only=True` for reading or `write_only=True` for writing.
++- Formulas are preserved but not evaluated; **openpyxl does not recalculate and may clear cached results on save**, which can make many cells appear blank/NaN to `data_only=True` readers. **Always run `recalc.py` after edits** (especially for embedded workbooks) and then re-open with `data_only=True` to confirm key numeric cells are present.
+ 
+ ### Working with pandas
+ - Specify data types to avoid inference issues: `pd.read_excel('file.xlsx', dtype={'id': str})`

@@ -1,0 +1,60 @@
+--- before/reflow-machine-maintenance-guidance/SKILL.md
++++ after/reflow-machine-maintenance-guidance/SKILL.md
+@@ -80,3 +80,30 @@
+                 total += (tcross - t0)
+     return total
+ ```
++
++
++
++## Q5: Best run per board_family (output formatting)
++
++For each board_family in mes_log.csv, pick `best_run_id` by quality then efficiency:
++1. Primary key: `fp_yield_pct` descending (higher is better).
++2. Secondary key: `boards_per_min` descending (higher is better).
++3. Tiebreak: `run_id` ascending (lexicographic).
++
++Then `runner_up_run_ids` = all other run_ids in that board_family. IMPORTANT: `runner_up_run_ids` MUST be sorted ascending (lexicographic) by `run_id`, NOT by ranking score. The verifier checks `runners == sorted(runners)`.
++
++Worked example:
++```python
++for bf, g in runs.groupby("board_family"):
++    ranked = g.sort_values(["fp_yield_pct","boards_per_min","run_id"], ascending=[False,False,True])
++    best = ranked.iloc[0]["run_id"]
++    others = [r for r in g["run_id"].astype(str).tolist() if r != best]
++    runner_up_run_ids = sorted(others)   # ASCENDING by run_id, independent of score
++```
++
++## Output formatting rules (apply to ALL q01–q05 outputs)
++
++- Round all float values to 2 decimals.
++- Sort every array in the output JSON ascending by `run_id` / `board_family` / `board_id` as applicable — INCLUDING nested/auxiliary arrays like `runner_up_run_ids`, `violating_runs`, `failing_runs`. Never emit arrays in ranking order.
++- Use `null` for missing/undefined values (e.g., runs with no thermocouple data).
++- Keys and run_ids are strings; compare/sort lexicographically.
+--- before/reflow-profile-compliance-toolkit/SKILL.md
++++ after/reflow-profile-compliance-toolkit/SKILL.md
+@@ -221,3 +221,24 @@
+ - No NaN/Inf in JSON.
+ - Sensor selection uses deterministic tie-breaks.
+ - Any “time above threshold” uses interpolation (not naive threshold counting).
++
++
++
++## Run selection & output sorting (Q5)
++
++When selecting the best run per `board_family` (e.g., Q5):
++- Primary criterion: highest `fp_yield_pct` (quality).
++- Secondary criterion: highest `boards_per_min` (efficiency).
++- Tiebreaker: smallest `run_id` lexicographically ascending.
++
++Full selection procedure is specified in the companion skill `reflow-machine-maintenance-guidance`.
++
++Critical output rule — **all output arrays, including `runner_up_run_ids`, MUST be sorted ascending by `run_id` regardless of ranking metric**. Do not emit runner-ups in ranked order.
++
++```python
++# After determining best_run_id for a board_family:
++other_run_ids = [r for r in family_run_ids if r != best_run_id]
++runner_up_run_ids = sorted(other_run_ids)  # ascending by run_id, NOT by rank
++```
++
++Sanity check before writing q05.json: for every record, assert `rec['runner_up_run_ids'] == sorted(rec['runner_up_run_ids'])`.

@@ -1,0 +1,32 @@
+{
+  "diagnosis": {
+    "task_id": "dynamic-object-aware-egomotion",
+    "fallback_used": false,
+    "overall_diagnosis": "Motion labeling passes (Macro-F1 0.86) but dynamic-object mask IoU is far below threshold (0.014 vs 0.1 required). The dyn-object-masks skill's approach (frame-differencing after affine warp, or the agent's Farneback residual variant) is not producing masks aligned with GT. The skill needs stronger guidance on handling parallax-heavy walking POV scenes and on calibrating thresholds/area filters to actually capture moving objects rather than parallax noise or missing them entirely.",
+    "diagnosed_skills": [
+      {
+        "path": "dyn-object-masks/SKILL.md",
+        "confidence": "0.9",
+        "diagnosis": "Mask Mean IoU is 0.014, catastrophically below the 0.1 threshold. The skill's current workflow (affine warp + absdiff + adaptive threshold + morphology + area filter) is insufficient for walking POV with strong parallax. Thresholds (min 20, 3*MAD) and area filters are not calibrated; the skill doesn't warn that pure 2D global motion models fail under parallax, nor does it recommend fallbacks (e.g., lower thresholds, larger dilation, flow-magnitude-based detection with lower MAD multiplier, or ensuring recall over precision given IoU threshold is only 0.1).",
+        "repair_instruction": "Update dyn-object-masks/SKILL.md to: (1) Recommend using dense optical flow (Farneback) residual after fitting a global affine flow model, as it handles parallax better than image differencing. (2) Lower the default residual threshold multiplier (e.g., median + 2*MAD, not 3*MAD) and reduce the minimum floor threshold to favor recall since IoU threshold is lenient (0.1). (3) Reduce the minimum connected-component area filter (e.g., 0.05-0.1% of image area, not 0.3%) to retain smaller moving objects. (4) Use larger closing kernels (15x15 or more) and apply dilation at the end to grow masks—this trades precision for recall, which helps IoU when GT masks are generous. (5) For the first frame (no previous), explicitly propagate the mask from frame 1 rather than leaving it empty. (6) Add explicit guidance that for walking POV / strong parallax scenes, consider segmentation-based approaches or more aggressive thresholds since 2D global motion cannot fully compensate."
+      },
+      {
+        "path": "egomotion-estimation/SKILL.md",
+        "confidence": "0.2",
+        "diagnosis": "Motion estimation passed (Macro-F1 0.86), so this skill is working adequately. Including only as low-confidence precaution.",
+        "repair_instruction": "No change strictly required; optionally add a note that the estimated global affine transform should be exported/reused by the dynamic-object masking stage to ensure consistency."
+      }
+    ],
+    "unselected_skills": [
+      "output-validation/SKILL.md",
+      "sampling-and-indexing/SKILL.md"
+    ]
+  },
+  "raw_text_prefix": "{\"overall_diagnosis\":\"Motion labeling passes (Macro-F1 0.86) but dynamic-object mask IoU is far below threshold (0.014 vs 0.1 required). The dyn-object-masks skill's approach (frame-differencing after affine warp, or the agent's Farneback residual variant) is not producing masks aligned with GT. The skill needs stronger guidance on handling parallax-heavy walking POV scenes and on calibrating thresholds/area filters to actually capture moving objects rather than parallax noise or missing them entirely.\",\"diagnosed_skills\":[{\"path\":\"dyn-object-masks/SKILL.md\",\"confidence\":0.9,\"diagnosis\":\"Mask Mean IoU is 0.014, catastrophically below the 0.1 threshold. The skill's current workflow (affine warp + absdiff + adaptive threshold + morphology + area filter) is insufficient for walking POV with strong parallax. Thresholds (min 20, 3*MAD) and area filters are not calibrated; the skill doesn't warn that pure 2D global motion models fail under parallax, nor does it recommend fallbacks (e.g., lower thresholds, larger dilation, flow-magnitude-based detection with lower MAD multiplier, or ensuring recall over precision given IoU threshold is only 0.1).\",\"repair_instruction\":\"Update dyn-object-masks/SKILL.md to: (1) Recommend using dense optical flow (Farneback) residual after fitting a global affine flow model, as it handles parallax better than image differencing. (2) Lower the default residual threshold multiplier (e.g., median + 2*MAD, not 3*MAD) and reduce the minimum floor threshold to favor recall since IoU threshold is lenient (0.1). (3) Reduce the minimum connected-component area filter (e.g., 0.05-0.1% of image area, not 0.3%) to retain smaller moving objects. (4) Use larger closing kernels (15x15 or more) and apply dilation at the end to grow masks—this trades precision for recall, which helps IoU when GT masks are generous. (5) For the first frame (no previous), explicitly propagate the mask from frame 1 rather than leaving it empty. (6) Add explicit guidance that for walking POV / strong parallax scenes, consider segmentation-based approaches or more aggressive thresholds since 2D global motion cannot fully compensate.\"},{\"path\":\"egomotion-estimation/SKILL.md\",\"confidence\":0.2,\"diagnosis\":\"Motion estimation passed (Macro-F1 0.86), so this skill is working adequately. Including only as low-confidence precaution.\",\"repair_instruction\":\"No change strictly required; optionally add a note that the estimated global affine transform should be exported/reused by the dynamic-object masking stage to ensure consistency.\"}],\"unselected_skills\":[{\"path\":\"sampling-and-indexing/SKILL.md\",\"reason\":\"Sampling (fps=5, 18 frames) was correct and all format tests passed.\"},{\"path\":\"output-validation/SKILL.md\",\"reason\":\"All format/structure validation tests passed; the failure is a semantic accuracy issue, not a format issue.\"}]}",
+  "usage": {
+    "prompt_tokens": 10100,
+    "completion_tokens": 1077,
+    "total_tokens": 11177
+  },
+  "duration_sec": 14.438
+}

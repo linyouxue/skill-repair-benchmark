@@ -1,0 +1,74 @@
+Analysis of failing build (AgentOps-AI/agentops, PR 189, build 24579293289)
+================================================================================
+
+Failing test (both py310 and py311):
+    tests/test_events.py::TestEvents::test_record_timestamp
+
+Assertion (tests/test_events.py:29):
+    event = ActionEvent()
+    time.sleep(0.15)
+    agentops.record(event)
+    assert event.init_timestamp != event.end_timestamp
+Observed failure: both timestamps equal '2024-05-04T02:35:55.717Z'.
+
+Root cause
+----------
+agentops/helpers.py defines the recorder:
+
+    def get_ISO_time():
+        return datetime.utcfromtimestamp(time.time()).isoformat(
+            timespec='milliseconds') + 'Z'
+
+Two problems:
+1. `timespec='milliseconds'` truncates the timestamp to 3 fractional
+   digits. Two calls that happen inside the same millisecond — which
+   can occur in this test even after a 0.15s sleep, because of how the
+   millisecond boundary falls — produce byte-identical strings, so the
+   `init_timestamp != end_timestamp` assertion fails.
+2. `datetime.utcfromtimestamp(...)` is deprecated in Python 3.12 and
+   returns a naive datetime; `datetime.now(timezone.utc)` is the
+   correct, non-deprecated replacement.
+
+This is the exact lossy-timestamp-recorder pattern documented in the
+testing-python skill. The fix must be in the production source
+(helpers.py), NOT in the test. ActionEvent's test is correct — it
+only checks that the two timestamps differ after sleeping 150 ms,
+which must always hold with proper precision.
+
+Why the "passed" build in log 24653510459 looked green
+------------------------------------------------------
+Same code; the millisecond truncation is lossy but not deterministic.
+Whether two calls separated by ~150 ms land in the same millisecond
+depends on when the first call fired relative to the ms boundary and
+on process scheduling. So the test is flaky in the failing build and
+accidentally green in the oracle build. Fixing precision makes it
+deterministic.
+
+Format compatibility
+--------------------
+tests/test_record_function.py parses these timestamps with
+`datetime.fromisoformat(ts.replace('Z', '+00:00'))`. Python 3.10/3.11
+`fromisoformat` accepts the microsecond-precision ISO string with the
+`+00:00` offset, so increasing precision does not break that test or
+any other consumer in the repo (grep for get_ISO_time / init_timestamp
+/ end_timestamp confirmed).
+
+Fix plan
+--------
+Single-file change: agentops/helpers.py
+
+Before:
+    from datetime import datetime
+    ...
+    def get_ISO_time():
+        return datetime.utcfromtimestamp(time.time()).isoformat(
+            timespec='milliseconds') + 'Z'
+
+After:
+    from datetime import datetime, timezone
+    ...
+    def get_ISO_time():
+        return datetime.now(timezone.utc).isoformat(
+            timespec='microseconds').replace('+00:00', 'Z')
+
+No test changes. No build-config changes.

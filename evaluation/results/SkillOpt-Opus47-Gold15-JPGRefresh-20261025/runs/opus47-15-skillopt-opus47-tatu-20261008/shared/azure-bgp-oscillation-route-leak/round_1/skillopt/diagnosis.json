@@ -1,0 +1,23 @@
+{
+  "task_id": "azure-bgp-oscillation-route-leak",
+  "fallback_used": false,
+  "overall_diagnosis": "Across all three samples, the agent consistently misclassified leak-mitigation solutions (export policy blocking provider→peer, no-export community, ingress AS_PATH filters, RPKI origin validation) as resolving BOTH oscillation and route leak, when the verifier expects them to resolve ONLY the route leak. The root cause is that azure-bgp/SKILL.md does not clearly distinguish between (a) solutions that stop a route leak by filtering/blocking advertisements and (b) solutions that break an oscillation preference cycle by altering route preference/selection. The skill needs an explicit classification rubric with two independent checks and worked examples mapping each canonical solution to (oscillation_resolved, route_leak_resolved) booleans.",
+  "diagnosed_skills": [
+    {
+      "path": "azure-bgp/SKILL.md",
+      "confidence": "0.9",
+      "diagnosis": "The skill conflates leak-stopping policies with cycle-breaking policies. The agent repeatedly classified no-export community, export policy blocking provider→peer, ingress AS_PATH filters on the receiving hub, and RPKI origin validation as resolving oscillation when they only resolve the route leak. The skill lacks an explicit rule that oscillation resolution requires modifying the local routing-preference cycle (local_pref/preference hierarchy, routing intent, UDR override, or export filter on the hub re-advertising routes learned from the peer hub), not merely filtering advertisements at ingress or blocking provider→peer export. It also lacks a decision table mapping each canonical solution string to the correct (oscillation_resolved, route_leak_resolved) pair.",
+      "repair_instruction": "Add a 'Solution Classification Decision Table' section to azure-bgp/SKILL.md with two independent checks and explicit rules:\n\nRULE 1 (Oscillation resolved=True ONLY IF): the solution changes path-selection/preference logic on at least one oscillating hub so the preference cycle is broken. Qualifying mechanisms: Virtual WAN routing intent (overrides BGP path selection), UDR data-plane override, routing preference hierarchy changes (customer>VirtualWAN>peer), direct local-preference updates on hub1, OR an export filter on hub1 that removes routes learned from hub2 before re-advertising (removes the alternate path).\n\nRULE 2 (Route leak resolved=True ONLY IF): the solution prevents provider-learned routes from being exported to a peer hub, OR prevents the receiving hub from accepting such leaked routes. Qualifying mechanisms: export policy blocking provider routes to peer hub, no-export community on provider→peer, ingress AS_PATH filter on receiving hub rejecting AS 65001 (provider ASN), RPKI origin validation (treated as leak-mitigation per verifier).\n\nKEY CLARIFICATION: Filtering a leaked advertisement at the destination or blocking export to the peer does NOT break the preference cycle on the other hub—hub1 still prefers via hub2 for other routes—so these resolve ONLY the route leak, not oscillation.\n\nCanonical mapping (oscillation_resolved, route_leak_resolved):\n- Virtual WAN routing intent → (True, True)\n- UDR override on hub → (True, True)\n- Routing preference hierarchy change (customer>VirtualWAN>peer) → (True, False)\n- Hub1 local-preference update to stop preferring via hub2 → (True, False)\n- Export filter on hub1 removing hub2-learned routes before re-advertising → (True, False)\n- Export policy blocking provider routes to peer hub → (False, True)\n- No-export community on provider→peer → (False, True)\n- Ingress AS_PATH filter on hub2 rejecting AS 65001 from peer hub → (False, True)\n- RPKI origin validation → (False, True)\n- Prohibited/ineffective (disable peering, shut down session, restart BGP, timer tuning, dampening, max-prefix, ECMP, wait for convergence, vague route map, MED-only tweaks that don't change preference order) → (False, False)\n\nInclude worked examples matching the task's exact solution strings so the agent can map directly."
+    }
+  ],
+  "unselected_skills": [],
+  "diagnosis_sample_count": 3,
+  "merged_from_samples": true,
+  "edit_budget_l": 4,
+  "shared_diagnosis": true,
+  "shared_diagnosis_source": "fresh",
+  "repair_round": 1,
+  "diagnosis_n": 3,
+  "merge_samples": true,
+  "producer_backend": "skillopt"
+}

@@ -1,0 +1,33 @@
+Fuzzing notes (black)
+
+High-value inputs / boundaries
+- Source parsing & formatting: black.format_str(), black.format_file_contents()
+- Parsing backend: black.parsing.lib2to3_parse(), black.parsing.parse_ast()
+- Notebook-ish paths: black.format_cell()/mask_cell()/unmask_cell() (via format_file_contents w/ is_ipynb)
+
+Suggested functions-under-test (FUTs)
+1) black.format_str(src_contents, mode=black.Mode(...))
+   - Main public API; parses source via lib2to3, generates formatted output.
+   - Lots of edge cases around invalid syntax, indentation, encoding-ish weirdness.
+
+2) black.parsing.lib2to3_parse(src_txt, target_versions=...)
+   - Error-handling logic and grammar selection.
+
+Primary fuzz oracle
+- If format_str() succeeds, formatting should be stable:
+  formatted = format_str(src)
+  formatted2 = format_str(formatted)
+  assert formatted2 == formatted
+
+Acceptable exceptions (treat as non-findings)
+- black.parsing.InvalidInput
+- black.NothingChanged
+- SyntaxError, IndentationError
+
+Suspicious exceptions (let them surface)
+- AssertionError from Black invariants
+- RuntimeError (e.g., unexpected internal states)
+- Any crash/hang
+
+Performance / DoS notes
+- Cap input size (e.g., <= 8KB) to avoid excessive parsing time.
