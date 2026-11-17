@@ -1,0 +1,42 @@
+## Window 12 new evidence
+
+This window captures the executor's mid-run OCR experiment on 10 receipts with `convert('L') + ImageOps.autocontrast + PSM 6/4/11`. The dumped lines are highly informative because they show, for most failing receipts, that the *correct* total is clearly recoverable with preprocessing + PSM 6 — meaning the failures were algorithmic/selection choices, not fundamentally un-OCRable images.
+
+Key new signals from the OCR dumps (preprocessed PSM 6 unless noted):
+
+- **074.jpg**: `'Subtotal : 102.00'`, `'Total incl. of GST 102.00'`, then a garbled `'Total Amt Rounded ——S«702.00'`, `'Total tem(a) 24'`. The *correct* 102.00 appears and the "Rounded"-line's `702.00` is pure OCR corruption of `102.00` (leading `S«` eaten by the regex). Also matches image "Total incl. of GST 102.00" / "Total Amt Rounded 102.00".
+- **011.jpg**: `'TOTAL 15.00'`, `'DATE: 15/06/2017'` — both unambiguous. The r003 prediction (15.00, 2017-06-15) is already correct per feedback.
+- **063.jpg / 064.jpg**: Date line parses as `26/02/18` / `21/02/18`; totals `85.54` / `88.17`. Both r003 outputs match these, so no residual failure here.
+- **009.jpg**: `'Total Rounded 26.60'` + `'18/01/2018'` — correct.
+- **083.jpg / 094.jpg / 087.jpg / 088.jpg**: all cleanly show the right total and date.
+- **077.jpg**: three distinct lines — `'Total (Excluding GSI): 21,30'`, `'Total (Inclusive of GST): 23.26'`, and a large `'TOTAL: 23.25'` (after Rounding Adj −0.01 as the image confirms). R003 wrote `23.26`; feedback marks amount incorrect → oracle very likely wants `23.25` (the final "TOTAL:" row after rounding).
+
+The executor's own think-block at m0039/m0045 explicitly diagnoses the tier-4 selection bug: last-candidate with a decimal wins, even when earlier candidates are obviously the real total. Their intended fix (iterate in reverse, skip non-decimal matches like "Total Item(s): 4", add exclusions for ITEM COUNT / TOTAL QTY / TOTAL SAVINGS, prefer PSM 6 preprocessed OCR) is only *started* in this window (m0051 adds those exclusion patterns) and never reaches a re-run that converges before `termination_reason: max_iterations` (65 iterations exhausted).
+
+## Causal mapping to the four failed fields
+
+Feedback table (reward 0.909; 4 wrong fields):
+
+1. **074.jpg amount = 702.00 (wrong)** — classic last-decimal-in-tier bug. Image clearly shows `Total incl. of GST 102.00` / `Total Amt Rounded 102.00`; OCR corrupts the rounded line to `S«702.00` and the `\bTOTAL\b` priority-4 match takes the *last* decimal candidate. Window 12 proves PSM 6 preprocessing already surfaces a clean "Total incl. of GST 102.00" line, but the submitted pipeline (a) wasn't switched to preprocessed PSM 6 before termination, and/or (b) still used last-candidate selection.
+2. **077.jpg amount = 23.26 (wrong)** — Image shows big `TOTAL: 23.25` as the authoritative receipt bottom line (Rounding Adj −0.01 applied to 23.26). R003 selected the pre-rounding line. Fix path: add a tier between priority-2 and priority-4 for a bare "TOTAL:" / "TOTAL RM" footer line that appears *after* all other totals, or prefer the very last decimal-bearing line matching plain `TOTAL\s*:` when a Rounding-Adj line is present.
+3. **078.jpg amount = "" (wrong/missing)** — Image (Thai Delicious) shows clear `Grand Total : 92.80` (priority 1 keyword `GRAND TOTAL`). R003 wrote empty. Window 12 did not exercise this file, so uncertainty is highest here, but hypotheses: (a) raw (unpreprocessed, default PSM 3) OCR split `Grand Total` across lines or mis-read as `Grani Total` / `Grand Totai` causing the `\bGRAND\s+TOTAL\b` regex to miss; (b) `extract_last_number` on `92.80` failed because of a stray glyph. Priority-1 falling through all tiers with no fallback → None → "". The window's ongoing refactor to PSM 6 + autocontrast would very likely rescue this receipt, as 078 is a clean print.
+4. **034.jpg date = 2018-08-09 (wrong)** — Image "Date: 09/03/2018" (DD/MM/YYYY) → oracle 2018-03-09. R003's 2018-08-09 does not match 09/03 under either MM/DD or DD/MM; it looks like the date parser latched onto a non-date token (e.g., receipt ID `CS00084670` — digits `0008`+time `08:49:00`, or `A03041` handwritten header) and formatted spuriously. This window did not inspect 034, so cause is inferential only.
+
+## Momentum / Patcher guidance
+
+Evidence-backed changes the Patcher should encode:
+
+- **Preprocess every image** with `convert('L') + ImageOps.autocontrast`, then run Tesseract with `--psm 6` as primary (window shows PSM 6 is strictly better than default PSM 3 on 074, 011, 077, 083, 087, 088, 094, 064). Keep PSM 4 as secondary.
+- **Selection rule rework** (priority 4):
+  - Iterate matches in receipt order; skip candidates whose `extract_last_number` is `None` (so "Total Item(s): 4" doesn't poison fallback).
+  - If multiple decimal candidates exist in tier 4, prefer the one matching `ROUNDED TOTAL`, `TOTAL ROUNDED`, `NET TOTAL`, `TOTAL AFTER (ADJ|ROUNDING)` patterns, else the one closest in value to a nearby Subtotal, else the last.
+  - Drop the "look at next non-excluded line" fallback *past* a GST-summary line (that's what injected 96.23 for 074 earlier in the trace).
+- **Exclusion additions** (already drafted at m0051): `TOTAL\s+(ITEMS?|QTY|QUANTITY|SAVINGS?)`, `ITEM\s+COUNT`.
+- **"TOTAL:" footer handling** for 077: if the line is just `TOTAL\s*:` with a decimal and a Rounding-Adj line precedes it, treat as highest-priority answer (post-rounding final).
+- **Date parser**: always prefer a line prefixed by `Date\s*[:\-]`; interpret `DD/MM/YYYY` for Malaysian receipts; reject tokens with fewer than two slashes/hyphens or embedded in colon-separated time components. This would correct 034 regardless of PSM.
+
+## Uncertainty
+
+- I have not read `extract.py`'s final state, so I cannot confirm which fixes were actually in the shipped binary vs. only brainstormed. The run ended at max_iterations, so the written code may be partially updated (m0051 exclusion edits were applied) but likely never re-executed against all 22 images.
+- 078's failure mode is inferred; no OCR dump exists in this window to confirm whether `Grand Total` was mis-read.
+- 077 oracle value (23.25 vs 23.26) is inferred from the feedback "amount incorrect" + image inspection; the diagnosis assumes 23.25.

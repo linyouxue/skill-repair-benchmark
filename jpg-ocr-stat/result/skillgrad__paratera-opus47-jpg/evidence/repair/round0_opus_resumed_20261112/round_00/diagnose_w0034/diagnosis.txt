@@ -1,0 +1,31 @@
+## New evidence from this window
+
+This window captures the agent's mid-run transition from default Tesseract to `PSM=6 + grayscale + autocontrast`, plus a `SUMMARY_HEADER_RE` cutoff and reversed-candidate iteration. Step 17 shows the first post-preprocessing run; it fixed several cases but introduced regressions (`052` 10.00→None; `034` date 2018-08-09→2018-03-09; `077` 23.26→23.25). The delivered XLSX contains values matching the *default-PSM* algorithm, not the PSM-6 state, confirming either a revert or a later stage overwriting with the original path before `max_iterations=65` hit (`termination_reason: max_iterations`). That is critical context: the final predictions do not reflect the best-tested algorithm.
+
+## Per-failing-field root causes (verified against image blocks)
+
+**034.jpg – date wrong (`2018-08-09`).** Image clearly prints `Date: 09/03/2018`. Window steps 17/18 show default OCR produces `09/08/2018` while PSM-6 preprocessing produces `09/03/2018`. The delivered answer encodes month "08" → agent's committed path is the pre-preprocessing one. Cause: OCR 3↔8 confusion on a thin-stroked receipt; fixable by the preprocessing+PSM-6 branch already written but not shipped.
+
+**074.jpg – amount wrong (`702.00`).** Image shows `102.00` on every monetary line (Subtotal, Total incl. GST, Total Amt Rounded, Payment). Step 18 (preprocessed) output: `Total incl. of GST 102.00` ✓, but `Total Amt Rounded ——S«702.00` and step 11 default OCR gives `Total inel. of GBT 702.00`. Even PSM-6 corrupted at least one of the three equivalent total lines. The current "LAST candidate wins" rule picks the corrupted Rounded line. Root cause is **selection fragility**, not just OCR noise: when multiple same-tier TOTAL lines exist with disagreeing amounts, no cross-validation is performed. Subtotal/Payment majority (3× 102.00 vs 1× 702.00) would have disambiguated.
+
+**077.jpg – amount wrong (`23.26`).** Image shows two totals: `Total (Inclusive of GST): 23.26` then `TOTAL: 23.25` (final rounded, large font). Step 18 PSM-6 OCR captured both; the "last-candidate in tier" rule correctly returns 23.25 (step 17 output). Delivered 23.26 again implies the shipped code path is the **old** algorithm (either default-PSM OCR that missed `TOTAL: 23.25`, or without-reverse-iteration logic). Oracle feedback (amount wrong) is consistent with expected = 23.25 per the task-hint priority: plain `TOTAL` tier should prefer the last matching line.
+
+**078.jpg – amount null.** Image shows `Grand Total ... 92.80`. Step 18 OCR for 078 yields `'{ Grand Total —— ~"""92 80'` – the decimal was lost (space instead of `.`). The number regex `\d+\.\d{1,2}` matches nothing on this line; fallback checks the next line which is `Cash Received — 100.00` and that is not excluded, so the fallback is at risk of returning 100.00. Final delivered null suggests exclusion short-circuited or the tier didn't match due to differences in default-PSM wording. Either way the ultimate failure is **OCR space-for-dot drop**, same mode as `9,80` and `1000`-for-`10.00` seen in 052.
+
+## Structural issues (Momentum / Patcher inputs)
+
+1. **Single-OCR-pass strategy is insufficient.** The original Skill explicitly describes a *multi-pass* approach (several PSMs, invert, sharpen) and recommends aggregating results. Window shows the agent only switched *between* single configurations (default ↔ PSM6/autocontrast) rather than combining them. Each switch fixes some receipts and regresses others (052 lost because the garbled left-margin noise prevented GRAND TOTAL extraction once preprocessing changed binarization). A union-of-passes + candidate-voting scheme is strongly indicated.
+
+2. **No numeric cross-validation.** The task hint lists keyword priority but the real failure mode is that identical TOTAL amounts repeat 3–4 times per receipt; using frequency/consensus over all monetary values would recover `102.00` (074), `92.80` (078), and `10.00` (052) despite isolated OCR corruption.
+
+3. **Number parser too strict.** Current regex requires `\d+\.\d{1,2}`. Observed OCR variants that should be recognised as money inside TOTAL/GRAND TOTAL contexts: `92 80`, `1000`, `20,00`, `10.u0`, `538 00`, `538.00`. A tier-specific permissive parser that (a) accepts comma-decimal, (b) accepts space-decimal when exactly two trailing digits, and (c) accepts bare integers reinterpreted as `N.00` only when corroborated by another occurrence on the same receipt, would recover most of these.
+
+4. **"Last candidate wins" vs. "ignore rounding-after-summary" conflict.** For 077 the last candidate under plain-`TOTAL` is the correct final `TOTAL: 23.25`; for 074 the last candidate (`Total Amt Rounded 702.00`) is the wrong one because the amount itself is OCR-corrupt. Pure positional heuristics will always flip between these two receipts; only cross-amount consensus resolves both.
+
+5. **Iteration budget / delivery mismatch.** `max_iterations=65` was reached and the committed artifact appears to pre-date the PSM-6 branch for several receipts. Patcher should (a) ensure the improved extraction is actually invoked in `process_image` end-to-end before writing XLSX, and (b) keep edits incremental enough to avoid cliff-edge regressions like 052.
+
+## Uncertainty
+
+- I cannot see the oracle's exact expected strings; the inferences `074=102.00`, `077=23.25`, `078=92.80`, `034 date=2018-03-09` come from direct inspection of the supplied JPEGs plus the boolean field_feedback and task-hint priority list, not from any oracle file.
+- Whether `052` oracle is `10.00` is likewise an image inference (`SUB TOTAL 10.00 / GRAND TOTAL 10.00` visible); the receipt currently scores correct in feedback, so changes must not regress it — motivates keeping default-PSM as a fallback OCR pass.
+- The exact commit state of `extract.py` at XLSX-write time is not in this window; I infer it from mismatches between step-17 PSM-6 outputs and delivered predictions.

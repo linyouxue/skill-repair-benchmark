@@ -1,0 +1,1 @@
+JPG diagnosis is delivered as structured window messages by jpg_adapter.

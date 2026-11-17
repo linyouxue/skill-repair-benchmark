@@ -1,0 +1,37 @@
+## Scope / new evidence this window
+This window shows exchanges e0001–e0015 (m0003–m0045): initial OCR exploration, construction of `/app/workspace/extract.py` (m0021), first full run (m0024 → implicit output in m0027 thought), several debugging passes, and the pivot in m0042/m0045 to preprocessed PSM 6. The actual extract.py code is now visible (Artifact m0021). All 22 source JPEGs are provided as image blocks, and permitted field feedback tells us exactly which 4 cells are wrong:
+
+- 034.jpg: date wrong (predicted 2018-08-09)
+- 074.jpg: amount wrong (predicted 20.00 — wait, predictions table says "702.00"… correction: predictions show 702.00 is NOT in table; 074.jpg has 702.00 total in predictions — actually table shows "702.00" for 074. Yes confirmed amount 702.00)
+- 077.jpg: amount wrong (predicted 23.26)
+- 078.jpg: amount wrong (predicted "" / empty)
+
+## Image-grounded root causes
+
+**074.jpg (amount 702.00 → wrong).** On the image the three total-area lines read "Total Excl. of GST 96.23", "Total Incl. of GST 102.00", "Total Amt Rounded 102.00", "Payment 102.00". Tesseract on raw image replaces the leading "1" of 102.00 with "7". The m0033/m0036 debug confirms extract_total matched a priority-4 TOTAL line and returned the number in that line. So the defect is purely OCR character confusion (1↔7), not the extractor. m0042+m0045 found that preprocessing (grayscale+autocontrast) + PSM 6 reads "102.00" correctly, but this fix was discovered late and never got applied to the delivered Excel because the run was terminated by `max_iterations=65` (termination_reason recorded). Fix: Patcher should make the default pipeline run preprocessing + PSM 6 (and optionally a second pass to confirm) rather than raw `image_to_string`.
+
+**077.jpg (amount 23.26 → wrong).** Pixel inspection: receipt displays "Total (Inclusive of GST): 23.26", then "Rounding Adj: -0.01", then a large "TOTAL: 23.25". The post-rounding grand total is 23.25, not 23.26. In m0045 the agent explicitly saw PSM-6 OCR yielding both "Total (Inclusive of GST): 23.26" and "TOTAL: 23.25" and chose to prefer 23.26, calling 23.25 an OCR error. This was a semantic misjudgement, not an OCR failure. The extract_total already prefers the LAST matching line within a tier; keeping that rule would have given 23.25. Fix: respect the last TOTAL (post-rounding) match; don't second-guess it.
+
+**078.jpg (amount empty → wrong).** Image clearly shows "Total: 92.80" then "Grand Total: 92.80". The m0018 analysis noted raw Tesseract output concatenates to "GrandTotal 92.80" (no space). Current regexes `\bGRAND\s+TOTAL\b` and `\bTOTAL\b` both fail on the single token "GrandTotal" (no word boundary inside, and GRAND\s+TOTAL requires whitespace). So extract_total returned None and the serializer wrote an empty cell. Two independent fixes are needed: (a) add a regex that tolerates missing whitespace (`\bGRAND\s*TOTAL\b` or match "GRAND TOTAL" after collapsing camel-case), (b) also match on "TOTAL" inside "GrandTotal" via a substring search as last resort. A fallback on "Total : 92.80" line immediately above would also rescue this — but OCR of 078 is noisy there too.
+
+**034.jpg (date 2018-08-09 → wrong).** Image shows "Date: 09/03/2018". OCR misread "03" as "08" (0+3 running together). The code takes the first DD/MM/YYYY match. There is no second date on the receipt to cross-validate. This is pure OCR noise in the date digits; preprocessing + PSM 6 may help but is not guaranteed. Lower confidence fix.
+
+## Extractor-logic observations (orthogonal to above)
+
+- The GST-summary exclusion only matches a single line. For 071/074/034 the GST summary section has a "Total" row BELOW the "GST Summary" header. m0027 planned a "once a GST SUMMARY header seen, exclude all subsequent TOTAL candidates" rule but the Artifact extract.py shows this was never implemented. The predictions nevertheless came out right for 034 amount and 071 amount, so the current single-line exclusion happened to be enough on raw OCR — but it is fragile and may regress when preprocessing changes line layout.
+- Total serialization: when `extract_total` returns None, the Excel cell is stored, and the predictions JSON shows it as `""`. The task says "null" for failed extraction, but the scored field_feedback treats `""` as present-and-wrong rather than missing. Patcher should decide whether to explicitly write None (openpyxl writes empty cell) — the current behaviour is already None; the downstream exporter is what stringifies. Low priority since only one field (078) is affected and the root cause is the extraction failure, not the null policy.
+
+## Uncertainty
+
+- I cannot see the oracle Excel. The 077 analysis above is based on reading the printed "TOTAL: 23.25" from the image; it is consistent with the feedback flag.
+- For 074 I rely on the m0039 debug + image showing "102.00" in multiple lines; high confidence.
+- For 034 the OCR confusion 03↔08 is likely but not directly observed in a quoted OCR dump in this window; medium confidence.
+- Preprocessing (PSM 6 + autocontrast) was validated on 074/011/063/009/083/094/087/088/064 in m0042, so switching the default is low-risk. However it was never actually rolled out before `max_iterations` terminated the run — Momentum should note this as "known-good change discovered but unshipped".
+
+## Signals for Momentum / Patcher
+
+1. Replace raw `image_to_string(img)` with preprocessed (`convert('L')` + `ImageOps.autocontrast`) OCR at `--psm 6`, optionally combined with a second raw pass.
+2. Make GRAND TOTAL / TOTAL patterns tolerate missing whitespace (handle "GrandTotal" OCR glom).
+3. Keep "last candidate in tier" preference; do NOT override to prefer "Inclusive of GST" over a later bare "TOTAL" line (fixes 077 regression noted in m0045 reasoning).
+4. Terminal state was `max_iterations` (65/65), so the source agent demonstrably had more work queued; Patcher needs to deliver a self-contained script rather than iterative debugging.
+5. Skills (image-ocr, openai-vision) are generic; no receipt heuristics. Patcher's job is the extract.py layer, not the skill text, unless Momentum chooses to encode receipt-specific guidance in the image-ocr skill.

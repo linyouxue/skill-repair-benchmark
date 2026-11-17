@@ -1,0 +1,48 @@
+## Window-scoped evidence (w0014, m0080–m0114)
+
+This window captures the executor's final refinement loop. It shows the script reaching the exact state that was shipped (via m0083 / m0092 outputs matching the delivered predictions), and the trajectory then exploring upscaled OCR but never adopting it.
+
+### Field-feedback failures (4 incorrect fields on 3 receipts)
+
+1. **034.jpg — date wrong** ("2018-08-09" vs image).
+   Image 034 shows a crisp printed `Date: 09/03/2018`. The executor's selected OCR variant misread the slim `3` as `8`, yielding `09/08/2018` → ISO `2018-08-09`. This window never surfaces 034 as a date concern; the fix was never attempted. Amount (332.30) is correct — only the date digit lost.
+
+2. **074.jpg — amount wrong** ("702.00" vs 102.00 in image).
+   Image 074 clearly shows `Subtotal: 102.00`, `Total incl. of GST 102.00`, `Total Amt Rounded 102.00`, `Payment: 102.00`. In m0098/m0110/m0113 the executor demonstrated that a 2× upscale + autocontrast + PSM 6 yields correctly "`102.00`" on every Total line; default (unscaled) OCR consistently merged the vertical bar of "1" with noise into "7", producing `702.00`. The executor diagnosed this (m0099, m0105, m0114) but, as m0083/m0092 outputs show, the shipped `extract.py` still uses only (default OCR + autocontrast PSM 6), not the upscaled pass. Hence "last tier-4 match" picks the `Total Amt Rounded 702.00` line.
+
+3. **077.jpg — amount wrong** ("23.26" vs likely 23.25 final).
+   Image 077 contains three Tier-4 ("TOTAL") candidates in reading order: `Total (Excluding GST): 21.30` → `Total (Inclusive of GST): 23.26` → `Rounding Adj: -0.01` → `TOTAL: 23.25` (bolded final). The executor added an "EXCLUDING" exclusion (m0102) which correctly skips 21.30. In the OCR variant actually shipped, the bold `TOTAL: 23.25` line was either missed or its number was tokenised differently (upscaled PSM 6 in m0113 shows both `23.26` and `23.25`). "Last candidate wins" with the upscaled text would select `23.25`; with the non-upscaled text, only `23.26` survives, so `23.26` gets picked. Root cause: shipped OCR did not capture the final `TOTAL: 23.25` line.
+
+4. **078.jpg — amount empty**.
+   Image 078 shows `Total : 92.80` and `Grand Total : 92.80` as right-aligned amounts. Upscaled OCR in m0113 reveals the split-line failure: `: Grand Total` is extracted with the number stripped onto a neighbouring visual row. The executor's own early OCR (m0083) in fact produced `78.jpg … total=92.80`, but this was overwritten later when the `NUM_RE` was tightened to `\d+\.\d{2}` (m0087). That regex change eliminated any 92.80 candidate that lost a decimal in the particular OCR pass used for the final run, and no split-line fallback (the task hint's "last number on the next line" rule) was implemented. The shipped amount is empty.
+
+### Shared causal pattern
+
+All four failures trace to a single architectural choice: the executor settled on one preprocessing pass (default + autocontrast PSM 6) with a "last-candidate-in-highest-priority-tier" selector, and never integrated the alternative passes (upscale 2×, PSM 4, PSM 11, inverted) that m0098/m0110/m0113 proved recover 074, parts of 077, and the date digits of 034. The thinking in m0114 explicitly proposed a multi-variant consensus but that patch was not applied before the budget ended (termination_reason=max_iterations, acp_stop_reason=max_turn_requests).
+
+Secondary contributing rule changes visible in this window:
+- m0087 strict 2-decimal `NUM_RE` fixed 064 (88.17) but made the pipeline brittle to any OCR variant that drops a decimal (contributed to 078 emptiness).
+- m0102 added `EXCL(?:UDING|\.)` exclusion — a correct generalisation; keep it.
+- No split-line fallback (task hint, bullet "fallback for receipts where the keyword and the numeric amount are split across two lines") was ever implemented — this is the sole gap for 078.
+
+### Evidence quality / uncertainty
+
+- Images confirm: 034 date is `09/03/2018`; 074 total is `102.00`; 078 Grand Total is `92.80`.
+- 077 ambiguity: oracle value not visible; feedback alone says 23.26 is wrong, and the receipt's visually dominant bolded `TOTAL: 23.25` is the most plausible gold (post-rounding-adjustment final).
+- The upscaled OCR itself regressed some fields (010, 064, 090 in m0113). Blind switch would trade errors. A **multi-variant consensus** (tier-priority → agreement count → 2-decimal precision → source priority) is the robust choice and is required for both 034 (digit reliability) and 074/078 (coverage).
+
+### Guidance for Momentum / Patcher stages
+
+Momentum should flag:
+1. Shipped script uses a single OCR pass; proven-better variants exist in the same workspace experiments.
+2. No two-line split fallback — explicit gap vs. task prompt hint.
+3. Date extraction has no consensus or plausibility check; a single misread digit silently wins.
+
+Patcher should:
+- Run ≥3 OCR variants (default, upscaled-2×-autocontrast-PSM6, autocontrast-PSM4) and take a tier-aware consensus for `total_amount`.
+- For dates, parse all candidates across variants; prefer values whose month ∈ 1..12 and whose digits agree across ≥2 variants.
+- Implement the split-line fallback: if a keyword line matches but contains no 2-decimal number, use the last `\d+\.\d{2}` on the next non-empty line.
+- Keep the `EXCLUDING` exclusion (m0102) and the strict 2-decimal `NUM_RE` (m0087), but allow the fallback to loosen to "last number" per task hint.
+- Do not alter the XLSX schema; current column/order/format is accepted by the delivered run.
+
+Uncertainty: oracle values for 077 and the exact gold date format for 034 are not accessible; fixes above follow pixel evidence and the task prompt's keyword-priority specification.

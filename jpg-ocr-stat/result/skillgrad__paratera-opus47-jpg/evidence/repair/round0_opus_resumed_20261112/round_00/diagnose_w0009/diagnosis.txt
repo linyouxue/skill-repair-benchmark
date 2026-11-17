@@ -1,0 +1,40 @@
+## Scope of failure
+Feedback shows 40/44 fields correct. Four field errors to explain:
+
+| file | date pred | date OK | amount pred | amount OK |
+|------|-----------|---------|-------------|-----------|
+| 034  | 2018-08-09 | ✗ | 332.30 | ✓ |
+| 074  | 2018-03-20 | ✓ | 702.00 | ✗ |
+| 077  | 2017-10-29 | ✓ | 23.26  | ✗ |
+| 078  | 2017-02-02 | ✓ | ""     | ✗ |
+
+The other 18 receipts (007/009/010/011/019/039/052/063/064/069/071/080/083/087/088/090/094/097) are fully correct, so basic pipeline (keyword table, exclusion list, DD/MM/YYYY→ISO, 2-dp formatting) works. The current Skill's multi-pass Tesseract strategy is adequate for clean receipts; the four misses cluster around a) ambiguous glyph OCR and b) keyword-priority / last-line tie-breaking logic, not around infrastructure.
+
+## Per-case causal reading from the pixels
+
+**074.jpg — GL HANDICRAFT & TAILORING.** The receipt clearly shows `Subtotal 102.00`, `Total Incl. of GST 102.00`, `Total Amt Rounded 102.00`, `Payment 102.00`. The predicted "702.00" is a pure Tesseract glyph confusion: the thin serif "1" of "102.00" is routinely misread as "7" (the digit immediately follows a run of dashes/underscores and the font is a light stencil face). Evidence it is OCR and not keyword choice: every candidate line on this receipt carries the same digits, so whichever keyword the code picked, the digits were already corrupted. Fix locus: amount region needs a digit-only re-OCR (e.g. `-c tessedit_char_whitelist=0123456789.,` with `--psm 7/8`) and/or majority voting across preprocessing variants; the Skill already lists multi-pass OCR but does not vote on the numeric substring.
+
+**077.jpg — Banh Mi Cafe.** Pixel inspection shows two candidate lines: `Total (Inclusive of GST): 23.26`, then `Rounding Adj: -0.01`, then a bold `TOTAL: 23.25`. The prediction 23.26 means the parser took the first "TOTAL"-matching line and stopped. Per the task hint, both match the same bucket (`TOTAL` / `TOTAL AMOUNT`), so priority alone cannot disambiguate. The post-rounding bold `TOTAL:` is clearly the intended final figure (it is also the only one preceded by a Rounding Adj delta). Fix locus: when multiple non-excluded "TOTAL*" lines exist on the same receipt, prefer the **last** occurrence after a `Rounding Adj`/`Rounded` marker, or the line whose value equals previous-TOTAL + rounding delta. Note "Rounding Adj" is *not* in the exclusion list and must not be added there — it's a signal, not noise.
+
+**078.jpg — Thai Delicious Restaurant.** Image clearly shows `Total : 92.80` and `Grand Total : 92.80`, then `Cash Received : 100.00`, `Change : 7.20`, `AVERAGE / PAX(S) : 23.20`. Predicted amount is empty. Likely cause: the receipt is a wide tabular layout where columns `Qty / Price / Amount` and the totals block sit far to the right; Tesseract in default PSM often collapses the right column so the "Grand Total" label and the "92.80" value land on different output lines or get joined with "Cash Received 100.00". The agent's fallback rule ("if keyword and number are on different lines, take last number on next line") would then pick up `100.00` — but Cash Tendered is excluded, so the code bailed to null instead of continuing to the "Grand Total" line below. Additionally `AVERAGE / PAX(S): 23.20` risks matching "AMOUNT" patterns loosely. Fix locus: when multi-pass OCR disagrees on amount but a strong `GRAND TOTAL` keyword is present anywhere, prefer the numeric token on the same vertical band (image_to_data bbox match), not pure text-line adjacency.
+
+**034.jpg — Perniagaan Zheng Hui.** The pixel date is `Date: 09/03/2018` (DD/MM/YYYY → 2018-03-09). Prediction 2018-08-09 corresponds to month "08", not "03". The handwritten annotations "GA 1801", "GA 1801"… repeated down the item column include tokens like "1801" (= Jan 2018). Two plausible mechanisms: (i) Tesseract misread the printed "03" as "08" on this noisy scan (the "3" has a broken top that looks like "8"); (ii) the agent's date picker scanned for any date-like string and latched onto a later token containing "08". The "Time: 08:49:00" line also contains "08" immediately after "Date:" visually. The Skill has no explicit instruction to anchor on the `Date:` label with DD/MM/YYYY proximity or to validate against neighbouring tokens. Fix locus: date extraction should prefer a token tied to the literal label "Date" (or date-only line) and re-OCR the date pixel box with a numeric whitelist.
+
+## Guidance for Momentum / Patcher (not a rewrite)
+
+Evidence supports targeted, minimal Skill additions rather than a rewrite:
+
+1. **Numeric-region re-OCR with whitelist voting.** Add a step: after identifying the candidate amount line (and the Date label line), crop that bbox from `image_to_data` and re-OCR with `--psm 7 -c tessedit_char_whitelist=0123456789.,/-` across ≥2 preprocessing variants; accept the majority token. Addresses 074 and 034.
+
+2. **Tie-breaker for multiple matches in the same priority bucket.** When 2+ lines match the same keyword tier (notably bare `TOTAL`), choose the last occurrence after any line containing `ROUNDING`/`ROUNDED`/`ADJ`, not the first. Addresses 077. Do not touch the exclusion list.
+
+3. **Layout-aware GRAND TOTAL recovery.** If `GRAND TOTAL` is detected textually but no numeric token on the same output line, search for the right-most numeric token whose bbox y-centre is within ±half-line-height of the keyword bbox before falling back to "next-line last number". Addresses 078.
+
+4. **Date anchoring.** Prefer the date token on the same OCR line as the literal word `Date` (case-insensitive); only fall back to first global date-like regex hit when no such anchor exists. Addresses 034.
+
+## Uncertainty
+
+- For 077 I cannot verify the oracle; the visual `TOTAL: 23.25` is the dominant-font bottom line and almost certainly the intended answer, but it is possible the oracle normalized differently.
+- For 078 the null output means I cannot observe what the executor's OCR actually produced; the layout-collapse hypothesis is the most consistent with the receipt's wide table, but a pure OCR drop of "92.80" is also possible.
+- For 034 I cannot distinguish between OCR misread of "03" vs. parser latching onto "08:49" without the raw OCR text, so Patcher should guard both paths (label anchoring + numeric re-OCR), which is the minimal fix covering either cause.
+- Historical images were not sent to the source agent; my pixel reading is Diagnoser evidence only and does not retroactively give the source run vision.

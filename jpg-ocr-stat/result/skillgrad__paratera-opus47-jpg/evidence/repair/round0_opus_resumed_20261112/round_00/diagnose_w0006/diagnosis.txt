@@ -1,0 +1,31 @@
+## New evidence in this window (iterations 38–51)
+
+The agent added a third OCR variant (2× LANCZOS upscale + autocontrast + PSM 6) and a consensus-voting layer (`pick_best_total` / `pick_best_date`) that picks (a) lowest tier index, (b) highest-count value in that tier, (c) first-occurrence tiebreak. Window's XLSX output (a0047) vs the feedback-confirmed final submission reveals the voting layer caused several regressions that were only partly undone later.
+
+## Receipt-level causal findings (verified against pixels)
+
+- **074.jpg** (pixel: "Subtotal 102.00 / Total Excl. of GST 96.23 / Total Incl. of GST 102.00 / Total Amt Rounded 102.00 / Payment 102.00"). Ground truth = 102.00. Variant 0 and Variant 1 of the agent's OCR consistently misread the "1" in "102.00" on the final "Total Amt Rounded" line as "7" → 702.00. Only the upscaled variant 2 reads 102.00. Priority-tier LAST-wins within each variant drives variants 0/1 to 702; then cross-variant tier-tie majority gives 2 votes for 702, 1 for 102 → final 702 wins. The fix required is either (i) prefer FIRST candidate within tier when multiple "TOTAL" lines exist, or (ii) weight consensus by number of OCR variants reading the same value anywhere in the text (102 appears many times in all 3 variants; 702 only twice as a tier-3 LAST-pick).
+
+- **064.jpg** (pixel: "Total RM 88.17 ... Total Gross C RM 88.17"). Variant 2 (upscaled) garbles the "Total RM" line to "Total RM = B81?" and the "Visa RM" line to "Visa RM =688.17". The current `TOTAL RM` regex (priority tier 1) matches "Total RM = B81?"; its fallback scans next non-empty non-excluded line → picks the Visa line ("=688.17" parses as 688.17). This escalates the variant 2 result from tier 3 → tier 1, and the cross-variant selector uses MIN(tier) across variants, so tier-1 outlier from the noisiest variant beats the two agreeing tier-3 variants reading 88.17. Root cause: tier escalation by a single noisy variant plus permissive fallback that treats `Visa` as a totals line.
+
+- **077.jpg** (pixel: "Total (Inclusive of GST): 23.26 / Rounding Adj: -0.01 / TOTAL: 23.25"). The feedback confirms the oracle accepts **23.26** (post-run final XLSX in COMMON = 23.26, amount_correct=true), not the printed final "TOTAL: 23.25". The agent's reasoning at a0048 that "the printed final is 23.25, so 23.26 was wrong" is the opposite of the oracle convention. In this window the voting layer elected 23.25 (2 variants to 1), which the agent must later revert. Patcher guidance: when a Rounding Adj line sits between an "(Inclusive of GST)" total and a bare "TOTAL:" differing by |Δ|<0.05, prefer the Inclusive line.
+
+- **078.jpg** (pixel: "Total : 92.80 / Grand Total : 92.80 / Cash Received : 100.00 / Change : 7.20"). Variants 1 & 2 drop/garble the number on the "Grand Total" line (it OCRs as `': Grand Total'` with no digits). The fallback then advances to the next non-empty, non-excluded line and finds "Cash Received 100.00" — "Cash Received" is NOT in the exclusion regex (only `CASH TENDERED` from the hint, plus `CHANGE`). So fallback captures 100.00 under tier 0 (GRAND TOTAL), beating the correct 92.80 from variant 0's tier 3. The final submission ultimately becomes NULL for 078 (per COMMON), consistent with the agent later over-correcting. Fix: add `CASH RECEIVED`, `PAYMENT`, `AMOUNT PAID`, bare `CASH` to exclusion keywords used by fallback.
+
+- **034.jpg** (pixel date: "Date: 09/03/2018"). Final feedback shows date 2018-08-09 is wrong. Upscaled variant reads "Data: 09/08/2018" (a0043). The date voter picks the 08/09 reading over a correct 09/03 because 2 of 3 variants return the same erroneous flip. The upscaling-induced OCR corruption of "/03/" as "/08/" is systematic for this image; cross-variant date voting with equal weight is unsafe.
+
+## Direction judgement for subsequent stages
+
+- **Momentum**: the "add more OCR variants + consensus vote" direction has net-negative returns for this dataset: it fixed 071 (date) and 074-variant-2 (visible 102.00) but introduced regressions on 034 (date), 064 (688.17), 078 (fallback to Cash). Rolling back to 2-variant extraction, or scoring candidates by (tier, within-variant frequency, value-appears-elsewhere-in-text) instead of (tier, cross-variant majority) is the higher-expected-value direction.
+
+- **Patcher** (Skill edits, not applied here): the original `image-ocr` Skill is silent on receipt-structure heuristics. Minimum deltas:
+  1. Exclusion vocabulary must include `CASH`, `CASH RECEIVED`, `CASH PAID`, `PAYMENT`, `VISA`, `MASTERCARD`, `ROUNDING ADJ`, `TOTAL EXCL`.
+  2. Candidate selection inside a priority tier should prefer the FIRST printed match whose value also appears elsewhere in the same OCR text (robust against single-line digit noise like 1→7); LAST-wins is too fragile.
+  3. For multi-pass OCR, prefer per-variant complete extraction, then score variants by internal self-consistency (subtotal ≈ total, payment == total) before cross-variant voting.
+  4. Date: when parsed month > 12 or day > 31, retry with digit-pair substitutions (6↔0, 8↔3, 1↔7) on the raw digit substring and accept only the unique valid interpretation.
+
+## Uncertainty
+
+- I cannot verify whether the oracle for 077 truly prefers pre-rounding "Inclusive of GST" vs post-rounding "TOTAL" for other receipts in a larger set; the inference is based solely on this one receipt's feedback.
+- For 074 the pixel clearly shows 102.00; whether digit-substitution heuristics (7→1 when context says ≈subtotal) generalise safely without new regressions is untested.
+- Whether removing upscaling entirely is better than keeping it as a tie-breaker is unclear from available evidence — it uniquely fixed 071's date but uniquely broke 034's date and 064's total.

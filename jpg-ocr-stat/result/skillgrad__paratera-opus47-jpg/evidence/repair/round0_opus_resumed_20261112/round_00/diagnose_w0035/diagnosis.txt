@@ -1,0 +1,50 @@
+## Scope and verified failures
+The source run shipped 40/44 correct fields (0.909). Verifier field feedback flags four specific mistakes:
+
+- 034.jpg date: predicted `2018-08-09`
+- 074.jpg amount: predicted `702.00`
+- 077.jpg amount: predicted `23.26`
+- 078.jpg amount: predicted `""` (empty)
+
+Direct pixel inspection of the attached JPGs (new Diagnoser evidence, not historical executor sight):
+- 034.jpg: header row clearly reads `Date: 09/03/2018` (DD/MM/YYYY ⇒ 2018-03-09).
+- 074.jpg: all three total-bearing rows (`Subtotal 102.00`, `Total incl. of GST 102.00`, `Total Amt Rounded 102.00`, `Payment 102.00`) show 102.00.
+- 077.jpg: ladder is `Total (Excluding GST): 21.30` / `Total (Inclusive of GST): 23.26` / `Rounding Adj: -0.01` / bold `TOTAL: 23.25`.
+- 078.jpg: `Total: 92.80` and bold `Grand Total: 92.80`.
+
+So the oracle values consistent with the images are 2018-03-09, 102.00, 23.25, 92.80.
+
+## New evidence in this window (steps 19–28, msgs m0072–m0119)
+
+1. Dual-pass strategy was explicitly chosen "default first, then preprocessed fallback" (m0078/step 20). The code short-circuits as soon as the first pass returns any value, so default-PSM OCR errors propagate without consensus checking.
+
+2. Default PSM text actually captured for the failing receipts (m0074):
+   - 034 default: `Data: 09/08/2018` (digit 3→8 misread). Preprocessed PSM 6 instead returns `09/03/2018`. Default-first ordering locks in the wrong month.
+   - 074 default: `Total inel. of GBT 702.00` — a `1→7` misread on the only TOTAL-keyword line. PSM 6 preprocessed produces both `Total incl. of GST 102.00` and a noisy `Total Amt Rounded ——S«702.00`; LAST-candidate selection then still returns 702.00.
+   - 077 default: only exposes `Total (Excluding GST): 21.30` and `Total (Inclusive of GST): 23.26`; the bold final `TOTAL: 23.25` line is lost. With tier-4 LAST = 23.26, the "excluding/inclusive" layering is not disambiguated.
+   - 078 default: `Grand Total` appears on its own line with no number (the amount is in a separate column). The "next-line fallback" immediately hits `| Change 7.20 |`, which matches the CHANGE exclusion, so the inner break fires and no value is returned.
+
+3. Step 23 (m0091) still showed `078.jpg total=92.80`, meaning before the stricter "exactly 2 decimals" tightening and EXCLUDING exclusion the default-OCR pipeline accidentally extracted Change=92.80-ish or rolled into AVERAGE line. Something after this window (w0035 is 35/37) regressed 078 to null. The Patcher must notice this regression is possible from later edits and keep a passing path for "Grand Total value on an adjacent/column-aligned line."
+
+4. Step 26–27 (m0109/m0113) empirically demonstrates that a 2×LANCZOS upscale + autocontrast + PSM 6 pass:
+   - Resolves 074 to a clean `Total incl. of GST 102.00` with no spurious "Total Amt Rounded 702.00" line.
+   - Resolves 077 to include `TOTAL: 23.25` as the terminal TOTAL line.
+   - Recovers 071 date `19/02/2018` (previously null in m0083).
+   - Harms 064 (`88.17`→`86.17`) and 010 (`14.10`→`14.15`) and 090 (`5.00`→`9.00`) — so upscale cannot replace the existing pass; it must be added as an additional voter.
+
+5. Step 25 (m0102) added `EXCLUDING` as an exclusion keyword. That alone fixes 077 only if the OCR variant surfaces the bold `TOTAL: 23.25` line (i.e., requires the upscale pass). The source run never combined "EXCLUDING exclusion + upscale pass + consensus" before iteration budget exhausted.
+
+## Causal summary for Momentum / Patcher
+
+- Termination reason is `max_iterations` (65/65). The agent had already identified every needed mechanism (upscale, EXCLUDING exclusion, tier-aware voting, 2-decimal regex) but the final `extract.py` saved before these were integrated. Patcher should carry forward the half-landed changes rather than rediscover them.
+- Core causal defect: single-pass priority with "first non-null wins" plus LAST-candidate-in-tier is brittle against OCR noise. Required fix is multi-pass OCR (default + autocontrast PSM 6 + 2× upscale PSM 6) with cross-pass consensus (majority of 2-decimal values per tier) rather than fallback ordering.
+- Keyword/exclusion logic needs: (a) `EXCLUDING`/`EXCL.` excluded; (b) a plain unqualified `TOTAL:` line (no `inclusive/excluding/items/qty/rounded` modifier) should outrank `Total (Inclusive of GST)` within tier 4 when both exist; (c) the next-line fallback must skip excluded lines (CHANGE, SUBTOTAL, TAX) rather than break on the first one, so 078's `Grand Total` can reach the column-aligned `92.80`.
+- Date extraction needs cross-pass agreement (034: majority of `09/03/2018` vs `09/08/2018` across variants, plus plausibility — month ≤ 12 rejects the `19/62/2018` case for 071 but can keep `62→02` recovery optional).
+
+## Uncertainty
+
+- Oracle values are not read; "likely oracle" above is inferred only from pixel reading of the supplied JPGs and the field-correct booleans. 077=23.25 vs 23.26 is the plausible split; both are present on the receipt and the verifier marks 23.26 wrong, which fits 23.25 being the chosen "TOTAL:" line.
+- Whether the oracle for 074 is 102.00 vs an alternative rounded value is only indirectly supported; the image shows 102.00 four times and 702.00 never, so confidence is high.
+- 078 could also be 92.80 (Total/Grand Total) rather than any derived value; `AVERAGE / PAX(S): 23.20` is clearly not the answer.
+- Regression root cause for 078 (step 21 had 92.80, final shipped empty) is not directly observable in this window; attribution to the strict 2-decimal + EXCLUDING changes is probable but should be verified by Patcher via a focused rerun.
+- Historical visual payload count is 0; the images were not seen by the source executor, so proposed Skill changes must remain OCR-pipeline-level (preprocess variants, keyword rules, consensus), not vision-model dependent.

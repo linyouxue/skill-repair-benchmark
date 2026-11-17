@@ -1,0 +1,45 @@
+## New evidence in this window (w0013)
+
+The window captures the agent's final structural changes to `extract.py`:
+
+1. **`extract_total` rewrite (m0054–m0056)**: added a `SUMMARY_HEADER_RE` cutoff so GST/TAX-SUMMARY lines are excluded, and now iterates tier-matching candidates **in reverse** (last-matching line first), with an optional next-line fallback.
+2. **`process_image` → `ocr_variants` (m0057–m0059, m0078–m0080)**: switched from a single preprocessed OCR pass (grayscale + autocontrast + `--psm 6`) to yielding **two variants** — default OCR first, then preprocessed `--psm 6` — using "fill the first non-None field found" semantics.
+3. **Direct OCR dumps for the six problem receipts (m0068, m0074)** show *exactly* which lines each variant produces for 034/052/071/074/077/078.
+
+## Why each failing field failed
+
+Combining this window's OCR dumps with the field feedback (`034.jpg` date✗, `074.jpg` amount✗, `077.jpg` amount✗, `078.jpg` amount✗) and the image pixels:
+
+### 034.jpg date → `2018-08-09` (wrong)
+Image prints `Date: 09/03/2018` (I can see the "3" clearly in the pixel block). The **preprocessed** PSM-6 pass in m0068 correctly produces `'Salesperson: Date: 09/03/2018'`. The **default** pass in m0074 produces `09/08/2018`. Because `ocr_variants` runs default first and sets `date` on the first non-None hit, the wrong default date is "locked in" and the preprocessed variant is never consulted. Short-circuit-on-first-non-None is the root cause here, not the date regex.
+
+### 074.jpg amount → `702.00` (wrong)
+Image shows `Total incl. of GST 102.00`, `Total Amt Rounded 102.00`, `Payment: 102.00`. Default OCR mangles the key line to `Total inel. of GBT 702.00`; preprocessed OCR produces both `Total incl. of GST 102.00` **and** a garbage line `Total Amt Rounded ——S«702.00`. The new "last candidate wins, iterate reversed" logic picks the LAST `TOTAL`-matching line in each variant:
+- default variant: only `Total inel. of GBT 702.00` matches → 702.00
+- preprocessed variant: last match is `Total Amt Rounded ——S«702.00` → 702.00
+
+Both variants independently return 702 for different reasons. The agent's own think-trace (m0075) notes "`——S«702.00` has a weird `——S«` which suggests OCR corruption" but no cleanliness penalty was ever implemented. Nothing in the code cross-checks `Subtotal`, `Payment`, or the GST-summary math (`96.23 + 5.77 ≈ 102.00`) to reject 702.
+
+### 077.jpg amount → `23.26` (wrong)
+Image shows: `Total (Inclusive of GST): 23.26`, `Rounding Adj: -0.01`, **`TOTAL: 23.25`** (large bold). Preprocessed OCR in m0068 does recover the final `'TOTAL: 23.25'` line; default OCR in m0074 does **not** — it stops at `'Total (Inclusive of GST): 23.26'`. Because default runs first and returns a non-None 23.26, `ocr_variants` never falls back. Same short-circuit bug as 034. If preprocessed had been consulted, its last-match-in-reverse rule would correctly land on `TOTAL: 23.25`.
+
+### 078.jpg amount → `null` (missing)
+Image clearly shows `Grand Total: 92.80`. m0068's preprocessed OCR for 078 captures it as `'{ Grand Total —— ~""92 80'` (the decimal was eaten by OCR — a space replaces the dot). The `extract_last_number` regex requires an explicit decimal point or a thousands-group pattern, so `92 80` doesn't match and GRAND TOTAL tier yields None. Fallback goes to the next line (`Cash Received 100.00`), but earlier agent output in m0062 showed `100.00`; the delivered output is empty, meaning a subsequent code change — the `SUMMARY_HEADER_RE` or the "break on exclusion" fallback path — now stops the walk before Cash is reached. Net effect: GRAND TOTAL line's number is unparseable AND the fallback got blocked, leaving null. The similar 052 case (`GRAND TOTAL 1000` in preprocessed → decimal lost) was patched by falling back to default, but 078's default OCR for Grand Total line is also missing the `.` (m0068 shows `'{ Grand Total —— ~""92 80'` only in preprocessed; default's "grand" line is not shown — suggesting default didn't even produce that line form, so no recovery).
+
+## Structural failure modes for Momentum/Patcher
+
+1. **First-non-None-wins across OCR variants** (m0078). This defeats the purpose of running multiple variants: whenever default returns a *plausible-looking but wrong* value (034 date, 077 amount), the better preprocessed pass is skipped. A voting/agreement strategy or collecting candidates from all variants and scoring them is needed.
+
+2. **Last-match-in-reverse within a tier has no corruption filter**. For 074 the "Total Amt Rounded" line is visibly corrupted (`——S«`) and should be deprioritized versus the clean `Total incl. of GST 102.00` immediately above. No signal about line cleanliness or cross-line consistency is used.
+
+3. **Decimal-separator loss not handled**. `extract_last_number` requires `\d+\.\d{1,2}` or grouped commas. OCR frequently drops the dot (`10.00`→`1000`, `92.80`→`92 80`). For lines that match a keyword tier, a loosened regex (e.g., accept `\d+\s?\d{2}` adjacent to a keyword and reinterpret as `XX.YY`) would recover 052 and 078 without poisoning the general path.
+
+4. **GST-SUMMARY cutoff is correct direction but unrelated to these four failures**. The window's `SUMMARY_HEADER_RE` addition is defensible; the remaining errors are all **before** the summary section.
+
+## Uncertainty
+
+- I cannot see the oracle; I'm inferring expected 074=102.00 from the image's Subtotal / Total incl. of GST / Payment all agreeing on 102.00 and the GST math (96.23+5.77). Expected 077=23.25 is inferred from the large bold TOTAL line post-rounding.
+- For 078, the feedback marks amount wrong given a null prediction; whether the oracle expects `92.80` (image's Grand Total) is the natural reading but unverified.
+- The 034 preprocessed pass reading "09/03/2018" matches the image pixels, so the date fix direction (prefer preprocessed, or merge candidates) is well-supported.
+
+The Patcher should focus on: (a) replacing "first non-None" variant selection with candidate aggregation+scoring, (b) adding a decimal-recovery fallback for keyword-matched integer blobs like `1000`/`92 80`, and (c) a mild corruption penalty (e.g., ratio of non-alphanumeric glyphs on the candidate line) so clean `Total incl. of GST 102.00` outranks `Total Amt Rounded ——S«702.00`.

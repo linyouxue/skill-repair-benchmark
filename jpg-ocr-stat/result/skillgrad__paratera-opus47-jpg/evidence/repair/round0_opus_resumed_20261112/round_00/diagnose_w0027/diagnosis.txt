@@ -1,0 +1,43 @@
+## Scope of failures in this window
+
+Feedback: reward 0.909, 4 field misses across 3 receipts.
+- **034.jpg**: date wrong (`2018-08-09` vs image)
+- **074.jpg**: amount wrong (`702.00`)
+- **077.jpg**: amount wrong (`23.26`)
+- **078.jpg**: amount null (empty)
+
+The failing receipts are all handled by an in-repo `extract.py` script (visible in the exchanges: `ocr_variants`, `extract_total_candidates`, `PRIORITY_TIERS`, `is_excluded`, `extract_last_number`, `find_summary_start`). The Skill documents themselves are generic OCR primers and do not encode any receipt-specific keyword/number/date logic — that logic is all in agent-authored code. This matters because the Patcher cannot "fix OCR" without reaching into the extraction algorithm it is expected to emit.
+
+## Receipt-level evidence (new this window)
+
+**077 (Banh Mi CafE)** — Pixels show two TOTAL-tier lines:
+- `Total (Inclusive of GST): 23.26`
+- `Rounding Adj: -0.01`
+- `TOTAL: 23.25` (bold, bottom)
+
+Prediction `23.26` is the *first* TOTAL match, pre-rounding. The code (as hinted by the agent's "077 now correctly shows 23.26!" celebration in e0054–e0055, then feedback contradicting) is picking the earlier TOTAL instead of the net/rounded final TOTAL. Hints list keywords by *specificity* but say nothing about tie-breaking inside tier 4; the correct behaviour is to prefer the last TOTAL after a Rounding line / the largest-text TOTAL, matching the net value 23.25.
+
+**078 (Thai Delicious Restaurant)** — Pixels clearly show `Total: 92.80`, `Grand Total: 92.80`, `Cash Received: 100.00`, `Change: 7.20`. Prediction is null. Exchange e0056 (agent `think`) records that OCR variants produced "GrandTota." (no space), "a Total — 92:80" (colon in decimal), and "92 80" (space-separated). The extractor's `\bGRAND\s+TOTAL\b` regex requires a whitespace separator and strict `\d+\.\d{2}` for numbers, so none of the Grand-Total candidates survive. "Cash Received" was added to exclusions in m0162 (correct, fixes a potential 100.00 fallback), but the real issue is that no clean candidate is produced, and a null is returned instead of picking the many visible 92.80's. Root causes:
+  1. Keyword matcher brittle to missing space / dropped characters ("GRANDTOTAL", "GrandTota", "Grond Total").
+  2. Number parser does not treat `:` between digits as a possible OCR misread of `.`.
+  3. No cross-variant voting on numbers when the keyword match fails in one variant but the amount text (92.80) occurs in another.
+
+**074 (GL Handicraft)** — Pixels show `Subtotal 102.00`, `Total Incl. of GST 102.00`, `Total Amt Rounded 102.00`, `Payment 102.00`. Prediction `702.00` is a single-digit OCR miss (`1`→`7`) on one amount token. The agent's e0054 comment notes "voting picks majority which is 702 from 2 variants" — i.e. the implemented *candidate voting* across variants reinforced the bad digit because multiple variants OCR'd the bold `102` as `702`. The implemented voting is majority-over-variants without any sanity constraint (e.g., consistency with Subtotal, consistency with the "Total Excl. of GST 96.23" + "GST 6% = 5.77" sum, or digit-plausibility of a leading `7`). The skill revision needs either: (a) a "constrain total ≥ subtotal, and ≈ subtotal + GST" check, or (b) prefer the candidate that matches another TOTAL-tier line (102.00 appears four times in the ink). Majority-voting over raw OCR variants is the wrong aggregator here.
+
+**034 (Perniagaan Zheng Hui)** — Pixels show `Date: 09/03/2018` and time `08:49:00`. Prediction `2018-08-09` suggests the date parser either: (i) picked up the `08` from `08:49:00` as a month, or (ii) OCR confused `03`→`08` and the DMY→ISO conversion then produced 2018-08-09. Looking at the clean scan, option (i) seems most likely: a generic date-regex pass that also triggers on `HH:MM:SS` or on the `GA1801` item annotations (which contain `1801`) mixing numeric groups across lines. Fix direction: date extraction should (a) require a 4-digit year in the same token, (b) prefer a match on the line/neighbourhood of the keyword `Date`, (c) run cross-variant voting on dates the same way amounts are voted, and (d) reject matches that overlap a `HH:MM` time span.
+
+## Cross-cutting causal findings for Momentum / Patcher
+
+1. **Keyword matcher is too strict.** `\bGRAND\s+TOTAL\b`, `\bTOTAL\s+AMOUNT\b` etc. fail when OCR drops a space or a character. Needs: allow 0-or-1 non-alphanumeric between tokens, accept common OCR confusions (`0`↔`O`, `1`↔`l`/`I`).
+2. **Number regex ignores separator noise.** `\d{1,3}(,\d{3})*\.\d{2}` misses `92:80`, `92 80`, `92.8O`. Needs tolerance for `:` / `;` / stray space between the integer and fractional part, and `O`→`0` fix in the decimal.
+3. **Tie-breaking inside tier 4 (TOTAL).** When several TOTAL matches exist, choose the *last one after any Rounding line*, not the first. Explicit evidence: 077.
+4. **Multi-variant voting must be sanity-checked.** Plain majority can entrench a bad digit (074). Prefer candidates that: (a) are consistent across keywords in the *same* variant (TOTAL = Payment = Rounded Total), or (b) match Subtotal+GST within 0.02.
+5. **Date extraction needs the same multi-variant voting discipline and must exclude clock-time groups.** Evidence: 034.
+6. **Termination.** Source run exhausted `max_iterations=65` (`termination_reason: max_iterations`); the agent was still iterating on 074/078 at the budget cutoff (exchanges e0054–e0057 are all late-cycle). Not a natural stop → any Momentum assumption that the current solution is "settled" is wrong; the extractor remains in a debug-mid-stream state.
+
+## Uncertainty
+
+- Oracle for 077: I am inferring `23.25` from the visible rounded TOTAL; feedback only tells me `23.26` is wrong, not what the truth is. If the oracle expected `23.26`, something else about that cell (e.g. normalization/format) would have to be the fault — but the Skill's export uses the same path for all receipts and the others pass, so this is unlikely.
+- For 034 the pixel `3` vs `8` glyph is unambiguous on my inspection; I attribute the miss to the parser scope (time/annotation bleed) rather than raw OCR.
+- I did not re-execute `extract.py`, so the exact tie-breaker in current code is inferred from the agent's own trace (e0054: "voting picks majority which is 702 from 2 variants"; e0056: notes on 078's failing candidates).
+- No evidence the source agent saw images; images here are Diagnoser-only, consistent with `original_visual_messages_recorded: false`.

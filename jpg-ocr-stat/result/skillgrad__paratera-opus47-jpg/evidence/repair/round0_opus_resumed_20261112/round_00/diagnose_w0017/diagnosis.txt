@@ -1,0 +1,37 @@
+## Window w0017 (iterations around turns 57–65) — focused evidence
+
+### What happened in this window
+The source agent was debugging `078.jpg` after an earlier fix changed its output from `20.00` (wrong) to `None`. In this window:
+
+1. **Trace of `078.jpg` variant 0** (m0176) revealed only tier-4 keyword hits:
+   - Line 10: `"Description Qty Price Amount"` → `extract_last_number=None`
+   - Line 31: `"a Total — 92:80"` → `None` (OCR produced `92:80` not `92.80`)
+   - The prior fallback was chaining from line 10 (the column-header `Amount`) to line 11 (first item row) and yielding `20.00` — explaining the earlier incorrect `20.00`.
+
+2. **Fix applied** (m0180): added exclusion regexes for header rows:
+   - `\bDESCRIPTION\b`
+   - `\b(QTY|PRICE)\s+AMOUNT\b`
+
+3. **Rerun** (m0185): all 22 rows unchanged except `078.jpg` → `total=None`. Agent confirmed this is "better than 20.00" but still incorrect.
+
+4. **Preprocessing probe** (m0191): tried 5 preprocessing variants × PSM {4,6}. Only `upscale 3x gray + PSM 4` produced the clean line `"Grand Total a 92.80"`. Other variants produced broken OCR (`92 80`, `92:80`, `SSCS 92.80`, `SRT`).
+
+5. **Code change** (m0195): modified `ocr_variants` to add a 4th variant = 3×-upscale autocontrast gray with `--psm 4`, intended to let voting pick up the `92.80` candidate.
+
+### Evidence relative to permitted feedback
+The feedback for this run shows 3 amount errors: `074`, `077`, `078`. In this window the agent is focused only on `078`. There is no evidence here that `074` or `077` are being revisited; the pre-fix rerun output still shows their previous (wrong) values `702.00` and `23.26`. Looking at the image pixels for those receipts:
+- **074.jpg** (GL Handicraft): `Total Amt Rounded 102.00`, GST `96.23`. Prediction `702.00` is clearly a misread of `102.00` from one OCR variant that merged `7`/`1` or picked a different line. Needs a direct look at variants; a new OCR voting pass could tip it to `102.00`.
+- **077.jpg** (Banh Mi Cafe): The receipt shows `TOTAL: 23.25` (after `Rounding Adj -0.01` from `23.26`). Prediction `23.26` picks `Total (Inclusive of GST)` line instead of the final `TOTAL:` line. Priority tiers currently rank `TOTAL` equally; the final large `TOTAL: 23.25` is strictly later and should win via "last occurrence" or line-position bias. The current code is not preferring the final/below-rounding TOTAL. This is a priority/ordering bug, not an OCR bug.
+- **078.jpg** (Thai Delicious): True value is `92.80` as agent discovered.
+
+### Primary causal issues visible in this window
+- **Pipeline design (candidate selection):** Priority tiers plus "reversed order" fallback are brittle around column headers and multi-TOTAL receipts. The new header exclusions help, but ordering across tier-4 keywords still mis-chooses between `Total (Inclusive of GST)` vs final `TOTAL`.
+- **OCR robustness:** `GrandTotal` (no space) and digit/punctuation noise (`92:80`, `92 80`) defeats `\bGRAND\s+TOTAL\b` and the decimal regex. The 3×-upscale PSM-4 variant demonstrably recovers the number — adding it is a correct direction, but voting must prefer a Priority-1 (`GRAND TOTAL`) hit with a clean decimal over tier-4 hits with noise.
+- **Termination risk:** Source run ended at `max_iterations=65` with termination_reason=`max_iterations`. This window is turns ~57–65, so the 3×-PSM-4 variant added in m0195 is near the end — subsequent windows should confirm whether any re-run completed and whether `074`/`077` were ever revisited before budget exhaustion.
+
+### Uncertainty / open items for Momentum + Patcher
+1. Did the final `ocr_variants` rerun actually fix `078` to `92.80`? Must check later windows — unclear whether vote picks `92.80` over `None` across 4 variants.
+2. `074.jpg` `702.00` vs `102.00`: hypothesize a decimal-regex false match on OCR like `"702 00"` or `"7 102.00"`. No evidence here that the agent diagnosed it.
+3. `077.jpg` `23.26` vs `23.25`: unclear whether the Patcher Skill should encode "prefer the last TOTAL line below Rounding Adj" or "prefer the largest/bottom-most tier-4 TOTAL".
+4. The Skill documents (`image-ocr`, `openai-vision`, etc.) do not prescribe priority-tier/exclusion logic; all extraction logic lives in the ad-hoc `extract.py`. Patcher-side guidance should probably codify: (a) header-column exclusions, (b) multi-pass OCR including an aggressive upscale, (c) tie-breaking that prefers the physically lowest/last matching TOTAL line, (d) tolerant decimal reconstruction (`92 80` / `92:80` → `92.80`) only when a priority-1/2 keyword is on the same line.
+5. Momentum should note: field accuracy 0.909, reward 0.0 due to exact-file comparison; the task fails binary even with 20/22 field-correct, so Patcher must raise joint accuracy, not just field accuracy.
