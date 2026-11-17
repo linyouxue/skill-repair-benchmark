@@ -1,0 +1,19 @@
+{
+  "method_id": "skillgrad-opus47-githubs0-clean",
+  "benchmark_version": "core25-gold-defects-20260909-v1",
+  "publication_scope": "finalized Opus47 seismic completion for the immutable partial14 snapshot",
+  "tasks": [
+    {
+      "task_id": "seismic-phase-picking",
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "LABEL: Annotation time-axis offset miscalibration\n\nThe agent correctly used PhaseNet via SeisBench, understood the small-amplitude issue and rescaled traces so prediction peaks became meaningful, and produced a complete CSV (200 rows: P+S per file). The P/S probabilities in the annotations were strong (quantile data showed peaks ≥0.5 for ~65% of traces after rescaling), so model-level picking was reasonable.\n\nThe failure appears to come from how the pick index was mapped back to the raw waveform time axis. The code did:\n  p_time = p_tr.stats.starttime + p_i * p_tr.stats.delta\n  p_idx = round((p_time - stime) * sr_orig)\n\nPhaseNet’s annotate output starts at a different starttime than the input stream (observed: input starttime 15:25:06.290, annotation starttime 15:25:06.290 but length 11500 vs 12000 — annotation is trimmed by blinding (250 samples on each side). The annotation’s starttime includes a shift relative to the raw input only equal to blinding/sr; indices computed this way should be correct in principle. However, inspection of the earlier debug output revealed a discrepancy: annotate argmax at sample 5752 corresponded to classify peak_time index 6002 — a 250-sample offset. The agent's code reads the annotation trace’s own starttime, which SeisBench reports as equal to the input starttime (not the blinded one), so (ann.starttime + i*delta) actually overestimates the index by ~250 samples (because the first annotation sample really corresponds to input sample 250, not 0). Since the ground-truth tolerance is only 0.1 s = 10 samples at 100 Hz, this ~250-sample systematic bias essentially guarantees failure for every file. All P picks landing near index 6000 (regardless of file) in the output CSV is a strong smell: it suggests the raw argmax of the annotation vector happens near sample ~5750 for many files (events typically centered in-window) and the +250 offset lands them all at ~6000.\n\nAnother contributing issue: the agent collapsed all files to exactly one P and one S pick each. For files where PhaseNet produced no confident peak (background-noise samples remained near uniform), argmax still returns an arbitrary index that is almost always wrong, lowering precision. Using the classify() picks (which already discard low-probability outputs and produce correctly timed peak_time values — note classify showed index 6002 while the agent’s manual mapping also showed 6002 but corresponded to annotation argmax 5752) would have avoided both the manual offset error and the no-event false positives. The reasoning step the agent skipped: before mass-processing, it did not verify its own index-mapping against classify()’s peak_time index on a known-good file. The earlier debug run actually showed that classify’s P was at index 6002 while annotate’s argmax was 5752, but the agent did not reconcile this mismatch and proceeded to use annotate-based indices anyway.",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/seismic-phase-picking/repaired_skill",
+      "executor_run_id": "seismic-phase-picking-s2"
+    }
+  ]
+}

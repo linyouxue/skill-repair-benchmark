@@ -9,3 +9,9 @@ Raw `trajectory/acp_trajectory.jsonl` files are the source of truth. `trajectory
 ## Current MAIN recovery correction
 
 Superseded Lab/Dynamic results and their timelines have been removed from current HEAD. The audited MAIN GPT-5.2 four-task canonical replacements are in [main31_local_recovery_four_20261019_v1](main31_local_recovery_four_20261019_v1/README.md). Git history is unchanged. Opus47 is a separate experiment line.
+
+The current MAIN GPT-5.2 canonical publication is complete: 25 tasks in [main31_clean_20261004_finalized](main31_clean_20261004_finalized/README.md), four tasks in the recovery package above, and two tasks in [main31_local_recovery_two_20261112_v1](main31_local_recovery_two_20261112_v1/README.md), for 31 unique tasks total. The final two results are `syzkaller-ppdev-syzlang` PASS @ S3 and `fix-druid-loophole-cve` FAIL @ S5.
+
+## Current Opus47 publication
+
+The existing [opus47_clean_20261016_partial14](opus47_clean_20261016_partial14/README.md) directory remains an immutable 14-task historical partial snapshot. The finalized [opus47_local_recovery_seismic_20261112_v1](opus47_local_recovery_seismic_20261112_v1/README.md) sibling adds the previously excluded `seismic-phase-picking` result, PASS @ S2. Together they define the current Opus47 canonical publication: 15/15 tasks finalized.
