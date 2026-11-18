@@ -72,7 +72,7 @@ def main():
     else:
         from score_flink import score
         base = Path("/app/workspace")
-        if not run_logged(["mvn","clean","package","-q"],base,"maven",480):
+        if not run_logged(["mvn","--offline","clean","package","-q"],base,"maven",480):
             finish({"failure_class":"candidate_compile_error","score":0.0,"accuracy":0.0,
                     "metric":"job_decision_accuracy","job_accuracy":0.0},
                    [{"name":"candidate_compilation","status":"failed"}],started)

@@ -25,5 +25,11 @@ RUN rm flink-1.20.3-bin-scala_2.12.tgz
 
 RUN java -version && flink --version
 
+ARG MAVEN_REPOSITORY_URL=https://repo.huaweicloud.com/repository/maven/
+COPY workspace/pom.xml /tmp/flink-maven/pom.xml
+COPY prepare_maven.py /tmp/prepare_maven.py
+RUN MAVEN_REPOSITORY_URL="${MAVEN_REPOSITORY_URL}" python3 /tmp/prepare_maven.py \
+ && rm /tmp/prepare_maven.py
+
 COPY workspace /app/workspace
 WORKDIR /app/workspace

@@ -31,6 +31,16 @@
 python flink-query/evaluation/prepare_task.py --split scale --output /tmp/flink-scale/tasks/flink-query
 ```
 
+## 环境准备
+
+在 Linux、WSL2 或 macOS 安装 Python 3.12+ 和 Docker 后，在仓库根目录执行免费环境检查。该命令构建镜像，并在断网的新容器中分别用 root 和 Agent 用户编译、运行一个独立的 Flink 小程序。
+
+```bash
+python flink-query/tools/check_environment.py
+```
+
+Docker 构建阶段按原 `pom.xml` 准备 Maven 依赖。Agent 与 verifier 使用镜像自带的离线缓存。首次构建需要联网，冷构建时限为 30 分钟。Maven 默认使用华为云镜像，也可通过 `--maven-repository-url` 指定其他 Maven Central 镜像。实际模型运行按仓库的 [执行器接入说明](../DELIVERY_GUIDE.md) 配置 API。
+
 ## 评分
 
 连续正确率为 **（正确输出数 + 正确排除数）÷（输入作业数 + 未知输出 ID 数 + 非法行数）**。正例须恰好输出一次且计数正确，负例须无输出。缺失、不可读、空输出或无合法 tuple 时计 0。阶段和边界反馈另存于 `stage_feedback.json`。
