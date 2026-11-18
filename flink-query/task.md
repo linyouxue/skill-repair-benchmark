@@ -33,7 +33,7 @@ agent:
   timeout_sec: 1800.0
 environment:
   network_mode: public
-  build_timeout_sec: 600.0
+  build_timeout_sec: 1800.0
   os: linux
   cpus: 4
   memory_mb: 4096

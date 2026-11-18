@@ -11,3 +11,5 @@
 SkillHone 在 `repair` 上执行五轮开发评分，冻结第 3 轮候选。人工修复 r1 是早期试跑，r2 用于四组正式对照。逐次记录中可查看模型请求数、显式 Skill 调用次数和现存的 verifier 汇总。
 
 [完整成绩和运行索引](../evaluation/results/README.md)
+
+每条 `run.json` 所在目录附有执行器原始结果、评分、实际输出，以及 XZ 压缩的 ACP、LLM 和 ATIF 轨迹。`run.json` 的 `evidence` 字段索引这些文件。SkillHone 的五轮原生修复记录位于 `skillhone-gpt5.2/evidence/repair/`。实际 Java 工作区与 JAR 存放在 [工作区归档](https://github.com/linyouxue/skill-repair-benchmark/releases/tag/flink-v2-evidence-20261118)，按原始运行 ID 查找。
