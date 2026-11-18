@@ -1,0 +1,1 @@
+Complete native ACP/LLM trajectories, executor request and configuration, verifier results and usage are preserved losslessly in the [original archive](https://github.com/linyouxue/skill-repair-benchmark/releases/download/skillgrad-jpg-generalization-evidence-v1/g2-r3-native-950-002.tar.gz). See the [asset index](../../../evidence/README.md) for byte size and SHA-256.
