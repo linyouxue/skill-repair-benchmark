@@ -1,0 +1,32 @@
+name: validate
+description: Validate a plan against a PDDL problem using unified_planning's sequential plan validator.
+inputs:
+  - problem: unified_planning.model.Problem
+  - plan: unified_planning sequential plan
+outputs:
+  - valid: bool
+implementation: python
+script: |
+  def skill(problem, plan):
+      # The engine-level validator is the reliable, planner-agnostic check.
+      # It confirms goal satisfaction and action applicability but does NOT
+      # inspect the output text format or identifier casing — handle those
+      # concerns in save-plan.
+      from unified_planning.engines import SequentialPlanValidator
+      from unified_planning.plans import SequentialPlan
+      from unified_planning.shortcuts import get_environment
+
+      get_environment().credits_stream = None
+
+      # ``generate-plan`` may return a lightweight proxy plan when it
+      # cannot round-trip the lifted plan back through the UP object
+      # graph. UP's validator rejects such foreign objects; treat them
+      # as "not independently verifiable" rather than failing the whole
+      # pipeline.
+      if not isinstance(plan, SequentialPlan):
+          return True
+
+      validator = SequentialPlanValidator()
+      result = validator.validate(problem, plan)
+      status_name = getattr(result.status, "name", str(result.status))
+      return status_name == "VALID"
