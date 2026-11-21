@@ -1,0 +1,81 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-flink-query-all",
+  "diagnoses": [
+    {
+      "prediction_id": "single-flink-query-all__workflow2_completion_predicate_too_strict_or_wrong_event",
+      "description": "Workflow 2’s completion-event predicate is underspecified and likely misleads agents into using an incorrect or overly strict lifecycle event to decide when a keyed aggregate is eligible to emit. For this task, stage detection is driven by task SUBMIT activity and stage termination is inactivity-based; tying emission to a specific job lifecycle event (e.g., FINISH) can drop valid outputs when that event is missing in the provided slice, arrives late, or is not the correct signal for ‘job has finished’ in the dataset schema.",
+      "evidence": "Location hint points to “完成事件判定的规定”. The current Workflow 2 ‘Semantic Contract Gate’ lists predicates but does not define how to choose the completion predicate, nor does it warn against requiring a lifecycle event when the business definition is inactivity-based. In Google cluster traces subsets, job events may be incomplete per file slice; requiring a FINISH event can suppress output for jobs that otherwise have complete task activity for stage computation.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Workflow 2: Build Real-Time Streaming Pipeline → Semantic Contract Gate for Keyed Event Aggregations (completion-event predicate)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-flink-query-all__workflow2_output_eligibility_keyset_not_checked",
+      "description": "Workflow 2’s output eligibility guidance is incomplete: it does not require explicit validation of the emitted key set (which keys should/shouldn’t appear) and does not instruct agents to ensure final emission for inactivity/session semantics (e.g., timers/watermarks/flush-on-end). This can cause extra keys (emitting partial aggregates) or missing keys (never flushing last session) in keyed aggregations.",
+      "evidence": "Location hint points to “结果输出资格的规定”. The current gate mentions ‘compare the output key set’ but lacks concrete checks for (a) when to emit for inactivity-defined sessions, (b) ensuring a final flush when bounded input ends, and (c) distinguishing ‘eligibility’ from ‘contribution’ predicates. These omissions commonly lead to Flink jobs that either emit intermediate results or fail to emit the last session because no inactivity timer fires before end-of-input.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Workflow 2: Build Real-Time Streaming Pipeline → Semantic Contract Gate for Keyed Event Aggregations (result output eligibility)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "senior-data-engineer/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "The update directly addresses two high-impact failure modes for keyed aggregations: (1) incorrectly gating output on a lifecycle event when the domain definition is inactivity-based, and (2) missing final flush/keyset validation leading to missing or extra outputs. Guidance is generalized and avoids prescribing task-instance specifics."
+    },
+    "trigger_precision": {
+      "score": 0.78,
+      "rationale": "Changes are confined to Workflow 2’s semantic gate, the area indicated by the hint. The guidance is framed for any keyed aggregation combining activity and lifecycle signals, not just this Flink query, though it is most relevant to event-time/session-style problems."
+    },
+    "instruction_compliance": {
+      "score": 0.83,
+      "rationale": "The repair distinguishes Skill deficiency (missing explicit rules/checks) from agent behavior by making required checks explicit (presence/semantics of lifecycle events, fallback completion, bounded-input flush, keyset validation). It does not attempt to solve the user’s Flink job."
+    },
+    "solution_path_coverage": {
+      "score": 0.84,
+      "rationale": "Adds coverage for multiple valid execution paths: lifecycle-based completion, inactivity/timer-based completion, and bounded-input flush. Also adds negative tests and edge case for last session closure, improving robustness across datasets and watermark behaviors."
+    },
+    "overall_rationale": "Workflow 2 previously encouraged a generic ‘completion event’ concept without rules for selecting it or ensuring final emission, which can systematically suppress outputs or emit incorrect key sets in session/inactivity problems. The patch clarifies completion vs eligibility, adds explicit selection criteria and fallbacks, and mandates keyset/value validation, improving correctness without overfitting."
+  },
+  "transport": {
+    "id": "chatcmpl-Elb0rDazJKvbduFvHmYEwqjHHlNm5",
+    "usage": {
+      "completion_tokens": 6994,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 7,
+        "engine_ttft_ms": 2842,
+        "engine_ttlt_ms": 54395,
+        "pre_inference_ms": 212,
+        "service_tbt_ms": 7,
+        "service_ttft_ms": 3199,
+        "service_ttlt_ms": 54744,
+        "user_visible_ttft_ms": 2987
+      },
+      "prompt_tokens": 90202,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 97196
+    }
+  }
+}

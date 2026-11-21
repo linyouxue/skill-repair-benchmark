@@ -1,0 +1,107 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-sec-financial-report-RI-002",
+  "diagnoses": [
+    {
+      "prediction_id": "single-sec-financial-report-RI-002",
+      "description": "Single-quarter holding summary uses an incorrect counting definition for “number of stock holdings”: it reports raw INFOTABLE row count after TITLEOFCLASS filtering, not the number of distinct stock positions (unique CUSIPs). This can overcount when a fund reports multiple lines per CUSIP (e.g., multiple managers, voting authority splits, or duplicated issuer lines). The location hint points to this counting semantics mismatch.",
+      "evidence": "In 13f-analyzer/scripts/one_fund_analysis.py, the script prints:\n- Total number of holdings: infotable.shape[0]\n- Number of stock holdings: stock_infotable.shape[0]\nBut later it groups by CUSIP to build the stock table, implying the meaningful unit is CUSIP-level positions. The hint explicitly mentions “单季度持仓汇总的数量口径” (single-quarter holding summary counting definition).",
+      "locations": [
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Analyze the holding summary of a particular fund in one quarter"
+        },
+        {
+          "file": "13f-analyzer/scripts/one_fund_analysis.py",
+          "section": "read_one_quarter_data(): printed summary stats for number of stock holdings"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-RI-002",
+      "description": "The stock TITLEOFCLASS filter list is malformed due to missing commas, causing unintended string concatenation and therefore incorrect filtering. This can lead to undercounting/overcounting and incorrect AUM/holdings summaries. The defect exists in both 13f-analyzer and fuzzy-name-search stock filters.",
+      "evidence": "In 13f-analyzer/scripts/one_fund_analysis.py, the list contains adjacent string literals without commas:\n\"sponsored adr\"\n\"sponsored ads\"\n\"adr\"\n\"equity\"\n...\nPython concatenates adjacent string literals, producing a single combined token like 'sponsored adrsponsored adsadrequity...'. Same issue appears in fuzzy-name-search/scripts/search_stock_cusip.py. This breaks .isin(title_class_of_stocks) matching.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/one_fund_analysis.py",
+          "section": "title_class_of_stocks definition"
+        },
+        {
+          "file": "fuzzy-name-search/scripts/search_stock_cusip.py",
+          "section": "title_class_of_stocks definition"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-RI-002",
+      "description": "holding_analysis.py ignores the quarter argument and reads from /root/INFOTABLE.tsv instead of /root/<quarter>/INFOTABLE.tsv, which can silently produce wrong top holders for a given quarter. This harms solution-path coverage for Q4-style queries.",
+      "evidence": "holding_analysis.py does: pd.read_csv(f\"{data_root}/INFOTABLE.tsv\", ...) while CLI requires --quarter. This contradicts the SKILL.md usage that passes --quarter 2025-q3 and expects quarter-specific results.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/holding_analysis.py",
+          "section": "topk_managers(): data loading path"
+        },
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Analyze which funds hold a stock to the most extent"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "13f-analyzer/SKILL.md",
+    "13f-analyzer/scripts/one_fund_analysis.py",
+    "13f-analyzer/scripts/holding_analysis.py",
+    "fuzzy-name-search/scripts/search_stock_cusip.py"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "Fixes a directly task-relevant metric bug (stock holdings count) and a severe filter bug (missing commas) that can corrupt AUM/holdings computations. Also fixes quarter misread in holding_analysis that would yield wrong Q4 results."
+    },
+    "trigger_precision": {
+      "score": 0.78,
+      "rationale": "Changes are confined to the hinted boundary (single-quarter holding summary counting semantics) plus closely related correctness issues in the same skill bundle that affect the same outputs (stock filtering, quarter-specific reads). Avoids task-instance hardcoding."
+    },
+    "instruction_compliance": {
+      "score": 0.82,
+      "rationale": "Attributes faults to Skill code/docs (incorrect counting definition, broken allowlist, wrong file path) rather than agent behavior, and makes the required counting semantics explicit in SKILL.md so an agent can verify it before answering."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "Supports common edge cases: duplicated CUSIPs across multiple rows, CUSIP normalization, and quarter-specific datasets. Still leaves broader issues (e.g., stock-cusip search limited to 2025-q2 universe) unchanged because not implicated by the hint and would be a larger behavioral change."
+    },
+    "overall_rationale": "The pass repairs the most likely root cause indicated by the hint—misdefined single-quarter holdings count—while also correcting two adjacent high-impact defects that would otherwise undermine the same analyses (broken TITLEOFCLASS allowlist and quarter-agnostic holding_analysis). The updates are minimal, transferable, and keep existing semantics (CUSIP-level aggregation) consistent across scripts and documentation."
+  },
+  "transport": {
+    "id": "chatcmpl-ElkWdv8Bz8w0HUM4sKiZ5yZnKD4fC",
+    "usage": {
+      "completion_tokens": 4834,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 7,
+        "engine_ttft_ms": 261,
+        "engine_ttlt_ms": 32864,
+        "pre_inference_ms": 74,
+        "service_tbt_ms": 7,
+        "service_ttft_ms": 711,
+        "service_ttlt_ms": 33309,
+        "user_visible_ttft_ms": 638
+      },
+      "prompt_tokens": 5532,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 10366
+    }
+  }
+}

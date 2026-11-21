@@ -1,0 +1,134 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-sec-financial-report-all",
+  "diagnoses": [
+    {
+      "prediction_id": "single-sec-financial-report-all_d1",
+      "description": "13f-analyzer SKILL usage examples reference scripts with incorrect relative paths and inconsistent python invocation, which can cause agents to call non-existent commands from the repo root.",
+      "evidence": "In 13f-analyzer/SKILL.md examples use `python3 scripts/one_fund_analysis.py` and `python scripts/holding_analysis.py` without the `13f-analyzer/` prefix. In this bundle, scripts live under `13f-analyzer/scripts/...`. Similar issue exists in fuzzy-name-search/SKILL.md examples using `python3 scripts/search_fund.py` and `python3 scripts/search_stock_cusip.py` while scripts are under `fuzzy-name-search/scripts/...`.",
+      "locations": [
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Overview / command examples"
+        },
+        {
+          "file": "fuzzy-name-search/SKILL.md",
+          "section": "Usage / command examples"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-all_d2",
+      "description": "holding_analysis.py ignores the `--quarter` argument and reads from a non-existent/incorrect global path, producing wrong results or failing to find data for the requested quarter.",
+      "evidence": "`topk_managers(cusip, quarter, topk)` reads `pd.read_csv(f\"{data_root}/INFOTABLE.tsv\")` instead of `/{quarter}/INFOTABLE.tsv`. The `quarter` parameter is only used in a print statement.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/holding_analysis.py",
+          "section": "topk_managers: data loading"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-all_d3",
+      "description": "Stock-title filtering lists in both analyzers are malformed due to missing commas, causing unintended string concatenation and under-filtering/over-filtering of common equity rows; this impacts AUM/holding counts and stock CUSIP search quality.",
+      "evidence": "In both `13f-analyzer/scripts/one_fund_analysis.py` and `fuzzy-name-search/scripts/search_stock_cusip.py`, entries like `\"sponsored adr\" \"sponsored ads\" \"adr\" \"equity\" ...` are missing commas, so Python concatenates them into one long string literal. This breaks `.isin(title_class_of_stocks)` filtering.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/one_fund_analysis.py",
+          "section": "title_class_of_stocks definition"
+        },
+        {
+          "file": "fuzzy-name-search/scripts/search_stock_cusip.py",
+          "section": "title_class_of_stocks definition"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-all_d4",
+      "description": "Single-quarter 'number of stocks held' is ambiguous and currently reported as number of rows, not distinct stock positions; this can mis-answer questions asking 'how many stocks' (should be unique CUSIPs after aggregation).",
+      "evidence": "`read_one_quarter_data` prints `- Number of stock holdings: {stock_infotable.shape[0]}` which counts line items, while later it groups by CUSIP. Many 13F filings can have multiple lines per CUSIP (e.g., different classes) or duplicates; the question asks 'How many stocks are held', typically meaning distinct holdings/issuers/CUSIPs.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/one_fund_analysis.py",
+          "section": "read_one_quarter_data: printed summary stats"
+        },
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Overview: one-quarter holding summary description"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-all_d5",
+      "description": "Cross-quarter Top Buys/Sells computation is not robust: it merges on CUSIP only, may double-count when multiple rows per CUSIP exist, and the 'Top 10 Sells' selection uses `tail(10)` after sorting descending, which is error-prone. Also percent-change handling for baseline zero is misleading.",
+      "evidence": "The script groups by CUSIP (good) but does not explicitly ensure numeric types post-merge; sells are computed via `merged[merged[\"ABS_CHANGE\"] < 0].tail(10)[::-1]` after sorting by ABS_CHANGE descending, which depends on global ordering and is less clear than sorting sells ascending. `PCT_CHANGE` uses baseline 0 replaced with 1, producing arbitrary percentages for new positions.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/one_fund_analysis.py",
+          "section": "one_fund_analysis: merge and Top Buys/Sells printing"
+        },
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Overview: cross-quarter analysis description"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "13f-analyzer/SKILL.md",
+    "fuzzy-name-search/SKILL.md",
+    "13f-analyzer/scripts/holding_analysis.py",
+    "13f-analyzer/scripts/one_fund_analysis.py",
+    "fuzzy-name-search/scripts/search_stock_cusip.py"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "Fixes quarter-path bug that would return wrong/empty results, corrects malformed stock-class filters affecting AUM/holding counts, clarifies and corrects distinct-stock counting, and makes Top Buys/Sells ranking deterministic and interpretable."
+    },
+    "trigger_precision": {
+      "score": 0.82,
+      "rationale": "Changes are confined to the hinted boundaries: script invocation paths, quarter-aware data loading, stock holding count definition, and cross-quarter delta computation. Avoids task-instance constants except keeping existing q2 universe in stock search (already present) while documenting validation expectations."
+    },
+    "instruction_compliance": {
+      "score": 0.8,
+      "rationale": "Attributes failures to Skill bundle defects (wrong paths, ignored args, malformed lists, ambiguous metrics) rather than agent behavior; updates SKILL docs to make required invocation and interpretation explicit and adds runtime checks for empty results."
+    },
+    "solution_path_coverage": {
+      "score": 0.78,
+      "rationale": "Improves robustness for missing TITLEOFCLASS, missing/NaN VALUE, absent CUSIP holdings, baseline-zero percent change, and deterministic sell ranking. Does not fully generalize stock-cusip search across quarters (left as-is but documented), which is acceptable for minimal repair."
+    },
+    "overall_rationale": "Primary defects prevented correct execution (wrong script paths; holding_analysis ignoring quarter) and produced incorrect analytics (broken equity filters; ambiguous stock-count metric; brittle Top Buys/Sells). Repairs are minimal, reusable, and aligned with the hinted problem areas without embedding task-specific answers."
+  },
+  "transport": {
+    "id": "chatcmpl-Elk9r5gXwoIeEntT3mO1glwDMgsOh",
+    "usage": {
+      "completion_tokens": 5308,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 8,
+        "engine_ttft_ms": 272,
+        "engine_ttlt_ms": 42811,
+        "pre_inference_ms": 99,
+        "service_tbt_ms": 8,
+        "service_ttft_ms": 764,
+        "service_ttlt_ms": 43300,
+        "user_visible_ttft_ms": 665
+      },
+      "prompt_tokens": 5131,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 10439
+    }
+  }
+}

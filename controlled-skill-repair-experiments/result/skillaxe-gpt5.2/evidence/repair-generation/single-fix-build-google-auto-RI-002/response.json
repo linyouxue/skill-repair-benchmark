@@ -1,0 +1,100 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-fix-build-google-auto-RI-002",
+  "diagnoses": [
+    {
+      "prediction_id": "single-fix-build-google-auto-RI-002",
+      "description": "The Maven build-lifecycle Skill overfits to a specific repository path (google/auto) and hardcodes patch artifact paths, which can cause agents to write diagnosis/patches to the wrong location for other repos/ids and fail the benchmark contract. This is a quality-impacting defect because it directly prevents producing required artifacts in the task-specified /home/travis/build/failed/<repo>/<id> directory.",
+      "evidence": "In maven-build-lifecycle/SKILL.md, the 'Build-repair artifact contract' and 'Minimal diagnostic sequence' hardcode /home/travis/build/failed/google/auto and /home/travis/build/failed/google/auto/patch_1.diff, while the task explicitly states the repository is at /home/travis/build/failed/<repo>/<id> and patch files must be written under that directory as patch_{i}.diff.",
+      "locations": [
+        {
+          "file": "maven-build-lifecycle/SKILL.md",
+          "section": "Build-repair artifact contract"
+        },
+        {
+          "file": "maven-build-lifecycle/SKILL.md",
+          "section": "Minimal diagnostic sequence"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-fix-build-google-auto-RI-002",
+      "description": "The Skill’s guidance for Maven Invoker / nested test projects lacks explicit boundaries on where dependency fixes should be applied (root reactor vs invoker test projects vs embedded sample poms). This can lead to low-precision, high-risk edits (e.g., modifying nested integration-test project POMs directly) that mask the real issue or break the intended test coverage. The location hint points to this gap.",
+      "evidence": "The Skill mentions 'including Maven Invoker integration tests' but provides no concrete decision procedure for dependency resolution failures originating from invoker-built nested projects (e.g., it doesn't instruct to inspect invoker plugin configuration, localRepositoryPath, settings.xml usage, or whether nested projects inherit dependencyManagement from the main reactor). The hint explicitly calls out '嵌套测试项目的依赖解析与修改范围' (dependency resolution and modification scope for nested test projects).",
+      "locations": [
+        {
+          "file": "maven-build-lifecycle/SKILL.md",
+          "section": "Core rule: reproduce the target CI before changing the project"
+        },
+        {
+          "file": "maven-build-lifecycle/SKILL.md",
+          "section": "General Maven lifecycle reminders"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-fix-build-google-auto-RI-002",
+      "description": "Instruction compliance is underspecified: the Skill does not explicitly require writing the Step 1 analysis/plan to /home/travis/build/failed/failed_reasons.txt before making changes, nor does it require generating patch_{i}.diff files via git diff in standard unified format. This can cause agent non-compliance with the benchmark’s required artifacts even if the build is fixed.",
+      "evidence": "The Skill’s artifact contract mentions creating a diff and applying it, but it does not mention the mandatory failed_reasons.txt artifact at the fixed path, and it still uses a hardcoded patch path example. It also does not explicitly instruct to create the diff from the repo state (e.g., via git diff) to ensure standard format.",
+      "locations": [
+        {
+          "file": "maven-build-lifecycle/SKILL.md",
+          "section": "Build-repair artifact contract"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "maven-build-lifecycle/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "Removes hardcoded repo-specific paths that can directly cause missing/incorrect artifacts, and adds explicit artifact-generation steps (failed_reasons.txt + patch diffs) that are required for benchmark success."
+    },
+    "trigger_precision": {
+      "score": 0.78,
+      "rationale": "Targets the Maven build-lifecycle Skill boundary (reproduction, artifacts, invoker/nested builds) without prescribing task-instance dependency versions or repo-specific commands; uses parameterized <repo>/<id> placeholders."
+    },
+    "instruction_compliance": {
+      "score": 0.9,
+      "rationale": "Makes mandatory benchmark actions explicit (write failed_reasons.txt, create patch_{i}.diff in correct directory, ensure patch applied, rerun exact CI command) and distinguishes these from optional examples."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "Adds a concrete decision procedure for nested/Invoker dependency-resolution failures, covering common edge cases (settings/local repo propagation, inheritance vs standalone fixtures) while preserving existing JDK/CI reproduction guidance."
+    },
+    "overall_rationale": "One pass fixes the main transferable defects: (1) repo-specific hardcoded paths that break artifact creation, and (2) missing guidance on dependency-resolution scope for nested Invoker test projects. The update improves compliance and reduces risky over-editing of integration-test fixtures while keeping the Skill broadly reusable."
+  },
+  "transport": {
+    "id": "chatcmpl-EllLwQU72Vn5eoNlli83s06L5J29h",
+    "usage": {
+      "completion_tokens": 2897,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 11,
+        "engine_ttft_ms": 289,
+        "engine_ttlt_ms": 31292,
+        "pre_inference_ms": 90,
+        "service_tbt_ms": 11,
+        "service_ttft_ms": 847,
+        "service_ttlt_ms": 31767,
+        "user_visible_ttft_ms": 757
+      },
+      "prompt_tokens": 8897,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 11794
+    }
+  }
+}

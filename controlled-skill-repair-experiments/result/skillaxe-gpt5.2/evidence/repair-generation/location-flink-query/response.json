@@ -1,0 +1,103 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "location-flink-query",
+  "diagnoses": [
+    {
+      "prediction_id": "location-flink-query-qi-01",
+      "description": "Workflow 2 lacks correct completion-event criteria for session/stage-style Flink jobs, which can cause premature or missing final results (e.g., treating any job-event as completion, or relying on processing-time termination).",
+      "evidence": "The task requires emitting results only once a job has finished, and stages are defined by event-time gaps. The location hint points to Workflow 2 rules for completion-event determination, but Workflow 2 currently contains no such rules at all—it's generic scaffolding guidance and does not specify how to detect completion in event-time streams (e.g., using job-event terminal states, watermarks, and timers). This omission can lead an agent to incorrectly finalize on first job event, on last seen task event, or never finalize if waiting for end-of-stream in an unbounded mindset.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Key Workflows → Workflow 2: Build Real-Time Streaming Pipeline (Steps/Expected Output)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "location-flink-query-qi-02",
+      "description": "Workflow 2 lacks explicit output-eligibility rules for emitting final per-key results, risking duplicate/partial outputs or outputs for unfinished entities.",
+      "evidence": "The task requires: for each job, output (jobId, longestStageTaskCount) only after the job has finished; order not required; one line per tuple. The location hint points to Workflow 2 output eligibility, but Workflow 2 does not define when to emit results (e.g., only on terminal job state, only once per jobId, handling late events, and ensuring deterministic final output). Without this, an agent may emit intermediate aggregates per window, emit on every update, or include jobs that never finish in the provided slice.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Key Workflows → Workflow 2: Build Real-Time Streaming Pipeline (Steps/Expected Output)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "location-flink-query-tp-01",
+      "description": "Workflow 2 is framed as multi-day production pipeline generation and monitoring, but does not include a reusable boundary for 'event-time keyed sessionization + finalize-on-terminal-event' which is the core of many Flink query tasks; this reduces trigger precision and encourages irrelevant tooling steps.",
+      "evidence": "Workflow 2 steps focus on YAML config generation, Kafka configs, scaffolding, deployment, monitoring. The task is a Flink batch-style job over bounded files with event-time semantics and a terminal job-event stream. The skill should provide a compact, reusable sub-workflow for event-time session windows / gap detection and finalization logic, rather than generic infra steps.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Key Workflows → Workflow 2: Build Real-Time Streaming Pipeline"
+        }
+      ]
+    },
+    {
+      "prediction_id": "location-flink-query-spc-01",
+      "description": "Workflow 2 does not cover edge cases needed for correct finalization: out-of-order events, watermark strategy, late events after terminal job event, and bounded-input end-of-stream behavior; missing guidance can cause incorrect longest-stage counts.",
+      "evidence": "The task uses microsecond timestamps and defines stage boundaries by 10-minute inactivity in event time. Correctness depends on watermarking, handling out-of-order submits, and deciding what to do with submits arriving after a job-finish event (or finish arriving before last submits). Workflow 2 contains no mention of these checks or recommended patterns (keyed state + event-time timers, allowed lateness, buffering until watermark passes).",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Reference content around Real-Time Streaming / Event Time Processing (but not connected to Workflow 2 execution steps)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "senior-data-engineer/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "Adds explicit, reusable rules for terminal-event completion and output eligibility, directly preventing premature/duplicate emissions and missing finals in event-time Flink jobs."
+    },
+    "trigger_precision": {
+      "score": 0.78,
+      "rationale": "Introduces a narrowly-scoped sub-workflow (2A) for event-time sessionization + finalize-on-terminal-event, applicable across many Flink query tasks without hardcoding dataset specifics."
+    },
+    "instruction_compliance": {
+      "score": 0.83,
+      "rationale": "Attributes the defect to missing Skill guidance (not agent behavior), and makes required checks explicit (timestamp units, authoritative terminal states, idempotent emission)."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "Covers multiple valid implementation paths (session windows vs keyed timers), bounded-input nuances, watermarking, and late/out-of-order considerations; still leaves dataset-specific terminal codes to be confirmed by the agent."
+    },
+    "overall_rationale": "The repair targets the hinted Workflow 2 gaps by adding concrete, transferable guidance for completion detection and output eligibility in event-time Flink jobs, improving correctness while avoiding task-instance overfitting."
+  },
+  "transport": {
+    "id": "chatcmpl-ElYsPLJ1HirzOZgS3aL49sjSMmNBb",
+    "usage": {
+      "completion_tokens": 7395,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 8,
+        "engine_ttft_ms": 3033,
+        "engine_ttlt_ms": 63644,
+        "pre_inference_ms": 189,
+        "service_tbt_ms": 8,
+        "service_ttft_ms": 3556,
+        "service_ttlt_ms": 64163,
+        "user_visible_ttft_ms": 3367
+      },
+      "prompt_tokens": 90088,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 97483
+    }
+  }
+}

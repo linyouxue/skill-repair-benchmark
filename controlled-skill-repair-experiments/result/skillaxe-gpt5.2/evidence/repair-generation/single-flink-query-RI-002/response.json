@@ -1,0 +1,81 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-flink-query-RI-002",
+  "diagnoses": [
+    {
+      "prediction_id": "single-flink-query-RI-002",
+      "description": "Workflow 2’s output-eligibility guidance is overly restrictive and can cause missing outputs when the specification requires emitting results after a job has finished, regardless of which terminal job event indicates completion. The current guidance says to emit only after a specific completion event (example: FINISH) and explicitly warns against treating other terminal states as equivalent. For the trial task, a job is considered finished for purposes of output when it has ended, and the dataset’s job lifecycle may include multiple terminal event types (e.g., FINISH, FAIL, KILL, EVICT, LOST, etc.). If an agent follows the current Skill guidance literally, it may suppress output for jobs that end via a different terminal event, causing undercounted/missing jobIds in output.",
+      "evidence": "Location hint points to “Workflow 2 中，结果输出资格的规定”. In senior-data-engineer/SKILL.md, the “Semantic Contract Gate for Keyed Event Aggregations” instructs: “If a specification says to emit after a FINISH event, do not broaden that condition to KILL, CANCEL, FAIL… unless explicitly declared equivalent.” The trial task’s requirement is to output per job “once the job has finished” (not necessarily only FINISH). In Google cluster traces, job termination can be represented by multiple terminal event types; restricting to a single terminal label can drop valid outputs.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Workflow 2: Build Real-Time Streaming Pipeline → Semantic Contract Gate for Keyed Event Aggregations (output authorization predicate)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-flink-query-RI-002",
+      "description": "Workflow 2 lacks an explicit step to derive and document the task’s definition of “finished” from the dataset schema/docs, and to map that definition to concrete event types present in the data. Without this, agents may incorrectly attribute missing outputs to late data/windowing rather than an incorrect completion predicate, or may guess completion semantics. The Skill should require checking the dataset documentation for lifecycle semantics and enumerating terminal states before implementing output gating.",
+      "evidence": "The Skill provides a strong warning against broadening completion events, but does not provide the complementary instruction for cases where the spec uses a semantic term (“finished”) rather than a specific event label. The trial task uses “once the job has finished” and references dataset docs (format.pdf, ClusterData2011_2.md). The Skill should instruct agents to consult those docs to determine which job events constitute “finished” and to implement gating accordingly.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Workflow 2: Build Real-Time Streaming Pipeline → Semantic Contract Gate for Keyed Event Aggregations"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "senior-data-engineer/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "The repair directly addresses a high-impact failure mode: suppressing outputs due to an overly narrow completion predicate. It preserves the original caution for cases where the spec names a specific event, while adding guidance for semantic completion terms. This reduces risk of missing keys/rows in outputs for lifecycle-driven aggregations."
+    },
+    "trigger_precision": {
+      "score": 0.78,
+      "rationale": "Changes are confined to Workflow 2’s output-eligibility/authorization guidance and do not introduce task-instance specifics (no dataset names, no hardcoded event labels beyond illustrative examples already present). It targets the correct boundary: how to decide when output is authorized in keyed aggregations."
+    },
+    "instruction_compliance": {
+      "score": 0.83,
+      "rationale": "The update distinguishes Skill deficiency (missing guidance for semantic completion terms) from agent non-compliance, and makes required checks explicit: consult documentation, enumerate terminal states, implement membership predicate, and test with fixtures including multiple terminal labels. This clarifies what the agent must do to comply."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "The revised gate supports multiple valid execution paths: single explicit completion label, semantic completion mapped to a terminal set, and negative cases where no completion occurs. It adds edge-case coverage (multiple terminal labels, avoiding accidental single-valued predicates) without prescribing a specific implementation."
+    },
+    "overall_rationale": "Workflow 2 previously encouraged an overly strict single-event completion gate, which can cause missing outputs when “finished” is represented by multiple terminal lifecycle events. The repair keeps the valuable strictness principle but adds the missing complementary rule: when the spec is semantic, derive the concrete terminal set from documentation and test accordingly."
+  },
+  "transport": {
+    "id": "chatcmpl-Elcjt6ErnjLSveLeIFTvg7SPaqlfL",
+    "usage": {
+      "completion_tokens": 6914,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 8,
+        "engine_ttft_ms": 1547,
+        "engine_ttlt_ms": 53801,
+        "pre_inference_ms": 285,
+        "service_tbt_ms": 8,
+        "service_ttft_ms": 2260,
+        "service_ttlt_ms": 54503,
+        "user_visible_ttft_ms": 1975
+      },
+      "prompt_tokens": 90278,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 97192
+    }
+  }
+}

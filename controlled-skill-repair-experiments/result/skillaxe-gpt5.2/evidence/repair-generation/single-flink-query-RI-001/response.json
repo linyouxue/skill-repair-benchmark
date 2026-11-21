@@ -1,0 +1,85 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-flink-query-RI-001",
+  "diagnoses": [
+    {
+      "prediction_id": "single-flink-query-RI-001-D1",
+      "description": "Workflow 2’s completion-event criterion is underspecified/incorrect for keyed aggregations that must finalize only after a job has finished. It does not explicitly require that the completion signal be the job’s terminal event (e.g., FINISH) and not merely any lifecycle event (e.g., SCHEDULE/ENABLE/DISABLE/UPDATE), which can cause premature finalization and wrong longest-stage counts.",
+      "evidence": "The task requires: “find the stage with the most number of tasks once the job has finished.” The location hint points to “Workflow 2 … completion event determination.” In the current SKILL.md, Workflow 2 includes a generic ‘Semantic Contract Gate’ and the ‘Non-negotiable Flink Emission Gate’, but it never defines what constitutes ‘completion’ beyond ‘a lifecycle or completion event controls when finalization runs’. Without an explicit rule that completion must be the terminal job event, an agent may treat any job event as completion and emit early, splitting stages incorrectly and undercounting the longest stage.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Workflow 2: Build Real-Time Streaming Pipeline / Semantic Contract Gate for Keyed Event Aggregations"
+        },
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Non-negotiable Flink Emission Gate"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-flink-query-RI-001-D2",
+      "description": "Workflow 2 does not require an explicit negative test/fixture for ‘premature lifecycle events’ (non-terminal job events) to ensure no emission occurs before true completion. This gap makes it likely that implementations pass the emission gate but still finalize on the wrong lifecycle signal.",
+      "evidence": "The SKILL.md asks for ‘positive and negative semantics’ fixtures, but the negative fixture described is only ‘completion event but no qualifying activity’. It does not include the critical edge case for this task: lifecycle events that are not terminal (job not finished) but are present in the job-event stream. For session/stage logic, emitting on such events would be a silent logic error producing plausible but wrong outputs.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Workflow 2: Build Real-Time Streaming Pipeline / Semantic Contract Gate for Keyed Event Aggregations"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "senior-data-engineer/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "The repair directly prevents a high-impact failure mode: emitting results before the entity is actually finished due to misidentifying completion events. It strengthens the semantic contract to require terminal completion signals and adds a required negative fixture for premature lifecycle events, reducing incorrect outputs without prescribing task-instance logic."
+    },
+    "trigger_precision": {
+      "score": 0.83,
+      "rationale": "The change targets the correct boundary: the Skill’s guidance for keyed aggregations combining activity and lifecycle events. It avoids overfitting to Google traces by describing terminal vs non-terminal lifecycle signals generically (FINISH/TERMINATE/DELETE as schema-defined examples) and applies broadly to similar Flink jobs."
+    },
+    "instruction_compliance": {
+      "score": 0.9,
+      "rationale": "The update clarifies what was deficient in the Skill (completion predicate definition and missing negative fixture) rather than blaming agent behavior. It makes required checks explicit: enumerate terminal outcomes, justify inclusion, and test against non-terminal lifecycle events."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "The repair supports multiple valid execution paths by allowing multiple terminal outcomes and requiring explicit enumeration. It adds coverage for an important edge case (non-terminal lifecycle events) while preserving the existing emission gate and key-eligibility rules."
+    },
+    "overall_rationale": "This pass repairs an underspecified completion-event rule in Workflow 2 that can cause premature finalization in Flink keyed aggregations. The fix is minimal (documentation-only), broadly applicable, and adds an explicit terminal-completion requirement plus a missing negative test condition, improving correctness without embedding task-specific implementation details."
+  },
+  "transport": {
+    "id": "chatcmpl-Elbe4dZB5VsOUpgkSbUiaN00pJful",
+    "usage": {
+      "completion_tokens": 7137,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 6,
+        "engine_ttft_ms": 2666,
+        "engine_ttlt_ms": 46481,
+        "pre_inference_ms": 345,
+        "service_tbt_ms": 6,
+        "service_ttft_ms": 3190,
+        "service_ttlt_ms": 46998,
+        "user_visible_ttft_ms": 2844
+      },
+      "prompt_tokens": 90512,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 97649
+    }
+  }
+}

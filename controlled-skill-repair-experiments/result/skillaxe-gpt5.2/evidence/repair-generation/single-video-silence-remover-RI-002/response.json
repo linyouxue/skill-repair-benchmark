@@ -1,0 +1,100 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-video-silence-remover-RI-002",
+  "diagnoses": [
+    {
+      "prediction_id": "single-video-silence-remover-RI-002",
+      "description": "Segment-combiner does not implement the documented/required interval merge contract (sort, clamp, de-overlap/merge). It simply concatenates segments and sums durations. This can yield overlapping/adjacent segments, unsorted segments, out-of-range times, and inconsistent duration math, which then propagates into video-processor and report-generator checks (non-overlapping, duration≈end-start, original≈compressed+removed).",
+      "evidence": "segment-combiner/SKILL.md claims it produces a unified list 'Compatible with video-processor' but does not specify or enforce non-overlap/merge. segment-combiner/scripts/combine_segments.py only appends segments and sorts; it never merges overlaps/adjacent intervals, never clamps to video duration, and trusts provided duration fields. video-processor/SKILL.md mandates 'Combine, sort, clamp, and de-overlap all removal segments' but video-processor/scripts/process_video.py does not perform these checks; it assumes remove_segments are already clean and uses seg['duration'] for reporting, which becomes wrong if overlaps exist.",
+      "locations": [
+        {
+          "file": "segment-combiner/SKILL.md",
+          "section": "Notes / interval merge expectations (missing contract)"
+        },
+        {
+          "file": "segment-combiner/scripts/combine_segments.py",
+          "section": "combine_segments(): no merge/clamp/validation; trusts duration"
+        },
+        {
+          "file": "video-processor/SKILL.md",
+          "section": "Mandatory end-to-end completion gate step 4 vs actual enforcement"
+        },
+        {
+          "file": "video-processor/scripts/process_video.py",
+          "section": "load_segments()/calculate_keep_segments(): assumes clean segments; removed_duration uses seg['duration']"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-video-silence-remover-RI-002",
+      "description": "Video-processor lacks explicit validation and normalization of removal segments at the Skill boundary. Even if segment-combiner is skipped or misused, video-processor should defensively sort, clamp, merge overlaps/adjacent segments, recompute durations, and fail fast on invalid intervals. Without this, ffmpeg filter generation can produce zero/negative-length trims or gaps due to overlaps, and the generated internal report can be inconsistent.",
+      "evidence": "video-processor/scripts/process_video.py: load_segments() sorts but does not validate start/end numeric, start<end, clamp to [0,total_duration], merge overlaps, or recompute duration. calculate_keep_segments() will behave incorrectly if remove segments overlap (current_time jumps forward, potentially skipping intended keep ranges) and can create keep segments with start>=end if remove segments are malformed. build_ffmpeg_filter() will emit trim/atrim with invalid ranges if keep segments are invalid.",
+      "locations": [
+        {
+          "file": "video-processor/SKILL.md",
+          "section": "Completion checks require non-overlapping sorted segments; script doesn't enforce"
+        },
+        {
+          "file": "video-processor/scripts/process_video.py",
+          "section": "No segment validation/normalization; removed_duration computed from untrusted duration fields"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "segment-combiner/SKILL.md",
+    "segment-combiner/scripts/combine_segments.py",
+    "video-processor/SKILL.md",
+    "video-processor/scripts/process_video.py"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.86,
+      "rationale": "Fixes a high-impact failure mode: overlapping/unsorted/out-of-range segments causing invalid cuts and inconsistent duration math. Adds normalization/merge/clamp and recomputes durations, preventing downstream ffmpeg and report validation issues."
+    },
+    "trigger_precision": {
+      "score": 0.8,
+      "rationale": "Targets the hinted boundary: segment merge contract in segment-combiner and defensive enforcement in video-processor. Changes are generic for any segment-removal workflow, not tuned to a specific video instance."
+    },
+    "instruction_compliance": {
+      "score": 0.78,
+      "rationale": "Attributes the defect to deficient Skill content (missing merge contract + missing enforcement) rather than agent behavior. Makes required checks explicit in docs and implements them in code; still allows upstream tools to be used but no longer requires perfect compliance."
+    },
+    "solution_path_coverage": {
+      "score": 0.83,
+      "rationale": "Covers common edge cases: invalid numeric fields, negative/zero durations, overlaps, adjacency micro-gaps, and out-of-range times. Adds fail-fast when removals cover entire video. Leaves room for clamping either at combine time or processor time."
+    },
+    "overall_rationale": "The bundle’s main defect is an underspecified and unimplemented interval-merge convention, leading to invalid removal lists and downstream inconsistencies. The repair establishes a clear merge/clamp contract in segment-combiner and adds defensive normalization in video-processor to ensure robust execution across plausible pipelines."
+  },
+  "transport": {
+    "id": "chatcmpl-Ele14vvToAe0RV1qmwIpfHYBQCQLs",
+    "usage": {
+      "completion_tokens": 7121,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 6,
+        "engine_ttft_ms": 430,
+        "engine_ttlt_ms": 42805,
+        "pre_inference_ms": 88,
+        "service_tbt_ms": 6,
+        "service_ttft_ms": 857,
+        "service_ttlt_ms": 43209,
+        "user_visible_ttft_ms": 769
+      },
+      "prompt_tokens": 10012,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 17133
+    }
+  }
+}

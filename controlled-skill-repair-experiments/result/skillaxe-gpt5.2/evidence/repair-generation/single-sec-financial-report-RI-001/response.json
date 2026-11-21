@@ -1,0 +1,108 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-sec-financial-report-RI-001",
+  "diagnoses": [
+    {
+      "prediction_id": "single-sec-financial-report-RI-001",
+      "description": "Helper scripts use inconsistent/incorrect data-root and quarter paths, causing failures or silently reading the wrong files. In particular, 13f-analyzer/holding_analysis.py ignores the --quarter argument and reads /root/INFOTABLE.tsv (nonexistent in this dataset layout), while other scripts expect /root/<quarter>/*.tsv. This breaks Q4 (top managers for a CUSIP in Q3) and can mislead analyses if a stray file exists.",
+      "evidence": "Task states datasets are in /root/2025-q2 and /root/2025-q3. one_fund_analysis.py reads f\"{data_root}/{quarter}/INFOTABLE.tsv\" (correct), but holding_analysis.py reads f\"{data_root}/INFOTABLE.tsv\" and never uses quarter. That will raise FileNotFoundError or read wrong data. Location hint points to helper script call locations and path conventions in 13f-analyzer/SKILL.md and fuzzy-name-search/SKILL.md.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/holding_analysis.py",
+          "section": "topk_managers(): reads /root/INFOTABLE.tsv and ignores quarter"
+        },
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Usage examples for scripts/holding_analysis.py and scripts/one_fund_analysis.py"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-RI-001",
+      "description": "Skill docs contain inconsistent python invocation and do not make the required working-directory / module path explicit. Examples mix `python` and `python3` and omit that scripts are located under each skill directory; agents may run from /root and get 'file not found'. This is a boundary/trigger precision issue: the skill should specify robust invocation patterns rather than relying on implicit CWD.",
+      "evidence": "13f-analyzer/SKILL.md uses `python3 scripts/one_fund_analysis.py` in one place and `python scripts/one_fund_analysis.py` in another. fuzzy-name-search/SKILL.md uses `python3 scripts/search_fund.py` and later `python3 scripts/search_stock_cusip.py` but does not state to run from the skill folder or provide absolute paths. The hint explicitly mentions '辅助脚本调用位置与路径约定' (helper script call locations and path conventions).",
+      "locations": [
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Analyze the change of holdings... example uses `python` and relative scripts path"
+        },
+        {
+          "file": "fuzzy-name-search/SKILL.md",
+          "section": "Usage examples rely on relative scripts/ paths without CWD guidance"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-sec-financial-report-RI-001",
+      "description": "Stock TITLEOFCLASS filter lists in multiple scripts are malformed due to missing commas, concatenating strings (e.g., 'sponsored adr''sponsored ads' -> 'sponsored adrsponsored ads'). This reduces recall for common-equity filtering and can change counts/AUM and stock universe used for comparisons, undermining correctness for Q2/Q3 holdings counts and top buys.",
+      "evidence": "In 13f-analyzer/scripts/one_fund_analysis.py and fuzzy-name-search/scripts/search_stock_cusip.py, the list has adjacent string literals without commas: \"sponsored adr\" \"sponsored ads\" \"adr\" \"equity\" ... which Python concatenates. That means intended classes like 'adr' and 'equity' may never match, affecting 'Number of stock holdings' and stock CUSIP search universe.",
+      "locations": [
+        {
+          "file": "13f-analyzer/scripts/one_fund_analysis.py",
+          "section": "title_class_of_stocks list definition"
+        },
+        {
+          "file": "fuzzy-name-search/scripts/search_stock_cusip.py",
+          "section": "title_class_of_stocks list definition"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "13f-analyzer/scripts/holding_analysis.py",
+    "13f-analyzer/scripts/one_fund_analysis.py",
+    "fuzzy-name-search/scripts/search_stock_cusip.py",
+    "13f-analyzer/SKILL.md",
+    "fuzzy-name-search/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.9,
+      "rationale": "Fixes a hard failure/wrong-file read in holding_analysis.py that would prevent answering Q4 and could corrupt results. Also repairs malformed TITLEOFCLASS filters that affect AUM/holding counts and stock universe, improving correctness across Q1–Q3/Q4."
+    },
+    "trigger_precision": {
+      "score": 0.78,
+      "rationale": "Changes target the shared skill boundary (path conventions and helper correctness) rather than task-specific logic. Added a quarter parameter to stock CUSIP search to avoid over-reliance on a single quarter without hardcoding the task’s quarters."
+    },
+    "instruction_compliance": {
+      "score": 0.82,
+      "rationale": "Docs now explicitly instruct how to invoke scripts with correct paths and dataset layout, reducing reliance on implicit CWD. The repair attributes faults to skill bundle (incorrect paths, ignored args, malformed lists) rather than assuming agent non-compliance."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "Supports multiple plausible execution paths: fund lookup per quarter, per-quarter fund analysis, cross-quarter comparison, and per-quarter stock-to-managers ranking. Adds basic edge handling (no holdings found) and normalizes CUSIP case."
+    },
+    "overall_rationale": "The pass repairs the primary operational defects indicated by the hint—script invocation/path conventions and quarter-aware file loading—while also correcting a subtle but high-impact filter bug. Updates are minimal, reusable, and improve reliability without embedding task-instance answers."
+  },
+  "transport": {
+    "id": "chatcmpl-ElkNdZez0wEYQab57vINr0IaEVNl1",
+    "usage": {
+      "completion_tokens": 6037,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 6,
+        "engine_ttft_ms": 271,
+        "engine_ttlt_ms": 36882,
+        "pre_inference_ms": 85,
+        "service_tbt_ms": 6,
+        "service_ttft_ms": 751,
+        "service_ttlt_ms": 37355,
+        "user_visible_ttft_ms": 666
+      },
+      "prompt_tokens": 5455,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 11492
+    }
+  }
+}

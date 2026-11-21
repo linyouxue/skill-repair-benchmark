@@ -1,0 +1,79 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-sec-financial-report-RI-003",
+  "diagnoses": [
+    {
+      "prediction_id": "single-sec-financial-report-RI-003",
+      "description": "跨季度 Top Buys/Top Sells 的计算流程在 Skill 文档中描述不够明确，且脚本实现存在会导致结果错误或误导的缺陷：未明确要求用“VALUE 差值(美元)”排序并输出 CUSIP；脚本对 sells 的取法使用 tail(10)[::-1]，在已按 ABS_CHANGE 降序排序的前提下会把“最接近 0 的负值”当作 Top Sells，而不是“最负(卖出最多)”；同时 PCT_CHANGE 对 baseline=0 的处理会产生不合理的百分比，容易误导。该缺陷会直接影响 Q3 问题 3（Top 5 increased investment）以及任何跨季度增减持分析。",
+      "evidence": [
+        "13f-analyzer/SKILL.md 仅说“newly purchased stocks ranked by notional value”，但没有明确：应按 VALUE 的绝对美元增量(本季-基准季)排序，并且对问题 3 需要输出 CUSIP 列表而非名称。",
+        "one_fund_analysis.py: merged 已按 ABS_CHANGE 降序排序；Top Sells 使用 merged[ABS_CHANGE<0].tail(10)[::-1]，这会选出负值中“最接近 0”的 10 个，而不是卖出最多的 10 个（最负）。正确应为对负值按 ABS_CHANGE 升序取 head(10)。",
+        "one_fund_analysis.py: PCT_CHANGE = ABS_CHANGE / VALUE_base.replace(0,1) 会把 baseline=0 的新增仓位显示为巨大/不合理的百分比，而文档未提示应忽略或标记为 N/A。"
+      ],
+      "locations": [
+        {
+          "file": "13f-analyzer/SKILL.md",
+          "section": "Analyze the change of holdings of a particular fund in between two quarters"
+        },
+        {
+          "file": "13f-analyzer/scripts/one_fund_analysis.py",
+          "section": "one_fund_analysis(): merged sorting and Top 10 Sells computation; PCT_CHANGE computation"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "13f-analyzer/SKILL.md",
+    "13f-analyzer/scripts/one_fund_analysis.py"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.9,
+      "rationale": "修复了 Top Sells 选择逻辑的实质性错误（会输出错误的卖出榜），并避免 baseline=0 时误导性的百分比变化；同时在文档中明确“按美元增量排序并输出 CUSIP”的要求，直接提升跨季度增减持问题的正确率。"
+    },
+    "trigger_precision": {
+      "score": 0.78,
+      "rationale": "改动聚焦于 13f-analyzer 的跨季度比较边界（Top Buys/Sells 计算与解释），不绑定具体基金/股票；但仍对输出解释做了更明确约束，属于合理的技能层泛化。"
+    },
+    "instruction_compliance": {
+      "score": 0.84,
+      "rationale": "将原本隐含的关键检查（按美元差值排序、Top Sells 定义、baseline=0 的处理、返回 CUSIP）显式写入 Skill 文档，减少因 agent 自行理解导致的不合规；缺陷主要归因于 Skill/脚本实现而非 agent 不执行。"
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "覆盖了常见边界情况：新增仓位 baseline=0、跨季度 accession 不同、Top Buys/Sells 的排序方向；仍未扩展到更复杂的情形（如多行同 CUSIP 的衍生品/不同 TITLEOFCLASS 过滤缺陷），但对本技能目标已显著更稳健。"
+    },
+    "overall_rationale": "本次 pass 针对 location hint 所指的跨季度 Top Buys 流程，发现并修复了会导致 Top Sells 错误排名的核心 bug，并补齐文档中对“按美元增量比较并输出 CUSIP”的关键操作约束，从而提升跨季度对比分析的可复用正确性。"
+  },
+  "transport": {
+    "id": "chatcmpl-ElkbnskXCKGJ76sIiLvgGkt0mx2wB",
+    "usage": {
+      "completion_tokens": 3219,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 8,
+        "engine_ttft_ms": 257,
+        "engine_ttlt_ms": 26694,
+        "pre_inference_ms": 88,
+        "service_tbt_ms": 8,
+        "service_ttft_ms": 723,
+        "service_ttlt_ms": 27154,
+        "user_visible_ttft_ms": 635
+      },
+      "prompt_tokens": 5355,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 8574
+    }
+  }
+}

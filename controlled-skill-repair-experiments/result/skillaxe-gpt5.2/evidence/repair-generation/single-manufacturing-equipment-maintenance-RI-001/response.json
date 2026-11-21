@@ -1,0 +1,103 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "single-manufacturing-equipment-maintenance-RI-001",
+  "diagnoses": [
+    {
+      "prediction_id": "single-manufacturing-equipment-maintenance-RI-001",
+      "description": "The Skill’s deliverables/completion criteria are underspecified: it provides computation recipes but does not explicitly require generating the five required output files with the exact schemas, nor does it enforce handbook-grounding (cite/extract definitions/limits) as a blocking condition. This can cause agents to return narrative answers, omit files, or compute using assumed limits/regions instead of handbook-derived ones.",
+      "evidence": "Task requires creating /app/output/q01.json–q05.json with strict formats, rounding, sorting, and null handling, and explicitly says to get definitions/regions/equations/limits/thresholds from handbook.pdf and not hallucinate. In reflow-profile-compliance-toolkit/SKILL.md, the 'Output construction guardrails' are generic and there is no 'deliverables' section that enumerates required files, schemas, and a completion checklist that includes handbook extraction as mandatory evidence. The 'Minimal end-to-end scaffold' shows writing outputs but does not bind to filenames or schemas.",
+      "locations": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "section": "Output construction guardrails / Minimal end-to-end scaffold (missing explicit deliverables & completion criteria)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-manufacturing-equipment-maintenance-RI-001",
+      "description": "Handbook grounding is not operationalized: the Skill tells the agent to 'retrieve cfg from handbook' but does not require recording the extracted parameters (preheat definition, temp band/window, ramp limit, TAL window, peak margin, conveyor rule inputs) in a structured way or validating that each computed metric is traceable to a specific handbook statement. This increases risk of guessing or silently defaulting to common industry values.",
+      "evidence": "Multiple questions require: 'Get the definition ... and allowable limit from the handbook' and 'Do not hallucinate or guess values.' The Skill provides a cfg placeholder but no explicit requirement to (a) parse handbook.pdf, (b) store extracted values with page/section references, (c) fail closed (null/unknown) when handbook values cannot be found. Without this, an agent can compute with assumed limits and still produce JSON.",
+      "locations": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "section": "Handbook “where to look” checklist / cfg object (needs explicit extraction+traceability+fail-closed checks)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-manufacturing-equipment-maintenance-RI-001",
+      "description": "Representative thermocouple selection rules are inconsistent across metrics and can lead to wrong Q01/Q03 outputs. The Skill specifies Q02 must use minimum TAL sensor, but does not explicitly specify the representative sensor rule for Q01 ramp (max ramp) and Q03 peak (minimum peak) in the context of required output fields (tc_id per run). It also doesn’t state what to do when some TCs have null metric and others have values (validity filtering).",
+      "evidence": "Task Q01: 'If multiple values exist, select the most representative thermocouple value based on the handbook details.' Q03: 'If a run has no thermocouple data, it is failing.' Skill includes generic tie-break rules but does not bind them to each question’s output schema, nor does it define validity filtering (e.g., ignore null metric TCs when selecting; if all null then null). This can cause selecting a tc_id with null metric or inconsistent selection across runs.",
+      "locations": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "section": "Deterministic sensor selection (tie-breaks) / Missing thermocouple data (needs per-question selection+validity rules)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "single-manufacturing-equipment-maintenance-RI-001",
+      "description": "Conveyor feasibility guidance contains a formula/sign error and ambiguous naming that can invert min/max speed requirements. The Skill states 'minimum dwell' then labels computed value as speed_min, but Q04 asks for required_min_speed_cm_min; additionally the Skill’s 'Maximum time-in-oven' bullet incorrectly repeats speed_min instead of speed_max, and the earlier maintenance-guidance skill has conflicting statements about speed_max vs speed_min. This can cause incorrect feasibility checks.",
+      "evidence": "In reflow-profile-compliance-toolkit/SKILL.md: 'Minimum dwell ... speed_min_cm_min = (L_eff_cm / t_min_s) * 60' (this is actually a minimum speed to not exceed max time? For minimum dwell, you need speed <= L/t_min, i.e., a maximum allowable speed). Then 'Maximum time-in-oven ... speed_min_cm_min = (L_eff_cm / t_max_s) * 60' (this is a minimum speed to avoid exceeding max time). The naming and repeated 'speed_min' are inconsistent and likely to produce wrong required_min_speed_cm_min and meets logic. The other skill (reflow-machine-maintenance-guidance/SKILL.md) also mixes speed_max and speed_min formulas, increasing confusion.",
+      "locations": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "section": "Conveyor feasibility (rule object approach)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "reflow-profile-compliance-toolkit/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.78,
+      "rationale": "Primary risk was producing incorrect or non-auditable outputs due to (a) missing explicit deliverables/schemas and (b) ambiguous/incorrect conveyor speed bound logic. The update adds blocking deliverables, fail-closed handbook grounding, per-question sensor selection rules, and corrects conveyor feasibility inequalities, reducing likelihood of wrong compliance determinations."
+    },
+    "trigger_precision": {
+      "score": 0.86,
+      "rationale": "Changes target the hinted area (deliverables/completion criteria) and adjacent computation boundary issues (handbook extraction traceability, sensor selection, conveyor bounds) without embedding task-instance constants. The guidance remains reusable across reflow compliance tasks."
+    },
+    "instruction_compliance": {
+      "score": 0.84,
+      "rationale": "Repairs explicitly distinguish what the Skill must require (file creation, schema adherence, handbook-derived parameters, fail-closed behavior) versus agent discretion, making previously implicit steps mandatory and checkable."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "Adds coverage for missing handbook parameters, missing/invalid TC segments, and mixed-validity thermocouples; clarifies per-question representative sensor selection; and supports both direct speed limits and derived time-in-oven constraints for conveyor feasibility."
+    },
+    "overall_rationale": "The repaired Skill now enforces concrete deliverables and handbook-grounded, deterministic computations with explicit fail-closed behavior and corrected conveyor feasibility math, addressing the most likely causes of incorrect or noncompliant outputs while staying general-purpose."
+  },
+  "transport": {
+    "id": "chatcmpl-EldEVpYEA3C36vjWlYXJDLtCJNsqT",
+    "usage": {
+      "completion_tokens": 5074,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 11,
+        "engine_ttft_ms": 243,
+        "engine_ttlt_ms": 56471,
+        "pre_inference_ms": 103,
+        "service_tbt_ms": 11,
+        "service_ttft_ms": 728,
+        "service_ttlt_ms": 56940,
+        "user_visible_ttft_ms": 625
+      },
+      "prompt_tokens": 5686,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 10760
+    }
+  }
+}

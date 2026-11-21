@@ -1,0 +1,114 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "location-pddl-airport-planning",
+  "diagnoses": [
+    {
+      "prediction_id": "location-pddl-airport-planning__save-plan-mismatched-signature-and-inputs",
+      "description": "The save-plan Skill has inconsistent interface definitions across SKILL.md and the .skill file: documentation says save-plan(plan_object, output_path) but the implementation requires (problem, plan, path) and the inputs list omits the required problem argument. This can cause runtime failures (missing argument) or incorrect usage by agents following the docs, preventing plan files from being written.",
+      "evidence": [
+        "SKILL.md Plan Saving section documents `save-plan(plan_object, output_path)` and example `save_plan(plan, \"solution.plan\")`.",
+        "pddl-skills/save_plan.skill declares inputs: plan, path; but script defines `def skill(problem, plan, path):` and uses `PDDLWriter(problem)`.",
+        "Example Workflow in SKILL.md calls `save_plan(plan, \"task01.plan\")` without providing problem, which would not satisfy the current implementation signature."
+      ],
+      "locations": [
+        {
+          "file": "pddl-skills/SKILL.md",
+          "section": "Plan Saving; Example Workflow"
+        },
+        {
+          "file": "pddl-skills/save_plan.skill",
+          "section": "inputs definition; python script signature"
+        }
+      ]
+    },
+    {
+      "prediction_id": "location-pddl-airport-planning__load-problem-inputs-mismatch",
+      "description": "The load-problem Skill's declared inputs do not match its implementation signature. The .skill file lists a single input `path`, but the script requires `domain_file` and `problem_file`. This mismatch can lead to incorrect invocation wiring and failure to load PDDL files.",
+      "evidence": [
+        "pddl-skills/load_problem.skill inputs: `- path: path to problem file`.",
+        "pddl-skills/load_problem.skill script: `def skill(domain_file, problem_file): ... parse_problem(domain_file, problem_file)`.",
+        "SKILL.md documents `load-problem(domain_path, problem_path)` which conflicts with the .skill inputs."
+      ],
+      "locations": [
+        {
+          "file": "pddl-skills/load_problem.skill",
+          "section": "inputs definition; python script signature"
+        },
+        {
+          "file": "pddl-skills/SKILL.md",
+          "section": "Load Domain and Problem"
+        }
+      ]
+    },
+    {
+      "prediction_id": "location-pddl-airport-planning__example-workflow-omits-required-save-plan-context",
+      "description": "The Example Workflow encourages calling save_plan with only (plan, path), but the underlying writer requires the problem context to correctly serialize action instances. The workflow should explicitly pass the problem object and include a check for None/unsolved plans before validation/saving to avoid crashes.",
+      "evidence": [
+        "save_plan.skill uses `PDDLWriter(problem)`; therefore problem is required for writing.",
+        "Example Workflow validates and saves without checking whether `generate_plan` returned None.",
+        "SKILL.md notes 'If no plan exists, returns None' for generate-plan, but workflow doesn't handle it."
+      ],
+      "locations": [
+        {
+          "file": "pddl-skills/SKILL.md",
+          "section": "Example Workflow; Plan Generation notes; Plan Saving"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "pddl-skills/save_plan.skill",
+    "pddl-skills/load_problem.skill",
+    "pddl-skills/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.9,
+      "rationale": "Fixes a high-likelihood runtime failure and incorrect usage pattern: save-plan previously could not be called as documented and would often fail to write outputs. Also corrects load-problem wiring mismatch that could prevent parsing entirely."
+    },
+    "trigger_precision": {
+      "score": 0.86,
+      "rationale": "Targets the skill boundary indicated by the hint (Plan Saving, Example Workflow, save_plan inputs) and additionally repairs a closely related interface mismatch in load-problem that affects the same pipeline, without adding task-instance logic."
+    },
+    "instruction_compliance": {
+      "score": 0.88,
+      "rationale": "Attributes faults to deficient Skill interface/documentation rather than agent behavior, and makes required arguments and checks explicit (problem required for saving; handle plan=None before validate/save)."
+    },
+    "solution_path_coverage": {
+      "score": 0.8,
+      "rationale": "Supports common execution paths (load→plan→validate→save) and an important edge case (no plan found). Does not expand into broader planner selection/timeout handling, keeping changes minimal."
+    },
+    "overall_rationale": "The bundle’s core defect is inconsistent function signatures and inputs between documentation and .skill implementations, especially for save-plan, which blocks correct plan output writing. The repair aligns interfaces, updates docs/workflow, and adds a minimal guard for unsolved instances, improving reliability across PDDL tasks without overfitting."
+  },
+  "transport": {
+    "id": "chatcmpl-EldYlpLHY1tTX4w9xrjdnYhOUcCzS",
+    "usage": {
+      "completion_tokens": 2354,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 10,
+        "engine_ttft_ms": 91,
+        "engine_ttlt_ms": 23834,
+        "pre_inference_ms": 83,
+        "service_tbt_ms": 10,
+        "service_ttft_ms": 494,
+        "service_ttlt_ms": 24233,
+        "user_visible_ttft_ms": 411
+      },
+      "prompt_tokens": 1978,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 4332
+    }
+  }
+}
