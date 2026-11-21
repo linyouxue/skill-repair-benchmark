@@ -5,12 +5,9 @@ from pathlib import Path
 import re
 
 import pymupdf as pdf
+from matched_references import matched
 
 ROOT = Path(__file__).resolve().parents[1]
-# Page / block and inclusive line indices, checked against the printed papers.
-ACK = {"birkholz24": (5,1,0,1), "jung24b": (4,22,0,2), "hussein24": (4,62,1,2),
-       "choi24c": (4,16,0,6), "wu24q": (5,1,0,2), "chen24r": (5,1,0,2),
-       "seide24": (4,15,0,1), "kang24c": (4,20,12,14), "zhao24i": (5,1,0,3)}
 
 
 def all_lines(doc):
@@ -69,8 +66,6 @@ def annotations(name, doc):
         elif (text == "Interspeech 2024" or "September 2024, Kos, Greece" in text
               or text.startswith(("10.21437/Interspeech.2024-", "arXiv:2509.26542v"))):
             add("publication", [key])
-    if name in ACK:
-        add("acknowledgment", block(*ACK[name]))
     if name == "paper2":
         add("acknowledgment", block(4,24,0,9) + block(5,0,0,2))
     if name == "paper3":
@@ -113,6 +108,7 @@ def main():
     parser.add_argument("--write", action="store_true", help="Replace frozen references after review")
     args = parser.parse_args()
     snapshot = json.loads((ROOT / "source/snapshot.json").read_bytes())
+    labels = json.loads((ROOT / "source/line_labels.json").read_bytes())
     for split, papers in snapshot.items():
         folder = ROOT if split == "train" else ROOT / "evaluation" / split
         inputs = folder / ("environment" if split == "train" else "inputs")
@@ -120,7 +116,9 @@ def main():
         annotated = {}
         for paper in papers:
             with pdf.open(inputs / paper["file"]) as doc:
-                annotated[paper["file"]] = {"pages": len(doc), "regions": annotations(paper["source_id"], doc)}
+                regions = (annotations(paper["source_id"], doc) if split == "train"
+                           else matched(doc, labels[paper["source_id"]], all_lines, identity_words))
+                annotated[paper["file"]] = {"pages": len(doc), "regions": regions}
         result = {"split": split, "papers": annotated}
         if args.write:
             reference.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

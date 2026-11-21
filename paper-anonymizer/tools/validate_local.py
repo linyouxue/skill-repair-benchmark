@@ -57,9 +57,27 @@ def verify(work):
     names = [paper["source_id"] for group in sources.values() for paper in group]
     assert set(ref) == set(sources) == set(SPLITS)
     assert len(names) == len(set(names)) == 18
+    for split, papers in ref.items():
+        for name, paper in papers.items():
+            with pdf.open(inputs[split] / name) as original:
+                assert len(original) == paper["pages"]
     out = {}
     for group, papers in ref.items():
         counts = Counter(r["kind"] for s in papers.values() for r in s["regions"])
+        blocks = 2 if group in ("group_01", "group_03") else 1
+        per_block = 25 if group in ("group_02", "group_03") else 20
+        assert [p["pages"] for p in papers.values()] == [23, 5, 12] * blocks
+        assert [p["source_family"] for p in sources[group]] == ["arxiv", "interspeech", "icml_workshop"] * blocks
+        assert counts["preserve"] == 44 * blocks
+        targets = sum(counts.values()) - counts["preserve"]
+        assert targets == per_block * blocks
+        assert (targets - counts["byline"]) * 5 == targets * 2
+        for start in range(0, len(papers), 3):
+            triplet = list(papers.values())[start:start + 3]
+            assert sum(r["kind"] != "preserve" for spec in triplet for r in spec["regions"]) == per_block
+        for spec in papers.values():
+            covered_pages = {piece[0] for r in spec["regions"] if r["kind"] == "preserve" for piece in r["pieces"]}
+            assert covered_pages == set(range(1, spec["pages"] + 1))
         out[group] = {"source_papers": len(papers), "pages": sum(s["pages"] for s in papers.values()),
                       "field_counts": dict(counts)}
         for mode in ("oracle", "unchanged", "first_page"):
@@ -77,8 +95,9 @@ def verify(work):
                                       for k,v in p["regions"].items() if not v["correct"]][:12]))
             if mode == "unchanged":
                 assert red["correct"] == 0 and res["by_type"]["preserve"]["correct"] == counts["preserve"]
-            if mode == "first_page" and group != "train":
-                misses = len(papers) if group in ("group_02", "group_03") else 0
+            if mode == "first_page":
+                misses = sum(r["kind"] != "preserve" and r["pieces"][0][0] > 1
+                             for spec in papers.values() for r in spec["regions"])
                 assert red["total"] - red["correct"] == misses
             out[group][mode] = brief(res)
         missing = score(group, work / "empty")
@@ -86,7 +105,7 @@ def verify(work):
         out[group]["missing"] = brief(missing)
     group = "group_02"
     folder = work / group / "oracle"
-    name, spec = next(iter(ref[group].items()))
+    name, spec = next((name, spec) for name, spec in ref[group].items() if spec["pages"] == 5)
     src = inputs[group] / name
     dest = folder / name
     saved = dest.read_bytes()

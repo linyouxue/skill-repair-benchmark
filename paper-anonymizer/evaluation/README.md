@@ -1,6 +1,6 @@
 # 三组受控泛化测试
 
-每组 `inputs/` 放该组原始 PDF，`verifier/expected_output.json` 放对应的逐区域标注。三组共用根目录题面、原 Skill 和评分代码。论文数和栏外字段占比见[分组表](../README.md#训练与泛化测试)。
+每组 `inputs/` 放该组原始 PDF，`verifier/expected_output.json` 放对应的逐区域标注。三组共用根目录题面、原 Skill 和评分代码。各组的论文数、页数和应遮字段数见[分组表](../README.md#训练与泛化测试)。
 
 ```bash
 python paper-anonymizer/evaluation/prepare_task.py --split group_01 --output /tmp/paper-g1/tasks/paper-anonymizer
