@@ -52,6 +52,14 @@ Unless otherwise stated by the user or existing template
 - Test with edge cases (zero values, negative numbers)
 - Verify no unintended circular references
 
+#### Volatility & risk-metric conventions (finance)
+- **Return units**: Decide upfront whether returns are **decimals** (0.012) or **percent** (1.2). If the prompt says "multiply by 100", keep returns in percent and remember to divide by 100 exactly once when converting a percent shock into a currency amount.
+- **Rolling volatility window**: For an *N-period* rolling volatility based on periodic returns, the window must include exactly N return observations (e.g., last 3 monthly returns for a 3-month rolling vol; last 12 monthly returns for a 12-month rolling vol). Guard with `COUNT()` / `COUNTA()` so the formula blanks until the window is complete.
+- **STDEV.S vs STDEV.P (sample vs population)**: For volatility, default to **sample** stdev (Excel `STDEV.S`, legacy `STDEV`) unless the prompt or an existing workbook explicitly calls for population. If you’re recalculating with LibreOffice/Calc or using an auto-grader that might not support newer function names, prefer legacy names it supports (`STDEV` for sample, `STDEVP` for population) to avoid `#NAME?`. In auto-graded tasks where it’s ambiguous, compute both on a small window and match the template/expected outputs.
+- **Z-scores / inverse normal CDF**: Prefer legacy `NORMSINV(p)` (or `NORMINV(p,0,1)`) for standard-normal quantiles. Some runtimes don’t recognize the newer `NORM.S.INV(p)` name and will produce `#NAME?`, cascading into downstream risk metrics.
+- **Annualization**: `annual_vol = period_vol * SQRT(periods_per_year)` (e.g., monthly → `SQRT(12)`, daily → `SQRT(252)`). Only annualize if explicitly requested or if the downstream metric’s horizon is annual.
+- **One-sided shock / VaR-style exposure** (common pattern): `exposure = position_value * z_score * volatility`, with units consistent (if volatility is in percent, use `/100`). **Match the volatility horizon to the shock horizon**: if the question is *near-term* (or otherwise non-annual), use the **non-annualized** periodic volatility (or scale to the horizon with `*SQRT(horizon_periods)`), and do **not** substitute an annualized volatility just because it exists for reporting.
+
 #### Documentation Requirements for Hardcodes
 - Comment or in cells beside (if end of table). Format: "Source: [System/Document], [Date], [Specific Reference], [URL if applicable]"
 - Examples:
@@ -203,13 +211,7 @@ wb.save('modified.xlsx')
 
 ## Recalculating formulas
 
-Excel files created or modified by openpyxl contain formulas as strings but typically **do not have updated cached results** (the `<v>` value stored alongside formulas in the XLSX XML). Many graders/verifiers read `data_only=True` values, so **formulas that aren't recalculated will look blank/None and be scored wrong even if the formulas are correct**.
-
-Therefore:
-- **Run recalc as the very last step before delivering the workbook.**
-- **Do not re-open and re-save the workbook with openpyxl after recalc** (that can wipe cached results). If you must edit after recalc, run recalc again after the final save.
-
-Use the provided `recalc.py` script to recalculate formulas:
+Excel files created or modified by openpyxl contain formulas as strings but not calculated values. Use the provided `recalc.py` script to recalculate formulas:
 
 ```bash
 python recalc.py <excel_file> [timeout_seconds]
