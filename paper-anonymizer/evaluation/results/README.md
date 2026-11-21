@@ -4,8 +4,8 @@
 
 | 测试组 | 论文数 | 评分分母 |
 |---|---:|---:|
-| group_01 | 6 | 94 |
-| group_02 | 3 | 47 |
-| group_03 | 6 | 94 |
+| group_01 | 6 | 134 |
+| group_02 | 3 | 72 |
+| group_03 | 6 | 144 |
 
 [训练组的 SkillHone 历史提交复算](../../result/README.md)与[评分器离线验证](../../tools/validation.json)分别记录。
