@@ -22,6 +22,8 @@ def make_submission(src, dest, spec, mode, skip=None):
                 continue
             if mode == "first_page" and reg["pieces"][0][0] != 1:
                 continue
+            if mode == "byline_only" and reg["kind"] != "byline":
+                continue
             for p, *coords in reg["pieces"]:
                 rect = pdf.Rect(coords) + (-0.3,-0.3,0.3,0.3)
                 if mode == "overlay":
@@ -56,7 +58,7 @@ def verify(work):
     sources = json.loads((ROOT / "source/snapshot.json").read_bytes())
     names = [paper["source_id"] for group in sources.values() for paper in group]
     assert set(ref) == set(sources) == set(SPLITS)
-    assert len(names) == len(set(names)) == 18
+    assert len(names) == len(set(names)) == 21
     for split, papers in ref.items():
         for name, paper in papers.items():
             with pdf.open(inputs[split] / name) as original:
@@ -71,7 +73,11 @@ def verify(work):
         assert counts["preserve"] == 44 * blocks
         targets = sum(counts.values()) - counts["preserve"]
         assert targets == per_block * blocks
-        assert (targets - counts["byline"]) * 5 == targets * 2
+        outside = targets - counts["byline"]
+        if group == "group_04":
+            assert (outside, targets) == (13, 20)
+        else:
+            assert outside * 5 == targets * 2
         for start in range(0, len(papers), 3):
             triplet = list(papers.values())[start:start + 3]
             assert sum(r["kind"] != "preserve" for spec in triplet for r in spec["regions"]) == per_block
@@ -80,7 +86,10 @@ def verify(work):
             assert covered_pages == set(range(1, spec["pages"] + 1))
         out[group] = {"source_papers": len(papers), "pages": sum(s["pages"] for s in papers.values()),
                       "field_counts": dict(counts)}
-        for mode in ("oracle", "unchanged", "first_page"):
+        modes = ["oracle", "unchanged", "first_page"]
+        if group in ("train", "group_04"):
+            modes.append("byline_only")
+        for mode in modes:
             folder = work / group / mode
             folder.mkdir(parents=True)
             if mode == "unchanged":
@@ -99,6 +108,10 @@ def verify(work):
                 misses = sum(r["kind"] != "preserve" and r["pieces"][0][0] > 1
                              for spec in papers.values() for r in spec["regions"])
                 assert red["total"] - red["correct"] == misses
+                if group in ("train", "group_04"):
+                    assert misses == 2
+            if mode == "byline_only":
+                assert red["correct"] == counts["byline"] and res["total"] - res["correct"] == outside
             out[group][mode] = brief(res)
         missing = score(group, work / "empty")
         assert missing["correct"] == 0

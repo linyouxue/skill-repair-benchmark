@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-SPLITS = ("train", "group_01", "group_02", "group_03")
+SPLITS = ("train", "group_01", "group_02", "group_03", "group_04")
 
 
 def prepare(split, output):
