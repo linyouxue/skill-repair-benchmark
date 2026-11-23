@@ -6,15 +6,15 @@
 |---|---|
 | [task.md](task.md) 和 [environment](environment/) | 三篇原题训练 PDF、作答环境和两份原 Skill |
 | [diagnosis](diagnosis/README.md) | 原题、原输入、GPT-5.2 原 Skill 失败轨迹和允许反馈 |
-| [evaluation](evaluation/README.md) | 三个测试组、隔离导出入口及接入说明 |
+| [evaluation](evaluation/README.md) | 四个测试组、隔离导出入口及接入说明 |
 | [verifier](verifier/) | 逐项正确率入口和训练集参考答案 |
-| [result](result/README.md) | 第五轮冻结 Skill、原题实际提交及复算证据 |
-| [evaluation/results](evaluation/results/README.md) | 三组测试的模型评测状态 |
+| [result](result/README.md) | 第 3 轮冻结 Skill、第 5 轮历史提交及复算证据 |
+| [evaluation/results](evaluation/results/README.md) | 五组的逐次评测成绩、轨迹及评分 |
 | [source](source/README.md) | 逐篇出处、分组和评分项的构造方法 |
 
 ## 训练与泛化测试
 
-每三篇为一组，依次选取 23 页 arXiv 预印本、5 页 Interspeech 2024 论文和 12 页 ICML 2025 工作坊论文。三个测试组共 15 篇，与训练组及彼此均无重复。[逐篇来源与版本](source/snapshot.json)
+每三篇为一组，依次选取 23 页 arXiv 预印本、5 页 Interspeech 2024 论文和 12 页 ICML 2025 工作坊论文。四个测试组共 18 篇，与训练组及彼此均无重复。[逐篇来源与版本](source/snapshot.json)
 
 | 数据集 | 论文数 / 总页数 | 每三篇应遮字段 | 全组应遮字段（栏外） | 正文保留 / 元数据 | 评分分母 |
 |---|---:|---:|---:|---:|---:|
@@ -22,8 +22,9 @@
 | group_01 | 6 / 80 | 20 | 40（16） | 88 / 6 | 134 |
 | group_02 | 3 / 40 | 25 | 25（10） | 44 / 3 | 72 |
 | group_03 | 6 / 80 | 25 | 50（20） | 88 / 6 | 144 |
+| group_04 | 3 / 40 | 20 | 20（13） | 44 / 3 | 67 |
 
-规模比较用 train 与 group_01，或 group_02 与 group_03。论文数翻倍时，按相同来源和单篇页数组合增加 40 页。字段数量比较用 train 与 group_02，或 group_01 与 group_03。相同规模下，每三篇多遮 5 项。四组的栏外字段均占 40%，每三篇都抽查 44 处正文并检查 3 份文档属性。分组选用各自独立的自然论文，作者、主题和字段类型可有差异。
+规模比较用 train 与 group_01，或 group_02 与 group_03。论文数翻倍时，按相同来源和单篇页数组合增加 40 页。字段数量比较用 train 与 group_02，或 group_01 与 group_03。相同规模下，每三篇多遮 5 项。训练组与前三个测试组的栏外字段均占 40%。比较 train 与 group_04 时，应遮字段同为 20 项，栏外从 8 项增至 13 项（40% → 65%），两组各有 2 项位于第二页及以后。所有组每三篇都抽查 44 处正文并检查 3 份文档属性。分组选用各自独立的自然论文，作者、主题和字段类型可有差异。
 
 ## 同学接入
 
