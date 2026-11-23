@@ -6,6 +6,7 @@
 |---|---|---|
 | 原 Skill Baseline | [原 Skill 和训练证据](baseline/README.md) | [测试原件](../evaluation/results/baseline/) |
 | SkillHone | [冻结 Skill、修复会话和训练证据](skillhone-gpt5.2/README.md) | [测试原件](../evaluation/results/methods/skillhone-gpt5.2/README.md) |
+| MMG2Skill | [第 5 轮冻结 Skill、五轮修复和训练证据](mmg2skill-gpt5.2/README.md) | [测试原件](../evaluation/results/methods/mmg2skill-gpt5.2/README.md) |
 | 人工修复 | [冻结 Skill、修复说明和训练证据](manual/README.md) | [测试原件](../evaluation/results/manual/README.md) |
 
 [完整成绩与运行索引](../evaluation/results/README.md)
