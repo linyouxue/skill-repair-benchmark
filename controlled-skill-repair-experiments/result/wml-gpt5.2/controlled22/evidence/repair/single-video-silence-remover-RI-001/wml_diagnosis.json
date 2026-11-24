@@ -1,0 +1,62 @@
+{
+  "diagnoses": [
+    {
+      "label": "silence smoothing window misaligned to timestamps",
+      "observable_evidence": "silence-detector/scripts/detect_silence.py uses np.convolve(..., mode=\"valid\") then sets silence_end=i directly from the smoothed index; with smoothing_window=30, smoothed[0] corresponds to original energy window [0..29], so returning i underestimates the true time by ~smoothing_window-1 (or requires a defined center/edge convention). SKILL.md describes smoothing but does not specify the timestamp mapping, and video-processor pipeline depends on this boundary to start pause detection.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "timestamp alignment for smoothed energy windows",
+      "defect_relation": "weak",
+      "scope_boundary": "initial-silence end-time computation when smoothing is applied (moving average) and the returned boundary is used as a real timestamp for downstream segmenting",
+      "do_not_generalize_to": "pause-detector local_avg computation (uniform_filter1d) which preserves array length and index-to-second mapping; also do not change energy-calculator windowing semantics",
+      "target_file": "silence-detector/scripts/detect_silence.py",
+      "target_section": "detect_initial_silence() smoothing + silence_end derivation",
+      "target_layer": "L2",
+      "recommended_direction": "Define and implement a consistent mapping from smoothed index to original-second timestamp (e.g., use 'same' convolution or add an explicit offset such as i + (smoothing_window-1) or i + (smoothing_window//2) depending on chosen convention), and document that convention in silence-detector/SKILL.md so downstream start-time usage is correct.",
+      "confidence": "high"
+    },
+    {
+      "label": "video-processor docs misroute report responsibility and pipeline call semantics",
+      "observable_evidence": "video-processor/SKILL.md states it \"Creates the processed video and a report JSON\" and shows an internal report format with keys original_duration/output_duration, but the task requires compression_report.json with different keys and a segments_removed list. A separate report-generator skill exists that matches the task format, and the location hint requests checking video-processor/SKILL.md calling说明. This mismatch can cause users to rely on the wrong report artifact and wrong schema.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "artifact contract & schema routing (which component produces which report)",
+      "defect_relation": "misrouted",
+      "scope_boundary": "documentation and expected outputs for end-to-end video-silence-remover pipeline, especially which report to deliver and which schema to follow",
+      "do_not_generalize_to": "the internal process_video.py behavior of producing its own *_report.json (may remain as an auxiliary debug artifact); also do not alter report-generator schema which already matches the task",
+      "target_file": "video-processor/SKILL.md",
+      "target_section": "Output / Notes / Mandatory end-to-end completion gate references to report generation",
+      "target_layer": "L1",
+      "recommended_direction": "Clarify that the task-format compression_report.json must be generated via report-generator using original+compressed+final segments, and treat video-processor's *_report.json as optional internal stats; update the documented pipeline call sequence to pass the corrected silence boundary into pause detection and then into segment-combiner/video-processor.",
+      "confidence": "high"
+    },
+    {
+      "label": "silence-detector docs omit smoothing-to-time convention used by downstream start-time",
+      "observable_evidence": "silence-detector/SKILL.md describes \"Apply smoothing with moving average\" and \"Find where smoothed energy exceeds baseline x multiplier\" but does not specify whether the returned end time corresponds to the start, center, or end of the smoothing window. Yet video-processor/SKILL.md mandates: \"start long-pause detection at that returned boundary,\" making the boundary semantics critical.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "inter-skill contract for boundary semantics (start-time meaning)",
+      "defect_relation": "missing",
+      "scope_boundary": "handoff of silence_end from silence-detector to pause-detector --start-time and to segment lists used for removal",
+      "do_not_generalize_to": "segment-combiner merge rules or report-generator duration math; this is specifically about boundary semantics and documentation",
+      "target_file": "silence-detector/SKILL.md",
+      "target_section": "How It Works / Notes (definition of returned silence end timestamp)",
+      "target_layer": "L1",
+      "recommended_direction": "Add an explicit definition of what timestamp the detector returns when smoothing is enabled (e.g., end-of-window or center-of-window), and ensure the JSON segment end and recommended pause-detector --start-time use that same convention.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "compute_or_transform",
+    "primary_anchor": "timestamp alignment for smoothed energy windows",
+    "editor_direction": "strengthen",
+    "composition_issue": "The silence-detector returns a boundary derived from a length-reducing smoothing operation without a defined index-to-time mapping; video-processor documentation then instructs using that boundary as an absolute second for pause detection. This compounds into systematic misplacement of the opening cut and mis-starting pause detection, which can cascade into wrong segments_removed and report inconsistencies.",
+    "preservation_constraints": [
+      "Preserve pause-detector local dynamic threshold behavior and its inclusive min_duration semantics",
+      "Preserve segment-combiner rule to not merge across positive gaps (only overlap/touch)",
+      "Preserve report-generator output schema and ffprobe-based duration measurement",
+      "Preserve video-processor ability to accept multiple remove-segments JSON inputs and produce a processed mp4"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defect is localized to a deterministic timestamp-mapping bug/omission in silence-detector smoothing and to documentation-level routing/contract issues in SKILL.md files. Fixing the mapping and clarifying the inter-skill boundary semantics should reliably correct downstream segment start-times without requiring changes to external tools or the end task."
+  }
+}

@@ -1,0 +1,21 @@
+Repository: /home/travis/build/failed/google/auto
+
+Observed failure
+- Reproduced with Travis-equivalent command:
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+- Build fails early during dependency resolution for modules auto-common, auto-factory, auto-service:
+  "Could not find artifact com.sun:tools:jar:11.0.27 at specified path .../lib/tools.jar"
+
+Root cause
+- The module POMs (common/, factory/, service/, value/) declare their parent as:
+    com.google.auto:auto-parent:3
+  This resolves the *published* parent POM, not the in-repo parent (root pom.xml is auto-parent:4-SNAPSHOT).
+- The published parent POM pulls in a system-scoped dependency on tools.jar (com.sun:tools) via a systemPath.
+- On modern JDKs (the build is using JDK 11 here), tools.jar no longer exists, so Maven cannot resolve that system dependency and aborts before compilation.
+
+Fix plan
+1) Make the modules use the in-repo parent POM by updating each module POM parent version from 3 -> 4-SNAPSHOT.
+   This removes the inherited tools.jar (com.sun:tools) system dependency.
+2) Re-run the same Maven verify command to see if there are any follow-on compilation/test issues under JDK 11.
+   If compilation fails due to old source/target levels, update the parent build configuration (maven-compiler-plugin) to a JDK-11-compatible configuration (e.g., use <release>8 or 7 and a newer compiler plugin).
+3) Produce patch_1.diff with the POM changes, apply it, then verify the build with the Travis-equivalent command.

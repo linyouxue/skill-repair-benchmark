@@ -1,0 +1,88 @@
+{
+  "method": "workflow-localized-mechanism-learning",
+  "trial_id": "single-sec-financial-report-RI-003",
+  "task_id": "sec-financial-report",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "provider": "Tatumass",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "wml_diagnosis": {
+    "diagnoses": [
+      {
+        "label": "cross-quarter top-buys uses wrong quarter data path",
+        "observable_evidence": "In 13f-analyzer/scripts/holding_analysis.py, topk_managers() reads `pd.read_csv(f\"{data_root}/INFOTABLE.tsv\", ...)` and never uses the `quarter` argument, while other scripts (e.g., one_fund_analysis.py) read `f\"{data_root}/{quarter}/INFOTABLE.tsv\"`. This indicates a systemic path/quarter binding error that would also break cross-quarter comparisons if similar patterns exist in the Top Buys workflow described in 13f-analyzer/SKILL.md.",
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "Quarter-scoped dataset path binding",
+        "defect_relation": "misrouted",
+        "scope_boundary": "Any analysis that must read quarter-specific 13F tables (INFOTABLE/COVERPAGE) for Q2 vs Q3 comparisons, especially Top Buys computations",
+        "do_not_generalize_to": "Purely quarter-agnostic utilities that intentionally read a single consolidated file (if such a file existed, which is not evidenced here)",
+        "target_file": "13f-analyzer/scripts/holding_analysis.py",
+        "target_section": "topk_managers() data loading",
+        "target_layer": "L2",
+        "recommended_direction": "Bind reads to `/root/{quarter}/INFOTABLE.tsv` (and analogous quarter-scoped paths) and ensure the `quarter` parameter is actually used for file selection.",
+        "confidence": "high"
+      },
+      {
+        "label": "top-buys ranking uses value not dollar increase",
+        "observable_evidence": "In 13f-analyzer/scripts/one_fund_analysis.py comparative mode, `ABS_CHANGE = VALUE - VALUE_base` and results are sorted by `ABS_CHANGE` descending, but the printed label is \"Top 10 Buys\" without explicitly constraining to the task-required metric \"ranked by dollar value increase\"; additionally, `VALUE` is summed per CUSIP (already aggregated) but the workflow doc in 13f-analyzer/SKILL.md does not specify extracting the top-5 by ABS_CHANGE for the requested quarter-to-quarter Top Buys question.",
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "Cross-quarter Top Buys computation (delta-based ranking)",
+        "defect_relation": "weak",
+        "scope_boundary": "Cross-quarter Top Buys / increased investment outputs used to answer questions like 'top 5 stocks received increased investment ... ranked by dollar value increase'",
+        "do_not_generalize_to": "Single-quarter summary stats (AUM, number of stock holdings) which do not require delta ranking",
+        "target_file": "13f-analyzer/SKILL.md",
+        "target_section": "Analyze the change of holdings of a particular fund in between two quarters",
+        "target_layer": "L1",
+        "recommended_direction": "Strengthen the documented workflow to explicitly instruct selecting the top-N CUSIPs by positive `ABS_CHANGE` (VALUE delta) and to use that as the 'dollar value increase' ranking, including how to extract exactly top-5 for the task.",
+        "confidence": "medium"
+      },
+      {
+        "label": "stock TITLEOFCLASS filter list is malformed causing misclassification",
+        "observable_evidence": "In both 13f-analyzer/scripts/one_fund_analysis.py and fuzzy-name-search/scripts/search_stock_cusip.py, `title_class_of_stocks` is defined with many adjacent string literals missing commas (e.g., \"sponsored adr\" \"sponsored ads\" \"adr\" ...), which in Python concatenates into a single string element. This will make `.isin(title_class_of_stocks)` filtering incorrect, impacting 'Number of stock holdings' and stock CUSIP search normalization guidance.",
+        "workflow_node": "compute_or_transform",
+        "mechanism_anchor": "Common-stock position filtering (TITLEOFCLASS whitelist)",
+        "defect_relation": "conflicting",
+        "scope_boundary": "Any step that filters holdings to 'stocks' via TITLEOFCLASS, including counting stock holdings and building the stock universe for CUSIP search",
+        "do_not_generalize_to": "Operations that do not rely on TITLEOFCLASS filtering (e.g., accession-number lookup in COVERPAGE)",
+        "target_file": "13f-analyzer/scripts/one_fund_analysis.py",
+        "target_section": "title_class_of_stocks constant and stock_infotable filter",
+        "target_layer": "L2",
+        "recommended_direction": "Correct the whitelist definition so each intended class label is a separate list element; keep behavior consistent across scripts that share this mechanism.",
+        "confidence": "high"
+      }
+    ],
+    "overlay": {
+      "primary_node": "compute_or_transform",
+      "primary_anchor": "Cross-quarter Top Buys computation (delta-based ranking)",
+      "editor_direction": "strengthen",
+      "composition_issue": "Cross-quarter Top Buys depends on (a) correct quarter-scoped file binding and (b) correct stock filtering; current misbinding (wrong INFOTABLE path) and malformed TITLEOFCLASS whitelist can silently distort the delta ranking and the resulting top-5 CUSIPs.",
+      "preservation_constraints": [
+        "Preserve the existing CLI interface and printed summary fields of one_fund_analysis.py (Total AUM, Total number of holdings, Number of stock holdings) except where fixes are required for correctness",
+        "Preserve the guidance in SKILL.md about using absolute /skills/... script paths and not replacing helpers unnecessarily"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "The observed failures are localized to deterministic data-path binding, filtering constants, and workflow documentation for Top Buys; these can be corrected within the existing scripts/markdown without needing external dependencies or changing the overall skill purpose."
+    }
+  },
+  "wml_repair": {
+    "edits": [
+      {
+        "path": "13f-analyzer/SKILL.md",
+        "content": "---\nname: 13f-analyzer\ndescription: Perform various data analysis on SEC 13-F and obtain some insights of fund activities such as number of holdings, AUM, and change of holdings between two quarters.\n---\n\n## Overview\n\nThe helper programs are installed under `/skills/13f-analyzer/scripts`. Run them\nfrom that absolute path; the task workspace is normally `/root`, so\n`scripts/...` and `/root/scripts/...` are not equivalent paths. If a helper\ncannot be found, check `/skills/13f-analyzer/scripts` before writing a replacement\nanalysis pipeline.\n\n### Analyze the holding summary of a particular fund in one quarter:\n\n```bash\npython3 /skills/13f-analyzer/scripts/one_fund_analysis.py \\\n    --accession_number ... \\\n    --quarter 2025-q2 \\\n```\n\nThis script will print out several basic information of a given fund on 2025-q2, including total number of holdings, AUM, total number of stock holdings, etc.\n\nInterpret the printed fields precisely:\n\n- `Total AUM` is the fund AUM across all reported holdings.\n- `Total number of holdings` counts all reported holding rows.\n- `Number of stock holdings` counts rows remaining after the helper's stock\n  `TITLEOFCLASS` filter. When a question asks how many stocks the fund holds,\n  use this field—not total holdings, `TABLEENTRYTOTAL`, or the number of unique\n  CUSIPs.\n\n\n### Analyze the change of holdings of a particular fund in between two quarters:\n\n```bash\npython3 /skills/13f-analyzer/scripts/one_fund_analysis.py \\\n    --quarter 2025-q3 \\\n    --accession_number <accession number assigned in q3> \\\n    --baseline_quarter 2025-q2 \\\n    --baseline_accession_number <accession number assigned in q2>\n```\n\nThis script will print out the dynamic changes of holdings from 2025-q2 to 2025-q3.\n\nFor questions like “top 5 stocks received increased investment ... ranked by dollar value increase”, interpret the helper’s output as follows:\n\n- Use the **Top Buys** section.\n- The ranking metric is **`Abs change`**, which is computed as `VALUE(q3) - VALUE(q2)` per CUSIP (i.e., the dollar/notional value increase).\n- Select only rows with **positive** `Abs change` (buys/increases).\n- Take the **top N** CUSIPs by `Abs change` (e.g., top-5 for the task).\n\n(Do not rank by the absolute `VALUE` level; the task requires ranking by the **increase** from baseline to current quarter.)\n\n### Analyze which funds hold a stock to the most extent\n\n```bash\npython3 /skills/13f-analyzer/scripts/holding_analysis.py \\\n    --cusip <stock cusip> \\\n    --quarter 2025-q3 \\\n    --topk 10\n```\n\nThis script will print out the top 10 hedge funds who hold a particular stock with highest notional value.\n"
+      }
+    ],
+    "repair_audit": {
+      "target_node": "compute_or_transform",
+      "target_anchor": "Cross-quarter Top Buys computation (delta-based ranking)",
+      "target_layer": "L1",
+      "edit_kind": "Clarify and strengthen the documented Top Buys workflow to explicitly use positive VALUE deltas (ABS_CHANGE) and select top-N CUSIPs by dollar value increase",
+      "boundedness": "Positive scope: only the cross-quarter holdings-change section in 13f-analyzer/SKILL.md, adding explicit instructions for interpreting 'Top Buys' as VALUE delta ranking and extracting top-5 CUSIPs. Negative scope: no changes to scripts, CLI interfaces, other sections, or any unrelated guidance.",
+      "verification_plan": "Downstream run: execute one_fund_analysis.py in comparative mode for a known fund across two quarters; confirm the printed 'Top 10 Buys' list is interpreted by selecting the first 5 CUSIPs with ABS_CHANGE > 0, matching the task's 'ranked by dollar value increase' requirement.",
+      "no_edit_reason": ""
+    }
+  },
+  "changed_files": [
+    "13f-analyzer/SKILL.md"
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "diagnoses": [
+    {
+      "label": "load-problem input name mismatch vs implementation",
+      "observable_evidence": "pddl-skills/load_problem.skill declares inputs: [path] but script defines def skill(domain_file, problem_file) and uses reader.parse_problem(domain_file, problem_file). SKILL.md documents load-problem(domain_path, problem_path).",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "Skill I/O contract alignment (declaration ↔ function signature ↔ docs)",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Any workflow that calls load-problem expecting declared inputs to match the Python skill signature and documented parameters",
+      "do_not_generalize_to": "Other skills whose declared inputs already match their implementation signatures",
+      "target_file": "pddl-skills/load_problem.skill",
+      "target_section": "inputs block and skill() signature",
+      "target_layer": "L2",
+      "recommended_direction": "Align the declared inputs and the Python function signature to accept domain_path and problem_path (or consistently named equivalents) as two parameters, matching SKILL.md and actual parse_problem usage.",
+      "confidence": "high"
+    },
+    {
+      "label": "save-plan inputs/signature require problem but not declared or documented",
+      "observable_evidence": "pddl-skills/save_plan.skill declares inputs: [plan, path] but script defines def skill(problem, plan, path) and constructs PDDLWriter(problem). SKILL.md documents save-plan(plan_object, output_path) with no problem parameter.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "Plan saving dependency injection (problem context for writer)",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Saving plans in workflows where only (plan, output_path) are provided per docs; any runtime binding of inputs to the save-plan skill",
+      "do_not_generalize_to": "Plan saving implementations that serialize without needing the original problem object",
+      "target_file": "pddl-skills/save_plan.skill",
+      "target_section": "inputs block and skill() signature",
+      "target_layer": "L2",
+      "recommended_direction": "Make the save-plan contract consistent: either (a) declare and document that save-plan requires the problem object, or (b) refactor implementation to not require problem; ensure inputs list matches the chosen signature.",
+      "confidence": "high"
+    },
+    {
+      "label": "SKILL.md example workflow uses inconsistent function names and wrong load-problem signature",
+      "observable_evidence": "SKILL.md shows load_problem(...) and generate_plan(...), but the skill names are load-problem and generate-plan; also the documented signature load-problem(domain_path, problem_path) conflicts with load_problem.skill inputs currently listing only 'path'.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "Documentation-to-skill invocation mapping (example workflow correctness)",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "User-facing guidance in SKILL.md for composing the skills into a pipeline (Load → Generate → Validate → Save)",
+      "do_not_generalize_to": "Non-example narrative sections that do not specify callable names or parameter lists",
+      "target_file": "pddl-skills/SKILL.md",
+      "target_section": "Plan Saving section and Example Workflow",
+      "target_layer": "L1",
+      "recommended_direction": "Update the example workflow and Plan Saving docs to use the actual skill names and the corrected parameter lists, so a reader can compose calls without guessing naming/argument conventions.",
+      "confidence": "medium"
+    },
+    {
+      "label": "validate skill likely misuses validator API / missing context manager",
+      "observable_evidence": "pddl-skills/validate.skill imports SequentialPlanValidator from unified_planning.engines and instantiates it directly; common unified_planning usage is via shortcuts/engines factory/context manager. This may fail at runtime depending on UP version.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "Unified Planning engine instantiation compatibility",
+      "defect_relation": "weak",
+      "scope_boundary": "Plan validation step across environments where unified_planning requires engine acquisition via factory/context manager rather than direct constructor",
+      "do_not_generalize_to": "Environments/versions where SequentialPlanValidator() direct instantiation is supported and stable",
+      "target_file": "pddl-skills/validate.skill",
+      "target_section": "skill() implementation",
+      "target_layer": "L2",
+      "recommended_direction": "Harden validator creation to a version-robust pattern (e.g., via unified_planning.shortcuts or engine factory/context manager) while preserving the boolean return contract.",
+      "confidence": "low"
+    }
+  ],
+  "overlay": {
+    "primary_node": "target_binding",
+    "primary_anchor": "Skill I/O contract alignment (declaration ↔ function signature ↔ docs)",
+    "editor_direction": "strengthen",
+    "composition_issue": "The pipeline composition (load → generate → validate → save) is currently broken because declared inputs, Python signatures, and SKILL.md guidance disagree, causing misbinding at runtime and confusing example usage; save-plan additionally depends on problem context not surfaced in its interface.",
+    "preservation_constraints": [
+      "Preserve the overall four-step workflow structure (load, generate, validate, save) and the intent to use unified_planning",
+      "Preserve generate-plan behavior of using OneshotPlanner with pyperplan unless required for interface consistency",
+      "Preserve return types/semantics: generate-plan returns a plan (or None), validate returns bool, save-plan returns output path"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "Defects are localized to interface mismatches and documentation/workflow mapping within the provided skill bundle files; aligning inputs/signatures/docs and optionally hardening validator instantiation can be done without external dependencies or changing the end-task logic."
+  }
+}

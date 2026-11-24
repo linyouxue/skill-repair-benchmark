@@ -1,0 +1,80 @@
+diff --git a/value/src/it/functional/pom.xml b/value/src/it/functional/pom.xml
+index 2471457..1f24d07 100644
+--- a/value/src/it/functional/pom.xml
++++ b/value/src/it/functional/pom.xml
+@@ -22,6 +22,11 @@
+   <artifactId>functional</artifactId>
+   <version>HEAD-SNAPSHOT</version>
+   <name>Auto-Value Functional Integration Test</name>
++
++  <properties>
++    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
++  </properties>
++
+   <dependencies>
+     <dependency>
+       <groupId>com.google.auto.value</groupId>
+@@ -46,6 +51,12 @@
+       <version>0.25</version>
+       <scope>test</scope>
+     </dependency>
++    <dependency>
++      <groupId>com.google.guava</groupId>
++      <artifactId>guava</artifactId>
++      <version>18.0</version>
++      <scope>test</scope>
++    </dependency>
+     <dependency>
+       <groupId>com.google.guava</groupId>
+       <artifactId>guava-testlib</artifactId>
+@@ -63,6 +74,7 @@
+         <configuration>
+           <source>1.6</source>
+           <target>1.6</target>
++          <encoding>${project.build.sourceEncoding}</encoding>
+           <compilerArgument>-Xlint:all</compilerArgument>
+           <showWarnings>true</showWarnings>
+           <showDeprecation>true</showDeprecation>
+@@ -83,6 +95,7 @@
+             <configuration>
+               <source>1.6</source>
+               <target>1.6</target>
++              <encoding>${project.build.sourceEncoding}</encoding>
+               <compilerArgs>
+                 <arg>-Xlint:all</arg>
+                 <arg>-Acom.google.auto.value.EclipseHackTest=1</arg>
+diff --git a/value/src/test/java/com/google/auto/value/processor/AutoAnnotationCompilationTest.java b/value/src/test/java/com/google/auto/value/processor/AutoAnnotationCompilationTest.java
+index e35b37e..c87f271 100644
+--- a/value/src/test/java/com/google/auto/value/processor/AutoAnnotationCompilationTest.java
++++ b/value/src/test/java/com/google/auto/value/processor/AutoAnnotationCompilationTest.java
+@@ -390,7 +390,7 @@ public class AutoAnnotationCompilationTest extends TestCase {
+         (Writer) null,
+         (JavaFileManager) null,
+         diagnosticCollector,
+-        ImmutableList.of("-d", tempDir.toString()),
++        ImmutableList.of("-d", tempDir.toString(), "-encoding", "UTF-8"),
+         (Iterable<String>) null,
+         ImmutableList.of(erroneousJavaFileObject));
+     compilationTask.setProcessors(ImmutableList.of(new AutoAnnotationProcessor()));
+@@ -398,8 +398,19 @@ public class AutoAnnotationCompilationTest extends TestCase {
+     assertThat(result).isFalse();
+     List<Diagnostic<? extends JavaFileObject>> diagnostics = diagnosticCollector.getDiagnostics();
+     assertThat(diagnostics).isNotEmpty();
+-    assertThat(diagnostics.get(0).getMessage(null)).contains("NotAutoAnnotation");
+-    assertThat(diagnostics.get(0).getMessage(null)).doesNotContain("static");
++
++    boolean sawNotAutoAnnotation = false;
++    StringBuilder allMessages = new StringBuilder();
++    for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics) {
++      String message = diagnostic.getMessage(null);
++      allMessages.append(message).append("\n");
++      if (message.contains("NotAutoAnnotation")) {
++        sawNotAutoAnnotation = true;
++      }
++    }
++
++    assertThat(sawNotAutoAnnotation).isTrue();
++    assertThat(allMessages.toString()).doesNotContain("static");
+   }
+ 
+   private static void removeDirectory(File dir) {

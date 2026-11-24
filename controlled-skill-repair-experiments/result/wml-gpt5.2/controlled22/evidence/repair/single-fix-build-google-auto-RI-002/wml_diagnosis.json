@@ -1,0 +1,61 @@
+{
+  "diagnoses": [
+    {
+      "label": "hardcoded repo path and patch contract",
+      "observable_evidence": "In maven-build-lifecycle/SKILL.md, the artifact contract and diagnostic sequence hardcode /home/travis/build/failed/google/auto and patch path /home/travis/build/failed/google/auto/patch_1.diff, while the task states the repository is at /home/travis/build/failed/<repo>/<id> and patch files must be written under that dynamic path.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "Dynamic target path binding (repo/id parameterization)",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Any step that instructs where to cd, where to write failed_reasons.txt, and where to write/apply patch_{i}.diff for arbitrary <repo>/<id> trials",
+      "do_not_generalize_to": "Trials that explicitly fix the repository path to a single known constant (e.g., a one-off benchmark that always uses google/auto)",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract; Minimal diagnostic sequence",
+      "target_layer": "L2",
+      "recommended_direction": "Replace hardcoded repository-specific paths with placeholders/variables aligned to the task contract (e.g., $REPO_DIR=/home/travis/build/failed/<repo>/<id>) and ensure all subsequent commands and patch paths reference that bound target.",
+      "confidence": "high"
+    },
+    {
+      "label": "missing guidance for nested invoker test project dependency scope",
+      "observable_evidence": "maven-build-lifecycle/SKILL.md emphasizes running the full reactor including Maven Invoker integration tests, but provides no mechanism for diagnosing/fixing dependency resolution failures inside nested invoker test projects (their own pom.xml) versus the main reactor POMs; the location hint explicitly flags “嵌套测试项目的依赖解析与修改范围”.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Invoker/nested test project dependency resolution triage",
+      "defect_relation": "missing",
+      "scope_boundary": "Maven builds that use maven-invoker-plugin (or similar) to run integration tests against nested sample projects under src/it, it/, or similar directories, where failures arise from those nested projects’ dependency/plugin resolution",
+      "do_not_generalize_to": "Single-module or multi-module builds without invoker-style nested projects (where all dependencies are resolved from the main reactor only)",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "General Maven lifecycle reminders / guidance around Invoker integration tests",
+      "target_layer": "L2",
+      "recommended_direction": "Add a decision procedure to locate invoker test projects, inspect their pom.xml and settings inheritance, run dependency:tree/effective-pom within the nested project context, and constrain edits to the correct POM (nested vs parent) based on where resolution actually fails.",
+      "confidence": "high"
+    },
+    {
+      "label": "ambiguous modification boundary between parent reactor and nested test projects",
+      "observable_evidence": "maven-build-lifecycle/SKILL.md instructs to ensure the full reactor including invoker tests succeeds, but does not define a safe modification boundary (what to change in parent vs nested test projects) and warns against modernizing JDK symptoms; without boundary rules, repairs may be misapplied (e.g., changing parent dependencyManagement when only nested IT project needs a repository/dependency tweak).",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "Change-scope isolation for multi-context Maven builds",
+      "defect_relation": "weak",
+      "scope_boundary": "When the build includes multiple Maven contexts (root reactor + nested invoker projects) and a failure could be fixed in more than one place",
+      "do_not_generalize_to": "Failures that are clearly confined to a single module within the main reactor (no secondary Maven execution contexts)",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Core rule / Do not modernize / Artifact contract (where it discusses what to patch)",
+      "target_layer": "L3",
+      "recommended_direction": "Strengthen guidance to (a) confirm which Maven execution context fails, (b) prefer the minimal, most local fix in the failing context, and (c) avoid broad parent-level dependencyManagement/plugin changes unless the failure is proven to originate there.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "target_binding",
+    "primary_anchor": "Dynamic target path binding (repo/id parameterization)",
+    "editor_direction": "strengthen",
+    "composition_issue": "Hardcoded paths misbind the working directory and patch artifact locations, which then prevents the later invoker/nested-project triage mechanism from being applied to the correct filesystem targets; additionally, missing/weak nested-project scope rules increase the chance of applying fixes in the wrong POM even if the correct repo path is used.",
+    "preservation_constraints": [
+      "Preserve the guidance about reproducing CI under the declared historical JDK before patching",
+      "Preserve the requirement to run the exact CI Maven command (including -f build-pom.xml when applicable) and to ensure invoker integration tests pass",
+      "Preserve the warnings against modernizing away historical-JDK symptoms"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All observed defects are localized to documentation mechanisms in maven-build-lifecycle/SKILL.md (path binding and missing invoker nested-project dependency triage/scope rules) and can be corrected by editing that file without needing external context or changes to other skills."
+  }
+}

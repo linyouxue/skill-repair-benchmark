@@ -1,0 +1,38 @@
+Repository: /home/travis/build/failed/google/auto
+
+Reproduced failure
+- Command:
+  mvn -B -U -f build-pom.xml -Dsource.skip=true -Dmaven.javadoc.skip=true verify
+- Environment:
+  Java: OpenJDK 11.0.27
+  Maven: 3.6.3
+- Error (first failure):
+  Failed to execute goal on project auto-common: Could not resolve dependencies
+  Could not find artifact com.sun:tools:jar:11.0.27 at specified path
+  /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Root cause
+1) Build configuration: module POMs reference the wrong parent POM version.
+   - common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml all use:
+     <parent> com.google.auto:auto-parent:3 </parent>
+   - The reactor builds com.google.auto:auto-parent:4-SNAPSHOT from the repo root.
+   - Because modules point to parent version 3, Maven resolves an older published parent,
+     which declares a system-scoped com.sun:tools dependency (tools.jar).
+   - tools.jar does not exist on JDK 9+ (including this JDK 11 environment), so dependency
+     resolution fails before compilation starts.
+
+2) Likely follow-on build issue: the root parent sets <java.version>1.6</java.version> and
+   configures maven-compiler-plugin with <source>/<target> ${java.version}. JDK 11 does not
+   support source/target 1.6, so compilation would fail after fixing the parent mismatch.
+
+Plan
+A) Align module parent versions with the in-repo parent:
+   - Update the <parent><version> in common/factory/service/value poms from 3 to 4-SNAPSHOT.
+   - Add <relativePath>../pom.xml</relativePath> to ensure Maven uses the local parent.
+
+B) Make compilation work on modern JDKs:
+   - Update root pom.xml property <java.version> from 1.6 to 1.8 (minimum supported by JDK 11).
+   - Keep the existing compiler plugin config using the updated property.
+
+After applying changes, re-run:
+  mvn -B -U -f build-pom.xml -Dsource.skip=true -Dmaven.javadoc.skip=true verify

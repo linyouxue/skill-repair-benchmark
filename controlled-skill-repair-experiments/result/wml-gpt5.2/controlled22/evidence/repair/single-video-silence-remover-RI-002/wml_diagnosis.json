@@ -1,0 +1,61 @@
+{
+  "diagnoses": [
+    {
+      "label": "No segment merge/clamp contract between combiner and processor",
+      "observable_evidence": "Location hint flags “segment-combiner/SKILL.md 的区间合并约定，以及 video-processor/SKILL.md 的相应调用和检查”. In segment-combiner/SKILL.md Notes: “Segments are sorted by start time” and script combine_segments.py only concatenates and sorts; it does not merge overlaps, clamp to video duration, or validate start<end. Meanwhile video-processor/SKILL.md pipeline step 4 requires “Combine, sort, clamp, and de-overlap all removal segments.” video-processor/scripts/process_video.py assumes sorted, non-overlapping remove_segments when computing keep segments (current_time = seg['end']), which will break if overlaps/out-of-order exist.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "segment normalization contract (merge/de-overlap/clamp) between detectors→combiner→processor",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Any workflow that combines multiple removal segment sources (opening + pauses) before video processing",
+      "do_not_generalize_to": "Single-source segment lists already guaranteed non-overlapping and within bounds",
+      "target_file": "segment-combiner/SKILL.md",
+      "target_section": "Notes / Segment merging convention",
+      "target_layer": "L1",
+      "recommended_direction": "Define an explicit, testable contract for combined segments: sorted, numeric, start<end, duration≈end-start, clamped to [0, video_duration], and merged/de-overlapped (union) before passing to video-processor; document whether adjacency (end==start) should be merged.",
+      "confidence": "high"
+    },
+    {
+      "label": "Processor lacks enforcement/validation of removal segment invariants",
+      "observable_evidence": "video-processor/SKILL.md completion checks require “segments are sorted and non-overlapping” and “duration ≈ end - start”. But video-processor/scripts/process_video.py load_segments() only sorts; it does not validate numeric types, start<end, clamp to duration, recompute/verify duration fields, or merge overlaps. calculate_keep_segments() will produce incorrect keep intervals if remove segments overlap or extend beyond total_duration.",
+      "workflow_node": "verification",
+      "mechanism_anchor": "input segment validation + normalization before keep-segment inversion",
+      "defect_relation": "missing",
+      "scope_boundary": "Before building keep segments and ffmpeg filter_complex in process_video.py for any removal list not guaranteed clean",
+      "do_not_generalize_to": "Pipelines where upstream guarantees strict invariants and processor is intentionally minimal",
+      "target_file": "video-processor/scripts/process_video.py",
+      "target_section": "load_segments() / calculate_keep_segments() preconditions",
+      "target_layer": "L2",
+      "recommended_direction": "Add a normalization/validation step after loading segments: coerce to floats/ints, drop/raise on invalid segments, clamp to [0,total_duration], sort, merge overlaps/adjacent per contract, and recompute duration; then compute keep segments from the normalized union.",
+      "confidence": "high"
+    },
+    {
+      "label": "SKILL docs conflict on whether processor accepts multiple segment files vs unified combined file",
+      "observable_evidence": "video-processor/SKILL.md shows two modes: --remove-segments /path/to/segments.json and also “Or multiple segment files: ... --remove-segments opening.json pauses.json”. segment-combiner/SKILL.md says it prepares unified input for video-processor and claims compatibility, but does not specify whether video-processor expects already-merged segments or will merge itself. The location hint explicitly requests checking “相应调用和检查” in video-processor/SKILL.md, implying the documented pipeline call path is unclear/inconsistent.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "pipeline wiring: when to call segment-combiner vs pass multiple files directly",
+      "defect_relation": "conflicting",
+      "scope_boundary": "End-to-end silence-removal pipeline documentation and invocation order",
+      "do_not_generalize_to": "Standalone use of video-processor where user manually supplies a single curated segments file",
+      "target_file": "video-processor/SKILL.md",
+      "target_section": "Usage / Mandatory end-to-end completion gate step 4",
+      "target_layer": "L1",
+      "recommended_direction": "Clarify the canonical pipeline: either (A) always run segment-combiner to produce a single normalized all_segments.json consumed by video-processor, or (B) allow multiple inputs but require video-processor to normalize/merge; align docs and checks to the chosen contract.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "operation_decision",
+    "primary_anchor": "segment normalization contract (merge/de-overlap/clamp) between detectors→combiner→processor",
+    "editor_direction": "strengthen",
+    "composition_issue": "Segment-combiner currently only concatenates+sorts, while video-processor assumes non-overlapping segments for inversion; this mismatch can create incorrect keep segments and invalid ffmpeg trims, undermining the completion checks that require sorted non-overlapping segments with consistent durations.",
+    "preservation_constraints": [
+      "Preserve existing detector output formats (silence-detector and pause-detector emit {method, segments, ...})",
+      "Preserve video-processor ability to accept one or more JSON inputs via --remove-segments",
+      "Preserve report-generator’s task-format JSON fields and ffprobe-based duration measurement behavior"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defect is localized to the segment interface between segment-combiner and video-processor (documentation + normalization/validation). Fixing the contract and enforcing it in the processor can be done within the existing bundle without changing external tools or requiring hidden task-specific heuristics."
+  }
+}

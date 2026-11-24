@@ -1,0 +1,74 @@
+{
+  "diagnoses": [
+    {
+      "label": "hardcoded repo path and patch contract",
+      "observable_evidence": "maven-build-lifecycle/SKILL.md hardcodes `cd /home/travis/build/failed/google/auto` and patch path `/home/travis/build/failed/google/auto/patch_1.diff`, while the task specifies the repository is at `/home/travis/build/failed/<repo>/<id>` and patch files must be `/home/travis/build/failed/<repo>/<id>/patch_{i}.diff`.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "Workspace/target path parameterization",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Any run where the benchmark provides a variable repo slug and id path rather than a fixed repository location",
+      "do_not_generalize_to": "Cases where the repository is guaranteed to be google/auto at a fixed path",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract; Minimal diagnostic sequence",
+      "target_layer": "L1",
+      "recommended_direction": "Replace hardcoded paths with a parameterized convention aligned to the task’s `/home/travis/build/failed/<repo>/<id>`; explicitly bind a REPO_DIR variable and derive patch/notes paths from it.",
+      "confidence": "high"
+    },
+    {
+      "label": "missing toolchain selection and reproducible build command convention",
+      "observable_evidence": "Location hint requests checking “构建工具链选择、失败复现与构建命令的约定”, but maven-build-lifecycle/SKILL.md contains only a stub (artifact contract + `cd ...`), with no guidance on selecting Maven wrapper vs system Maven, Java version constraints, or a canonical reproduce command (e.g., `mvn -e -X ...` vs `./mvnw ...`).",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Toolchain selection & failure reproduction protocol",
+      "defect_relation": "missing",
+      "scope_boundary": "Maven CI repair workflows where build failures depend on Maven wrapper, Maven version, Java version, or specific flags/profiles used by CI",
+      "do_not_generalize_to": "Non-Maven builds or repositories where toolchain is irrelevant and a single default `mvn test` always reproduces",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "General Maven lifecycle reminders (currently empty) / new section near Minimal diagnostic sequence",
+      "target_layer": "L2",
+      "recommended_direction": "Add a decision procedure: prefer `./mvnw` if present; otherwise use `mvn`; record `mvn -v`/`java -version`; define a standard reproduce command set (clean/test/verify with `-e` and optionally `-DskipTests` only when justified) and how to mirror CI profiles.",
+      "confidence": "high"
+    },
+    {
+      "label": "missing nested test project dependency resolution boundaries",
+      "observable_evidence": "Location hint calls out “嵌套测试项目的依赖解析与修改范围”, but maven-build-lifecycle/SKILL.md provides no mechanism for handling Maven Invoker/IT projects (e.g., `src/it/**`, `maven-invoker-plugin`), including how to resolve their dependencies and what files are in-scope to modify vs fixtures to preserve.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "Nested integration-test project handling (Invoker/IT fixtures)",
+      "defect_relation": "missing",
+      "scope_boundary": "Repositories using Maven Invoker or nested sample projects where build failures originate from IT fixture POMs, local repo resolution, or plugin configuration affecting nested builds",
+      "do_not_generalize_to": "Single-module projects without invoker/failsafe/IT fixture directories",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "General Maven lifecycle reminders / add dedicated 'Invoker & nested projects' section",
+      "target_layer": "L2",
+      "recommended_direction": "Add guidance to detect invoker usage, locate nested project roots, reproduce invoker runs, and define modification scope rules (prefer fixing parent/plugin config; only edit IT fixture POMs when the failure is within the fixture and changes are minimal and justified).",
+      "confidence": "medium"
+    },
+    {
+      "label": "artifact contract omits required diagnosis note file",
+      "observable_evidence": "Task Step 1 requires writing analysis/plan to `/home/travis/build/failed/failed_reasons.txt`, but maven-build-lifecycle/SKILL.md’s artifact contract mentions only creating/applying a patch and checking git status; it does not mention producing the required diagnosis artifact at the specified path.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "Benchmark artifact compliance (diagnosis + patch outputs)",
+      "defect_relation": "missing",
+      "scope_boundary": "Benchmarks requiring both a diagnosis text artifact and patch diffs in specific filesystem locations",
+      "do_not_generalize_to": "Workflows that only require code changes without external artifact files",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract",
+      "target_layer": "L1",
+      "recommended_direction": "Extend the contract to include creation/updating of `failed_reasons.txt` at the benchmark-specified path and tie it to the same parameterized repo/id binding used for patches.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "target_binding",
+    "primary_anchor": "Workspace/target path parameterization",
+    "editor_direction": "strengthen",
+    "composition_issue": "Hardcoded paths (repo + patch) prevent correct artifact production and also block any added reproduction/toolchain guidance from being executable because commands would run in the wrong directory; missing diagnosis artifact requirement further breaks end-to-end compliance even if build fixes succeed.",
+    "preservation_constraints": [
+      "Preserve existing general Maven reference content in other Skill files (dependency-management, plugin-configuration) as they are not implicated by the location hint",
+      "Preserve the requirement to produce a standard unified diff and to apply it, but make paths variable and benchmark-aligned"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All observed failures are documentation/workflow-contract defects within maven-build-lifecycle/SKILL.md (path binding, artifact outputs, and missing procedural guidance). They can be corrected by editing the Skill bundle without needing external repository state."
+  }
+}

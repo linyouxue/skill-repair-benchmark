@@ -1,0 +1,35 @@
+Repository: /home/travis/build/failed/google/auto
+
+Reproduction (CI-like):
+  mvn -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+Environment here:
+  Java 11.0.27, Maven 3.6.3
+
+Observed failure:
+  Maven fails during dependency resolution for modules auto-common / auto-factory / auto-service:
+    Could not find artifact com.sun:tools:jar:11.0.27 at specified path .../lib/tools.jar
+
+Diagnosis:
+- This is a build configuration issue, not a Java source code compile error.
+- The modules (common/, factory/, service/, value/) declare their parent as:
+    com.google.auto:auto-parent:3
+  That parent POM is resolved from the Maven repository (not from the root pom.xml in this checkout).
+- Parent version 3 brings in a system-scoped dependency on tools.jar (com.sun:tools) using:
+    ${java.home}/../lib/tools.jar
+  This works on JDK <= 8 but fails on JDK 9+ because tools.jar was removed.
+
+Plan (updated after effective-pom inspection):
+1) Keep the in-repo parent POM (./pom.xml, version 4-SNAPSHOT) as the parent of all modules:
+   - Update common/pom.xml, factory/pom.xml, service/pom.xml, value/pom.xml:
+       <parent> ... <version>3</version> -> <version>4-SNAPSHOT</version>
+2) Update the in-repo parent POM to compile on Java 11:
+   - Bump <java.version> from 1.6 to 1.7 (JDK 11 no longer supports -source/-target 1.6).
+3) Root cause of com.sun:tools resolution:
+   - The project itself does not declare com.sun:tools.
+   - The failing dependency is pulled in transitively by old versions of:
+       com.google.testing.compile:compile-testing
+     which declare a system-scoped dependency on com.sun:tools with systemPath=${toolsjar}.
+4) Fix strategy:
+   - Add an exclusion for (com.sun:tools) on each compile-testing dependency.
+   - Then re-run: mvn -f build-pom.xml verify
+   - If tests still fail due to JDK 9+ module access changes, upgrade compile-testing (and possibly Truth/Guava) as a follow-up.

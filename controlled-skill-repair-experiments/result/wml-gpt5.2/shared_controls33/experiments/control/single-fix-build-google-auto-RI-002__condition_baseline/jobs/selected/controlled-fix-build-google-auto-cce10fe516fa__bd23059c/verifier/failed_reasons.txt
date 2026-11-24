@@ -1,0 +1,61 @@
+Repository: /home/travis/build/failed/google/auto
+
+Step 1 — What fails
+
+Running the CI command from .travis.yml:
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+under JDK 7 fails in module :auto-value because of a single failing unit test:
+  com.google.auto.value.processor.AutoAnnotationCompilationTest#testMissingClass
+
+Failure details
+
+The test compiles an in-memory Java source using JSR-199 (ToolProvider.getSystemJavaCompiler()).
+It asserts that the first compiler diagnostic contains "NotAutoAnnotation".
+On this environment the first diagnostic message is:
+  "unmappable character for encoding ASCII"
+so the assertion fails.
+
+Why this happens
+
+The JSR-199 compilation task in doTestMissingClass does not pass an explicit source encoding
+(e.g. "-encoding UTF-8"). In this container, the default charset/encoding is ASCII
+(ANSI_X3.4-1968), so javac can emit an encoding-related diagnostic before (or instead of)
+the expected "NotAutoAnnotation" undefined-symbol diagnostic.
+
+This is a test fragility issue (code is fine; build configuration/environment affects diagnostics).
+
+Plan
+
+1) Make the JSR-199 compilation deterministic by adding "-encoding UTF-8" to the options.
+2) Make the assertion robust by searching all diagnostics for "NotAutoAnnotation" instead of
+   assuming it is diagnostics.get(0). Also ensure none of the diagnostics contain "static"
+   (the real regression the test is guarding against).
+
+After patching, re-run the same Maven verify command under JDK 7 to confirm the full reactor passes.
+
+
+Follow-up failure after fixing the unit test
+
+After fixing AutoAnnotationCompilationTest, the build progresses further and then fails in the
+Maven Invoker integration tests for auto-value (value module):
+  org.apache.maven.plugins:maven-invoker-plugin:1.8:run
+
+The failing invoker project is:
+  value/src/it/functional (cloned to value/target/it/functional)
+
+Errors seen there:
+1) "unmappable character for encoding ASCII" when compiling test sources that contain "É" in
+   author comments. The invoker project pom does not set project.build.sourceEncoding, so the
+   compiler plugin uses the platform default (ASCII in this container).
+2) "cannot find symbol: class MoreObjects" because a Guava version < 18 is being selected via
+   dependency conflict (functional IT pom only declares guava-testlib; an older Guava can win).
+
+Plan for this follow-up:
+- In value/src/it/functional/pom.xml:
+  * Add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  * Configure maven-compiler-plugin <encoding>${project.build.sourceEncoding}</encoding>
+  * Add an explicit test dependency on com.google.guava:guava:18.0 to force the right Guava.
+- In value/src/it/gwtserializer/pom.xml:
+  * Add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  * Configure maven-compiler-plugin <encoding>${project.build.sourceEncoding}</encoding>
+

@@ -1,0 +1,37 @@
+Repository: /home/travis/build/failed/google/auto
+CI command (from .travis.yml): mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true (JDK7)
+
+Reproduction:
+- Switched to OpenJDK7.
+- Ran the CI Maven command.
+- Build fails in module :auto-value during surefire tests.
+
+Failure:
+- Test com.google.auto.value.processor.AutoAnnotationCompilationTest.testMissingClass fails.
+- Assertion expects the first compiler diagnostic message to contain "NotAutoAnnotation".
+- Actual first diagnostic message is "unmappable character for encoding ASCII".
+
+Diagnosis:
+- This failure happens inside the test’s in-process compilation (JavaCompiler API).
+- The JavaCompiler task is created without specifying a source encoding.
+- In this environment, the default platform encoding is ANSI_X3.4-1968 (ASCII). When the compiler encounters any non-ASCII characters in sources produced/compiled during that task, it emits an "unmappable character" diagnostic which may appear before the expected "NotAutoAnnotation" diagnostic.
+- This is a test robustness / configuration issue (encoding + diagnostic ordering), not production code.
+
+Plan:
+1) In AutoAnnotationCompilationTest.doTestMissingClass, pass "-encoding", "UTF-8" to JavaCompiler.getTask options so the compilation uses a stable UTF-8 source encoding.
+2) Make the assertion robust to diagnostic ordering by searching the diagnostics list for a message that contains "NotAutoAnnotation" rather than assuming it is diagnostics.get(0).
+3) Keep the existing intent that no diagnostic should mention "static" (processor must not mis-handle @NotAutoAnnotation).
+4) Re-run the full Maven verify command under OpenJDK7 to confirm the reactor succeeds.
+
+Update after first fix attempt:
+- The reactor still fails in :auto-value, but now in the Maven Invoker integration test project value/src/it/functional.
+- The nested build runs with platform encoding ANSI_X3.4-1968 (ASCII) and compiles sources containing non-ASCII characters ("É" in @author lines), causing "unmappable character for encoding ASCII" compilation errors.
+- The same nested build also resolves com.google.guava:guava:17.0, so com.google.common.base.MoreObjects is missing. (functional IT tests import MoreObjects.)
+
+Additional plan:
+5) Edit value/src/it/functional/pom.xml (the invoker template, not target/it copy):
+   - Add <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>.
+   - Configure maven-compiler-plugin <encoding>UTF-8</encoding> (also inside the eclipse profile block).
+   - Add an explicit dependency on com.google.guava:guava:18.0 (test scope is sufficient) to force a version that contains MoreObjects.
+6) Re-run the full reactor verify under OpenJDK7.
+

@@ -1,0 +1,75 @@
+{
+  "diagnoses": [
+    {
+      "label": "hardcoded repo/toolchain assumptions in lifecycle skill",
+      "observable_evidence": "maven-build-lifecycle/SKILL.md contains repo-specific instructions and paths: \"cd /home/travis/build/failed/google/auto\" and \"Create ... diff at /home/travis/build/failed/google/auto/patch_1.diff\" plus a \"Repository-specific checkpoint: AutoValue functional integration test\" that assumes google/auto and value/src/it/functional/pom.xml.",
+      "workflow_node": "target_binding",
+      "mechanism_anchor": "Repository path & artifact path parameterization",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Any build-repair workflow where the task provides /home/travis/build/failed/<repo>/<id> and patch_{i}.diff location must be derived from that path, not hardcoded to a specific repository.",
+      "do_not_generalize_to": "Cases where the task explicitly fixes the repository identity/path (e.g., explicitly states google/auto) and requires that exact path.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract; Minimal diagnostic sequence; Repository-specific checkpoint",
+      "target_layer": "L2",
+      "recommended_direction": "Replace hardcoded repository identifiers/paths with placeholders bound to the task-provided repo/id; ensure patch path and cd commands are expressed as variables or derived from the given root.",
+      "confidence": "high"
+    },
+    {
+      "label": "toolchain selection and build command conventions are underspecified/biased",
+      "observable_evidence": "Location hint requests checking \"构建工具链选择、失败复现与构建命令的约定\". The skill provides only a minimal sequence (sed/find) and general reminders, but does not specify a standard reproducible Maven invocation (e.g., clean test/verify), flags for CI parity, or how to choose Maven vs wrapper (mvnw) when present.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Toolchain selection & reproducible build invocation convention",
+      "defect_relation": "missing",
+      "scope_boundary": "When reproducing Maven CI failures locally in arbitrary repos, the workflow must define how to select mvn vs ./mvnw, Java version expectations, and a default command sequence to reproduce failures consistently.",
+      "do_not_generalize_to": "Non-Maven builds or repos where the build tool is explicitly not Maven (Gradle, Bazel) or where the task mandates a specific command already.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Minimal diagnostic sequence; General Maven lifecycle reminders",
+      "target_layer": "L2",
+      "recommended_direction": "Add a convention block: prefer ./mvnw if present else mvn; record mvn -v/java -version; define default reproduction commands (e.g., mvn -e -X as escalation, mvn -DskipTests only when justified) and how to align with CI goals (test vs verify, profiles).",
+      "confidence": "medium"
+    },
+    {
+      "label": "misrouted guidance: embeds a specific dependency fix as general workflow",
+      "observable_evidence": "maven-build-lifecycle/SKILL.md prescribes a concrete dependency set for \"Google Auto snapshot\" (jsr305 3.0.0, junit 4.12, guava 19.0, truth 0.28). This is not a lifecycle mechanism but a repository-specific repair recipe, which can mislead repairs in other codebases and contradicts the skill's stated reusable purpose.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "Generalizable diagnosis-to-fix mapping (avoid repo-specific prescriptions)",
+      "defect_relation": "misrouted",
+      "scope_boundary": "Reusable skill bundles should encode decision procedures (how to detect dependency drift, how to confirm selected versions) rather than a single project’s pinned versions unless explicitly scoped as an example.",
+      "do_not_generalize_to": "A dedicated, explicitly scoped skill intended only for google/auto AutoValue invoker functional test failures.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Repository-specific checkpoint: AutoValue functional integration test",
+      "target_layer": "L3",
+      "recommended_direction": "Demote the repo-specific block to a clearly labeled historical example or remove it from the reusable workflow; replace with a generic procedure: inspect nested POM, run dependency:tree/effective-pom in that nested build, align coupled test libs, then patch the relevant POM.",
+      "confidence": "high"
+    },
+    {
+      "label": "artifact contract guidance not aligned with task placeholders",
+      "observable_evidence": "The task requires writing failed_reasons.txt and patch_{i}.diff under /home/travis/build/failed/<repo>/<id>/..., but the skill contract hardcodes patch path to google/auto and does not explicitly state using the task-provided <repo>/<id> for both artifacts.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "Output artifact path binding & naming convention",
+      "defect_relation": "weak",
+      "scope_boundary": "Any workflow that must emit diagnosis and patch artifacts to task-specified absolute paths should restate and bind those paths from the task input.",
+      "do_not_generalize_to": "Workflows without mandated artifact paths or where outputs are free-form.",
+      "target_file": "maven-build-lifecycle/SKILL.md",
+      "target_section": "Build-repair artifact contract",
+      "target_layer": "L2",
+      "recommended_direction": "Strengthen the contract to explicitly parameterize the repo root and patch paths using the task-provided location; include a check step ensuring the patch is applied to repo files (git diff/status) without assuming a specific repo name.",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "target_binding",
+    "primary_anchor": "Repository path & artifact path parameterization",
+    "editor_direction": "strengthen",
+    "composition_issue": "Hardcoded repo-specific checkpoint + hardcoded artifact paths jointly override task-provided <repo>/<id>, causing the workflow to bind to the wrong filesystem targets and to apply an irrelevant fix recipe instead of reproducing the actual failing build with a consistent Maven invocation.",
+    "preservation_constraints": [
+      "Keep the general guidance about Maven Invoker nested builds and the principle of finding the first concrete error.",
+      "Preserve the emphasis on dependency-version drift diagnosis (e.g., Guava API signals) as a general heuristic, but not as a pinned-version prescription.",
+      "Preserve the requirement to produce both a diagnosis artifact and a unified diff patch artifact, while making paths task-parameterized."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All observed defects are localized to maven-build-lifecycle/SKILL.md content (path binding, toolchain/command conventions, and repo-specific prescription). Adjusting the reusable mechanisms in that file can correct behavior without needing external context or changes to other skills."
+  }
+}

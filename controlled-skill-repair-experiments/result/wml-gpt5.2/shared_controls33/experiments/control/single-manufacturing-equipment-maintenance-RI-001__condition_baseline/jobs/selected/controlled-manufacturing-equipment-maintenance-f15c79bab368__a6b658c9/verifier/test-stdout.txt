@@ -1,0 +1,58 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.8, pytest-8.4.1, pluggy-1.7.0
+rootdir: /app
+configfile: ../dev/null
+plugins: json-ctrf-0.3.5
+collected 7 items
+
+. .....F.                                                                [100%]
+
+=================================== FAILURES ===================================
+___________________ test_Q05_best_run_per_board_family_loose ___________________
+
+    def test_Q05_best_run_per_board_family_loose():
+        df_runs = load_runs()
+        out = load_json(Q05)
+    
+        assert isinstance(out, list), "Q05 must be a JSON list"
+    
+        fam_to_runs: Dict[str, List[str]] = {}
+        for bf, g in df_runs.groupby("board_family"):
+            fam_to_runs[str(bf)] = sorted(g["run_id"].astype(str).tolist())
+    
+        got: Dict[str, Dict[str, Any]] = {}
+        for r in out:
+            if isinstance(r, dict) and "board_family" in r:
+                got[str(r["board_family"])] = r
+    
+        assert set(got.keys()) == set(fam_to_runs.keys()), "Q05 must include exactly one record per board_family"
+    
+        for bf, rec in got.items():
+            best = rec.get("best_run_id", rec.get("best", rec.get("best_run", None)))
+            assert best is not None, f"Q05 missing best run field for board_family={bf}"
+            best = str(best)
+            assert best in fam_to_runs[bf], f"Q05 best_run_id must be a run_id in board_family={bf}"
+    
+            runners = rec.get("runner_up_run_ids", rec.get("runner_ups", rec.get("runner_up", [])))
+            if runners is None:
+                continue
+            assert isinstance(runners, list), f"Q05 runner_up_run_ids must be a list for board_family={bf}"
+            runners_s = [str(x) for x in runners]
+>           assert runners_s == sorted(runners_s), f"Q05 runner_up_run_ids must be sorted for board_family={bf}"
+E           AssertionError: Q05 runner_up_run_ids must be sorted for board_family=Compute_IO
+E           assert ['R0011', 'R0... 'R0030', ...] == ['R0002', 'R0... 'R0030', ...]
+E             
+E             At index 0 diff: 'R0011' != 'R0002'
+E             Use -v to get more diff
+
+/verifier/test_outputs.py:460: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ::test_L0_required_outputs_exist_and_parse
+PASSED ::test_Q01_preheat_ramp_rate_loose
+PASSED ::test_Q02_tal_loose
+PASSED ::test_Q03_peak_loose
+PASSED ::test_Q04_conveyor_loose
+PASSED ::test_minimal_schema_guards_loose
+FAILED ::test_Q05_best_run_per_board_family_loose - AssertionError: Q05 runne...
+========================= 1 failed, 6 passed in 5.41s ==========================

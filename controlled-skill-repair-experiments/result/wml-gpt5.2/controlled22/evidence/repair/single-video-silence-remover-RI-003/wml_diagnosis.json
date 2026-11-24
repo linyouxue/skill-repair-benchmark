@@ -1,0 +1,61 @@
+{
+  "diagnoses": [
+    {
+      "label": "pause threshold_ratio tuning semantics inverted",
+      "observable_evidence": "pause-detector/SKILL.md tuning table states: `threshold_ratio` Lower Value => More aggressive, Higher Value => More conservative, but the algorithm flags low energy when `energy < local_avg * threshold_ratio` (pause-detector/scripts/detect_pauses.py). Increasing threshold_ratio increases the cutoff, making more frames count as low-energy (more aggressive), not more conservative.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "Parameter semantics & tuning guidance",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Documentation and user-facing guidance for pause-detector threshold_ratio and any downstream skills that reference it for tuning",
+      "do_not_generalize_to": "Other parameters whose monotonic effect is correctly described (e.g., min_duration, window_size) or other skills not using threshold_ratio",
+      "target_file": "pause-detector/SKILL.md",
+      "target_section": "Parameters Tuning table + Notes about threshold inclusivity",
+      "target_layer": "L2",
+      "recommended_direction": "Correct the monotonic interpretation of threshold_ratio (higher => more aggressive/more pauses removed; lower => more conservative/fewer pauses) and align any related explanatory notes with the actual inequality used in code.",
+      "confidence": "high"
+    },
+    {
+      "label": "cross-skill tuning guidance missing alignment for threshold_ratio",
+      "observable_evidence": "Location hint requests checking pause-detector threshold_ratio parameter explanation and corresponding tuning guidance in silence-detector and video-processor. silence-detector/SKILL.md and video-processor/SKILL.md contain pipeline/tuning notes but do not explain how pause-detector threshold_ratio should be adjusted relative to silence-detector output boundary or how aggressive pause removal impacts segment combination/processing.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Cross-skill parameter coupling guidance",
+      "defect_relation": "missing",
+      "scope_boundary": "End-to-end silence-removal pipeline where silence-detector determines start-time and pause-detector threshold_ratio controls pause sensitivity; includes how this affects segment lists consumed by segment-combiner/video-processor",
+      "do_not_generalize_to": "Standalone use of silence-detector or video-processor outside the lecture pause-removal pipeline",
+      "target_file": "video-processor/SKILL.md",
+      "target_section": "Mandatory end-to-end completion gate / Notes / Performance Tips (where tuning guidance is described)",
+      "target_layer": "L2",
+      "recommended_direction": "Add concise, explicit tuning guidance that references pause-detector threshold_ratio semantics (post-fix) and explains practical adjustment tradeoffs (over-removal vs preserving teaching content) and how to use silence-detector’s returned boundary as pause-detector start-time.",
+      "confidence": "medium"
+    },
+    {
+      "label": "silence-detector tuning table lacks coupling note to pause threshold",
+      "observable_evidence": "silence-detector/SKILL.md includes a tuning table for threshold_multiplier/initial_window/smoothing_window and a note about using returned segment end as pause-detector start-time, but does not warn that overly aggressive pause-detector threshold_ratio can remove low-volume teaching immediately after the opening boundary, nor does it provide a cross-reference to the corrected threshold_ratio directionality.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Pipeline handoff constraints (opening boundary → pause detection)",
+      "defect_relation": "weak",
+      "scope_boundary": "Handoff from initial silence/opening detection to subsequent pause detection in the same energy timeline",
+      "do_not_generalize_to": "Silence-detector’s internal alignment logic (already described) or report generation",
+      "target_file": "silence-detector/SKILL.md",
+      "target_section": "Notes / Parameters Tuning / Example (handoff guidance)",
+      "target_layer": "L2",
+      "recommended_direction": "Strengthen the handoff note by adding a brief cross-reference to pause-detector threshold_ratio tuning (with correct directionality) and a caution about low-volume speech right after the opening transition.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "input_grounding",
+    "primary_anchor": "Parameter semantics & tuning guidance",
+    "editor_direction": "strengthen",
+    "composition_issue": "Incorrect threshold_ratio semantics in pause-detector documentation can cause users to tune in the wrong direction; missing/weak cross-skill coupling notes in silence-detector and video-processor amplify the error by providing no corrective context during pipeline setup.",
+    "preservation_constraints": [
+      "Do not change pause-detector/scripts/detect_pauses.py behavior or CLI defaults unless explicitly required by evidence",
+      "Preserve video-processor completion gate and verification checklist wording except where adding minimal tuning cross-references",
+      "Preserve silence-detector alignment explanation and existing note about using returned segment end as pause-detector start-time"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The observed defects are confined to documentation-level parameter semantics and cross-skill tuning guidance within existing SKILL.md files; they can be corrected without altering core algorithms or external dependencies."
+  }
+}

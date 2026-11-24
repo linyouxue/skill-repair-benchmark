@@ -1,0 +1,464 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.8, pytest-8.4.1, pluggy-1.7.0
+rootdir: /app/workspace
+configfile: ../../dev/null
+plugins: json-ctrf-0.3.5
+collected 3 items
+
+. ..F                                                                    [100%]
+
+=================================== FAILURES ===================================
+_________________________ test_output_matches_expected _________________________
+
+    def test_output_matches_expected():
+        """Test that the output file matches the expected output. This testcase also check the query semantics."""
+        expected_path = os.path.join(os.path.dirname(__file__), "out_lsj_001a.txt")
+        actual_path = "/app/workspace/out.txt"
+    
+        assert os.path.isfile(actual_path), f"Output file {actual_path} does not exist"
+        assert os.path.isfile(expected_path), f"Expected file {expected_path} does not exist"
+    
+        with open(expected_path, "r") as f:
+            expected_lines = set(f.read().strip().splitlines())
+        with open(actual_path, "r") as f:
+            actual_lines = set(f.read().strip().splitlines())
+    
+        # Sort by jobId (first field in tuple format like "(jobId,count)")
+        def extract_jobId(line):
+            try:
+                return int(line.strip("()").split(",")[0])
+            except ValueError:
+                return 0
+        sorted_actual = sorted(actual_lines, key=extract_jobId)
+        print(f"Actual lines (sorted by jobId): {sorted_actual}")
+    
+        missing = expected_lines - actual_lines
+        extra = actual_lines - expected_lines
+    
+>       assert expected_lines == actual_lines, (
+            f"Output mismatch:\n"
+            f"Missing {len(missing)} lines (first 5): {list(missing)[:5]}\n"
+            f"Extra {len(extra)} lines (first 5): {list(extra)[:5]}"
+        )
+E       AssertionError: Output mismatch:
+E         Missing 644 lines (first 5): ['(6252096299,1)', '(6252209821,1)', '(6252227226,1)', '(6252254034,1)', '(6252145082,1)']
+E         Extra 0 lines (first 5): []
+E       assert {'(6251432964...1965,1)', ...} == set()
+E         
+E         Extra items in the left set:
+E         '(6252096299,1)'
+E         '(6252209821,1)'
+E         '(6252227226,1)'
+E         '(6252254034,1)'
+E         '(6252145082,1)'...
+E         
+E         ...Full output truncated (640 lines hidden), use '-vv' to show
+
+/verifier/test_outputs.py:72: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Actual lines (sorted by jobId): []
+==================================== PASSES ====================================
+_______________________________ test_maven_build _______________________________
+----------------------------- Captured stdout call -----------------------------
+
+=== Content of LongestSessionPerJob.java ===
+package clusterdata.query;
+
+import clusterdata.datatypes.JobEvent;
+import clusterdata.datatypes.TaskEvent;
+import clusterdata.utils.AppBase;
+import org.apache.flink.api.common.functions.MapFunction;
+
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.util.Collector;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.zip.GZIPInputStream;
+
+public class LongestSessionPerJob extends AppBase {
+
+    public static void main(String[] args) throws Exception {
+
+        ParameterTool params = ParameterTool.fromArgs(args);
+        String taskInput = params.get("task_input", null);
+        String jobInput = params.get("job_input", null);
+        String outputPath = params.get("output", null);
+        final int sesssize = params.getInt("sesssize", 600);
+
+        // set up streaming execution environment
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(1);
+
+        DataStream<StageOrFinishEvent> events;
+        if (AppBase.taskEvents == null && AppBase.jobEvents == null) {
+            events = env.addSource(new MergedGzipEventsSource(taskInput, jobInput));
+        } else {
+            SourceFunction<TaskEvent> taskSource = taskSourceOrTest(new GzipTaskEventSource(taskInput));
+            SourceFunction<JobEvent> jobSource = jobSourceOrTest(new GzipJobEventSource(jobInput));
+
+            DataStream<StageOrFinishEvent> submitEvents = env
+                    .addSource(taskSource)
+                    .filter(TaskEvent::isSubmit)
+                    .map((MapFunction<TaskEvent, StageOrFinishEvent>) e -> StageOrFinishEvent.submit(e.jobId, e.timestampMs));
+
+            DataStream<StageOrFinishEvent> finishEvents = env
+                    .addSource(jobSource)
+                    .filter(JobEvent::isFinish)
+                    .map((MapFunction<JobEvent, StageOrFinishEvent>) e -> StageOrFinishEvent.finish(e.jobId, e.timestampMs));
+
+            events = submitEvents.union(finishEvents);
+        }
+
+        long gapMs = sesssize * 1000L;
+
+        DataStream<Tuple2<Long, Integer>> result = events
+                .keyBy(e -> e.jobId)
+                .process(new LongestStageProcess(gapMs));
+
+        DataStream<String> formatted = result.map(t -> "(" + t.f0 + "," + t.f1 + ")");
+
+        formatted
+                .addSink((org.apache.flink.streaming.api.functions.sink.SinkFunction<String>) sinkOrTest(new LocalTextFileSink(outputPath)))
+                .setParallelism(1);
+
+        env.execute("LongestSessionPerJob");
+    }
+
+    public static class StageOrFinishEvent {
+        public static final int KIND_SUBMIT = 0;
+        public static final int KIND_FINISH = 1;
+
+        public long jobId;
+        public long timestampMs;
+        public int kind;
+
+        public StageOrFinishEvent() {}
+
+        public StageOrFinishEvent(long jobId, long timestampMs, int kind) {
+            this.jobId = jobId;
+            this.timestampMs = timestampMs;
+            this.kind = kind;
+        }
+
+        public static StageOrFinishEvent submit(long jobId, long timestampMs) {
+            return new StageOrFinishEvent(jobId, timestampMs, KIND_SUBMIT);
+        }
+
+        public static StageOrFinishEvent finish(long jobId, long timestampMs) {
+            return new StageOrFinishEvent(jobId, timestampMs, KIND_FINISH);
+        }
+    }
+
+    public static class LongestStageProcess extends KeyedProcessFunction<Long, StageOrFinishEvent, Tuple2<Long, Integer>> {
+        private final long gapMs;
+
+        private transient ValueState<Long> lastSubmitTs;
+        private transient ValueState<Integer> currentStageCount;
+        private transient ValueState<Integer> maxStageCount;
+        private transient ValueState<Boolean> finished;
+
+        public LongestStageProcess(long gapMs) {
+            this.gapMs = gapMs;
+        }
+
+        @Override
+        public void open(Configuration parameters) {
+            lastSubmitTs = getRuntimeContext().getState(new ValueStateDescriptor<>("lastSubmitTs", Long.class));
+            currentStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("currentStageCount", Integer.class));
+            maxStageCount = getRuntimeContext().getState(new ValueStateDescriptor<>("maxStageCount", Integer.class));
+            finished = getRuntimeContext().getState(new ValueStateDescriptor<>("finished", Boolean.class));
+        }
+
+        @Override
+        public void processElement(StageOrFinishEvent event, Context ctx, Collector<Tuple2<Long, Integer>> out) throws Exception {
+            if (Boolean.TRUE.equals(finished.value())) {
+                return;
+            }
+
+            if (event.kind == StageOrFinishEvent.KIND_SUBMIT) {
+                handleSubmit(event);
+                return;
+            }
+
+            flushCurrentStage();
+
+            Integer max = maxStageCount.value();
+            if (max == null) {
+                max = 0;
+            }
+            out.collect(Tuple2.of(ctx.getCurrentKey(), max));
+
+            lastSubmitTs.clear();
+            currentStageCount.clear();
+            maxStageCount.clear();
+            finished.update(true);
+        }
+
+        private void handleSubmit(StageOrFinishEvent event) throws Exception {
+            Integer count = currentStageCount.value();
+            if (count == null) {
+                count = 0;
+            }
+
+            Long last = lastSubmitTs.value();
+            if (last == null) {
+                currentStageCount.update(1);
+                lastSubmitTs.update(event.timestampMs);
+                return;
+            }
+
+            if (event.timestampMs > last && event.timestampMs - last > gapMs) {
+                flushCurrentStage();
+                currentStageCount.update(1);
+            } else {
+                currentStageCount.update(count + 1);
+            }
+            lastSubmitTs.update(Math.max(last, event.timestampMs));
+        }
+
+        private void flushCurrentStage() throws Exception {
+            Integer current = currentStageCount.value();
+            if (current == null || current == 0) {
+                return;
+            }
+
+            Integer max = maxStageCount.value();
+            if (max == null || current > max) {
+                maxStageCount.update(current);
+            }
+        }
+    }
+
+    public static class MergedGzipEventsSource extends RichSourceFunction<StageOrFinishEvent> {
+        private final String taskPath;
+        private final String jobPath;
+        private transient volatile boolean running = true;
+
+        public MergedGzipEventsSource(String taskPath, String jobPath) {
+            this.taskPath = taskPath;
+            this.jobPath = jobPath;
+        }
+
+        @Override
+        public void run(SourceContext<StageOrFinishEvent> ctx) throws Exception {
+            try (BufferedReader taskReader = openGzip(taskPath);
+                 BufferedReader jobReader = openGzip(jobPath)) {
+
+                Cursor nextTask = readNextTaskSubmit(taskReader);
+                Cursor nextJob = readNextJobFinish(jobReader);
+
+                while (running && (nextTask != null || nextJob != null)) {
+                    boolean takeTask;
+                    if (nextJob == null) {
+                        takeTask = true;
+                    } else if (nextTask == null) {
+                        takeTask = false;
+                    } else {
+                        takeTask = nextTask.timestampUs <= nextJob.timestampUs;
+                    }
+
+                    StageOrFinishEvent outEvent;
+                    if (takeTask) {
+                        outEvent = StageOrFinishEvent.submit(nextTask.jobId, nextTask.timestampUs / 1000L);
+                        nextTask = readNextTaskSubmit(taskReader);
+                    } else {
+                        outEvent = StageOrFinishEvent.finish(nextJob.jobId, nextJob.timestampUs / 1000L);
+                        nextJob = readNextJobFinish(jobReader);
+                    }
+
+                    synchronized (ctx.getCheckpointLock()) {
+                        ctx.collect(outEvent);
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
+
+        private static BufferedReader openGzip(String path) throws Exception {
+            InputStream in = Files.newInputStream(Paths.get(path));
+            GZIPInputStream gzipIn = new GZIPInputStream(in);
+            return new BufferedReader(new InputStreamReader(gzipIn, StandardCharsets.UTF_8));
+        }
+
+        private Cursor readNextTaskSubmit(BufferedReader reader) throws Exception {
+            String line;
+            while (running && (line = reader.readLine()) != null) {
+                if (line.isEmpty()) {
+                    continue;
+                }
+                String[] p = line.split(",", -1);
+                int eventType = Integer.parseInt(p[5]);
+                if (eventType != TaskEvent.EVENT_SUBMIT) {
+                    continue;
+                }
+
+                long tsUs = Long.parseLong(p[0]);
+                long jobId = Long.parseLong(p[2]);
+                return new Cursor(tsUs, jobId);
+            }
+            return null;
+        }
+
+        private Cursor readNextJobFinish(BufferedReader reader) throws Exception {
+            String line;
+            while (running && (line = reader.readLine()) != null) {
+                if (line.isEmpty()) {
+                    continue;
+                }
+                String[] p = line.split(",", -1);
+                int eventType = Integer.parseInt(p[3]);
+                if (eventType != JobEvent.EVENT_FINISH) {
+                    continue;
+                }
+
+                long tsUs = Long.parseLong(p[0]);
+                long jobId = Long.parseLong(p[2]);
+                return new Cursor(tsUs, jobId);
+            }
+            return null;
+        }
+
+        private static class Cursor {
+            final long timestampUs;
+            final long jobId;
+
+            Cursor(long timestampUs, long jobId) {
+                this.timestampUs = timestampUs;
+                this.jobId = jobId;
+            }
+        }
+    }
+
+    public static class GzipTaskEventSource extends RichSourceFunction<TaskEvent> {
+        private final String path;
+        private transient volatile boolean running = true;
+
+        public GzipTaskEventSource(String path) {
+            this.path = path;
+        }
+
+        @Override
+        public void run(SourceContext<TaskEvent> ctx) throws Exception {
+            try (InputStream in = Files.newInputStream(Paths.get(path));
+                 GZIPInputStream gzipIn = new GZIPInputStream(in);
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(gzipIn, StandardCharsets.UTF_8))) {
+
+                String line;
+                while (running && (line = reader.readLine()) != null) {
+                    if (line.isEmpty()) {
+                        continue;
+                    }
+                    TaskEvent event = TaskEvent.fromCsvLine(line);
+                    synchronized (ctx.getCheckpointLock()) {
+                        ctx.collect(event);
+                    }
+                }
+
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
+    }
+
+    public static class GzipJobEventSource extends RichSourceFunction<JobEvent> {
+        private final String path;
+        private transient volatile boolean running = true;
+
+        public GzipJobEventSource(String path) {
+            this.path = path;
+        }
+
+        @Override
+        public void run(SourceContext<JobEvent> ctx) throws Exception {
+            try (InputStream in = Files.newInputStream(Paths.get(path));
+                 GZIPInputStream gzipIn = new GZIPInputStream(in);
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(gzipIn, StandardCharsets.UTF_8))) {
+
+                String line;
+                while (running && (line = reader.readLine()) != null) {
+                    if (line.isEmpty()) {
+                        continue;
+                    }
+                    JobEvent event = JobEvent.fromCsvLine(line);
+                    synchronized (ctx.getCheckpointLock()) {
+                        ctx.collect(event);
+                    }
+                }
+
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
+    }
+
+    public static class LocalTextFileSink extends RichSinkFunction<String> {
+        private final String outputPath;
+        private transient BufferedWriter writer;
+
+        public LocalTextFileSink(String outputPath) {
+            this.outputPath = outputPath;
+        }
+
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            File out = new File(outputPath);
+            File parent = out.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
+
+            writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out, false), StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public void invoke(String value, Context context) throws Exception {
+            writer.write(value);
+            writer.newLine();
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (writer != null) {
+                writer.flush();
+                writer.close();
+            }
+        }
+    }
+}
+
+=== End of LongestSessionPerJob.java ===
+
+=========================== short test summary info ============================
+PASSED ::test_maven_build
+PASSED ::test_flink_job_runs
+FAILED ::test_output_matches_expected - AssertionError: Output mismatch:
+========================= 1 failed, 2 passed in 8.02s ==========================

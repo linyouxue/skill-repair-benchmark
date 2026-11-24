@@ -1,0 +1,75 @@
+{
+  "diagnoses": [
+    {
+      "label": "Validation missing reachability constraint",
+      "observable_evidence": "Task constraint: “All nodes must be reachable from the first node”. Supplied Graph.validate() only checks edge endpoints exist (with special-case End) and does not compute reachability from a start/first node.",
+      "workflow_node": "verification",
+      "mechanism_anchor": "Graph structural validation (reachability)",
+      "defect_relation": "missing",
+      "scope_boundary": "Graph.validate() should enforce reachability of all declared nodes from the designated entry/first node for dialogue graphs produced by parsers",
+      "do_not_generalize_to": "Do not apply to arbitrary directed graphs where disconnected components are allowed or where 'first node' is undefined",
+      "target_file": "dialogue-graph/scripts/dialogue_graph.py",
+      "target_section": "class Graph.validate",
+      "target_layer": "L2",
+      "recommended_direction": "Add a reachability check (e.g., BFS/DFS) from a well-defined start node (explicit parameter, stored attribute, or deterministic first node) and report unreachable nodes as validation errors",
+      "confidence": "high"
+    },
+    {
+      "label": "End node handling inconsistent across export/visualize/validate",
+      "observable_evidence": "validate(): allows missing edge.target only if target == \"End\"; visualize(): always adds an 'End' node even if not in graph.nodes; to_dict()/to_json(): exports only self.nodes values (so 'End' is omitted unless explicitly added). Location hint flags “Export” and “End related convention”.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "End node convention (serialization vs visualization vs validation)",
+      "defect_relation": "conflicting",
+      "scope_boundary": "When edges target 'End', the bundle must define whether 'End' is an implicit sentinel or an explicit node and keep validate/export/visualize consistent",
+      "do_not_generalize_to": "Do not force an 'End' sentinel for domains where terminal nodes are explicit and named variably, or where multiple terminal nodes exist without a shared sentinel",
+      "target_file": "dialogue-graph/scripts/dialogue_graph.py",
+      "target_section": "Graph.validate / Graph.to_dict / Graph.visualize",
+      "target_layer": "L2",
+      "recommended_direction": "Choose and document one convention: either (A) treat 'End' as an implicit terminal (keep validate exception, ensure export includes a synthetic End node or explicitly excludes it consistently and document), or (B) require adding an explicit End node (remove validate exception, stop auto-adding in visualize unless present, and ensure export includes it). Align SKILL.md Export section accordingly.",
+      "confidence": "high"
+    },
+    {
+      "label": "SKILL.md edge API mismatched with implementation",
+      "observable_evidence": "SKILL.md “Adding Edges” uses Edge(source=..., target=...), but Edge.__init__ signature is (source, target, text) and Edge.to_dict emits {\"from\": source, \"to\": target}. The doc examples omit the required 'text' default behavior nuance and do not mention 'from/to' mapping; location hint flags “Adding Edges”.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "Documentation-to-API alignment (Edge fields and export schema)",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Skill documentation must accurately describe how to construct edges and how they serialize to the required {from,to,text} schema",
+      "do_not_generalize_to": "Do not rewrite documentation for unrelated modules or alternative schemas not used by this bundle",
+      "target_file": "dialogue-graph/SKILL.md",
+      "target_section": "Adding Edges",
+      "target_layer": "L1",
+      "recommended_direction": "Clarify Edge constructor parameters and explicitly state serialization mapping to {from,to,text}; ensure examples match the implemented API and the task-required schema",
+      "confidence": "medium"
+    },
+    {
+      "label": "Export section omits End convention and may produce invalid deliverable",
+      "observable_evidence": "SKILL.md Export section states to_dict returns {\"nodes\": [...], \"edges\": [...]}, but does not specify whether 'End' appears in nodes when edges target End. Implementation currently omits End from export unless explicitly added, while visualize always shows it; location hint flags “Export” and “End related convention”.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "Export contract specification (JSON schema + terminal handling)",
+      "defect_relation": "weak",
+      "scope_boundary": "Export guidance must specify how terminal nodes like 'End' are represented in JSON and how validators interpret them",
+      "do_not_generalize_to": "Do not impose a single terminal-node policy on all dialogue systems; keep scoped to this bundle’s schema and validator expectations",
+      "target_file": "dialogue-graph/SKILL.md",
+      "target_section": "Export",
+      "target_layer": "L1",
+      "recommended_direction": "Document the chosen 'End' policy (implicit vs explicit) and ensure the export description matches what Graph.to_dict/to_json will output under that policy",
+      "confidence": "high"
+    }
+  ],
+  "overlay": {
+    "primary_node": "verification",
+    "primary_anchor": "End node convention (serialization vs visualization vs validation)",
+    "editor_direction": "strengthen",
+    "composition_issue": "Current bundle mixes an implicit 'End' sentinel in validation, an always-present 'End' in visualization, and an absent 'End' in export, creating inconsistent downstream behavior and making it unclear how parsers should satisfy “edge targets must exist except the last node” while also meeting reachability requirements.",
+    "preservation_constraints": [
+      "Preserve existing node/edge JSON key names: nodes use {id,text,speaker,type} and edges use {from,to,text}",
+      "Preserve visualization styling rules for choice nodes and bracketed skill-check edges",
+      "Preserve ability to load graphs from dict/JSON using from_dict/from_json"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "Defects are localized to documented conventions and Graph.validate/to_dict/visualize consistency; they can be corrected within the existing module and SKILL.md without needing external dependencies or changes to the end-task parser implementation."
+  }
+}

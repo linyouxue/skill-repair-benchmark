@@ -1,0 +1,61 @@
+{
+  "diagnoses": [
+    {
+      "label": "deliverables-and-completion-criteria-not-explicit",
+      "observable_evidence": "Task requires generating five concrete files (/app/output/q01.json ... q05.json) with strict formatting (rounding, sorting, null rules) and handbook-grounded definitions/limits; location hint points to “reflow-profile-compliance-toolkit/SKILL.md 中交付物和任务完成条件”, but SKILL.md currently provides general “Output construction guardrails” and a scaffold without explicitly binding to the required deliverable filenames, per-question schemas, and completion checks.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "Deliverable Contract & Task Completion Criteria",
+      "defect_relation": "missing",
+      "scope_boundary": "Applies when the end task demands specific output artifacts and schemas (here: q01–q05 JSON files) and requires the skill to define what 'done' means.",
+      "do_not_generalize_to": "Tasks that only require conversational guidance without producing files or strict schemas.",
+      "target_file": "reflow-profile-compliance-toolkit/SKILL.md",
+      "target_section": "Output construction guardrails / Minimal end-to-end scaffold (add explicit deliverables & done criteria section)",
+      "target_layer": "L2",
+      "recommended_direction": "Add an explicit 'Deliverables' section enumerating required output paths and exact schema obligations for Q01–Q05, plus a 'Task completion checklist' that verifies files exist, keys match, sorting/rounding/null rules, and handbook citations/grounding steps were performed before writing.",
+      "confidence": "high"
+    },
+    {
+      "label": "handbook-grounding-not-enforced-as-gating-step",
+      "observable_evidence": "Task repeatedly states: “Get the definition… applicable temperature region… equation… allowable limit from the handbook. Do not hallucinate or guess values.” SKILL.md suggests extracting cfg from handbook but does not define a gating mechanism that blocks computation/output when handbook parameters (preheat region, ramp limit, TAL window, peak margin, conveyor rule) are not successfully retrieved; it only says 'cfg = {...}'.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "Handbook-First Parameterization (Config Gating)",
+      "defect_relation": "weak",
+      "scope_boundary": "Applies to any metric requiring handbook-defined regions/limits/windows/margins; ensures no numeric limits are invented and outputs become null when cfg fields are missing.",
+      "do_not_generalize_to": "Purely data-driven tasks where thresholds are explicitly provided in the prompt or dataset and no handbook grounding is required.",
+      "target_file": "reflow-profile-compliance-toolkit/SKILL.md",
+      "target_section": "Goal: extract a compact config object / Sanity checks before writing outputs",
+      "target_layer": "L2",
+      "recommended_direction": "Strengthen by adding explicit gating rules: required cfg keys per question; if missing, set corresponding outputs to null and mark compliance conservatively (e.g., failing/non-compliant) per task; require citing handbook page/section identifiers in internal reasoning (or code comments) before emitting numeric limits.",
+      "confidence": "medium"
+    },
+    {
+      "label": "question-specific-representative-sensor-rule-incomplete-for-q01-q03",
+      "observable_evidence": "SKILL.md defines deterministic sensor selection generally and gives a blocking invariant specifically for Q02 (minimum TAL). However, Q01 asks: “If multiple values exist, select the most representative thermocouple value based on the handbook details.” Q03 requires failing if no TC data and implies a run-level selection (e.g., min peak across sensors). The skill provides generic max/min tie-breaks but does not explicitly bind Q01 to 'max ramp across TCs' vs 'representative/cold spot' selection as dictated by handbook, nor does it state Q03 run-level selection and failing rule as a deliverable requirement.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Per-Question Representative Sensor Selection Policy",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Applies when multiple thermocouples exist per run and the output requires a single tc_id/metric per run (Q01, Q03) or a single record per run (Q02).",
+      "do_not_generalize_to": "Tasks that report per-thermocouple metrics without collapsing to a run-level representative sensor.",
+      "target_file": "reflow-profile-compliance-toolkit/SKILL.md",
+      "target_section": "Deterministic sensor selection (tie-breaks) / Peak and margin",
+      "target_layer": "L2",
+      "recommended_direction": "Clarify Q01 and Q03 selection rules as explicit policies: (a) Q01 default to maximum ramp across TCs unless handbook specifies a 'representative/cold spot' TC; (b) Q03 explicitly compute per-TC peak then select minimum peak (coldest) for run-level compliance; (c) explicitly state 'no TC data => failing' for Q03 and how to represent nulls in JSON.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "writeback_or_delivery",
+    "primary_anchor": "Deliverable Contract & Task Completion Criteria",
+    "editor_direction": "add",
+    "composition_issue": "Lack of explicit deliverable contracts interacts with weak handbook-gating: without a 'done' checklist tied to q01–q05 schemas and required handbook-derived cfg fields, the skill can produce plausible-but-noncompliant outputs (wrong filenames/keys, missing null handling, or invented limits) even if computation recipes are correct.",
+    "preservation_constraints": [
+      "Preserve existing deterministic computation recipes (slope, interpolation) and tie-break guidance, especially the Q02 minimum-TAL invariant.",
+      "Preserve sorting/rounding/NaN-to-null guardrails and the minimal scaffold structure.",
+      "Do not remove or weaken the instruction to ignore dt<=0 segments and to sort by time before computations."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The defects are localized to SKILL.md guidance (deliverable binding, gating, and question-specific selection policy). They can be corrected by strengthening documentation/checklists and decision rules without needing new external tools or changing unrelated mechanisms."
+  }
+}

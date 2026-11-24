@@ -1,0 +1,33 @@
+Build reproduction
+- Repo: /home/travis/build/failed/google/auto
+- CI command (from .travis.yml):
+  mvn -B -U -f build-pom.xml verify --fail-at-end -Dsource.skip=true -Dmaven.javadoc.skip=true
+- Reproduced locally under:
+  - Java: OpenJDK 1.7.0_75 (openjdk7)
+  - Maven: 3.6.3
+
+Observed failure
+- Reactor fails in module: AutoValue (auto-value)
+- Failure is not in main reactor compilation/tests; it is in a Maven Invoker integration test build.
+- Invoker failed build:
+  - value/src/it/functional/pom.xml
+  - executed as: value/target/it/functional/pom.xml
+- First concrete error inside nested build:
+  - maven-compiler-plugin testCompile fails with:
+    1) "unmappable character for encoding ASCII" in multiple test sources.
+       Example: Javadoc author names contain "É" (non-ASCII).
+       Root cause: nested IT POM does not set source encoding, so compiler uses platform default ANSI_X3.4-1968.
+    2) "cannot find symbol: class MoreObjects" (com.google.common.base.MoreObjects).
+       Root cause: nested IT POM has dependency drift; it does not pin a Guava version that provides MoreObjects.
+       It only depends on guava-testlib, allowing an older Guava to be selected transitively.
+
+Plan
+- Fix build configuration in value/src/it/functional/pom.xml (integration-test POM only):
+  1) Set Java compiler encoding to UTF-8 (and set project.build.sourceEncoding).
+  2) Synchronize test dependency versions and explicitly add Guava:
+     - com.google.code.findbugs:jsr305 -> 3.0.0 (provided)
+     - junit:junit -> 4.12 (test)
+     - com.google.guava:guava -> 19.0 (test)
+     - com.google.guava:guava-testlib -> 19.0 (test)
+     - com.google.truth:truth -> 0.28 (test)
+- Re-run the same mvn verify command under openjdk7 and confirm Invoker functional build passes.

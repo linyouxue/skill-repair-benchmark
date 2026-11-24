@@ -1,0 +1,61 @@
+{
+  "diagnoses": [
+    {
+      "label": "stock-title filter list malformed causing wrong stock-holdings count",
+      "observable_evidence": "Location hint flags “13f-analyzer/SKILL.md 中单季度持仓汇总的数量口径”. In 13f-analyzer/scripts/one_fund_analysis.py, title_class_of_stocks is defined with many adjacent string literals missing commas (e.g., \"sponsored adr\" \"sponsored ads\" \"adr\" ...), which in Python concatenates into a single string entry. The same malformed pattern exists in fuzzy-name-search/scripts/search_stock_cusip.py. This makes TITLEOFCLASS filtering via .isin(title_class_of_stocks) incorrect, impacting “Number of stock holdings” and “Total stock AUM” summary semantics.",
+      "workflow_node": "compute_or_transform",
+      "mechanism_anchor": "Single-quarter holdings summary semantics (stock universe filter + counting)",
+      "defect_relation": "conflicting",
+      "scope_boundary": "Applies when computing single-quarter summary stats for a fund (total holdings vs stock holdings) and when filtering equities for stock CUSIP search; specifically the TITLEOFCLASS-based stock universe definition used by helpers.",
+      "do_not_generalize_to": "Does not apply to quarter-to-quarter ABS_CHANGE computation logic, accession-number lookup, or ranking rules for Top Buys/Sells beyond the initial stock-universe filter.",
+      "target_file": "13f-analyzer/scripts/one_fund_analysis.py",
+      "target_section": "module-level title_class_of_stocks and downstream stock_infotable filter in read_one_quarter_data()",
+      "target_layer": "L2",
+      "recommended_direction": "Fix the reusable stock-universe mechanism by correcting the title_class_of_stocks list to be a proper list of separate strings (add missing commas / ensure intended entries), so .str.lower().isin(...) matches intended TITLEOFCLASS values; keep counting definition consistent with the documented “Number of stock holdings” semantics.",
+      "confidence": "high"
+    },
+    {
+      "label": "documentation quantity definition ambiguous vs grouped holdings",
+      "observable_evidence": "13f-analyzer/SKILL.md says one_fund_analysis prints “total number of holdings” and “total number of stock holdings” but does not specify whether “number of stock holdings” means raw INFOTABLE rows or unique CUSIPs after grouping. The script currently prints stock_infotable.shape[0] (row count) while later groups by CUSIP for analysis, creating an internal mismatch in quantity semantics that can mislead users answering “How many stocks are held”.",
+      "workflow_node": "writeback_or_delivery",
+      "mechanism_anchor": "User-facing metric definition for 'number of stocks held' (rows vs unique securities)",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Applies to interpreting and reporting the single-quarter metric used to answer tasks like “How many stocks are held by Renaissance?” based on one_fund_analysis output.",
+      "do_not_generalize_to": "Does not apply to AUM summation itself (VALUE sum) or to the fuzzy search process for accession numbers.",
+      "target_file": "13f-analyzer/SKILL.md",
+      "target_section": "Overview → Analyze the holding summary of a particular fund in one quarter",
+      "target_layer": "L1",
+      "recommended_direction": "Clarify the metric definition in the skill guidance: explicitly state whether “Number of stock holdings” is counted as INFOTABLE line items or unique CUSIPs (distinct securities) and align guidance with helper output (or instruct how to derive the other count if needed).",
+      "confidence": "medium"
+    },
+    {
+      "label": "stock CUSIP search uses fixed quarter and shares same malformed stock filter",
+      "observable_evidence": "fuzzy-name-search/scripts/search_stock_cusip.py reads stocks only from /root/2025-q2/INFOTABLE.tsv regardless of requested quarter (no quarter arg exists). It also uses the same malformed title_class_of_stocks list with missing commas, so the equity universe for CUSIP lookup can be incomplete/incorrect, affecting tasks that require confirming CUSIP presence in a specific quarter.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "Stock identifier grounding (CUSIP lookup) across quarters",
+      "defect_relation": "weak",
+      "scope_boundary": "Applies when grounding a stock name (e.g., Palantir) to a CUSIP and validating it against the requested quarter’s INFOTABLE.",
+      "do_not_generalize_to": "Does not apply to fund-name fuzzy search in COVERPAGE.tsv or to one_fund_analysis quarter comparison logic.",
+      "target_file": "fuzzy-name-search/scripts/search_stock_cusip.py",
+      "target_section": "search_stock_by_name(): data source selection and title_class_of_stocks filter",
+      "target_layer": "L2",
+      "recommended_direction": "Strengthen the grounding mechanism by parameterizing quarter (or otherwise ensuring the search universe covers the requested quarter) and by fixing the TITLEOFCLASS filter list so returned CUSIPs are reliably discoverable and verifiable in the target quarter.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "compute_or_transform",
+    "primary_anchor": "Single-quarter holdings summary semantics (stock universe filter + counting)",
+    "editor_direction": "strengthen",
+    "composition_issue": "A malformed shared stock-universe filter (TITLEOFCLASS list) propagates into both single-fund summaries and stock CUSIP search, while SKILL.md’s ambiguous counting definition can cause users to select the wrong quantity even if the filter is fixed.",
+    "preservation_constraints": [
+      "Preserve the existing helper invocation paths and the guidance to run scripts from /skills/... absolute paths.",
+      "Preserve the quarter-to-quarter comparison pipeline and the instruction to take Top Buys CUSIPs in printed order (rank by dollar-value increase).",
+      "Preserve the non-amendment preference behavior in fund search (ISAMENDMENT == \"N\")."
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "The observed failures stem from local, editable mechanisms within the bundle (malformed Python list affecting filtering and ambiguous documentation of counting semantics). Fixing these within the existing scripts/docs should restore correct single-quarter stock-holdings counts and improve reliable CUSIP grounding without needing external dependencies."
+  }
+}

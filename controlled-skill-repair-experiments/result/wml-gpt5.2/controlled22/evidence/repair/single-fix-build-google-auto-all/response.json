@@ -1,0 +1,102 @@
+{
+  "method": "workflow-localized-mechanism-learning",
+  "trial_id": "single-fix-build-google-auto-all",
+  "task_id": "fix-build-google-auto",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "provider": "Tatumass",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "wml_diagnosis": {
+    "diagnoses": [
+      {
+        "label": "hardcoded repo path and patch contract",
+        "observable_evidence": "maven-build-lifecycle/SKILL.md hardcodes `cd /home/travis/build/failed/google/auto` and patch path `/home/travis/build/failed/google/auto/patch_1.diff`, while the task specifies the repository is at `/home/travis/build/failed/<repo>/<id>` and patch files must be `/home/travis/build/failed/<repo>/<id>/patch_{i}.diff`.",
+        "workflow_node": "target_binding",
+        "mechanism_anchor": "Workspace/target path parameterization",
+        "defect_relation": "conflicting",
+        "scope_boundary": "Any run where the benchmark provides a variable repo slug and id path rather than a fixed repository location",
+        "do_not_generalize_to": "Cases where the repository is guaranteed to be google/auto at a fixed path",
+        "target_file": "maven-build-lifecycle/SKILL.md",
+        "target_section": "Build-repair artifact contract; Minimal diagnostic sequence",
+        "target_layer": "L1",
+        "recommended_direction": "Replace hardcoded paths with a parameterized convention aligned to the task’s `/home/travis/build/failed/<repo>/<id>`; explicitly bind a REPO_DIR variable and derive patch/notes paths from it.",
+        "confidence": "high"
+      },
+      {
+        "label": "missing toolchain selection and reproducible build command convention",
+        "observable_evidence": "Location hint requests checking “构建工具链选择、失败复现与构建命令的约定”, but maven-build-lifecycle/SKILL.md contains only a stub (artifact contract + `cd ...`), with no guidance on selecting Maven wrapper vs system Maven, Java version constraints, or a canonical reproduce command (e.g., `mvn -e -X ...` vs `./mvnw ...`).",
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "Toolchain selection & failure reproduction protocol",
+        "defect_relation": "missing",
+        "scope_boundary": "Maven CI repair workflows where build failures depend on Maven wrapper, Maven version, Java version, or specific flags/profiles used by CI",
+        "do_not_generalize_to": "Non-Maven builds or repositories where toolchain is irrelevant and a single default `mvn test` always reproduces",
+        "target_file": "maven-build-lifecycle/SKILL.md",
+        "target_section": "General Maven lifecycle reminders (currently empty) / new section near Minimal diagnostic sequence",
+        "target_layer": "L2",
+        "recommended_direction": "Add a decision procedure: prefer `./mvnw` if present; otherwise use `mvn`; record `mvn -v`/`java -version`; define a standard reproduce command set (clean/test/verify with `-e` and optionally `-DskipTests` only when justified) and how to mirror CI profiles.",
+        "confidence": "high"
+      },
+      {
+        "label": "missing nested test project dependency resolution boundaries",
+        "observable_evidence": "Location hint calls out “嵌套测试项目的依赖解析与修改范围”, but maven-build-lifecycle/SKILL.md provides no mechanism for handling Maven Invoker/IT projects (e.g., `src/it/**`, `maven-invoker-plugin`), including how to resolve their dependencies and what files are in-scope to modify vs fixtures to preserve.",
+        "workflow_node": "input_grounding",
+        "mechanism_anchor": "Nested integration-test project handling (Invoker/IT fixtures)",
+        "defect_relation": "missing",
+        "scope_boundary": "Repositories using Maven Invoker or nested sample projects where build failures originate from IT fixture POMs, local repo resolution, or plugin configuration affecting nested builds",
+        "do_not_generalize_to": "Single-module projects without invoker/failsafe/IT fixture directories",
+        "target_file": "maven-build-lifecycle/SKILL.md",
+        "target_section": "General Maven lifecycle reminders / add dedicated 'Invoker & nested projects' section",
+        "target_layer": "L2",
+        "recommended_direction": "Add guidance to detect invoker usage, locate nested project roots, reproduce invoker runs, and define modification scope rules (prefer fixing parent/plugin config; only edit IT fixture POMs when the failure is within the fixture and changes are minimal and justified).",
+        "confidence": "medium"
+      },
+      {
+        "label": "artifact contract omits required diagnosis note file",
+        "observable_evidence": "Task Step 1 requires writing analysis/plan to `/home/travis/build/failed/failed_reasons.txt`, but maven-build-lifecycle/SKILL.md’s artifact contract mentions only creating/applying a patch and checking git status; it does not mention producing the required diagnosis artifact at the specified path.",
+        "workflow_node": "writeback_or_delivery",
+        "mechanism_anchor": "Benchmark artifact compliance (diagnosis + patch outputs)",
+        "defect_relation": "missing",
+        "scope_boundary": "Benchmarks requiring both a diagnosis text artifact and patch diffs in specific filesystem locations",
+        "do_not_generalize_to": "Workflows that only require code changes without external artifact files",
+        "target_file": "maven-build-lifecycle/SKILL.md",
+        "target_section": "Build-repair artifact contract",
+        "target_layer": "L1",
+        "recommended_direction": "Extend the contract to include creation/updating of `failed_reasons.txt` at the benchmark-specified path and tie it to the same parameterized repo/id binding used for patches.",
+        "confidence": "high"
+      }
+    ],
+    "overlay": {
+      "primary_node": "target_binding",
+      "primary_anchor": "Workspace/target path parameterization",
+      "editor_direction": "strengthen",
+      "composition_issue": "Hardcoded paths (repo + patch) prevent correct artifact production and also block any added reproduction/toolchain guidance from being executable because commands would run in the wrong directory; missing diagnosis artifact requirement further breaks end-to-end compliance even if build fixes succeed.",
+      "preservation_constraints": [
+        "Preserve existing general Maven reference content in other Skill files (dependency-management, plugin-configuration) as they are not implicated by the location hint",
+        "Preserve the requirement to produce a standard unified diff and to apply it, but make paths variable and benchmark-aligned"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All observed failures are documentation/workflow-contract defects within maven-build-lifecycle/SKILL.md (path binding, artifact outputs, and missing procedural guidance). They can be corrected by editing the Skill bundle without needing external repository state."
+    }
+  },
+  "wml_repair": {
+    "edits": [
+      {
+        "path": "maven-build-lifecycle/SKILL.md",
+        "content": "---\nname: maven-build-lifecycle\ndescription: Use when reproducing and repairing Maven CI build failures, especially legacy multi-module builds and Maven Invoker integration tests.\n---\n\n# Maven Build Lifecycle — Legacy CI Repair Workflow\n\n## Build-repair artifact contract\n\nThis benchmark requires both a diagnosis artifact and one or more applicable patches.\n\n### Workspace binding (do this first)\n\nThe repository is located at:\n\n- `/home/travis/build/failed/<repo>/<id>`\n\nBind that location once and derive all artifact paths from it:\n\n```bash\n# Fill these in from the benchmark instance\nREPO_SLUG=\"<repo>\"   # e.g. org/name\nRUN_ID=\"<id>\"        # e.g. 123\n\nREPO_DIR=\"/home/travis/build/failed/${REPO_SLUG}/${RUN_ID}\"\nPATCH_1=\"${REPO_DIR}/patch_1.diff\"\n# Add more as needed: PATCH_2=\"${REPO_DIR}/patch_2.diff\" ...\n\nFAILED_REASONS=\"/home/travis/build/failed/failed_reasons.txt\"\n```\n\n### Required outputs\n\nBefore finishing:\n\n1. Write your analysis/plan to:\n   - `/home/travis/build/failed/failed_reasons.txt`\n2. Create at least one non-empty standard unified diff at:\n   - `/home/travis/build/failed/<repo>/<id>/patch_{i}.diff`\n3. Apply that patch (or patches) to the repository.\n4. Check `git diff`/`git status` and ensure the intended project file—not only\n   the patch artifact—was changed.\n\n## Minimal diagnostic sequence\n\n```bash\ncd \"${REPO_DIR}\"\n\n# Record toolchain (helps explain CI-only failures)\njava -version\nmvn -v || true\n\n# Prefer Maven Wrapper if present (matches repo-pinned Maven version)\nif [ -x ./mvnw ]; then\n  MVN=./mvnw\nelse\n  MVN=mvn\nfi\n\n# Fast, high-signal reproduction attempts (pick the one that matches the failure)\n# 1) Default verification (most CI jobs)\n\"${MVN}\" -e -DtrimStackTrace=false clean verify\n\n# 2) If you need more detail\n# \"${MVN}\" -X -e -DtrimStackTrace=false clean verify\n\n# 3) If tests are too slow/noisy and the failure is compilation/packaging\n# \"${MVN}\" -e -DskipTests clean verify\n\n# 4) If the project uses profiles in CI, mirror them explicitly\n# \"${MVN}\" -e -Pci clean verify\n```\n\n## Toolchain selection & failure reproduction protocol\n\n1. **Choose Maven executable**\n   - Use `./mvnw` when available and executable. This best matches the project’s\n     intended Maven version and avoids “works locally, fails in CI” due to Maven\n     version drift.\n   - Otherwise use system `mvn`.\n\n2. **Capture versions early**\n   - Always record `java -version` and `mvn -v` in your notes. Many failures are\n     caused by Java release level (`--release`, `maven-compiler-plugin`) or\n     enforcer rules.\n\n3. **Use a canonical reproduce command**\n   - Default: `clean verify` (covers compilation + unit tests + integration tests\n     when configured).\n   - Add `-e` for stack traces; add `-X` only when needed.\n   - Avoid `-DskipTests` unless you have evidence the failure is outside tests.\n\n4. **Mirror CI flags/profiles**\n   - Check for CI scripts/config (e.g., `.travis.yml`, GitHub Actions, Jenkinsfile)\n     and reproduce with the same profiles and properties (`-P...`, `-D...`).\n\n5. **Multi-module targeting (when narrowing scope)**\n   - Use `-pl :module -am` to focus on a failing module while still building\n     required dependencies.\n\n## Invoker & nested projects (integration-test fixtures)\n\nSome Maven builds run *nested* Maven projects as fixtures (common in plugin\nprojects) via `maven-invoker-plugin` or integration-test directories.\n\n### How to detect\n\n- Look for `maven-invoker-plugin` in `pom.xml`.\n- Common fixture locations:\n  - `src/it/**`\n  - `src/it/projects/**`\n  - `src/test/resources/**` containing embedded `pom.xml`\n- Look for `invoker.properties`, `invoker.xml`, or `verify.groovy`.\n\n### Reproducing invoker runs\n\n- Invoker executions are usually bound to `integration-test`/`verify`.\n- Prefer running the same lifecycle phase the build uses:\n  - `\"${MVN}\" -e clean verify`\n- If you need to isolate invoker-only behavior, run the module that configures it:\n  - `\"${MVN}\" -e -pl :<plugin-module> -am verify`\n\n### Dependency resolution boundaries for nested projects\n\n- Nested fixture builds often rely on artifacts produced by the outer build.\n  If a fixture fails to resolve dependencies:\n  - Ensure the outer build installs required artifacts first (e.g., `install`),\n    or that the invoker is configured to use the reactor/local repo as intended.\n  - Check invoker settings such as local repository location and whether it uses\n    `-Dmaven.repo.local=...`.\n\n### Modification scope rules (keep changes minimal and durable)\n\n- Prefer fixing the **real build** (parent POM, plugin configuration, dependency\n  management) rather than editing many fixture projects.\n- Only edit fixture `pom.xml`/files when:\n  - The failure is demonstrably inside the fixture itself, and\n  - The change is minimal and does not invalidate the fixture’s purpose.\n- Avoid broad refactors across many `src/it/**` projects; treat them as test data.\n\n## General Maven lifecycle reminders\nn"
+      }
+    ],
+    "repair_audit": {
+      "target_node": "target_binding",
+      "target_anchor": "Workspace/target path parameterization",
+      "target_layer": "L1",
+      "edit_kind": "Replace hardcoded workspace/patch paths with parameterized REPO_DIR binding; extend artifact contract to include failed_reasons.txt; add missing toolchain selection, reproduction command convention, and invoker/nested project scope guidance",
+      "boundedness": "Positive: only updates maven-build-lifecycle/SKILL.md sections implicated by diagnosis (artifact contract, minimal diagnostic sequence, and added adjacent guidance). Negative: does not modify other Skill files or introduce task-specific repo/id values; preserves unified diff requirement and general intent.",
+      "verification_plan": "Downstream runner should (1) set REPO_SLUG and RUN_ID, (2) cd into ${REPO_DIR} successfully, (3) write /home/travis/build/failed/failed_reasons.txt, (4) create patch files under ${REPO_DIR}/patch_{i}.diff, and (5) reproduce Maven failures using ./mvnw when present or mvn otherwise; for invoker builds, verify guidance leads to running verify and respecting fixture modification boundaries.",
+      "no_edit_reason": ""
+    }
+  },
+  "changed_files": [
+    "maven-build-lifecycle/SKILL.md"
+  ]
+}

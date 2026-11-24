@@ -1,0 +1,47 @@
+Repository: /home/travis/build/failed/google/auto
+
+Repro command (from repo root):
+  mvn -f build-pom.xml test
+
+Observed failure (first failure in reactor):
+  Module: common (com.google.auto:auto-common:1.0-SNAPSHOT)
+  Error:
+    Could not resolve dependencies for project com.google.auto:auto-common:jar:1.0-SNAPSHOT:
+    Could not find artifact com.sun:tools:jar:11.0.27 at specified path
+    /usr/lib/jvm/java-11-openjdk-amd64/../lib/tools.jar
+
+Diagnosis:
+- The build is driven by build-pom.xml (a convenience aggregator) which builds:
+    . (auto-parent 4-SNAPSHOT), common, factory, service, value.
+- However, each module pom (common/service/factory/value) declares:
+    <parent> com.google.auto:auto-parent:3 </parent>
+  so Maven resolves the published parent POM version 3 (not the in-repo parent 4-SNAPSHOT).
+- That released parent brings in a system-scoped dependency on com.sun:tools with
+  systemPath pointing at tools.jar. tools.jar exists on JDK 8, but not on JDK 9+.
+  On this environment (JDK 11), the file does not exist, so dependency resolution fails
+  before any code compiles.
+
+Likely next failure after tools.jar is fixed:
+- AutoValue uses maven-invoker-plugin and runs nested builds under value/src/it/*.
+  The functional IT pom (value/src/it/functional/pom.xml) has stale dependency versions
+  (jsr305 1.3.9, junit 4.11, truth 0.25, guava-testlib 18.0) and is known to fail
+  to compile/tests when the main project is on newer Guava APIs.
+
+Plan:
+1) Fix build configuration (parent resolution):
+   - Update these module poms to use the in-repo parent:
+       common/pom.xml, service/pom.xml, factory/pom.xml, value/pom.xml
+     Change parent version from 3 -> 4-SNAPSHOT.
+   - This removes the legacy tools.jar system dependency and lets the reactor build proceed
+     on JDK 11.
+
+2) Fix Invoker functional integration test dependency drift:
+   - Update value/src/it/functional/pom.xml coherently:
+     * com.google.code.findbugs:jsr305 -> 3.0.0 (provided)
+     * junit:junit -> 4.12 (test)
+     * add com.google.guava:guava:19.0 (test)
+     * com.google.guava:guava-testlib -> 19.0 (test)
+     * com.google.truth:truth -> 0.28 (test)
+
+Verification after changes:
+  mvn -f build-pom.xml test
