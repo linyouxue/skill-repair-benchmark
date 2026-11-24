@@ -1,0 +1,326 @@
+{
+  "method_id": "SkillAxe-GPT52-Originals-Completion",
+  "benchmark_version": "manual-gold-defects-20260917-v25",
+  "tasks": [
+    {
+      "task_id": "bike-rebalance",
+      "diagnoses": [
+        {
+          "prediction_id": "bike-rebalance-optimality-gap-failure",
+          "description": "The agent produced a feasible report but with objective slightly worse than the verifier’s 10%-gap SCIP benchmark (must be <= allowed). Skill guidance did not require comparing candidate solution quality against a known incumbent or performing a local improvement pass (e.g., reducing unmet penalty by reallocating pickups/dropoffs or shortening route distance) when using a MIP with a time/gap limit. This led to an avoidable optimality test failure even though all feasibility checks passed.",
+          "evidence": "Verifier failure: reconstructed objective 8.771931727631486 > allowed 8.75839030549318 (benchmark 8.75739030549318) in TestOptimality.test_objective_is_no_worse_than_gap_limited_benchmark. Trajectory shows the agent solved with SCIP once and accepted the incumbent without any further improvement loop or quality check beyond feasibility/objective consistency.",
+          "locations": [
+            {
+              "file": "scip-opt/SKILL.md",
+              "section": "Modeling Workflow / Solve with time and gap limits / Extraction And Validation"
+            },
+            {
+              "file": "logistics-rules-to-optimization/SKILL.md",
+              "section": "Rule Translation Workflow / Objective Assembly"
+            }
+          ]
+        },
+        {
+          "prediction_id": "bike-rebalance-no-solution-improvement-loop",
+          "description": "The skills emphasize correctness and validation, but lack explicit guidance to iterate: tightening SCIP parameters, running multiple solves, or adding a post-solve local search to reduce objective (especially unmet deviation penalties) when the evaluation includes an incumbent-comparison optimality check. Without an improvement loop, a near-optimal but slightly inferior solution can slip through.",
+          "evidence": "Only 1 optimization solve is shown in the trajectory (single Python script invocation), and the agent message concludes after feasibility validation. The objective test failure indicates the need for an improvement mechanism beyond basic feasibility validation.",
+          "locations": [
+            {
+              "file": "scip-opt/SKILL.md",
+              "section": "Reproducibility / Solve with time and gap limits"
+            },
+            {
+              "file": "routing-subtour-elimination/SKILL.md",
+              "section": "Validation"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/bike-rebalance/repaired_skill",
+      "executor_run_id": "bike-rebalance-a12"
+    },
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [
+        {
+          "prediction_id": "d3vis-click-intercepts-pointer-events",
+          "description": "Interactive linking failed because bubble labels (<text>) intercept pointer events, preventing clicks from reaching the underlying <circle> elements that have the click handler.",
+          "evidence": "Verifier failure in test_interactive_linking shows Playwright timing out while clicking the first bubble: “<text ...>AAPL</text> intercepts pointer events”. Locator resolves to <circle ...> but click is intercepted repeatedly, so the click handler never fires.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Interactive features (tooltips, click handlers, hover effects)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "d3vis-missing-guidance-hit-target-click",
+          "description": "Skill guidance for click/selection does not mention pointer-event layering pitfalls for SVG labels and does not instruct to attach click handlers at the correct element/container or disable pointer events on labels. This failed to prevent the observed verifier failure.",
+          "evidence": "In the representative run, bubbles are labeled by ticker symbols inside circles. The verifier specifically reports the <text> label intercepting pointer events during click, indicating the implementation likely followed the basic click-handler snippet but lacked guidance to make text non-interactive or to bind events to a parent <g>.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Click handlers for selection/highlighting"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/data-to-d3/repaired_skill",
+      "executor_run_id": "data-to-d3-a09"
+    },
+    {
+      "task_id": "dialogue-parser",
+      "diagnoses": [
+        {
+          "prediction_id": "D1-End-node-reachability-mismatch",
+          "description": "Skill omits/contradicts the evaluator’s special handling of terminal node 'End', leading to graphs where 'End' exists as a node but is treated as non-traversable in reachability, making it appear unreachable and fail the reachability check.",
+          "evidence": "Verifier reachability BFS explicitly does not enqueue targets equal to \"End\" (`if tgt != \"End\": queue.append(tgt)`), yet it still computes `unreachable = set(nodes.keys()) - reachable` and fails with `Unreachable nodes found: ['End']...`. This indicates the output contained an 'End' node in `nodes` while the verifier excludes 'End' from traversal, so 'End' must not be listed as a node (or must be handled specially).",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "Validation / constraints guidance (missing)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2-Edge-schema-inconsistency-source-vs-from",
+          "description": "Skill documentation uses `Edge(source,target)` while the task schema and verifier use edge keys `from`/`to`. This mismatch can cause implementations to emit the wrong JSON fields or misuse the library.",
+          "evidence": "Task instruction specifies edge format `{ \"from\":\"\", \"to\":\"\", \"text\":\"\" }` and verifier accesses `edge[\"from\"]` and `edge[\"to\"]`. Skill examples use `Edge(source=\"Start\", target=\"Choices\")`, which is inconsistent with the required schema and can mislead agents.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "3. Adding Edges"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "4. Export"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3-Validation-guidance-missing-reachability-exception",
+          "description": "Skill’s validation section does not mention the evaluator’s exception that 'End' may be an edge target without existing as a node and may be excluded from reachability, so agents may incorrectly \"auto-create\" an End node and then fail reachability.",
+          "evidence": "Agent output (per trajectory) states it 'auto-creates an implicit End node if referenced'. Verifier failure shows exactly that having End in nodes triggers reachability failure in this benchmark. Skill currently says validation checks missing node targets but does not address the special-case for 'End' from the task constraints/verifier behavior.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "5. Validation"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/dialogue-parser/repaired_skill",
+      "executor_run_id": "dialogue-parser-a01"
+    },
+    {
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "qi-1-missing-window-boundary-before-finish",
+          "description": "Stage segmentation logic likely violates the task definition around job finish time, producing incorrect longest-stage counts.",
+          "evidence": "Verifier failure is `FAILED ::test_output_matches_expected - AssertionError: Output mismatch` while build and job execution pass. The implemented logic ends/rolls stages only when a subsequent SUBMIT arrives with a >=10min gap; when a job finishes, it simply compares `cur` vs `max` and emits. This does not enforce the required 10-minute inactivity rule for stage termination at the end of the job (i.e., a stage should only be considered ended by 10 minutes of no SUBMITs, not merely by job FINISH/KILL). The trace shows `onTimer` emits at job finish timestamp without waiting for the inactivity gap; see `processElement2` registering a timer at `value.timestamp` and `onTimer` emitting immediately at that timestamp.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Real-Time Streaming / Apache Flink patterns (missing guidance about event-time gap handling and end-of-stream/job terminal events)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "qi-2-watermarks-monotonic-assumption-risk",
+          "description": "Using strictly monotonic watermark strategy can drop or misorder events, affecting stage counts.",
+          "evidence": "In `LongestSessionPerJob.java`, both streams use `WatermarkStrategy.forMonotonousTimestamps()`. Cluster trace CSV ordering is not validated in the run; if any out-of-order timestamps exist, event-time timers and comparisons like `value.timestamp > finish` could behave incorrectly, causing output mismatches while still producing output. Verifier indicates mismatch rather than crash, consistent with subtle watermark/order issues.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Real-Time Streaming best practices (windowing/watermarks)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "tp-1-skill-does-not-trigger-on-flink-specific pitfalls",
+          "description": "The senior-data-engineer skill is broad and lacks an explicit Flink sessionization/checklist trigger, so it did not guide the agent toward correct stage/session semantics and watermark handling.",
+          "evidence": "Representative run shows `n_skill_invocations: 0` and the produced solution contains common Flink pitfalls (monotonic watermarks, emitting at job finish rather than respecting inactivity). This indicates the skill package content is not precise/operational enough to get applied in a Flink sessionization task.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Core Capabilities / Real-Time Streaming (too general)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "ic-1-missing-self-checks-against-task-definition",
+          "description": "Skill guidance does not require explicit verification of semantics: event-time units, gap definition, and how to handle termination vs inactivity gap.",
+          "evidence": "The agent implemented `gapMicros = sesssize * 1_000_000L` (correct units) but did not implement the definitional rule that a stage ends after 10 minutes of inactivity; instead it ends on the next submit, and emits on FINISH/KILL without waiting. A skill-level checklist would have caught this mismatch before submission.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Best Practices (missing task-to-implementation validation checklist for stateful/event-time jobs)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "spc-1-edge-cases-not-covered",
+          "description": "Guidance lacks coverage for common sessionization edge cases: no submits, submits after finish, multiple terminal job events, and how to close the last session correctly.",
+          "evidence": "The solution includes ad-hoc guards like dropping submits after finish (`if (finish != null && value.timestamp > finish) return;`) and deduping emission via `emitted` state, showing edge cases were encountered/anticipated but not systematically handled. Output mismatch suggests at least one such edge case is handled incorrectly (e.g., last stage closure).",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md",
+              "section": "Real-Time Streaming (stateful processing patterns)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/flink-query/repaired_skill",
+      "executor_run_id": "flink-query-a01"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "D1-no-outputs-written",
+          "description": "Skill guidance does not make the 'write required JSON files to /app/output' step explicit or mandatory; representative run produced no q01–q05 outputs, causing all verifier failures.",
+          "evidence": "Verifier fails immediately on missing required outputs: 'Missing required output: /app/output/q01.json' and similarly q02–q05. Trajectory shows only directory listing and an attempted PDF-tool check; no step writes any JSON files.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "Output construction guardrails / Minimal end-to-end scaffold"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md",
+              "section": "General description and equations"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D2-terminal-tool-misuse-multi-command",
+          "description": "Agent attempted to run multiple commands in a single execute tool call, which the environment rejected. Skill lacks an explicit constraint and workaround (chain with &&/; or run separately). This can prevent handbook extraction/tool checks and stall completion.",
+          "evidence": "Tool error: 'Cannot execute multiple commands at once. Please run each command separately OR chain them into a single command via && or ;' after a tool_call that included python heredoc + which + python -V.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "Handbook “where to look” checklist / Minimal end-to-end scaffold"
+            }
+          ]
+        },
+        {
+          "prediction_id": "D3-non-ascii-shell-flag",
+          "description": "First terminal call used an invalid/non-ASCII ls flag ('-್ল'), causing failure; skill lacks a robustness note to avoid non-ASCII characters and to retry with simple commands.",
+          "evidence": "Tool result: 'ls: invalid option -- '�'' for command 'ls -์... /app/data'. This wasted a tool call and time.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "Sanity checks before writing outputs"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/manufacturing-equipment-maintenance/repaired_skill",
+      "executor_run_id": "manufacturing-equipment-maintenance-completion-a01"
+    },
+    {
+      "task_id": "multilingual-video-dubbing",
+      "diagnoses": [
+        {
+          "prediction_id": "naturalness_low_offline_tts_choice",
+          "description": "The produced TTS audio has very low speech naturalness because the pipeline falls back to espeak-ng (a formant TTS) after network-based Edge TTS fails, but the skills do not explicitly warn that espeak-like voices will not meet human-level naturalness requirements (UTMOS >= 3.5).",
+          "evidence": "Verifier fails only test_metric_08_speech_naturalness with UTMOS score 2.18 (< 3.5). In the trajectory, Edge TTS fails with a 403 websocket handshake error, then the agent switches to espeak-ng and generates the final seg_0.wav from it (commands show espeak-ng used). All other mastering/alignment tests pass, isolating the failure to voice/naturalness rather than loudness, SR, mono, or timing.",
+          "locations": [
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "1. TTS Engine & Output Basics"
+            },
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "3. Loudness Normalization"
+            }
+          ]
+        },
+        {
+          "prediction_id": "missing_quality_gate_for_naturalness",
+          "description": "The TTS skill lacks an explicit quality gate/verification step for perceptual naturalness (e.g., UTMOS), so the agent can produce technically compliant audio (LUFS, SR, mono) that still fails the benchmark’s naturalness requirement.",
+          "evidence": "Verifier shows loudness standard, sample rate, mono channels, alignment, drift, and report schema all passed, but naturalness failed. The current TTS skill guidance focuses on cleanup/normalization/timing, with no instruction to check perceptual quality or to avoid low-naturalness engines when a human-level requirement is stated.",
+          "locations": [
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "# SKILL: TTS Audio Mastering"
+            },
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "3. Loudness Normalization"
+            },
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "4. Timing & Segment Boundary Handling"
+            }
+          ]
+        },
+        {
+          "prediction_id": "network_dependency_not_handled_as_quality_risk",
+          "description": "The TTS skill mentions cloud TTS but does not instruct to plan for network-restricted environments or provide guidance to prefer offline neural models over cloud TTS to avoid falling back to low-quality formant TTS.",
+          "evidence": "During generation, edge-tts is installed but fails with a 403 (network/service restriction). The agent then uses espeak-ng (explicitly described in the skill as prototyping-only), resulting in low UTMOS and verifier failure. The skill did not provide a robust offline high-quality alternative path for restricted-network runs.",
+          "locations": [
+            {
+              "file": "text-to-speech/SKILL.md",
+              "section": "1. TTS Engine & Output Basics"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/multilingual-video-dubbing/repaired_skill",
+      "executor_run_id": "multilingual-video-dubbing-a16"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [
+        {
+          "prediction_id": "plan_format_not_pddl_parenthesized",
+          "description": "Plans were saved in Unified Planning's pretty-printed ActionInstance format `action_name(arg)` rather than the PDDL plan syntax required by the verifier `(<action-name> <arg1> ...)` per line. This caused plan parsing to fail before validation.",
+          "evidence": "Verifier failure shows PDDLReader.parse_plan_string cannot interpret a line like `move_seg_rw_0_400_seg_rww_0_50_south_south_medium(airplane_cfbeg)` and expects lines matching `^\\s*\\(\\s*([\\w?-]+)((\\s+[\\w?-]+)*)\\s*\\)\\s*$`. The representative run writes plan files containing exactly that `name(arg)` format (see displayed task01.txt/task02.txt contents).",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "3. Plan Saving"
+            },
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "Requirements for Outputs"
+            }
+          ]
+        },
+        {
+          "prediction_id": "save_plan_guidance_incorrect_tool",
+          "description": "The skill document claims `save-plan` uses `unified_planning.io.PDDLWriter` to write a text plan file, but the representative run used `str(action_instance)` lines; and UP's `PDDLWriter` is for writing PDDL domains/problems, not plan files. The skill lacks explicit instruction to serialize plans in the exact parenthesized plan format accepted by UP's PDDLReader/verifier.",
+          "evidence": "Trajectory shows the agent writes `lines = [str(a) for a in res.plan.actions]` producing `action(args)` lines. Verifier then attempts `reader.parse_plan(problem, plan_file)` and fails on that format. The skill doc's current `save-plan` notes do not warn against `str(a)` nor specify the required `(<action> <params...>)` syntax.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "3. Plan Saving"
+            },
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "Example Workflow"
+            }
+          ]
+        },
+        {
+          "prediction_id": "missing_roundtrip_parse_check",
+          "description": "The skill requires validation of a plan object but does not require verifying that the *written file* can be parsed back as a plan. This allowed a syntactically invalid plan file to pass internal validation (on the in-memory plan) while failing the external verifier that parses from disk.",
+          "evidence": "Representative run prints `validated as VALID with the sequential_plan_validator` for the in-memory plan, yet verifier fails earlier at `reader.parse_plan(problem, plan_file)` due to serialization mismatch. This gap indicates missing instruction to roundtrip: write -> parse -> validate.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "4. Plan Validation"
+            },
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "Example Workflow"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/pddl-airport-planning/repaired_skill",
+      "executor_run_id": "pddl-airport-planning-a11"
+    }
+  ]
+}
