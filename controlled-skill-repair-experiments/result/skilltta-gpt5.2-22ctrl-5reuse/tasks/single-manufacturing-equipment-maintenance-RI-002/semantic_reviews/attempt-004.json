@@ -1,0 +1,63 @@
+{
+  "id": "single-manufacturing-equipment-maintenance-RI-002",
+  "attempt": "attempt-004",
+  "required_artifact_write_and_ending_confirmed": true,
+  "failure_category": "artifact_numeric_preheat_lower_bound_and_tal_tc_selection",
+  "explanation": "Actual toolkit full body read event2; missing optional file utility/pdftotext is recovered with pypdf5.1 installation and extraction. Initial model PDF regex fails14 and edit17 misses, but repaired18 and actual solver run19 succeeds exit0;20 reloads all5 actual nonempty JSONs with run coverage,21 previews each before descriptive final22. No unperformed final action or unresolved model write. Official7tests5pass2fail:Q01 R0001 ramp1.77 vs1.74 (model final explicitly uses bothT<=150 and omits100 lowerbound);Q02 R0001 selected159.57 vs129.95 minimumTAL. Normal content/numeric failure, not infrastructure;0 retained,no score repeat.",
+  "tool_evidence": [
+    {
+      "event_index": 18,
+      "call_id": "call_lYfwMwagAF8lSiHGyqyWqHSL",
+      "title": "Update peak margin extraction regex with robust fallback search: Editing /app/solve_reflow.py",
+      "status": "completed"
+    },
+    {
+      "event_index": 19,
+      "call_id": "call_pO22CgBektNwFs8f4zeRcI73",
+      "title": "Re-run solver script after fixing handbook peak margin parsing: $ python /app/solve_reflow.py",
+      "status": "completed"
+    },
+    {
+      "event_index": 20,
+      "call_id": "call_KLMTz82XZV0IXDJgEttEppmC",
+      "title": "Validate all five JSON outputs exist, parse, and show brief stats: $ python - <<'PY' from pathlib import Path import json out=Path('/app/output') required=[out/f'q0{i}.json' for i in range(1,6)] for p in required:     assert p.is_file() and p.stat().st_size>0, p     with p.open() as f:         data=json.load(f)     print(p.name,'type',type(data).__name__,'size',p.stat().st_size) print('ok: all parse')  # Coverage checks import pandas as pd mes=pd.read_csv('/app/data/mes_log.csv') run_ids=sorted(mes.run_id.astype(str).unique()) q01=json.load((out/'q01.json').open()) assert sorted(q01['max_ramp_by_run'].keys())==run_ids q02=json.load((out/'q02.json').open()) assert [r['run_id'] for r in q02]==run_ids q03=json.load((out/'q03.json').open()) assert sorted(q03['min_peak_by_run'].keys())==run_ids q04=json.load((out/'q04.json').open()) assert [r['run_id'] for r in q04]==run_ids q05=json.load((out/'q05.json').open()) assert [r['board_family'] for r in q05]==sorted(mes.board_family.astype(str).unique()) print('ok: coverage checks passed') PY",
+      "status": "completed"
+    },
+    {
+      "event_index": 21,
+      "call_id": "call_EzFQKBmZBZMqdqICaBoh7GTB",
+      "title": "Preview generated JSON outputs for sanity and formatting: $ for f in /app/output/q0*.json; do echo \"\\n### $f\"; python - <<PY import json p='$f' with open(p) as fp:     d=json.load(fp) print('top-level type',type(d).__name__) if isinstance(d,dict):     # print a few keys     print('keys',list(d)[:5])     # print first two run entries if present     if 'max_ramp_by_run' in d:         for k in sorted(d['max_ramp_by_run'])[:3]:             print(k,d['max_ramp_by_run'][k])     if 'min_peak_by_run' in d:         for k in sorted(d['min_peak_by_run'])[:3]:             print(k,d['min_peak_by_run'][k])     if 'violating_runs' in d:         print('violating_runs count',len(d['violating_runs']))     if 'failing_runs' in d:         print('failing_runs count',len(d['failing_runs'])) else:     print('len',len(d))     for row in d[:3]:         print(row) PY done | sed -n '1,160p'",
+      "status": "completed"
+    }
+  ],
+  "trajectory": "/Users/king/Documents/Codex/2026-11-18/skilltta-controlled-gpt52/runs/repaired/single-manufacturing-equipment-maintenance-RI-002/attempt-004/jobs/2026-11-25__11-49-17/task__fbede960/trajectory/acp_trajectory.jsonl",
+  "trajectory_sha256": "93108aaf385091c89f7190c544f9d87ff6ffd7d0945b01553cd4ebd27fbf13c9",
+  "failed_checks": [
+    {
+      "name": "::test_Q01_preheat_ramp_rate_loose",
+      "status": "failed",
+      "raw_status": "call_failed",
+      "duration": 0.015891166985966265,
+      "start": 1795578876.5009966,
+      "stop": 1795578876.5320797,
+      "retries": 0,
+      "file_path": "../verifier/test_outputs.py",
+      "trace": "def test_Q01_preheat_ramp_rate_loose():\n        df_runs = load_runs()\n        df_tc = load_tc()\n        out = load_json(Q01)\n    \n        recs = _q01_iter_records(out)\n        assert recs, \"Q01 must contain per-run ramp records (list or dict/max_ramp_by_run)\"\n    \n        got: Dict[str, Dict[str, Any]] = {}\n        for r in recs:\n            rid = _q01_get_run_id(r)\n            if rid:\n                got.setdefault(rid, r)\n    \n        exp_ids = run_ids(df_runs)\n        missing = [rid for rid in exp_ids if rid not in got]\n        assert not missing, f\"Q01 missing run_ids: {missing}\"\n    \n        if isinstance(out, dict) and \"ramp_rate_limit_c_per_s\" in out:\n            assert_float_close(out[\"ramp_rate_limit_c_per_s\"], RAMP_LIMIT_C_S, msg=\"Q01 ramp_rate_limit mismatch\")\n    \n        for rid in exp_ids:\n            tc_max, r_max = max_preheat_ramp_for_run(df_tc, rid)\n            rec = got[rid]\n            got_r = _q01_get_max_ramp(rec)\n    \n            if tc_max == \"\" or math.isnan(r_max):\n                assert got_r is None, f\"Expected null/None ramp for run {rid}, got {got_r}\"\n                continue\n    \n            assert got_r is not None, f\"Missing ramp value for run {rid}\"\n>           assert_float_close(got_r, float(r_max), msg=f\"Preheat ramp mismatch for run {rid}\")\n\n/verifier/test_outputs.py:312: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\ngot = 1.77, exp = 1.74\n\n    def assert_float_close(got: Any, exp: float, *, msg: str = \"\"):\n        g = _as_float(got)\n        assert not math.isnan(g), msg or f\"Expected a numeric value, got {got!r}\"\n>       assert round2(g) == round2(exp), msg or f\"Expected {round2(exp)}, got {round2(g)}\"\nE       AssertionError: Preheat ramp mismatch for run R0001\nE       assert 1.77 == 1.74\nE        +  where 1.77 = round2(1.77)\nE        +  and   1.74 = round2(1.74)\n\n/verifier/test_outputs.py:94: AssertionError",
+      "message": "The test failed in the call phase due to an assertion error"
+    },
+    {
+      "name": "::test_Q02_tal_loose",
+      "status": "failed",
+      "raw_status": "call_failed",
+      "duration": 0.015197166008874774,
+      "start": 1795578876.532162,
+      "stop": 1795578876.5537345,
+      "retries": 0,
+      "file_path": "../verifier/test_outputs.py",
+      "trace": "def test_Q02_tal_loose():\n        df_runs = load_runs().set_index(\"run_id\")\n        df_tc = load_tc()\n        out = load_json(Q02)\n    \n        by = _q02_group_by_run(out)\n        exp_ids = run_ids(df_runs.reset_index())\n    \n        missing = [rid for rid in exp_ids if rid not in by]\n        assert not missing, f\"Q02 missing run_ids: {missing}\"\n    \n        ids_in_out = [str(r.get(\"run_id\")) for r in out if isinstance(r, dict) and r.get(\"run_id\") is not None]\n        assert_sorted_non_decreasing(ids_in_out, \"Q02 records must be sorted non-decreasing by run_id (duplicates allowed)\")\n    \n        for rid in exp_ids:\n            liquidus = float(df_runs.loc[rid, \"solder_liquidus_c\"])\n            tc_min, tal = min_tal_for_run(df_tc, rid, liquidus)\n    \n            picked = _q02_pick_min_tal_record(by[rid])\n    \n            if tc_min == \"\" or math.isnan(tal):\n                if picked is not None and \"status\" in picked:\n                    assert str(picked[\"status\"]) not in {\"compliant\"}, f\"Q02 run {rid} should not be compliant without TC data\"\n                continue\n    \n            assert picked is not None, f\"Q02 run {rid} has TC data but no TAL numeric record found in output\"\n            got_tal = picked.get(\"tal_s\", picked.get(\"time_above_liquidus_s\"))\n            assert got_tal is not None, f\"Q02 run {rid} picked record missing TAL field\"\n>           assert_float_close(got_tal, float(tal), msg=f\"TAL mismatch for run {rid}\")\n\n/verifier/test_outputs.py:355: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\ngot = 159.57, exp = 129.95\n\n    def assert_float_close(got: Any, exp: float, *, msg: str = \"\"):\n        g = _as_float(got)\n        assert not math.isnan(g), msg or f\"Expected a numeric value, got {got!r}\"\n>       assert round2(g) == round2(exp), msg or f\"Expected {round2(exp)}, got {round2(g)}\"\nE       AssertionError: TAL mismatch for run R0001\nE       assert 159.57 == 129.95\nE        +  where 159.57 = round2(159.57)\nE        +  and   129.95 = round2(129.95)\n\n/verifier/test_outputs.py:94: AssertionError",
+      "message": "The test failed in the call phase due to an assertion error"
+    }
+  ],
+  "independent_verifier_defect": false,
+  "AI_assisted_not_human": true
+}

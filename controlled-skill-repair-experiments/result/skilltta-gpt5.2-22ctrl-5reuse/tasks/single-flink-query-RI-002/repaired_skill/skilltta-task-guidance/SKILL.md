@@ -1,0 +1,141 @@
+---
+name: skilltta-task-guidance
+---
+
+# SkillTTA Task Guidance: Longest Stage (Session) per Job in Flink
+
+This skill describes a reusable workflow to implement a Flink batch job that (1) groups **task SUBMIT events** into **stages** using **event-time sessionization**, (2) finds the **largest stage** per job (by number of SUBMIT events), and (3) **outputs results only for jobs that have finished**, using job-events input as the qualification signal.
+
+---
+
+## Problem Decomposition
+
+You have two bounded inputs:
+
+- **Task events** (`task_input`): gzipped CSV, contains timestamps in **microseconds**.
+- **Job events** (`job_input`): gzipped CSV, contains job lifecycle events (including a “finished” terminal event).
+
+You must output, for each finished job:
+
+- `jobId`
+- `maxStageTasks`: the **maximum number of task SUBMIT events** in any stage of that job
+
+Stage definition:
+
+- A **stage** is a cluster of task **SUBMIT** events close in event time for the same job.
+- A stage ends after **10 minutes of inactivity** (no SUBMITs) for that job.
+
+Output format is strict:
+
+- One line per job: `(jobId,maxStageTasks)`
+- No extra fields, no header, no extra whitespace required.
+
+---
+
+## Workflow 1 — Understand schema & implement datatypes
+
+1. **Read `/data/format.pdf` and `ClusterData2011_2.md`** and identify required fields:
+   - For task events: at least `timestamp`, `jobId`, and `eventType`.
+   - For job events: at least `timestamp`, `jobId`, and `eventType`.
+2. Implement the missing data classes under `clusterdata.datatypes` (as referenced by `clusterdata.utils.AppBase`).
+   - Use Flink-friendly POJOs (public class, public fields or getters/setters, no-arg constructor).
+3. Parsing CSV:
+   - The trace CSVs often contain many columns; parse only the needed ones.
+   - Handle empty fields defensively (e.g., treat as `-1` or skip the record).
+4. Timestamps:
+   - Source timestamps are in **microseconds**.
+   - Flink event-time APIs commonly operate on **milliseconds**; convert via `micros / 1000`.
+
+---
+
+## Workflow 2 — Build the Flink pipeline (sessionize SUBMITs, then qualify output)
+
+### Step A: Identify which jobs are eligible for output (“finished jobs”)
+
+The task requires: **“find the stage with the most number of tasks once the job has finished”**.
+
+Implement a “finished jobs” set from `job_input`:
+
+- Filter job events to **exactly the dataset’s successful completion event label/code** (commonly named `FINISH` in the docs).
+- **Do not** include other terminal states (`FAIL`, `KILL`, `CANCEL`, etc.) unless the task specification explicitly states they should be treated as equivalent.
+- Extract `jobId` into a dataset of finished job IDs.
+
+Practical patterns (bounded batch job):
+
+- **Option 1 (simplest):** build `DataSet`/`DataStream` of finished job IDs, then join/filter final results by membership.
+- **Option 2:** compute results for all jobs then inner-join with finished jobs.
+
+> Note: The numeric code for `FINISH` depends on the dataset spec—confirm it in the provided docs. If the docs define multiple success-completion labels, **enumerate them explicitly from the docs** rather than using a broad “terminal” filter.
+
+### Step B: Extract task SUBMIT events and sessionize per job
+
+1. Read task events.
+2. Filter to **eventType == SUBMIT**.
+3. Assign event-time timestamps (converted to ms).
+4. Key by `jobId`.
+5. Use an **event-time session window** with a **10-minute gap**:
+   - Gap = `10 * 60 * 1000` milliseconds.
+
+Aggregate within each session window:
+
+- Count events in the session. (Do **not** deduplicate task IDs; resubmissions count separately.)
+
+### Step C: Compute the maximum session count per job
+
+After windowing, you’ll have records like:
+
+- `(jobId, sessionCount)` for each stage
+
+Then compute:
+
+- `(jobId, max(sessionCount))`
+
+### Step D: Apply “finished job” qualification
+
+Filter final `(jobId, maxStageTasks)` by whether `jobId` is in the finished-jobs set.
+
+This satisfies the “only once finished” requirement for bounded evaluation.
+
+---
+
+## Workflow 3 — Output formatting rules (critical for evaluation)
+
+Write exactly one tuple per line:
+
+- `(first_int,second_int)`
+
+Recommendations:
+
+- Convert the final result to strings with a map:
+  - `"(" + jobId + "," + maxStageTasks + ")"`
+- Write to the provided `output` path.
+- Do not emit extra logging lines into the output.
+- Ordering is not required.
+
+---
+
+## Implementation Notes & Common Pitfalls
+
+1. **Microseconds vs milliseconds**
+   - If you forget to divide by 1000, session gaps will be wrong by 1000×.
+2. **Window type**
+   - Use event-time session windows (not processing time).
+3. **Counting semantics**
+   - Count SUBMIT events, not unique tasks.
+4. **Finished-job qualification**
+   - Ensure you filter outputs to finished jobs (qualified by the exact completion predicate), not merely “terminal” jobs.
+5. **Gzipped CSV input**
+   - Ensure the input format supports `.gz` (Flink can read gzipped text; if using a custom input format, ensure it handles gzip).
+
+---
+
+## Minimal Pseudocode Blueprint
+
+1. `finishedJobs = jobEvents.filter(isFinish).map(jobId).distinct()`
+2. `submits = taskEvents.filter(isSubmit).assignTimestamps(micros/1000).keyBy(jobId)`
+3. `stageCounts = submits.window(EventTimeSessionWindows.withGap(10min)).aggregate(count)`
+4. `maxPerJob = stageCounts.keyBy(jobId).reduce(max)`
+5. `result = maxPerJob.join(finishedJobs).where(jobId).equalTo(jobId)`
+6. `result.map(toTupleString).writeAsText(output)`
+
+Use this structure to fill in `/clusterdata/query/LongestSessionPerJob.java` without changing the class name.

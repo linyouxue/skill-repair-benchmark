@@ -1,0 +1,282 @@
+{
+  "method_id": "skilltta-repair-gpt52-gold31-20260924",
+  "benchmark_version": "manual-gold-defects-20260917-v25",
+  "tasks": [
+    {
+      "task_id": "data-to-d3",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "SKILL.md claims the skill is for D3.js (v6) in the header/front matter, but later instructs to pin D3 to v7.9.0 by default, creating an internal version inconsistency that can mislead implementations needing v6.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Front matter / \"Offline + dependency determinism\" (default: d3@7.9.0)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "bubble_chart_example.js uses an absolute data path (d3.csv('/data/stocks.csv')), which is brittle for standalone apps opened from disk and contradicts the common need for relative paths within the output tree.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/bubble_chart_example.js",
+              "section": "Load and process data (d3.csv('/data/stocks.csv'))"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "bubble_chart_example.js tooltip suppression for ETFs is implemented as `if (d.sector !== 'ETF')`, but ETF-ness is not reliably represented by the `sector` field; the example simultaneously computes `hasValue`/missing marketCap but does not use it for tooltip gating, which is logically inconsistent and encourages incorrect behavior.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/bubble_chart_example.js",
+              "section": "Data parsing (hasValue) vs. circle mouseover handler (sector !== 'ETF')"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "bubble_chart_example.js uses a force simulation without any determinism controls (no deterministic initial node positions, no fixed tick count + stop), conflicting with the skill’s own determinism rules and yielding non-reproducible layouts.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/bubble_chart_example.js",
+              "section": "Create force simulation / simulation.on('tick', ...)"
+            },
+            {
+              "file": "d3-visualization/SKILL.md",
+              "section": "Determinism rules → Rendering determinism (force simulation guidance: fixed tick count, deterministic initial positions)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P5",
+          "description": "interactive_table_example.js formatNumber double-applies a negative sign: it computes `formatted` from `num` (which already includes the negative sign in the division/toFixed result) and then prefixes another '-' when `num < 0`, producing strings like '--1.23B'.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/interactive_table_example.js",
+              "section": "Number formatting utility (formatNumber: `return num < 0 ? '-' + formatted : formatted;`)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P6",
+          "description": "tooltip_handler.js helper formatNumber treats 0 as missing due to `if (!num) return '-'`, and defaultFormat similarly hides legitimate zero values via truthiness checks (`data.value ? ... : ''`), causing incorrect tooltip output for zero-valued data.",
+          "locations": [
+            {
+              "file": "d3-visualization/scripts/tooltip_handler.js",
+              "section": "Helper function formatNumber (`if (!num) return '-'`) and defaultFormat (`data.value ? ...`)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "data-to-d3/repaired_skill",
+      "executor_run_id": "data-to-d3-skilltta-gpt52-r001",
+      "reuse_source_submission_row_preserved_in": "source_metadata/submission.json"
+    },
+    {
+      "task_id": "dialogue-parser",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "SKILL.md instructs users to import a `dialogue_graph` module (`from dialogue_graph import Graph, Node, Edge`), but the bundle only provides `dialogue-graph/scripts/dialogue_graph.py` and does not define an installable/importable `dialogue_graph` package/module at the documented import path. This makes the documented usage likely to fail without extra, undocumented PYTHONPATH/package setup.",
+          "locations": [
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "How to use (Import the module)"
+            },
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "File location / module name mismatch relative to documented `from dialogue_graph import ...`"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`Graph.validate()` is advertised as validating graph integrity, but it only checks edge endpoint existence and does not validate key constraints that the task/evaluators commonly enforce (e.g., all nodes reachable from the first node). Using this validation as-is can allow structurally invalid graphs to pass \"validate\" while failing downstream constraints.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.validate"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md",
+              "section": "5. Validation (\"Check for integrity.\")"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The implementation treats the special target `\"End\"` inconsistently across validation/serialization/visualization: `validate()` explicitly allows edges to point to `End` even when `End` is not present in `self.nodes`, `to_dict()`/`to_json()` will omit an `End` node unless the user added one, but `visualize()` always injects an `End` node into the DOT output. This can produce a JSON graph with dangling `to: \"End\"` references (depending on consumer expectations) and a DOT graph that does not faithfully represent the serialized JSON graph.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.validate (edge.target != \"End\" exception)"
+            },
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.to_dict / Graph.to_json (serializes only self.nodes)"
+            },
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py",
+              "section": "Graph.visualize (unconditionally adds 'End' node)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "dialogue-parser/repaired_skill",
+      "executor_run_id": "dialogue-parser-skilltta-gpt52-r001",
+      "reuse_source_submission_row_preserved_in": "source_metadata/submission.json"
+    },
+    {
+      "task_id": "flink-query",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "`senior-data-engineer/scripts/data_quality_validator.py` has a broken CLI wiring: `DataQualityValidator.__init__` expects a single `config: Dict`, but `main()` instantiates it with `(args.target, verbose=...)`, and then calls `tool.run()` even though the class only defines `process()` (no `run()` method). This will raise `TypeError`/`AttributeError` and makes the script unusable as documented.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/data_quality_validator.py",
+              "section": "class DataQualityValidator.__init__ signature vs main(): tool instantiation and tool.run() call"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`senior-data-engineer/scripts/pipeline_orchestrator.py` has the same concrete CLI defects as the other tools: the class constructor signature is `__init__(self, config: Dict)` but `main()` passes `(args.target, verbose=...)`, and `main()` calls `tool.run()` which is not implemented (only `process()` exists). Script will fail at runtime.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/pipeline_orchestrator.py",
+              "section": "class PipelineOrchestrator.__init__ signature vs main(): tool instantiation and tool.run() call"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "`senior-data-engineer/scripts/etl_performance_optimizer.py` has invalid CLI wiring: `EtlPerformanceOptimizer.__init__` expects `config: Dict`, but `main()` instantiates it with `(args.target, verbose=...)` and calls a nonexistent `tool.run()` method (only `process()` exists). This is a direct runtime error.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/etl_performance_optimizer.py",
+              "section": "class EtlPerformanceOptimizer.__init__ signature vs main(): tool instantiation and tool.run() call"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P4",
+          "description": "`senior-data-engineer/scripts/stream_processor.py` generates invalid Flink scaffolding: the generated PyFlink code string uses `DeliveryGuarantee.EXACTLY_ONCE` but does not import `DeliveryGuarantee`, so the generated job will not run. The generated Java code string also references `DeliveryGuarantee.EXACTLY_ONCE` without importing `DeliveryGuarantee`, so it will not compile.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/scripts/stream_processor.py",
+              "section": "FlinkJobGenerator._generate_pyflink_code template (uses DeliveryGuarantee without import)"
+            },
+            {
+              "file": "senior-data-engineer/scripts/stream_processor.py",
+              "section": "FlinkJobGenerator._generate_java_code template (uses DeliveryGuarantee without import)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P5",
+          "description": "`senior-data-engineer/HOW_TO_USE.md` instructs users to run the provided Python tools directly (e.g., `data_quality_validator.py`, `etl_performance_optimizer.py`, `pipeline_orchestrator.py`), but these scripts currently crash due to the constructor/method mismatches in their `main()` functions, making the usage instructions inaccurate.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/HOW_TO_USE.md",
+              "section": "Python Tools Available / You can run these tools directly"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "flink-query/repaired_skill",
+      "executor_run_id": "flink-query-skilltta-gpt52-r001",
+      "reuse_source_submission_row_preserved_in": "source_metadata/submission.json"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "`time_above_threshold_s` treats “above threshold” as strictly `>` (not `>=`), which will undercount TAL when temperatures equal the threshold (e.g., at liquidus). It also fails to count segments where both endpoints equal the threshold (flat-at-threshold dwell). This is a concrete computation defect because the function’s logic omits equality cases rather than making the comparison operator configurable.",
+          "locations": [
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md",
+              "section": "Reference codes → `def time_above_threshold_s(df_tc, thr):` (the `if y0 > thr and y1 > thr:` block and crossing logic)"
+            },
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "Deterministic thermocouple computation recipes → 3. Time above threshold with linear interpolation → `def time_above_threshold_s(df_tc, thr):` (the `if y0 > thr and y1 > thr:` block and crossing logic)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "Conveyor feasibility guidance contains a direction/labeling error: for a minimum dwell time requirement over heated length, the derived constraint is a **maximum** conveyor speed (speed must be ≤ L/t_min), but the skill labels/formulates it as `speed_min_cm_min`. This can directly lead to reversed compliance logic when computing `required_min_speed_cm_min` or comparing against actual speed.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "6. Conveyor feasibility (rule object approach) → Common patterns → “Minimum dwell time across effective heated length” (uses `speed_min_cm_min = (L_eff_cm / t_min_s) * 60`)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The deterministic thermocouple selection example for “max metric” is not executable and encodes an incorrect/undefined tie-break: it references `lex(...)` (undefined) and uses `-lex(x.tc_id)` (nonsensical for strings), which contradicts the stated tie-break “smallest_tc_id” and can mislead implementation.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md",
+              "section": "4. Deterministic sensor selection (tie-breaks) → Examples (the `best = max(items, key=lambda x: (x.value, -lex(x.tc_id)))` snippet)"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "manufacturing-equipment-maintenance/repaired_skill",
+      "executor_run_id": "manufacturing-equipment-maintenance-skilltta-gpt52-r001",
+      "reuse_source_submission_row_preserved_in": "source_metadata/submission.json"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "diagnoses": [
+        {
+          "prediction_id": "P1",
+          "description": "Inconsistent API naming between the declared skill signatures (hyphenated names like `load-problem`, `generate-plan`, `save-plan`) and the provided usage examples (underscored names like `load_problem`, `generate_plan`, `save_plan`). This creates ambiguity about the actual callable/tool names and can directly cause invocation errors in an automated workflow.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 1. Load Domain and Problem / `load-problem(domain_path, problem_path)` (and its Example)"
+            },
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 2. Plan Generation / `generate-plan(problem_object)` (and its Example)"
+            },
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 3. Plan Saving / `save-plan(plan_object, output_path)` (and its Example)"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P2",
+          "description": "`save-plan` claims it \"Uses `unified_planning.io.PDDLWriter`\" to write a plan in \"standard PDDL plan format\". `PDDLWriter` is for emitting PDDL domain/problem text, not serializing a computed plan into a plain action-per-line plan file. This is likely to produce the wrong output format or fail at runtime, and it does not align with the task requirement of writing a textual plan (one action per line) to `plan_output`.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 3. Plan Saving / Notes (\"Uses `unified_planning.io.PDDLWriter`.\")"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P3",
+          "description": "The plan-generation notes hard-code the default planner as `pyperplan`, but `pyperplan` is commonly limited to STRIPS-style fragments and may not support typical IPC Airport encodings that use richer PDDL requirements (e.g., ADL features, conditional effects, negative/disjunctive preconditions). This makes the documented default approach unreliable for the stated benchmark suite.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md",
+              "section": "## 2. Plan Generation / Notes (\"Default planner: `pyperplan`.\")"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "pddl-airport-planning/repaired_skill",
+      "executor_run_id": "pddl-airport-planning-skilltta-gpt52-r001",
+      "reuse_source_submission_row_preserved_in": "source_metadata/submission.json"
+    }
+  ]
+}

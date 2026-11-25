@@ -1,0 +1,152 @@
+{
+  "method": "SkillTTA retrieval + temporary synthesis + diagnosis + two iterative repair rounds",
+  "diagnosis": {
+    "diagnoses": [
+      {
+        "id": "end-node-dangling-allowed",
+        "summary": "Graph.validate() explicitly allows edges targeting \"End\" even when no End node exists, enabling graphs that violate the task constraint that all edge targets must exist.",
+        "evidence": [
+          "dialogue-graph/scripts/dialogue_graph.py: validate(): `if edge.target not in self.nodes and edge.target != \"End\": ...`"
+        ],
+        "impact": "Parsers using this skill can emit JSON where edges reference a missing node (End), which will fail validators expecting all targets to exist and/or expecting End to be materialized as a node when referenced."
+      },
+      {
+        "id": "visualize-injects-unreachable-end",
+        "summary": "Graph.visualize() always adds an \"End\" node to the rendered diagram even if the graph does not contain End and no edges reference it, which can misrepresent the actual serialized graph and can conflict with reachability expectations in tooling.",
+        "evidence": [
+          "dialogue-graph/scripts/dialogue_graph.py: visualize(): unconditionally `dot.node('End', 'END', ...)`"
+        ],
+        "impact": "Users may believe End exists in the data when it does not; downstream checks comparing visualization vs JSON can disagree. If a DOT export is added using the same logic, it could create an extra unreachable node."
+      },
+      {
+        "id": "docs-misstate-end-convention",
+        "summary": "SKILL.md shows adding edges to End without documenting that End must be a real node, contradicting the task guidance that End should be created when referenced and that edge targets must exist.",
+        "evidence": [
+          "dialogue-graph/SKILL.md: Adding Edges example uses `target=\"End\"` without adding an End node.",
+          "dialogue-graph/SKILL.md: Export section does not mention End materialization requirements."
+        ],
+        "impact": "Encourages consumers (script parsers) to create graphs with missing End nodes that pass the current validate() but fail task validators."
+      },
+      {
+        "id": "missing-dot-export-api",
+        "summary": "The skill documentation's Export section only covers JSON; the library provides visualize() that renders image formats via graphviz but does not provide a stable .dot export string/file API needed by tasks requiring /app/dialogue.dot.",
+        "evidence": [
+          "dialogue-graph/SKILL.md: Export section only mentions to_dict/to_json.",
+          "dialogue-graph/scripts/dialogue_graph.py: has visualize() but no to_dot()/write_dot()."
+        ],
+        "impact": "For tasks needing DOT output, users must re-implement DOT export outside the skill, reducing reuse and increasing inconsistency."
+      },
+      {
+        "id": "no-node-upsert-for-placeholders",
+        "summary": "Graph.add_node() forbids adding a node with an existing id, which makes it awkward to implement the recommended placeholder-target creation and later upgrading when the real section is parsed.",
+        "evidence": [
+          "dialogue-graph/scripts/dialogue_graph.py: add_node(): raises ValueError if node.id already exists."
+        ],
+        "impact": "Encourages consumers to bypass the Graph API (mutating graph.nodes directly) or to avoid creating placeholder nodes, increasing the chance of missing-target edges and invalid graphs."
+      }
+    ],
+    "affected_files": [
+      "dialogue-graph/scripts/dialogue_graph.py",
+      "dialogue-graph/SKILL.md"
+    ],
+    "repair_plan": [
+      {
+        "step": "Tighten validation to require all edge targets exist, including \"End\".",
+        "file": "dialogue-graph/scripts/dialogue_graph.py",
+        "details": [
+          "Change validate() to always error when edge.target not in self.nodes (remove `edge.target != \"End\"` exception).",
+          "Optionally add a specific, clearer message when target == \"End\" and missing: e.g., \"Edge points to 'End' but node 'End' is missing; create Node(id='End', ...)\"."
+        ]
+      },
+      {
+        "step": "Align visualization behavior with the actual graph contents.",
+        "file": "dialogue-graph/scripts/dialogue_graph.py",
+        "details": [
+          "Only add/render an End node in visualize() if it exists in self.nodes OR if at least one edge targets \"End\" (and ideally require it exists after validation).",
+          "Avoid silently creating nodes during visualization; visualization should reflect data, not mutate/augment semantics."
+        ]
+      },
+      {
+        "step": "Add DOT export support as part of the skill's Export capabilities.",
+        "file": "dialogue-graph/scripts/dialogue_graph.py",
+        "details": [
+          "Implement Graph.to_dot() -> str that returns DOT source (using graphviz.Digraph when available, or a simple manual DOT generator as fallback).",
+          "Implement Graph.write_dot(path: str) to write the DOT to a file.",
+          "Ensure DOT escaping of quotes/newlines and include edge labels (edge.text).",
+          "Keep visualize() as-is for image rendering, but reuse the same DOT-building logic so DOT and images are consistent."
+        ]
+      },
+      {
+        "step": "Support placeholder creation and later upgrades without forcing callers to bypass the API.",
+        "file": "dialogue-graph/scripts/dialogue_graph.py",
+        "details": [
+          "Add Graph.upsert_node(node: Node) (or add_node(..., overwrite=False)) that replaces an existing placeholder or overwrites fields safely.",
+          "Document intended semantics: placeholder nodes can have empty text/speaker and type='line'; later parsing can overwrite them with real content."
+        ]
+      },
+      {
+        "step": "Update documentation to match the corrected End convention and the new export APIs.",
+        "file": "dialogue-graph/SKILL.md",
+        "details": [
+          "In 'Adding Edges', explicitly state: all edge targets must be existing nodes; if using 'End', add Node(id='End', ...) first (or ensure it's created when referenced).",
+          "In 'Export', document JSON export and newly added DOT export (to_dot/write_dot), including that End must be materialized as a node if referenced.",
+          "Keep existing usage examples, but amend them to include adding an End node before referencing it."
+        ]
+      }
+    ],
+    "preservation_constraints": [
+      "Preserve unrelated working guidance and any existing sections not implicated by Adding Edges / Export / End conventions.",
+      "Do not change the external JSON schema: nodes must remain {id,text,speaker,type} and edges {from,to,text}.",
+      "Avoid adding new required third-party dependencies beyond the already-optional graphviz usage; DOT export should work even if graphviz is not installed (fallback acceptable).",
+      "Maintain backward compatibility where feasible: keep visualize() signature and keep to_json()/to_dict() outputs compatible (only stricter validation behavior changes)."
+    ],
+    "confidence": 0.78,
+    "_usage": {
+      "completion_tokens": 2751,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 1252,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 21,
+        "engine_ttft_ms": 215,
+        "engine_ttlt_ms": 58381,
+        "pre_inference_ms": 104,
+        "service_tbt_ms": 21,
+        "service_ttft_ms": 434,
+        "service_ttlt_ms": 58597,
+        "user_visible_ttft_ms": 330
+      },
+      "prompt_tokens": 4465,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 7216
+    }
+  },
+  "round_summaries": [
+    {
+      "round": 1,
+      "applied_updates": [
+        "dialogue-graph/SKILL.md",
+        "dialogue-graph/scripts/dialogue_graph.py"
+      ],
+      "rationale": [
+        "Fixed an invalid 'End' convention: Graph.validate() no longer exempts edges targeting \"End\" from existence checks. This aligns the skill with task constraints that all edge targets must exist and that End must be materialized as a node when referenced.",
+        "Made visualization consistent with serialized data: visualize() no longer injects an \"End\" node unconditionally; it renders exactly the nodes/edges present in the graph.",
+        "Added first-class DOT export support required by tasks producing /app/dialogue.dot: implemented Graph.to_dot() and Graph.write_dot(), with correct label escaping and edge label support.",
+        "Added Graph.upsert_node() to support placeholder-node workflows without requiring callers to mutate internal dicts or fail due to add_node() duplicate checks.",
+        "Updated SKILL.md in the Adding Edges and Export sections to document the corrected End convention, placeholder/upsert guidance, and the new DOT export APIs."
+      ]
+    },
+    {
+      "round": 2,
+      "applied_updates": [],
+      "rationale": "Reviewed the current skill bundle against the reported issues. The included versions of `dialogue-graph/scripts/dialogue_graph.py` and `dialogue-graph/SKILL.md` already implement the repair plan: (1) `Graph.validate()` now requires all edge targets to exist (including `End`) and emits a specific error when `End` is referenced but missing; (2) visualization no longer injects an `End` node and instead renders exactly the graph contents by delegating to `to_dot()`; (3) DOT export support is present via `Graph.to_dot()` and `Graph.write_dot()` with basic escaping and edge labels; (4) placeholder/upgrade behavior is supported via `Graph.upsert_node()` and is documented; (5) documentation in Adding Edges/Export sections matches the corrected End convention and DOT export API. No further code/doc changes are necessary for this repair round."
+    }
+  ],
+  "audit_file": "adapter_audit.json"
+}

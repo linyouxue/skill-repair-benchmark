@@ -1,0 +1,475 @@
+--- input/reflow-profile-compliance-toolkit/SKILL.md
++++ repaired/reflow-profile-compliance-toolkit/SKILL.md
+@@ -127,54 +127,177 @@
+     return best  # None if no valid segments
+ ```
+ 
+-### 3. Time above threshold with linear interpolation
+-
+-For wetting/TAL-type metrics, compute time above a threshold `thr` using segment interpolation:
+-
+-```python
+-def time_above_threshold_s(df_tc, thr):
++### 3. Time above threshold (TAL/wetting) and handbook-gated interpolation
++
++For wetting/TAL-type metrics, you must first check the handbook for **how threshold crossings are measured** and what comparison operator is intended:
++- Does the handbook define TAL as time **above** liquidus, or **at or above** liquidus (>=)?
++- Does it require linear interpolation at crossing points, or a discrete/sampled method?
++
++Apply this gating:
++- If the handbook explicitly requires linear interpolation at crossing points (or otherwise defines a continuous-time method), implement that.
++- If the handbook explicitly requires a different method (e.g., sample-counting, fixed sampling interval assumption, or use of machine-reported TAL), follow it.
++- If the handbook is silent, use a deterministic method and document that it is a default not contradicted by the handbook. Recommended default is linear interpolation because it is a continuous-time estimate and avoids dependence on sampling rate.
++
++Default interpolation implementation (treating “above” as strictly `>`; adjust to `>=` if the handbook states “at or above”):
++
++```python
++def time_above_threshold_s(df_tc, thr, inclusive=False):
+     g = df_tc.sort_values("time_s")
+     t = g["time_s"].to_numpy(dtype=float)
+     y = g["temp_c"].to_numpy(dtype=float)
+     total = 0.0
++
++    def is_above(v):
++        return (v >= thr) if inclusive else (v > thr)
++
+     for i in range(1, len(g)):
+         t0, t1 = t[i-1], t[i]
+         y0, y1 = y[i-1], y[i]
+         if t1 <= t0:
+             continue
+ 
+-        if y0 > thr and y1 > thr:
++        if is_above(y0) and is_above(y1):
+             total += (t1 - t0)
+             continue
+ 
+-        crosses = (y0 <= thr < y1) or (y1 <= thr < y0)
+-        if crosses and (y1 != y0):
++        # crossing test must match inclusive semantics; keep deterministic
++        if y1 == y0:
++            continue
++
++        # For inclusive=True, treat equality as "above"; crossing can occur at equality.
++        if inclusive:
++            crosses = (y0 < thr <= y1) or (y1 < thr <= y0)
++        else:
++            crosses = (y0 <= thr < y1) or (y1 <= thr < y0)
++
++        if crosses:
+             frac = (thr - y0) / (y1 - y0)
+             tcross = t0 + frac * (t1 - t0)
+-            if y0 <= thr and y1 > thr:
++            if (y0 <= thr and y1 > thr) or (inclusive and y0 < thr and y1 >= thr):
+                 total += (t1 - tcross)
+             else:
+                 total += (tcross - t0)
++
+     return total
+ ```
+ 
+ ### 4. Deterministic sensor selection (tie-breaks)
+ 
+-When reducing multiple thermocouples to one run-level result, use these stable rules:
+-
+-- If selecting maximum metric (e.g., ramp): choose `(max_value, smallest_tc_id)`.
+-- If selecting minimum metric (e.g., “coldest” TAL or peak): choose `(min_value, smallest_tc_id)`.
+-
+-Examples:
+-
+-```python
+-# max metric
+-best = max(items, key=lambda x: (x.value, -lex(x.tc_id)))  # or sort then take first
+-# min metric
+-best = min(items, key=lambda x: (x.value, x.tc_id))
+-```
+-
+-### 5. Peak and margin
++When reducing multiple thermocouples to one run-level result, apply **handbook-first** selection:
++
++1. If the handbook explicitly specifies which thermocouple to use (by location rule or label that can be mapped to a `tc_id`), that overrides any generic rule here.
++2. If the handbook specifies a principle (e.g., “use the cold spot / worst-case location”), reduce by the implied worst-case metric (examples: minimum peak, minimum TAL).
++3. If the handbook is silent, use the deterministic fallback rules below (stable and reproducible).
++
++**Tie-break rule (always):** if multiple TCs yield the same metric value, choose the lexicographically smallest `tc_id`.
++
++Correct, deterministic examples (where each item is a tuple `(value, tc_id)`):
++
++```python
++items = [(1.2, "TC2"), (1.2, "TC1"), (0.9, "TC3")]
++
++# select maximum metric (e.g., max ramp)
++best_value, best_tc = sorted(items, key=lambda x: (-x[0], x[1]))[0]
++
++# select minimum metric (e.g., coldest peak)
++best_value, best_tc = sorted(items, key=lambda x: (x[0], x[1]))[0]
++```
++
++### 5. Q02-specific: TAL representative TC selection and run-level compliance mapping
++
++Q02 typically requires returning exactly one `(run_id, tc_id, tal_s, status, ...)` row per run even though multiple thermocouples exist. To avoid masking violations, compute **per-TC TAL first**, then select the reported TC in a way that correctly reflects compliance against a `[min_tal_s, max_tal_s]` spec.
++
++**Handbook-first override:** If the handbook explicitly requires a particular TC/location for TAL reporting, use it for the *reported tc_id*, but **do not** use it to hide violations from other TCs: the run-level `status` must still reflect any violation across the set of TCs unless the handbook explicitly states only that TC is normative.
++
++#### Step A — Compute TAL per TC
++- Use handbook-defined liquidus threshold (either a fixed handbook value or a run-level MES field if the handbook allows it).
++- Use the handbook-stated TAL window and threshold crossing method; if silent, use the deterministic default method (Section 3) and document in code comments.
++
++#### Step B — Determine run-level TAL compliance across all TCs
++Let `tal(tc)` be the TAL for a TC, and `min_req = cfg["tal_min_s"]`, `max_req = cfg["tal_max_s"]` (either may be null if not in the handbook).
++
++- If there is **no thermocouple data** for the run (no TCs at all):
++  - `tal_s = null`, `tc_id = null`, `status = non-compliant` (unless the task explicitly allows N/A).
++
++- Compute per-TC violations where requirements exist:
++  - low-side violation magnitude (if min exists): `v_low(tc) = max(0, min_req - tal(tc))`
++  - high-side violation magnitude (if max exists): `v_high(tc) = max(0, tal(tc) - max_req)`
++
++- If **any** TC violates any bound:
++  - `status = non-compliant`.
++  - Report a TC that *exposes* the violation deterministically:
++    - If there are only low-side violations: report the **minimum TAL** TC.
++    - If there are only high-side violations: report the **maximum TAL** TC.
++    - If both low-side and high-side violations exist across the set:
++      - report the TC with the **largest violation magnitude** `max(v_low(tc), v_high(tc))`.
++      - tie-break by smallest `tc_id`.
++
++- Else (no violations detected against the provided bounds; i.e., all computable TALs fall within range):
++  - If the handbook defines a representative TC for TAL reporting (e.g., “cold spot TC”, “largest thermal mass”), use that.
++  - If the handbook is silent: report the **minimum TAL** TC (conservative for future drift detection) with the deterministic tie-break.
++  - `status = compliant` **only if at least one requirement bound exists** (min or max). If both bounds are null, do not claim compliance; output `status = non-compliant`.
++
++**Important:** The `status` must reflect **run-level worst-case** against the handbook’s TAL requirements, not merely the selected TC if that selection could hide another TC’s violation.
++
++Minimal pseudo-code:
++
++```python
++def select_tc_for_tal(tal_by_tc, min_req, max_req, handbook_tc_id=None, handbook_tc_is_normative=False):
++    # tal_by_tc: dict {tc_id: tal_s} with tal_s possibly None
++
++    items = [(tc_id, tal) for tc_id, tal in tal_by_tc.items() if tal is not None]
++    if not items:
++        return None, None, "non-compliant"
++
++    # deterministic min/max TAL
++    min_item = sorted(items, key=lambda x: (x[1], x[0]))[0]      # (tc_id, tal)
++    max_item = sorted(items, key=lambda x: (-x[1], x[0]))[0]
++
++    have_any_bound = (min_req is not None) or (max_req is not None)
++
++    # compute violations
++    def v_low(tal):
++        return 0.0 if min_req is None else max(0.0, float(min_req) - float(tal))
++
++    def v_high(tal):
++        return 0.0 if max_req is None else max(0.0, float(tal) - float(max_req))
++
++    violating = []  # list of (max_violation, tc_id, tal)
++    for tc_id, tal in items:
++        mv = max(v_low(tal), v_high(tal))
++        if mv > 0:
++            violating.append((mv, tc_id, tal))
++
++    if violating:
++        # If only one side violated, pick min TAL or max TAL accordingly.
++        any_low = any(v_low(tal) > 0 for _, _, tal in violating)
++        any_high = any(v_high(tal) > 0 for _, _, tal in violating)
++
++        if any_low and not any_high:
++            tc_id, tal = min_item
++            return tc_id, tal, "non-compliant"
++        if any_high and not any_low:
++            tc_id, tal = max_item
++            return tc_id, tal, "non-compliant"
++
++        # both sides present: pick largest violation magnitude deterministically
++        mv, tc_id, tal = sorted(violating, key=lambda x: (-x[0], x[1]))[0]
++        return tc_id, tal, "non-compliant"
++
++    # no violations against known bounds
++    if handbook_tc_id is not None and handbook_tc_id in tal_by_tc and tal_by_tc[handbook_tc_id] is not None:
++        tal = tal_by_tc[handbook_tc_id]
++        status = "compliant" if have_any_bound else "non-compliant"
++        # if the handbook explicitly says only this TC is normative, it may allow ignoring others;
++        # keep status as above unless handbook explicitly changes the compliance definition.
++        return handbook_tc_id, tal, status
++
++    tc_id, tal = min_item
++    status = "compliant" if have_any_bound else "non-compliant"
++    return tc_id, tal, status
++```
++
++### 6. Peak and margin
+ 
+ Per TC:
+ - `peak_tc = max(temp_c)`
+@@ -183,7 +306,7 @@
+ Requirement:
+ - `required_peak = liquidus + peak_margin`
+ 
+-### 6. Conveyor feasibility (rule object approach)
++### 7. Conveyor feasibility (rule object approach)
+ 
+ Handbooks vary. Represent the rule as a structured object and compute `required_min_speed_cm_min` if possible.
+ 
+@@ -260,5 +383,6 @@
+ - Floats rounded to 2 decimals.
+ - No NaN/Inf in JSON.
+ - Sensor selection uses deterministic tie-breaks.
+-- Any “time above threshold” uses interpolation (not naive threshold counting).
++- Any “time above threshold” method matches the handbook; if handbook is silent, the default method used is documented.
++- For Q02/TAL with multi-TC runs, the selected TC/status must not hide violations from other TCs.
+ - Every output file explicitly requested by the task exists, is nonempty, parses as JSON, and has complete visible-ID coverage before completion.
+--- input/skilltta-task-guidance/SKILL.md
++++ repaired/skilltta-task-guidance/SKILL.md
+@@ -0,0 +1,250 @@
++---
++name: skilltta-task-guidance
++---
++
++# Reflow Profile Compliance Toolkit — Task Guidance Skill
++
++This skill describes a **reusable, non-hallucinating** workflow to answer reflow-process compliance questions using:
++- `/app/data/handbook.pdf` (source of *definitions, equations, limits*)
++- `/app/data/thermocouples.csv` (time–temperature traces)
++- `/app/data/mes_log.csv` (run parameters like conveyor speed, recipe)
++- `/app/data/test_defects.csv` (quality outcomes)
++
++The outputs must be written to `/app/output/q01.json` … `/app/output/q05.json` with correct sorting, rounding, and null handling.
++
++---
++
++## 0) Non-hallucination rule (hard requirement)
++1. **All numeric thresholds/limits/definitions must come from the handbook**.
++2. If a required value cannot be found in the handbook or data files, write `null` (and mark run as failing when explicitly required, e.g., Q3 missing thermocouple data).
++3. Never invent “typical” SMT values.
++
++---
++
++## 1) Load data deterministically
++Use pandas and strict typing.
++
++### 1.1 Read CSVs
++- `thermocouples.csv`: expect columns like `run_id`, `tc_id`, `time_s` (or timestamp), `temp_c`.
++- `mes_log.csv`: expect run-level settings, especially conveyor speed (units must be checked).
++- `test_defects.csv`: expect `run_id`, `board_family`/`board_id`, defect counts/yield fields.
++
++### 1.2 Normalize
++- Strip whitespace in IDs: `run_id`, `tc_id`, `board_family`.
++- Ensure `time_s` is numeric and sorted within each `(run_id, tc_id)`.
++- Deduplicate exact duplicate rows (same run, tc, time, temp).
++
++### 1.3 Sorting and rounding (output contract)
++- Sort keys/arrays by ascending `run_id` (and `board_family`, `board_id` when required).
++- Round floats to **2 decimals** at output time.
++
++---
++
++## 2) Extract handbook definitions, equations, and limits
++
++### 2.1 Extract text from PDF
++Use a PDF text extractor (e.g., `pdfplumber`) and keep page references.
++
++### 2.2 Locate required clauses by keyword search
++Search for (case-insensitive):
++- **Preheat** definition and its temperature window (e.g., “from X°C to Y°C”, or “ambient to soak start”).
++- **Ramp rate** equation and allowable limit (e.g., `°C/s` max).
++- **Liquidus temperature** (solder alloy) and **TAL** definition (time above liquidus) + min/max threshold.
++- **Peak temperature** requirement (min and/or max) and which thermocouple is used.
++- **Conveyor speed** feasibility: board geometry, heated length, required dwell time/window, allowed speed range or formula.
++
++### 2.3 Represent data as a parameter dictionary
++Create a structured dict (all `null` until proven by handbook):
++- `preheat_start_c`, `preheat_end_c`
++- `ramp_rate_limit_c_per_s`
++- `liquidus_temp_c`
++- `tal_min_s`, `tal_max_s`
++- `peak_min_c` (and peak max if specified)
++- `dwell_min_s`/`dwell_target_s` and geometry constants needed for speed
++
++If multiple handbook sections conflict, pick the one explicitly labeled as **standard**, **process spec**, or **production requirement**; otherwise keep `null` and avoid compliance claims.
++
++---
++
++## 3) Thermocouple “representative TC” selection (critical for Q01–Q03)
++
++The handbook may explicitly state which TC is “representative” (e.g., “use TC at the coldest location / largest thermal mass / BGA center”).
++
++### 3.1 First-choice: explicit handbook instruction
++If the handbook specifies a particular `tc_id` (or a location mapping that can be tied to a `tc_id`), use it.
++
++### 3.2 If handbook specifies a *principle* (common in reflow specs)
++Apply principle-driven selection **after computing the metric for each TC**.
++
++- **For Peak temperature compliance (Q03):** select the thermocouple with the **smallest peak temperature** (coldest peak) when the requirement is a minimum peak.
++- **For Preheat ramp rate (Q01):** select the thermocouple with the **largest max ramp rate** when the requirement is a maximum ramp.
++
++- **For TAL (Q02):** because TAL commonly has **both** a minimum and maximum requirement, the “worst-case” thermocouple depends on which bound is violated:
++  1. Compute `tal_s` for each TC in the run.
++  2. If any TC violates the **minimum** TAL (`tal_s < tal_min_s`), report the **minimum TAL** TC (shortest wetting).
++  3. Else if any TC violates the **maximum** TAL (`tal_s > tal_max_s`), report the **maximum TAL** TC (longest exposure).
++  4. Else (all within bounds): if the handbook names a representative location for reporting, use it; otherwise report the **minimum TAL** TC deterministically.
++
++This prevents selecting a “representative” TC that appears compliant while another TC violates the handbook.
++
++### 3.3 If neither explicit TC nor principle is in the handbook
++Return `null` for `tc_id` selection-dependent fields or report the metric per TC internally but choose a deterministic conservative default **only if** the handbook does not contradict it. Prefer `null` over guessing.
++
++---
++
++## 4) Q01 — Maximum temperature ramp rate during preheat
++
++### 4.1 Handbook-driven definition
++From handbook, determine:
++- What “preheat” means (segment boundary by temperature and/or time)
++- Applicable temperature window (e.g., `Tstart` to `Tend`)
++- Ramp calculation equation (typically `dT/dt`, in `°C/s`)
++- Allowable ramp limit
++
++### 4.2 Compute ramp rate per TC
++For each `(run_id, tc_id)`:
++1. Filter samples to the handbook-defined preheat window.
++   - If defined by temperature: keep points where `preheat_start_c <= temp_c <= preheat_end_c`.
++   - If defined by time markers that you can’t compute from available data, set result to `null`.
++2. Compute instantaneous slope between adjacent points:
++   - `ramp_i = (T[i+1] - T[i]) / (t[i+1] - t[i])`
++   - Guard: if `Δt <= 0`, skip that segment.
++3. `max_preheat_ramp_c_per_s = max(ramp_i)` over preheat segments.
++
++### 4.3 Select representative TC for the run
++Use the representative TC policy in Section 3.
++
++### 4.4 Violations
++A run violates if:
++- `max_preheat_ramp_c_per_s > ramp_rate_limit_c_per_s` and both are non-null.
++
++### 4.5 Output: `/app/output/q01.json`
++```json
++{
++  "ramp_rate_limit_c_per_s": 0.00,
++  "violating_runs": ["R0001"],
++  "max_ramp_by_run": {
++    "R0001": {"tc_id": "TC3", "max_preheat_ramp_c_per_s": 1.23}
++  }
++}
++```
++
++---
++
++## 5) Q02 — Time Above Liquidus (TAL)
++
++### 5.1 Handbook-driven TAL definition
++Extract from handbook:
++- Liquidus temperature `Tliq` (for solder alloy used)
++- TAL measurement definition and comparison operator: is it `temp > Tliq` or `temp >= Tliq`?
++- TAL measurement method: does it require threshold-crossing interpolation?
++- Required min and max TAL thresholds
++
++### 5.2 Compute TAL per TC
++For each `(run_id, tc_id)`:
++1. Identify all time intervals where the trace is above liquidus according to the handbook operator (`>` vs `>=`).
++2. Compute total time above liquidus using the handbook’s stated method.
++   - If the handbook is silent on crossing measurement, use a deterministic default (linear interpolation at crossings) and document that it was used because the handbook did not contradict it.
++3. Result `tal_s`.
++
++### 5.3 Select the reported TC and compute run-level status (do not hide violations)
++Because the output requires a single record per run, you must (unless the handbook explicitly defines otherwise):
++
++- Evaluate compliance across **all** TCs for the run.
++- If any TC violates `tal_min_s`, report the TC with **minimum** `tal_s` and mark `non-compliant`.
++- Else if any TC violates `tal_max_s`, report the TC with **maximum** `tal_s` and mark `non-compliant`.
++- Else report the handbook-specified representative TC; if none is specified, report the minimum `tal_s` TC deterministically and mark `compliant`.
++
++If a run has no TC data, set `tc_id=null`, `tal_s=null`, and `status=non-compliant`.
++
++### 5.4 Output: `/app/output/q02.json`
++Array sorted by `run_id`.
++
++---
++
++## 6) Q03 — Peak temperature requirement
++
++### 6.1 Handbook requirements
++Extract required minimum peak (and maximum if specified). Also extract which TC to use.
++
++### 6.2 Compute peak per TC
++For each `(run_id, tc_id)`: `peak_temp_c = max(temp_c)`.
++
++### 6.3 Representative TC selection
++Follow handbook. If handbook uses coldest location for qualification, select **minimum peak** TC (Section 3.2).
++
++### 6.4 Run failing conditions
++- If a run has **no thermocouple data**: failing (explicit requirement).
++- If peak requirement exists and selected peak is below min (or above max if applicable): failing.
++
++### 6.5 Output: `/app/output/q03.json`
++- `failing_runs`: sorted list.
++- `min_peak_by_run`: store the representative/worst-case TC id, peak, and required minimum peak.
++
++---
++
++## 7) Q04 — Conveyor speed feasibility
++
++### 7.1 Handbook geometry + dwell model
++From handbook, extract:
++- Board geometry / effective heated length model (e.g., “board length + margin” or “zone length”).
++- Required thermal dwell time (or constraint like “time in reflow zone must be between A and B seconds”).
++- Allowed conveyor speed range or equation:
++  - Typical form: `speed = effective_length / dwell_time` with unit conversions.
++
++### 7.2 Get actual speed from MES logs
++- Parse `mes_log.csv` for conveyor speed per `run_id`.
++- Confirm units from handbook/MES header. Convert to `cm/min` for output.
++
++### 7.3 Compute required minimum speed
++Example pattern (must match handbook’s formula):
++- If handbook provides **max dwell time**, then you need **min speed**: `min_speed = effective_length / max_dwell`.
++- If handbook provides **min dwell time**, then you need **max speed**: `max_speed = effective_length / min_dwell`.
++This task asks specifically for `required_min_speed_cm_min`—derive it accordingly from the handbook’s dwell constraint.
++
++### 7.4 Meets
++`meets = (actual_speed_cm_min >= required_min_speed_cm_min)` when both known; else `false`.
++
++### 7.5 Output `/app/output/q04.json`
++Array sorted by `run_id`.
++
++---
++
++## 8) Q05 — Best run per board_family (quality + efficiency)
++
++### 8.1 Join datasets
++- Map `run_id -> board_family` from `test_defects.csv` (or MES if needed).
++- Bring in compliance outcomes from Q01–Q04 computations (do not re-infer).
++
++### 8.2 Define “quality” and “efficiency” using only available data
++Do not invent metrics:
++- Quality: defect count, defect rate, pass/fail status fields present in `test_defects.csv`.
++- Efficiency: conveyor speed or cycle time proxies available in `mes_log.csv`.
++
++### 8.3 Selection rule (deterministic)
++For each `board_family`:
++1. Prefer runs that are compliant on critical thermal metrics (TAL, peak, ramp, speed) when those requirements exist in handbook.
++2. Among remaining, choose the run with best quality (e.g., lowest defect rate). Use a clear tie-breaker.
++3. If still tied, choose higher efficiency (e.g., higher conveyor speed within allowed range).
++4. Final tie-breaker: smallest `run_id`.
++
++Output `runner_up_run_ids` as the remaining run_ids for that board_family (sorted).
++
++---
++
++## 9) Output writing
++- Ensure `/app/output/` exists.
++- Write strict JSON.
++- Convert NaN to null.
++- Round floats to 2 decimals.
++
++---
++
++## 10) Common edge cases checklist
++- Missing handbook parameters → output nulls, avoid compliance claims.
++- Thermocouple time not monotonic → sort by time; drop non-increasing segments for slope.
++- Sparse data in preheat window → ramp becomes null.
++- TAL crossing occurs between samples → interpolate if handbook demands; if handbook is silent, use deterministic interpolation and document.
++- A run present in MES but absent in TC data → fails Q03 per requirement.
++
++---

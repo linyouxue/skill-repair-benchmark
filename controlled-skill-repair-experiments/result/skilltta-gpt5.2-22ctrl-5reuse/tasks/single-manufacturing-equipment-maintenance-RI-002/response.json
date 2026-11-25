@@ -1,0 +1,108 @@
+{
+  "method": "SkillTTA retrieval + temporary synthesis + diagnosis + two iterative repair rounds",
+  "diagnosis": {
+    "diagnoses": [
+      {
+        "id": "D1-q02-representative-tc-selection-incomplete",
+        "description": "The toolkit’s thermocouple reduction rule is generic (max-metric vs min-metric) and does not give a Q02/TAL-specific “representative TC” selection procedure aligned to handbook constraints. For TAL, the representative/worst-case TC depends on what the handbook specifies (e.g., cold-spot TC) and also on whether the violation is against the minimum TAL (coldest/shortest TAL) or maximum TAL (hottest/longest TAL). As written, an implementation can incorrectly always pick the minimum TAL (or otherwise not consider both bounds), which can miss a max-TAL violation and incorrectly mark a run compliant/non-compliant.",
+        "evidence": [
+          "File: reflow-profile-compliance-toolkit/SKILL.md",
+          "Section “Deterministic sensor selection (tie-breaks)” only states: “If selecting maximum metric … choose (max_value, smallest_tc_id). If selecting minimum metric … choose (min_value, smallest_tc_id).”",
+          "No explicit Q02/TAL guidance on when to choose min vs max TAL under a [min,max] spec, nor any instruction to consult handbook for ‘coldest location’ requirement."
+        ]
+      },
+      {
+        "id": "D2-q02-compliance-logic-not-linked-to-selection",
+        "description": "Because Q02 output requires a single (run_id, tc_id, tal_s, status) record per run, the toolkit should specify a deterministic mapping from multi-TC TAL results to one record that correctly reflects compliance. Without an explicit rule, different agents may (a) choose a “representative” TC that is compliant while another TC violates, or (b) compute status only on the selected TC rather than the worst-case per handbook intent.",
+        "evidence": [
+          "File: reflow-profile-compliance-toolkit/SKILL.md",
+          "The toolkit provides interpolation code for time_above_threshold_s but does not specify how to compute run-level TAL compliance from multiple TCs when min/max thresholds exist."
+        ]
+      },
+      {
+        "id": "D3-tie_break_example_is_invalid_and_misleading",
+        "description": "The example for selecting a maximum metric includes an invalid/undefined expression and an incorrect approach for choosing the smallest tc_id on ties, which can propagate into faulty implementations and non-deterministic selection.",
+        "evidence": [
+          "File: reflow-profile-compliance-toolkit/SKILL.md",
+          "In “Deterministic sensor selection (tie-breaks)”: `best = max(items, key=lambda x: (x.value, -lex(x.tc_id)))` — `lex` is undefined and negating a lexicographic key is not a valid Python idiom."
+        ]
+      },
+      {
+        "id": "D4-interpolation_requirement_not_explicitly_handbook_gated",
+        "description": "The toolkit presents time_above_threshold_s with linear interpolation as the default method for TAL-like metrics, but the overall contract requires handbook-grounded definitions. The skill should explicitly instruct to confirm from the handbook whether linear interpolation at crossings is required/allowed, or otherwise document the chosen method as handbook-consistent.",
+        "evidence": [
+          "File: reflow-profile-compliance-toolkit/SKILL.md",
+          "Section “Time above threshold with linear interpolation” provides interpolation logic as a standard recipe without an explicit ‘confirm handbook method’ gating step."
+        ]
+      }
+    ],
+    "affected_files": [
+      "reflow-profile-compliance-toolkit/SKILL.md"
+    ],
+    "repair_plan": [
+      "Add a dedicated Q02/TAL subsection under the toolkit (or augment the existing sensor-selection section) that defines handbook-first selection, and a deterministic fallback when the handbook is silent.",
+      "Define a run-level TAL ‘worst-case for compliance’ rule when TAL has both min and max limits: (1) compute tal_s per TC; (2) if any tal_s < min_required, select the minimum tal_s TC; else if any tal_s > max_required, select the maximum tal_s TC; else (all within range) select the handbook-specified representative TC, and if unspecified fall back to the minimum tal_s TC (coldest) with smallest tc_id tie-break. Ensure the reported `status` corresponds to the run-level worst-case decision and not just an arbitrary TC.",
+      "Explicitly document that if the handbook specifies a particular thermocouple location (e.g., ‘cold spot’, ‘largest thermal mass’, ‘BGA center’), that instruction overrides the fallback logic; otherwise use the deterministic worst-case rule above.",
+      "Fix the incorrect tie-break example code in the toolkit. Replace with a correct, deterministic snippet such as: `best = sorted(items, key=lambda x: (-x.value, x.tc_id))[0]` for max metric and `best = sorted(items, key=lambda x: (x.value, x.tc_id))[0]` for min metric.",
+      "Update the ‘time above threshold’ section to include a handbook-gating note: confirm whether the handbook requires linear interpolation at crossings; if unspecified, use interpolation as the conservative continuous-time estimate but record in comments that the method was not contradicted by the handbook (or otherwise follow handbook’s stated sampling/measurement method)."
+    ],
+    "preservation_constraints": [
+      "Preserve the existing end-to-end execution contract and output guardrails in reflow-profile-compliance-toolkit/SKILL.md.",
+      "Do not change unrelated sections (Q01 ramp computation, Q03 peak logic, Q04 conveyor feasibility patterns, output sorting/rounding/null rules) except where necessary to maintain consistency with the repaired Q02 guidance.",
+      "Keep the skill handbook-grounded: any new rules must be framed as ‘handbook-first, deterministic fallback when silent’ rather than asserting domain defaults as requirements."
+    ],
+    "confidence": 0.74,
+    "_usage": {
+      "completion_tokens": 2718,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 1456,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 20,
+        "engine_ttft_ms": 316,
+        "engine_ttlt_ms": 53352,
+        "pre_inference_ms": 237,
+        "service_tbt_ms": 20,
+        "service_ttft_ms": 766,
+        "service_ttlt_ms": 55320,
+        "user_visible_ttft_ms": 529
+      },
+      "prompt_tokens": 9375,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 12093
+    }
+  },
+  "round_summaries": [
+    {
+      "round": 1,
+      "applied_updates": [
+        "reflow-profile-compliance-toolkit/SKILL.md"
+      ],
+      "rationale": [
+        "Added a Q02/TAL-specific representative thermocouple selection and run-level compliance mapping procedure that is handbook-first and otherwise deterministically chooses the worst-case TC depending on whether the violation is against the minimum TAL or maximum TAL bound, preventing compliant-looking selections from masking violations.",
+        "Fixed the invalid/misleading tie-break example (`lex` undefined and incorrect negation). Replaced it with correct, deterministic sorting-based snippets with explicit lexicographic `tc_id` tie-break behavior.",
+        "Made the TAL interpolation approach explicitly handbook-gated: the toolkit now instructs agents to confirm the handbook’s required TAL measurement method, and only uses linear interpolation as a documented default when the handbook is silent, aligning with the non-hallucination/handbook-grounded contract."
+      ]
+    },
+    {
+      "round": 2,
+      "applied_updates": [
+        "reflow-profile-compliance-toolkit/SKILL.md",
+        "skilltta-task-guidance/SKILL.md"
+      ],
+      "rationale": [
+        "Repaired Q02/TAL thermocouple reduction so it is handbook-first and does not mask violations when both minimum and maximum TAL limits exist. The toolkit now defines a deterministic, compliance-preserving mapping from per-TC TAL results to a single reported `(run_id, tc_id, tal_s, status)` row, including the case where different TCs violate different bounds.",
+        "Fixed and strengthened deterministic tie-break examples and clarified the tuple-based sorting idiom to avoid undefined functions / invalid lexicographic negation patterns.",
+        "Made threshold-crossing interpolation explicitly handbook-gated and also clarified the common handbook ambiguity of `>` vs `>=` for TAL, providing a deterministic default that can be parameterized to match handbook wording.",
+        "Aligned the separate task guidance skill’s Q02 representative-TC selection and interpolation guidance with the toolkit to avoid conflicting instructions that could cause an implementation to always pick min-TAL and miss max-TAL violations."
+      ]
+    }
+  ],
+  "audit_file": "adapter_audit.json"
+}

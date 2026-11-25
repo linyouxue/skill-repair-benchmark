@@ -1,0 +1,88 @@
+{
+  "diagnoses": [
+    {
+      "id": "DQ-OUTPUT-QUALIFICATION-AMBIGUOUS",
+      "summary": "Workflow guidance for qualifying which keys/jobs are allowed to emit results is ambiguous and can lead to emitting results for the wrong terminal job states.",
+      "evidence": [
+        "In `skilltta-task-guidance/SKILL.md`, Workflow 2 / Step A says: \"Filter job events to only terminal FINISH (or equivalent “completed”) events.\" This wording invites broadening the completion predicate beyond the spec-required event label, which the trial explicitly warns against (output only once the job has finished).",
+        "In `senior-data-engineer/SKILL.md`, Workflow 2 (“Build Real-Time Streaming Pipeline”) does not explicitly instruct that final output must be gated by an exact completion-event predicate; the relevant rule exists later under “Semantic Contract Gate...”, but it is not integrated into Workflow 2 where users will follow steps."
+      ],
+      "impact_on_trial": "The end task requires emitting results only for jobs that have finished; if a solver treats other terminal job states (KILL/CANCEL/FAIL) as “finished” due to ambiguous guidance, the output key-set will contain extra jobs, failing evaluation even if aggregate values for finished jobs are correct."
+    },
+    {
+      "id": "DQ-GUIDANCE-PLACEMENT-MISMATCH",
+      "summary": "The correct ‘do not broaden FINISH’ rule exists but is placed outside the workflow referenced by the hint, making it easy to miss and effectively non-binding.",
+      "evidence": [
+        "In `senior-data-engineer/SKILL.md`, the “Semantic Contract Gate for Keyed Event Aggregations” section correctly states: “If a specification says to emit after a `FINISH` event, do not broaden that condition to `KILL`, `CANCEL`, `FAIL`, ... unless the specification explicitly declares them equivalent.”",
+        "However, this is not referenced from Workflow 2 steps; the hint explicitly points to “Workflow 2” output qualification requirements."
+      ],
+      "impact_on_trial": "Users following Workflow 2 may not apply the semantic gate, recreating the exact class of bug (wrong output eligibility) that this trial checks."
+    }
+  ],
+  "affected_files": [
+    "senior-data-engineer/SKILL.md",
+    "skilltta-task-guidance/SKILL.md"
+  ],
+  "repair_plan": [
+    {
+      "step": 1,
+      "file": "senior-data-engineer/SKILL.md",
+      "change": "Amend Workflow 2 (“Build Real-Time Streaming Pipeline”) to include an explicit, prominently placed subsection on result-output qualification for keyed aggregations that depend on lifecycle events.",
+      "details": [
+        "Add a short checklist item near the workflow steps: define (a) contributing-event predicate, (b) completion-event predicate, and (c) output gating rule.",
+        "State explicitly: if the spec says output after FINISH, only FINISH qualifies; do not treat other terminal states as equivalent unless the spec says so.",
+        "Add a brief negative-test recommendation (must-not-emit cases) directly inside Workflow 2, referencing the existing “Semantic Contract Gate” section to avoid duplication while making it discoverable."
+      ]
+    },
+    {
+      "step": 2,
+      "file": "skilltta-task-guidance/SKILL.md",
+      "change": "Remove/replace the ambiguous phrase “or equivalent ‘completed’” and tighten language to require an exact match to the specification’s completion event code/label.",
+      "details": [
+        "Update Workflow 2 / Step A to: “Filter job events to the dataset’s FINISH (successful completion) event as defined in the provided docs; do not include FAIL/KILL/CANCEL unless the task explicitly asks for them.”",
+        "Optionally add a single sentence: “If the dataset defines multiple success-completion labels, enumerate them explicitly from the docs instead of using a broad ‘terminal’ filter.”"
+      ]
+    },
+    {
+      "step": 3,
+      "file": "senior-data-engineer/SKILL.md",
+      "change": "Cross-link the existing “Semantic Contract Gate...” section from Workflow 2.",
+      "details": [
+        "Add a one-line pointer in Workflow 2: “Apply the Semantic Contract Gate below before implementing lifecycle-gated output.”",
+        "Preserve the existing gate section text; do not remove it."
+      ]
+    }
+  ],
+  "preservation_constraints": [
+    "Do not add end-task-specific implementation details (no Flink job code, no dataset-specific numeric enums) beyond generic guidance about exact completion predicates.",
+    "Preserve unrelated working guidance and all attachments/files not implicated by output-qualification semantics.",
+    "Keep the existing “Semantic Contract Gate for Keyed Event Aggregations” content; only reposition/reference/augment it for discoverability.",
+    "Maintain the overall structure and intent of `senior-data-engineer` as a general data-engineering skill; changes must be minimal and focused on output-eligibility correctness."
+  ],
+  "confidence": 0.74,
+  "_usage": {
+    "completion_tokens": 2628,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 1540,
+      "rejected_prediction_tokens": 0
+    },
+    "latency_checkpoint": {
+      "engine_tbt_ms": 16,
+      "engine_ttft_ms": 908,
+      "engine_ttlt_ms": 43405,
+      "pre_inference_ms": 213,
+      "service_tbt_ms": 16,
+      "service_ttft_ms": 1310,
+      "service_ttlt_ms": 43770,
+      "user_visible_ttft_ms": 1097
+    },
+    "prompt_tokens": 28807,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0
+    },
+    "total_tokens": 31435
+  }
+}

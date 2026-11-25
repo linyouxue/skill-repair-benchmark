@@ -1,0 +1,167 @@
+{
+  "method": "SkillTTA retrieval + temporary synthesis + diagnosis + two iterative repair rounds",
+  "diagnosis": {
+    "diagnoses": [
+      {
+        "id": "D1",
+        "title": "Inconsistent skill/function naming across documentation (hyphen vs underscore) causing callers to use non-existent APIs",
+        "evidence": [
+          "pddl-skills/SKILL.md defines `load-problem(domain_path, problem_path)` but its example uses `load_problem(...)`.",
+          "pddl-skills/SKILL.md defines `generate-plan(problem_object)` but its example uses `generate_plan(problem)`.",
+          "pddl-skills/SKILL.md defines `save-plan(plan_object, output_path)` but its example uses `save_plan(plan, ...)`."
+        ],
+        "impact": "A runner that relies on the declared skill names/signatures will fail to call the correct routines; conversely, code written from examples won’t match the documented API."
+      },
+      {
+        "id": "D2",
+        "title": "Plan saving implementation guidance is likely incorrect/fragile for required output format",
+        "evidence": [
+          "pddl-skills/SKILL.md Plan Saving notes: “Uses `unified_planning.io.PDDLWriter`.” This component is primarily for writing PDDL domain/problem; plan serialization often differs and may not match the benchmark-required plain line-per-action format.",
+          "Task prompt requires: one action primitive per line; no numbering/timestamps; exact names; saved to `plan_output` path.",
+          "skilltta-task-guidance/SKILL.md provides a robust manual save routine and warns against common formatting mistakes, which conflicts with relying on a generic writer without explicit formatting controls."
+        ],
+        "impact": "Even if a valid plan is generated, the saved file may be rejected due to formatting (parentheses style, step numbers, extra annotations, blank lines), or saving may fail if the writer doesn’t support plan output in the assumed way."
+      },
+      {
+        "id": "D3",
+        "title": "Example Workflow does not mention using `plan_output` from problem.json and omits required directory creation behavior",
+        "evidence": [
+          "pddl-skills/SKILL.md Example Workflow saves to a hardcoded \"task01.plan\" rather than the provided `entry[\"plan_output\"]` path.",
+          "Task prompt explicitly requires writing to the path specified by “plan_output”.",
+          "skilltta-task-guidance/SKILL.md explicitly calls out creating parent directories, but pddl-skills/SKILL.md Plan Saving section does not."
+        ],
+        "impact": "Plans may be written to the wrong location or fail due to missing directories, causing evaluation failure despite correct planning."
+      },
+      {
+        "id": "D4",
+        "title": "Missing `save_plan.skill` artifact and/or mismatched inputs definition",
+        "evidence": [
+          "Location hint explicitly references: “save_plan.skill 的 inputs 定义”.",
+          "Current bundle contains only `pddl-skills/SKILL.md` and `skilltta-task-guidance/SKILL.md`; no `save_plan.skill` file exists to define inputs as required by the framework."
+        ],
+        "impact": "SkillTTA cannot reliably call the plan-saving skill; even if documentation is correct, the executable skill interface is absent."
+      },
+      {
+        "id": "D5",
+        "title": "Validation section may reference a non-existent or incorrect validator API name",
+        "evidence": [
+          "pddl-skills/SKILL.md: “Uses `unified_planning.shortcuts.SequentialPlanValidator`.” In many Unified Planning versions, validation is performed via `PlanValidator`/`SequentialSimulator`/`OneshotPlanner` engines; the exact class name may differ by version."
+        ],
+        "impact": "If copied verbatim, validation code may crash. (Lower priority than plan saving/path issues, but still a reliability risk.)"
+      }
+    ],
+    "affected_files": [
+      "pddl-skills/SKILL.md",
+      "skilltta-task-guidance/SKILL.md"
+    ],
+    "repair_plan": [
+      {
+        "step": 1,
+        "action": "Standardize public-facing names and examples",
+        "details": [
+          "Pick one naming convention and apply consistently: either hyphenated (`load-problem`) everywhere or snake_case (`load_problem`) everywhere.",
+          "Update `pddl-skills/SKILL.md` section headers and all examples to match the chosen names.",
+          "Ensure parameter names match between signature and example (`domain_path`, `problem_path`, `output_path`/`plan_output`)."
+        ]
+      },
+      {
+        "step": 2,
+        "action": "Fix Plan Saving guidance to guarantee benchmark-required format",
+        "details": [
+          "Replace/augment the `PDDLWriter`-based note with a robust, explicit, line-by-line save routine (as in skilltta-task-guidance), including: directory creation, stripping blank lines, writing one action per line, final newline.",
+          "Document that the saved file must contain only actions with no numbering/comments."
+        ]
+      },
+      {
+        "step": 3,
+        "action": "Align Example Workflow with problem.json I/O contract",
+        "details": [
+          "Update `pddl-skills/SKILL.md` Example Workflow to show reading `entry[\"domain\"]`, `entry[\"problem\"]`, and writing to `entry[\"plan_output\"]`.",
+          "Explicitly mention creating parent directories before saving."
+        ]
+      },
+      {
+        "step": 4,
+        "action": "Add the missing executable skill definition file for plan saving",
+        "details": [
+          "Create `save_plan.skill` (or the correct framework-expected path/filename) implementing the canonical save routine.",
+          "Define minimal inputs exactly as hinted and as documented in skilltta-task-guidance: `plan_output: string`, `plan: string|list[string]`.",
+          "Avoid requiring unrelated inputs like `id/domain/problem` in `save_plan.skill`."
+        ]
+      },
+      {
+        "step": 5,
+        "action": "De-risk validation API references",
+        "details": [
+          "Adjust validation guidance to be version-tolerant (e.g., recommend using Unified Planning `PlanValidator` engine via `OneshotPlanner`/`PlanValidator` factory) or clearly mark validation as optional and dependent on installed UP engines."
+        ]
+      },
+      {
+        "step": 6,
+        "action": "Keep the two docs consistent",
+        "details": [
+          "Ensure `pddl-skills/SKILL.md` Plan Saving and `skilltta-task-guidance/SKILL.md` Plan saving sections do not contradict each other.",
+          "If both remain, cross-reference rather than duplicate conflicting instructions."
+        ]
+      }
+    ],
+    "preservation_constraints": [
+      "Do not add any actual PDDL problem solutions or domain-specific action sequences.",
+      "Preserve unrelated working guidance and overall structure/metadata headers of existing SKILL.md files.",
+      "Do not remove the task guidance content; only reconcile and correct inconsistencies.",
+      "Keep plan formatting requirements strict: one action per line, no extra annotations, write to exact `plan_output` path.",
+      "Do not assume any hidden evaluator details beyond the task prompt and the provided location hint."
+    ],
+    "confidence": 0.78,
+    "_usage": {
+      "completion_tokens": 1946,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 393,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 16,
+        "engine_ttft_ms": 186,
+        "engine_ttlt_ms": 30758,
+        "pre_inference_ms": 95,
+        "service_tbt_ms": 16,
+        "service_ttft_ms": 645,
+        "service_ttlt_ms": 31207,
+        "user_visible_ttft_ms": 550
+      },
+      "prompt_tokens": 2619,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 4565
+    }
+  },
+  "round_summaries": [
+    {
+      "round": 1,
+      "applied_updates": [
+        "pddl-skills/SKILL.md"
+      ],
+      "rationale": [
+        "Standardized the documented public API to snake_case everywhere (headings, signatures, and examples) to eliminate the hyphen vs underscore mismatch that would cause callers to reference non-existent skills/functions.",
+        "Replaced the fragile/incorrect plan-saving guidance (“use PDDLWriter”) with an explicit, benchmark-safe save routine that guarantees: parent directory creation, one action per line, no numbering/annotations, and a trailing newline.",
+        "Updated the Example Workflow to use `entry['domain']`, `entry['problem']`, and write to the required `entry['plan_output']` path from `problem.json`, matching the task I/O contract.",
+        "Made validation guidance version-tolerant by avoiding hard-coded Unified Planning validator class names that may not exist in the runtime."
+      ]
+    },
+    {
+      "round": 2,
+      "applied_updates": [
+        "pddl-skills/SKILL.md"
+      ],
+      "rationale": [
+        "Resolved a remaining inconsistency between the two SKILL.md files: `save_plan` parameter order is now standardized to `save_plan(plan_output, plan)` in pddl-skills/SKILL.md, matching the guidance document’s canonical routine and the emphasized `plan_output`-driven I/O contract.",
+        "Updated all affected examples and pseudocode to use the standardized signature, reducing the chance that callers implement the wrong argument order and write plans to unintended paths."
+      ]
+    }
+  ],
+  "audit_file": "adapter_audit.json"
+}

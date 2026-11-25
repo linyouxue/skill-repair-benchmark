@@ -1,0 +1,209 @@
+{
+  "method": "SkillTTA retrieval + temporary synthesis + diagnosis + two iterative repair rounds",
+  "diagnosis": {
+    "diagnoses": [
+      {
+        "id": "D1",
+        "summary": "Single-quarter \"number of stock holdings\" is computed as row-count, not stock-count (unique CUSIPs), so it will mis-answer questions like \"How many stocks are held?\"",
+        "evidence": [
+          "13f-analyzer/scripts/one_fund_analysis.py prints `Number of stock holdings: {stock_infotable.shape[0]}` which counts infotable lines, not distinct securities.",
+          "Location hint explicitly points to “13f-analyzer/SKILL.md 中单季度持仓汇总的数量口径”."
+        ],
+        "impact": "Q2-type questions (\"How many stocks\") will be overstated when a filing has multiple rows per CUSIP (duplicated lines, multiple classes, etc.) and understates the required definition if the expected metric is unique stocks."
+      },
+      {
+        "id": "D2",
+        "summary": "Quarter-over-quarter comparison in one_fund_analysis.py is broken due to merging on a non-existent CUSIP column (CUSIP is an index after groupby).",
+        "evidence": [
+          "read_one_quarter_data() returns `stock = stock_infotable.groupby('CUSIP').agg(...)` (CUSIP becomes index).",
+          "one_fund_analysis() does `pd.merge(infotable, baseline_infotable, ... on='CUSIP')` which will raise KeyError because 'CUSIP' is not a column."
+        ],
+        "impact": "Any workflow relying on the helper’s `Top Buys` / `Top Sells` output (e.g., Berkshire Q2→Q3 top increases) will fail at runtime."
+      },
+      {
+        "id": "D3",
+        "summary": "Stock title-class filter list is malformed (missing commas), causing unintended string concatenation and incorrect filtering of equities.",
+        "evidence": [
+          "In 13f-analyzer/scripts/one_fund_analysis.py: entries like `\"sponsored adr\" \"sponsored ads\" \"adr\" ...` are missing commas, creating one long string element.",
+          "Same pattern exists in fuzzy-name-search/scripts/search_stock_cusip.py."
+        ],
+        "impact": "Equity filtering via `TITLEOFCLASS` will be incorrect, potentially dropping legitimate common-stock lines and producing empty or biased results (affecting AUM, counts, comparisons, and stock CUSIP search)."
+      },
+      {
+        "id": "D4",
+        "summary": "holding_analysis.py ignores the `--quarter` argument and reads a non-quarter-scoped file path; also outputs accession numbers only, not manager names.",
+        "evidence": [
+          "13f-analyzer/scripts/holding_analysis.py reads `pd.read_csv(f\"{data_root}/INFOTABLE.tsv\"...)` (no `{quarter}`), while the dataset structure is `/root/<quarter>/INFOTABLE.tsv` as used elsewhere.",
+          "Script prints `accession number = ...` but does not join COVERPAGE to print `FILINGMANAGER_NAME`, despite SKILL.md claiming it returns “top hedge funds”."
+        ],
+        "impact": "Cross-fund ranking for a stock in Q3 can be wrong (wrong quarter file) or fail (file not found), and cannot directly answer prompts requiring manager names (e.g., top-3 fund managers holding Palantir)."
+      },
+      {
+        "id": "D5",
+        "summary": "search_stock_cusip.py is hard-coded to read 2025-q2 holdings, making it non-reusable for other quarters and inconsistent with SKILL.md guidance.",
+        "evidence": [
+          "fuzzy-name-search/scripts/search_stock_cusip.py loads `/root/2025-q2/INFOTABLE.tsv` unconditionally."
+        ],
+        "impact": "Stock CUSIP discovery may miss quarter-specific coverage and violates the intended \"search in requested quarter\" workflow; reduces robustness for tasks focused on Q3."
+      },
+      {
+        "id": "D6",
+        "summary": "13f-analyzer/SKILL.md describes single-quarter summary counts without specifying the correct counting definition (unique CUSIPs) and currently aligns with the buggy row-count behavior.",
+        "evidence": [
+          "13f-analyzer/SKILL.md: “including total number of holdings, AUM, total number of stock holdings” without clarifying whether “holdings” are lines vs unique CUSIPs, and it implicitly relies on the helper output that currently uses row-count."
+        ],
+        "impact": "Even if users implement custom code, they may follow the wrong counting semantics, yielding inconsistent answers with expected evaluation."
+      }
+    ],
+    "affected_files": [
+      "13f-analyzer/SKILL.md",
+      "13f-analyzer/scripts/one_fund_analysis.py",
+      "13f-analyzer/scripts/holding_analysis.py",
+      "fuzzy-name-search/scripts/search_stock_cusip.py"
+    ],
+    "repair_plan": [
+      {
+        "step": 1,
+        "action": "Fix the `title_class_of_stocks` lists by adding missing commas and making the list syntactically correct in both `one_fund_analysis.py` and `search_stock_cusip.py`.",
+        "details": [
+          "Ensure each string is a separate list element.",
+          "Optionally deduplicate and store as a set for faster `.isin()`.",
+          "Keep all existing intended class variants; do not broaden beyond what the helper intended."
+        ]
+      },
+      {
+        "step": 2,
+        "action": "Correct single-quarter stock counting in `one_fund_analysis.py` and align printed stats with the intended definition.",
+        "details": [
+          "Compute and print both: (a) number of stock lines (rows) and (b) number of unique stocks by `CUSIP` after the TITLEOFCLASS filter.",
+          "Set the metric labeled \"Number of stock holdings\" to mean `nunique(CUSIP)` (unique securities), because that is the typical interpretation of “how many stocks”."
+        ]
+      },
+      {
+        "step": 3,
+        "action": "Fix quarter-over-quarter merge logic in `one_fund_analysis.py` so comparison works.",
+        "details": [
+          "After groupby, call `.reset_index()` so `CUSIP` is a column (or merge on index with `left_index/right_index`).",
+          "Update the Top Buys/Sells printing loop to reference the correct CUSIP (either from the column or the index depending on chosen merge).",
+          "Sanity-check that output is sorted by ABS_CHANGE descending and that Top Buys corresponds to positive ABS_CHANGE."
+        ]
+      },
+      {
+        "step": 4,
+        "action": "Repair `holding_analysis.py` to be quarter-correct and return manager names.",
+        "details": [
+          "Read `/root/{quarter}/INFOTABLE.tsv` instead of `/root/INFOTABLE.tsv`.",
+          "Join with `/root/{quarter}/COVERPAGE.tsv` on `ACCESSION_NUMBER` to retrieve and print `FILINGMANAGER_NAME` for each rank.",
+          "Apply the same equity TITLEOFCLASS filter as used elsewhere (after fixing the list) to avoid option/other instrument contamination, unless the dataset lacks those columns."
+        ]
+      },
+      {
+        "step": 5,
+        "action": "Make `search_stock_cusip.py` reusable across quarters without breaking existing usage.",
+        "details": [
+          "Add optional CLI arg `--quarter` (default: `2025-q2` to preserve current behavior).",
+          "Use `/root/{quarter}/INFOTABLE.tsv` for the search universe.",
+          "Keep output format unchanged (Rank, Name, CUSIP)."
+        ]
+      },
+      {
+        "step": 6,
+        "action": "Update `13f-analyzer/SKILL.md` to document the corrected counting semantics and how to interpret helper outputs.",
+        "details": [
+          "Explicitly define: single-quarter “number of stocks held” = number of unique CUSIPs after the helper’s TITLEOFCLASS equity filter (not number of rows).",
+          "Note that the helper prints both line count and unique CUSIP count (after repair), and instruct which one to use for questions like “How many stocks are held?”.",
+          "Keep all other working guidance intact, especially instructions about absolute helper paths and ranking by Top Buys."
+        ]
+      },
+      {
+        "step": 7,
+        "action": "Add minimal self-check commands (not task-solving) to validate repairs locally.",
+        "details": [
+          "Run `python3 /skills/13f-analyzer/scripts/one_fund_analysis.py --quarter 2025-q3 --accession_number <some valid acc>` and confirm it prints unique CUSIP count and does not crash.",
+          "Run the same script with `--baseline_quarter 2025-q2 --baseline_accession_number <valid>` and confirm Top Buys/Sells prints.",
+          "Run `python3 /skills/13f-analyzer/scripts/holding_analysis.py --cusip <valid> --quarter 2025-q3 --topk 3` and confirm it prints manager names and uses quarter-scoped data."
+        ]
+      }
+    ],
+    "preservation_constraints": [
+      "Do not solve the end task (no actual accession numbers, AUM values, or top CUSIP outputs).",
+      "Preserve unrelated working guidance in SKILL.md files (especially absolute `/skills/...` script paths and the top-buys ranking semantics).",
+      "Keep helper CLI interfaces backward compatible where possible (e.g., add optional args instead of removing existing ones).",
+      "Do not broaden the stock universe beyond the helper’s intended TITLEOFCLASS-based equity filter; only fix correctness/bugs and document the correct counting definition."
+    ],
+    "confidence": 0.86,
+    "_usage": {
+      "completion_tokens": 4506,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 2397,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 16,
+        "engine_ttft_ms": 329,
+        "engine_ttlt_ms": 71358,
+        "pre_inference_ms": 195,
+        "service_tbt_ms": 16,
+        "service_ttft_ms": 670,
+        "service_ttlt_ms": 71712,
+        "user_visible_ttft_ms": 475
+      },
+      "prompt_tokens": 9426,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 13932
+    }
+  },
+  "round_summaries": [
+    {
+      "round": 1,
+      "applied_updates": [
+        "13f-analyzer/SKILL.md",
+        "13f-analyzer/scripts/holding_analysis.py",
+        "13f-analyzer/scripts/one_fund_analysis.py",
+        "fuzzy-name-search/SKILL.md",
+        "fuzzy-name-search/scripts/search_stock_cusip.py"
+      ],
+      "rationale": {
+        "13f-analyzer/scripts/one_fund_analysis.py": [
+          "Fix malformed TITLEOFCLASS list (missing commas) that previously concatenated multiple strings into one element, breaking equity filtering.",
+          "Correct the “how many stocks” metric: row-count is replaced with (and supplemented by) unique CUSIP count after the helper’s equity filter; both line-count and unique-stock count are printed to prevent ambiguity.",
+          "Repair quarter-over-quarter comparison by returning aggregated data with CUSIP as a column and merging on that column (previously CUSIP was an index, causing KeyError).",
+          "Keep the stock universe consistent with the helper’s original intent; no expansion beyond the intended TITLEOFCLASS-based filter."
+        ],
+        "13f-analyzer/scripts/holding_analysis.py": [
+          "Make the script quarter-correct by reading `/root/{quarter}/INFOTABLE.tsv` instead of a non-scoped `/root/INFOTABLE.tsv`.",
+          "Join with `/root/{quarter}/COVERPAGE.tsv` so output includes fund manager names (not just accession numbers), enabling tasks requiring manager names.",
+          "Apply the same equity TITLEOFCLASS filter as the other helper to keep semantics consistent."
+        ],
+        "fuzzy-name-search/scripts/search_stock_cusip.py": [
+          "Fix malformed TITLEOFCLASS list (missing commas) that broke equity filtering.",
+          "Remove hard-coded quarter (`2025-q2`) by adding optional `--quarter` argument (default `2025-q2` to preserve backward compatibility), and read `/root/{quarter}/INFOTABLE.tsv`."
+        ],
+        "13f-analyzer/SKILL.md": [
+          "Document the corrected counting semantics: “number of stocks held” is unique CUSIPs after the helper’s equity filter (not row-count).",
+          "Align documentation with repaired helper output (line-count vs unique-stock count) and clarify which metric to use for questions like “How many stocks are held?”.",
+          "Update holding_analysis description to reflect manager-name output."
+        ],
+        "fuzzy-name-search/SKILL.md": [
+          "Update usage docs for stock CUSIP search to include `--quarter` and note the default remains `2025-q2` for compatibility."
+        ]
+      }
+    },
+    {
+      "round": 2,
+      "applied_updates": [
+        "13f-analyzer/scripts/holding_analysis.py"
+      ],
+      "rationale": [
+        "Hardened 13f-analyzer/scripts/holding_analysis.py against subtle runtime failures while preserving the intended semantics and CLI: replaced `infotable.get('CUSIP', '')` (which can crash if the column is missing) with explicit required-column checks, normalized CUSIP deterministically, and used `pd.to_numeric(..., errors='coerce')` for robust VALUE parsing.",
+        "Added explicit validation for COVERPAGE having ACCESSION_NUMBER so the manager-name join fails fast with an informative error instead of a confusing KeyError during merge."
+      ]
+    }
+  ],
+  "audit_file": "adapter_audit.json"
+}

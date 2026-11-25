@@ -1,0 +1,334 @@
+--- input/pddl-skills/SKILL.md
++++ repaired/pddl-skills/SKILL.md
+@@ -22,12 +22,23 @@
+ 
+ # PDDL Skills
+ 
++## Naming convention (important)
++
++All public-facing skill names in this bundle use **snake_case**:
++
++- `load_problem(...)`
++- `generate_plan(...)`
++- `save_plan(...)`
++- `validate(...)`
++
++Do **not** mix hyphenated names (e.g., `load-problem`) with snake_case in callers/examples.
++
+ ## 1. Load Domain and Problem
+ 
+-### `load-problem(domain_path, problem_path)`
++### `load_problem(domain_path, problem_path)`
+ 
+ **Description**:  
+-Loads a PDDL domain file and problem file into a unified planning problem object.
++Loads a PDDL domain file and problem file into a Unified Planning problem object.
+ 
+ **Parameters**:
+ - `domain_path` (str): Path to PDDL domain file.
+@@ -42,71 +53,102 @@
+ ```
+ 
+ **Notes**:
+-
+-- Uses unified_planning.io.PDDLReader.
+-- Raises an error if parsing fails.
++- Typically implemented with `unified_planning.io.PDDLReader`.
++- Raise an error if parsing fails.
+ 
+ ## 2. Plan Generation
+-### `generate-plan(problem_object)`
++
++### `generate_plan(problem_object)`
+ 
+ **Description**:
+-Generates a plan for the given planning problem using a classical planner.
++Generates a plan for the given planning problem using an available classical planner.
+ 
+ **Parameters**:
+-
+-- `problem_object`: A unified planning problem instance.
++- `problem_object`: A Unified Planning problem instance.
+ 
+ **Returns**:
+-
+-- `plan_object`: A sequential plan.
++- `plan_object`: A sequential plan (or a list of grounded action strings), depending on implementation.
+ 
+ **Example**:
+-
+ ```python
+ plan = generate_plan(problem)
+ ```
+ 
+ **Notes**:
+-
+-- Uses `unified_planning.shortcuts.OneshotPlanner`.
+-- Default planner: `pyperplan`.
+-- If no plan exists, returns None.
++- Commonly implemented via `unified_planning.shortcuts.OneshotPlanner`.
++- Planner availability depends on the runtime (e.g., `pyperplan` may or may not be installed).
++- If no plan exists, return `None`.
+ 
+ ## 3. Plan Saving
+-### `save-plan(plan_object, output_path)`
++
++### `save_plan(plan_output, plan)`
+ 
+ **Description**:
+-Writes a plan object to disk in standard PDDL plan format.
++Writes a plan to disk in the **benchmark-required plain text format**:
++
++- **one grounded action per line**
++- **no** step numbers, timestamps, comments, JSON, brackets, or extra annotations
++- write to the **exact** `plan_output` path
++- create parent directories if needed
+ 
+ **Parameters**:
+-
+-- `plan_object`: A unified planning plan.
+-
+-- `output_path` (str): Output file path.
++- `plan_output` (str): Output file path (typically `entry["plan_output"]` from `problem.json`).
++- `plan`: Either:
++  - a multi-line string containing one action per line, or
++  - a list/iterable of action strings, or
++  - a planner-specific plan object that your code can stringify into grounded actions.
+ 
+ **Example**:
+ ```python
+-save_plan(plan, "solution.plan")
++save_plan("solutions/task01.txt", plan)
+ ```
+ 
+-**Notes**:
++**Implementation guidance (robust, format-safe)**:
+ 
+-- Uses `unified_planning.io.PDDLWriter`.
+-- Output is a text plan file.
++Do **not** rely on a generic PDDL domain/problem writer (e.g., `PDDLWriter`) for plan serialization, because benchmark plan checkers usually expect a very specific “one action per line” text format.
++
++Pseudocode:
++```python
++import os
++
++def save_plan(plan_output: str, plan):
++    os.makedirs(os.path.dirname(plan_output) or '.', exist_ok=True)
++
++    # Accept either a multi-line string or an iterable of actions.
++    if isinstance(plan, str):
++        lines = [ln.strip() for ln in plan.splitlines() if ln.strip()]
++    else:
++        lines = [str(a).strip() for a in plan if str(a).strip()]
++
++    # Write exactly one action per line.
++    with open(plan_output, 'w', encoding='utf-8') as f:
++        for act in lines:
++            f.write(act + "\n")
++
++    return plan_output
++```
++
++### `save_plan.skill` interface (inputs definition)
++
++If your framework uses a separate executable `save_plan.skill`, its inputs should be minimal and stable:
++
++- `plan_output` (string): output file path from `problem.json`
++- `plan` (string OR list[string]): plan content
++
++Do **not** require unrelated inputs (like `id/domain/problem`) for plan saving.
+ 
+ ## 4. Plan Validation
++
+ ### `validate(problem_object, plan_object)`
+ 
+ **Description**:
+ Validates that a plan correctly solves the given PDDL problem.
+ 
+ **Parameters**:
+-
+ - `problem_object`: The planning problem.
+ - `plan_object`: The generated plan.
+ 
+ **Returns**:
+-
+ - bool: True if the plan is valid, False otherwise.
+ 
+ **Example**:
+@@ -115,27 +157,36 @@
+ ```
+ 
+ **Notes**:
++- Validator APIs vary across Unified Planning versions/installed engines.
++- Treat validation as optional if a compatible validator engine is not available.
++- If you do validate, ensure it checks applicability and goal satisfaction.
+ 
+-- Uses `unified_planning.shortcuts.SequentialPlanValidator`.
+-- Ensures goal satisfaction and action correctness.
++# Example Workflow (aligned with problem.json + plan_output)
+ 
+-# Example Workflow
+ ```python
+-# Load
+-problem = load_problem("domain.pddl", "task01.pddl")
++import json
+ 
+-# Generate plan
+-plan = generate_plan(problem)
++with open("problem.json", "r", encoding="utf-8") as f:
++    entries = json.load(f)
+ 
+-# Validate plan
+-if not validate(problem, plan):
+-    raise ValueError("Generated plan is invalid")
++for entry in entries:
++    # Load
++    problem = load_problem(entry["domain"], entry["problem"])
+ 
+-# Save plan
+-save_plan(plan, "task01.plan")
++    # Generate
++    plan = generate_plan(problem)
++    if plan is None:
++        raise RuntimeError(f"No plan found for task {entry.get('id')}")
++
++    # Validate (optional)
++    # if not validate(problem, plan):
++    #     raise ValueError("Generated plan is invalid")
++
++    # Save to the required output path
++    save_plan(entry["plan_output"], plan)
+ ```
++
+ # Notes
+ 
+-- This skill set enables reproducible planning pipelines.
+-- Designed for PDDL benchmarks and automated plan synthesis tasks.
+-- Ensures oracle solutions are fully verifiable.
++- This skill set enables reproducible planning pipelines for IPC-style PDDL benchmarks.
++- Plan files must be saved in strict line-per-action format to the exact `plan_output` path.
+--- input/skilltta-task-guidance/SKILL.md
++++ repaired/skilltta-task-guidance/SKILL.md
+@@ -0,0 +1,122 @@
++---
++name: skilltta-task-guidance
++---
++
++# Skill: PDDL Airport Planning — workflow + correct plan saving
++
++This skill provides **reusable task guidance** for IPC-style PDDL airport-ground-traffic problems: how to load inputs, produce a plan, and **save the plan in the exact required format/path**.
++
++## 1) Expected task I/O (what to read)
++
++You will be given a `problem.json` that is a **list of task entries** like:
++
++```json
++[
++  {
++    "id": "problem_id",
++    "domain": ".../domain.pddl",
++    "problem": ".../problem.pddl",
++    "plan_output": ".../problem_id.txt"
++  }
++]
++```
++
++For each entry:
++
++- Read the **domain PDDL** from `entry["domain"]`
++- Read the **problem PDDL** from `entry["problem"]`
++- Write the resulting plan to the exact file path `entry["plan_output"]`
++
++Paths may be relative; treat them as filesystem paths.
++
++## 2) Plan format requirements (what to write)
++
++A valid plan file must satisfy:
++
++- **One grounded action per line**
++- **No extra JSON, numbering, timestamps, commentary, or brackets**
++- Action/object names must match exactly those in the domain/problem
++- The plan should be directly parseable as a sequence of action applications
++
++Example (each on its own line):
++
++```
++drive(truck1, depot1, market1)
++load(goods1, truck1, market1, level0, level1, level0, level1)
++...
++```
++
++If your planner returns actions in another textual style (e.g., `(drive truck1 depot1 market1)`), convert only if necessary to match the task’s expected syntax. If the benchmark expects the “`name(arg, ...)`” style, keep it consistent across all lines.
++
++## 3) Example workflow (high level)
++
++For each task:
++
++1. **Load files**: read domain/problem PDDL text.
++2. **Generate plan**:
++   - Prefer calling an available planner component/library.
++   - Ensure the plan is a sequence of **ground** actions using objects from the problem.
++3. **Save plan** using the dedicated plan-saving routine (see next section).
++
++## 4) Plan saving (common failure points + robust routine)
++
++### Common mistakes
++
++- Writing the plan as a Python list representation (e.g., `['a', 'b']`) instead of line-separated text
++- Forgetting to create parent directories for `plan_output`
++- Adding numbering like `0: action(...)` when the evaluator expects raw action lines
++- Trailing spaces / blank lines that some checkers treat as extra actions
++
++### Required behavior
++
++- Create parent directories for `plan_output` if they do not exist
++- Write exactly one action per line
++- End file with a newline (safe default)
++
++### Canonical save routine
++
++Pseudocode:
++
++```python
++import os
++
++def save_plan(plan_output: str, plan):
++    # plan can be a string (multi-line) or a list of action strings
++    os.makedirs(os.path.dirname(plan_output) or '.', exist_ok=True)
++
++    if isinstance(plan, str):
++        # normalize line endings and strip extra blank lines
++        lines = [ln.strip() for ln in plan.splitlines() if ln.strip()]
++    else:
++        lines = [str(a).strip() for a in plan if str(a).strip()]
++
++    with open(plan_output, 'w', encoding='utf-8') as f:
++        for act in lines:
++            f.write(act + '\n')
++
++    return plan_output
++```
++
++## 5) `save_plan.skill` interface (inputs definition)
++
++If your system uses a separate `save_plan.skill`, define its inputs so it can be called consistently from planners.
++
++**Recommended inputs** (minimal and unambiguous):
++
++- `plan_output` (string): output file path from `problem.json`
++- `plan` (string OR list[string]): the plan content (already grounded actions)
++
++Notes:
++
++- Do **not** require the caller to pass `id`, `domain`, or `problem` into `save_plan`.
++- Accepting both `str` and `list[str]` avoids brittle coupling to any single planner’s return type.
++
++## 6) Lightweight validation before saving (optional but useful)
++
++Before writing, validate:
++
++- `len(lines) > 0` (unless you are certain the problem is already at goal)
++- No line contains forbidden prefixes like `";"`, `"#"`, or step numbers like `"0:"`
++- Each line contains an action name and parentheses (if using `name(arg,...)` style)
++
++This doesn’t prove correctness, but catches frequent formatting errors.

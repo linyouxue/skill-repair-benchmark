@@ -1,0 +1,2126 @@
+{
+  "method_id": "skilltta-gpt52-tatumass-controlled55-20261118",
+  "benchmark_version": "skill-repair-controlled-datasets-20261020",
+  "complete": false,
+  "model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "audit_complete": false,
+  "tasks": [
+    {
+      "task_id": "data-to-d3",
+      "trial_id": "location-data-to-d3",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Reusable guidance can cause implementers to fetch/ship the wrong D3 major version, breaking tasks that explicitly require v6 (like this trial) and making outputs fail path/version checks.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Implementations may fail verification for 'click bubble' interactions because label overlays capture clicks/hover, causing selection/tooltip to be unreliable.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Implementers may create one-way selection or inconsistent highlighting, failing tasks that require coordinated views.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Implementations may rely on default/random initial node placement or variable simulation runtimes, creating unstable layouts and flaky verification.",
+          "locations": [
+            {
+              "file": "d3-visualization/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-data-to-d3/repaired_skill",
+      "method_evidence": "tasks/location-data-to-d3/method_evidence",
+      "historical_executor_run_id": "location-data-to-d3__attempt-004",
+      "executor_run_id": "attempt-005/task__449fa769",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/location-data-to-d3/attempts",
+      "audit": "tasks/location-data-to-d3/audit.json"
+    },
+    {
+      "task_id": "dialogue-parser",
+      "trial_id": "location-dialogue-parser",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Graph.validate() explicitly allows edges targeting \"End\" even when no End node exists, enabling graphs that violate the task constraint that all edge targets must exist.\nParsers using this skill can emit JSON where edges reference a missing node (End), which will fail validators expecting all targets to exist and/or expecting End to be materialized as a node when referenced.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Graph.visualize() always adds an \"End\" node to the rendered diagram even if the graph does not contain End and no edges reference it, which can misrepresent the actual serialized graph and can conflict with reachability expectations in tooling.\nUsers may believe End exists in the data when it does not; downstream checks comparing visualization vs JSON can disagree. If a DOT export is added using the same logic, it could create an extra unreachable node.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "SKILL.md shows adding edges to End without documenting that End must be a real node, contradicting the task guidance that End should be created when referenced and that edge targets must exist.\nEncourages consumers (script parsers) to create graphs with missing End nodes that pass the current validate() but fail task validators.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The skill documentation's Export section only covers JSON; the library provides visualize() that renders image formats via graphviz but does not provide a stable .dot export string/file API needed by tasks requiring /app/dialogue.dot.\nFor tasks needing DOT output, users must re-implement DOT export outside the skill, reducing reuse and increasing inconsistency.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "Graph.add_node() forbids adding a node with an existing id, which makes it awkward to implement the recommended placeholder-target creation and later upgrading when the real section is parsed.\nEncourages consumers to bypass the Graph API (mutating graph.nodes directly) or to avoid creating placeholder nodes, increasing the chance of missing-target edges and invalid graphs.",
+          "locations": [
+            {
+              "file": "dialogue-graph/scripts/dialogue_graph.py"
+            },
+            {
+              "file": "dialogue-graph/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-dialogue-parser/repaired_skill",
+      "method_evidence": "tasks/location-dialogue-parser/method_evidence",
+      "historical_executor_run_id": "location-dialogue-parser__attempt-001",
+      "executor_run_id": null,
+      "audit_status": "verifier_semantics_disputed",
+      "adopted_reward": null,
+      "attempts": "tasks/location-dialogue-parser/attempts",
+      "audit": "tasks/location-dialogue-parser/audit.json"
+    },
+    {
+      "task_id": "flink-query",
+      "trial_id": "location-flink-query",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Workflow 2 lacks rules for determining a 'completion/terminal' event when a streaming/bounded Flink job must emit results only after an entity finishes.\nThis trial requires emitting per-job results only after the job has finished, and finish must be inferred from job-event terminal states defined in the dataset docs (format.pdf / ClusterData2011_2.md). The current `senior-data-engineer/SKILL.md` Workflow 2 is generic and does not specify: (a) that completion must be driven by explicit terminal job events (not by watermark/end-of-input), nor (b) how to identify terminal event types by consulting the dataset schema and mapping event codes to semantic states (FINISH/FAIL/KILL/LOST etc., with explicit instruction to verify).\nUsers following the skill may implement incorrect completion detection (e.g., emitting on inactivity timers, window close, or end-of-file) and produce outputs for jobs that never finished per input job-events, violating the task’s evaluation criteria.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Workflow 2 lacks an explicit 'result output eligibility' constraint (emit only for keys/entities with an observed terminal event).\nThe task’s scoring expects output only for jobIds that have a terminal job-event in the provided job_events input. Workflow 2 currently has no gating rule and does not warn against emitting partial/intermediate results (e.g., on session end timers) or emitting for all observed jobIds regardless of completion.\nImplementations may output extra lines or premature results, causing mismatches in per-job counts and failing tests that compare expected outputs per finished job.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-flink-query/repaired_skill",
+      "method_evidence": "tasks/location-flink-query/method_evidence",
+      "historical_executor_run_id": "location-flink-query__attempt-010",
+      "executor_run_id": null,
+      "audit_status": "retry_cap_no_valid_result",
+      "adopted_reward": null,
+      "attempts": "tasks/location-flink-query/attempts",
+      "audit": "tasks/location-flink-query/audit.json"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "trial_id": "location-manufacturing-equipment-maintenance",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "reflow-profile-compliance-toolkit/SKILL.md does not state the concrete deliverables and task completion conditions required by this trial (writing q01–q05 JSON files to /app/output with the exact schemas). It only provides generic computation recipes and generic output guardrails.\nAgents invoking this skill may compute correct metrics but fail the trial due to missing/incorrect file outputs, schema mismatch, or not realizing all five outputs are mandatory.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The bundle provides an incorrect/unsafe rule for selecting the representative thermocouple for Q02 (TAL). It encourages metric-driven choices that may contradict the handbook requirement ('most representative thermocouple value based on the handbook details') and uses unsupported tie-break logic.\nQ02 may select the wrong tc_id per run, producing incorrect tal_s and compliance status even when TAL computation is correct.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The deterministic sensor selection example for maximum metrics is invalid/pseudocode that could be implemented incorrectly (uses undefined lex() and attempts to negate a string-derived order).\nImplementations may accidentally pick the wrong tc_id for Q01/Q03/Q02 when values tie, causing non-reproducible outputs and potential verifier mismatches.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The guidance around TAL measurement window is incomplete/inconsistent across files: one part suggests generic 'time above threshold' integration, while another suggests 'first up-crossing to last down-crossing'. Without explicitly deferring to handbook-defined TAL window, this can lead to wrong TAL values.\nEven if the correct liquidus temperature is used, TAL could be computed differently than the handbook defines, yielding incorrect compliance judgments.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-manufacturing-equipment-maintenance/repaired_skill",
+      "method_evidence": "tasks/location-manufacturing-equipment-maintenance/method_evidence",
+      "historical_executor_run_id": "location-manufacturing-equipment-maintenance__attempt-004",
+      "executor_run_id": null,
+      "audit_status": "historical_resource_evidence_insufficient",
+      "adopted_reward": null,
+      "attempts": "tasks/location-manufacturing-equipment-maintenance/attempts",
+      "audit": "tasks/location-manufacturing-equipment-maintenance/audit.json"
+    },
+    {
+      "task_id": "pddl-airport-planning",
+      "trial_id": "location-pddl-airport-planning",
+      "dataset": "location",
+      "condition": "location_hint",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "A runner that relies on the declared skill names/signatures will fail to call the correct routines; conversely, code written from examples won’t match the documented API.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Even if a valid plan is generated, the saved file may be rejected due to formatting (parentheses style, step numbers, extra annotations, blank lines), or saving may fail if the writer doesn’t support plan output in the assumed way.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Plans may be written to the wrong location or fail due to missing directories, causing evaluation failure despite correct planning.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "SkillTTA cannot reliably call the plan-saving skill; even if documentation is correct, the executable skill interface is absent.",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "If copied verbatim, validation code may crash. (Lower priority than plan saving/path issues, but still a reliability risk.)",
+          "locations": [
+            {
+              "file": "pddl-skills/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/location-pddl-airport-planning/repaired_skill",
+      "method_evidence": "tasks/location-pddl-airport-planning/method_evidence",
+      "historical_executor_run_id": "location-pddl-airport-planning__attempt-004",
+      "executor_run_id": null,
+      "audit_status": "historical_resource_evidence_insufficient",
+      "adopted_reward": null,
+      "attempts": "tasks/location-pddl-airport-planning/attempts",
+      "audit": "tasks/location-pddl-airport-planning/audit.json"
+    },
+    {
+      "task_id": "fix-build-google-auto",
+      "trial_id": "single-fix-build-google-auto-RI-001",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "maven-build-lifecycle/SKILL.md contains a repo-specific checkpoint for \"Google Auto snapshot\" including a specific failing module path (value/src/it/functional/pom.xml) and prescriptive dependency version edits. This violates the requirement to provide reusable workflow guidance and risks effectively solving a particular end-task instance rather than guiding diagnosis.\nMisleads on other repos/ids, reduces generality, and can cause incorrect edits or overfitting to one trial.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The build-repair artifact contract references a fixed repo path (/home/travis/build/failed/google/auto/patch_1.diff) instead of the task-mandated generic location (/home/travis/build/failed/<repo>/<id>/patch_{i}.diff). Although it contains a parenthetical note, the primary instruction is still misleading.\nUsers may write patches to the wrong directory, causing task verification to fail even if the code change is correct.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The skill does not clearly define how to select the Maven toolchain (prefer ./mvnw if present) nor how to record Java/Maven versions as part of reproducible diagnosis. The location hint explicitly calls out toolchain selection conventions.\nNon-reproducible results and inconsistent behavior across environments; unnecessary failures due to Maven/JDK mismatch.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The skill emphasizes Maven Invoker integration tests but does not clearly state when to run `verify` (where Invoker typically executes) vs `test`, nor does it provide a canonical baseline command with evidence-rich flags. The included minimal diagnostic snippet is repo-specific and does not provide a general reproduction contract.\nUsers may run the wrong lifecycle phase and fail to reproduce CI failures, derailing diagnosis.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The Invoker debug list skips from step 4 to step 6, which is a quality defect and reduces clarity.\nLower instructional quality; can confuse the intended workflow.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-fix-build-google-auto-RI-001/repaired_skill",
+      "method_evidence": "tasks/single-fix-build-google-auto-RI-001/method_evidence",
+      "historical_executor_run_id": "single-fix-build-google-auto-RI-001__attempt-005",
+      "executor_run_id": null,
+      "audit_status": "retry_cap_no_valid_result",
+      "adopted_reward": null,
+      "attempts": "tasks/single-fix-build-google-auto-RI-001/attempts",
+      "audit": "tasks/single-fix-build-google-auto-RI-001/audit.json"
+    },
+    {
+      "task_id": "fix-build-google-auto",
+      "trial_id": "single-fix-build-google-auto-RI-002",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "maven-build-lifecycle/SKILL.md hardcodes a specific repository path (google/auto) and patch output path, making the skill non-reusable and conflicting with the task prompt’s required /home/travis/build/failed/<repo>/<id>/patch_{i}.diff locations.\n[\"The 'Build-repair artifact contract' section mandates `/home/travis/build/failed/google/auto/patch_1.diff`.\", \"The 'Minimal diagnostic sequence' section uses `cd /home/travis/build/failed/google/auto`.\", 'This contradicts the trial instruction that the repo is at `/home/travis/build/failed/<repo>/<id>` and patch files must be written under that same directory.']\nUsers following the skill will write artifacts to the wrong location and run commands in the wrong directory, causing the meta-task to be judged incorrect even if the actual project repair is correct.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The skill claims 'reproduce target CI' but then effectively forces JDK 7 switching and a specific Maven command (`-f build-pom.xml verify ...`), which is not generally valid and can mislead repairs for projects/CI that use different JDKs or commands.\n['The document emphasizes reading CI config first, but the concrete workflow sections prescribe JDK 7 and a specific command as the default.', 'Hardcoding `-f build-pom.xml` assumes the presence of a nonstandard reactor POM; many repos do not have this file.']\nFollowing the skill may reproduce the wrong environment, chase non-CI failures, or fail to reproduce at all due to nonexistent files/incorrect JDK.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Per the location hint, the skill should cover nested test project dependency resolution and modification scope (common in Maven Invoker / integration-test fixtures), but maven-build-lifecycle/SKILL.md lacks concrete guidance on diagnosing/fixing dependency issues in nested test projects and limiting changes appropriately.\n['No section explains how Maven Invoker-style nested projects (often under src/it or similar) resolve parents/dependencies.', 'No guidance on when it is appropriate to edit nested fixture POMs vs. fixing the main reactor so the nested projects build correctly.', \"No explicit 'modification scope' constraints for fixtures vs. production modules (important for minimizing changes and avoiding altering test fixtures unnecessarily).\"]\nFor builds failing in invoker/nested integration test projects, the skill provides insufficient direction, leading to either overbroad changes or ineffective fixes.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-fix-build-google-auto-RI-002/repaired_skill",
+      "method_evidence": "tasks/single-fix-build-google-auto-RI-002/method_evidence",
+      "historical_executor_run_id": "single-fix-build-google-auto-RI-002__attempt-001",
+      "executor_run_id": null,
+      "audit_status": "retry_cap_no_valid_result",
+      "adopted_reward": null,
+      "attempts": "tasks/single-fix-build-google-auto-RI-002/attempts",
+      "audit": "tasks/single-fix-build-google-auto-RI-002/audit.json"
+    },
+    {
+      "task_id": "fix-build-google-auto",
+      "trial_id": "single-fix-build-google-auto-all",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "`maven-build-lifecycle/SKILL.md` hardcodes `/home/travis/build/failed/google/auto` instead of using the task-provided `/home/travis/build/failed/<repo>/<id>` path.\nSkill becomes non-reusable across trials/repos and can mislead the agent into operating in the wrong directory; also violates the benchmark’s path contract.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "`maven-build-lifecycle/SKILL.md` lacks the required conventions for selecting the build toolchain and for failure reproduction/build commands.\nAgent guidance is incomplete; increases likelihood of running incorrect Maven goals/phases, skipping critical flags, or failing to reproduce.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "`maven-build-lifecycle/SKILL.md` does not address nested Maven test projects (e.g., invoker integration tests) nor does it define safe modification scope to avoid editing irrelevant nested fixtures.\nHigh risk of changing the wrong `pom.xml` (e.g., a fixture under integration tests) or misdiagnosing dependency resolution issues originating from invoker-built nested projects.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The build-repair artifact contract is incomplete (missing failed_reasons.txt requirement) and has inconsistent numbering.\nAgent may miss mandatory benchmark artifacts or produce them at wrong paths; checklist is confusing.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "`maven-build-lifecycle/SKILL.md` does not reflect the Step 1/2/3 structure (analyze → write plan to failed_reasons.txt → write diff(s) → apply) required by the trial prompt.\nNon-compliance with benchmark workflow; increased chance of failing evaluation due to missing artifacts even if the code fix is correct.",
+          "locations": [
+            {
+              "file": "maven-build-lifecycle/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-fix-build-google-auto-all/repaired_skill",
+      "method_evidence": "tasks/single-fix-build-google-auto-all/method_evidence",
+      "historical_executor_run_id": "single-fix-build-google-auto-all__attempt-001",
+      "executor_run_id": null,
+      "audit_status": "retry_cap_no_valid_result",
+      "adopted_reward": null,
+      "attempts": "tasks/single-fix-build-google-auto-all/attempts",
+      "audit": "tasks/single-fix-build-google-auto-all/audit.json"
+    },
+    {
+      "task_id": "flink-query",
+      "trial_id": "single-flink-query-RI-001",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Workflow 2 lacks an explicit, reusable rule for how to determine and operationalize a “completion/terminal event” in keyed Flink aggregations where lifecycle events arrive independently from activity events.\nThe skill includes a general ‘Semantic Contract Gate’ and a ‘Non-negotiable Flink Emission Gate’, but it does not clearly specify (a) that completion must be defined by an explicit terminal-event predicate sourced from the dataset/spec, (b) that finalization should be delayed until event time is safe (watermark has passed the terminal timestamp + allowed lateness), and (c) that end-of-input/boundedness is not a valid completion signal for per-key emission. This gap is directly relevant to the trial’s requirement: emit only when a job has finished in event time, not just when the stream ends.\nImplementations guided by the current Workflow 2 can incorrectly emit on EOF/batch completion, emit too early (dropping late SUBMITs), or misclassify completion events, leading to incorrect aggregates and extra/missing keys.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Semantic Contract Gate predicate list has a numbering/structure error that obscures the intended three-predicate contract.\nThe section lists predicates as 1 and 3 (missing 2). The missing predicate is important for this trial: the completion criterion (which lifecycle event(s) close the key) should be explicitly captured alongside contributing-event and output-eligibility predicates.\nReaders may miss the requirement to define completion precisely and separately, increasing the risk of emitting based on non-terminal lifecycle events or stream termination.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Trial guidance suggests emitting zero for keys with no qualifying activity, which conflicts with the Senior Data Engineer skill’s ‘Non-negotiable Flink Emission Gate’.\nThe reusable skill mandates: “Missing aggregate state means no output row, not a zero-valued row,” unless explicitly required. The temporary task guidance includes “Jobs with no submits: output (jobId,0) when terminal arrives (default to emitting 0 is safest…)”, which is not aligned with the core skill’s contract gate and can cause incorrect extra keys.\nMay produce spurious output rows for jobs that only have lifecycle events, violating the skill’s invariant and potentially failing evaluators that compare emitted key sets.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-flink-query-RI-001/repaired_skill",
+      "method_evidence": "tasks/single-flink-query-RI-001/method_evidence",
+      "historical_executor_run_id": "single-flink-query-RI-001__attempt-007",
+      "executor_run_id": "attempt-009/task__8628a96d",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-flink-query-RI-001/attempts",
+      "audit": "tasks/single-flink-query-RI-001/audit.json"
+    },
+    {
+      "task_id": "flink-query",
+      "trial_id": "single-flink-query-RI-002",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Workflow guidance for qualifying which keys/jobs are allowed to emit results is ambiguous and can lead to emitting results for the wrong terminal job states.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The correct ‘do not broaden FINISH’ rule exists but is placed outside the workflow referenced by the hint, making it easy to miss and effectively non-binding.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            },
+            {
+              "file": "skilltta-task-guidance/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-flink-query-RI-002/repaired_skill",
+      "method_evidence": "tasks/single-flink-query-RI-002/method_evidence",
+      "historical_executor_run_id": "single-flink-query-RI-002__attempt-002",
+      "executor_run_id": null,
+      "audit_status": "retry_cap_no_valid_result",
+      "adopted_reward": null,
+      "attempts": "tasks/single-flink-query-RI-002/attempts",
+      "audit": "tasks/single-flink-query-RI-002/audit.json"
+    },
+    {
+      "task_id": "flink-query",
+      "trial_id": "single-flink-query-all",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Workflow 2’s “Semantic Contract Gate for Keyed Event Aggregations” is incomplete: it promises three predicates but only defines #1, omitting the completion-event predicate and the output-eligibility/emission predicate.\nEncourages implementers to (a) guess job completion semantics, and/or (b) emit results for keys that never reach a terminal lifecycle event. This directly conflicts with the trial’s requirements to base completion on schema docs and to output only for finished jobs.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Workflow 2 lacks an explicit rule that result emission must be gated by lifecycle completion (i.e., output only when the key/job is finished), which is required in this trial.\nImplementations may output partial/ongoing aggregates, producing extra jobIds (unfinished jobs) and failing evaluation that compares per-jobId counts only for finished jobs.",
+          "locations": [
+            {
+              "file": "senior-data-engineer/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-flink-query-all/repaired_skill",
+      "method_evidence": "tasks/single-flink-query-all/method_evidence",
+      "historical_executor_run_id": "single-flink-query-all__attempt-002",
+      "executor_run_id": "attempt-003/task__29f2ca0d",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-flink-query-all/attempts",
+      "audit": "tasks/single-flink-query-all/audit.json"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "trial_id": "single-manufacturing-equipment-maintenance-RI-001",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "An agent following only this skill can fail the trial requirement to generate five specific files (/app/output/q01.json…q05.json) with the exact schemas, rounding, and sorting rules for each question.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The trial explicitly requires selecting the most representative thermocouple based on handbook details. Hard-coding min-TAL selection risks contradicting the handbook and producing noncompliant methodology.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "If the handbook specifies an absolute peak requirement (e.g., 235–245°C) rather than (or in addition to) a liquidus margin, the skill can steer the agent to compute the wrong requirement and misjudge compliance (Q3).",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "If samples sit exactly at liquidus for a duration, strict '>' excludes that dwell, biasing TAL downward and potentially causing false non-compliance in Q02.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The sample code references undefined functions (lex) and an invalid negation of a lexicographic value; combined with the stated rule, it can confuse implementations and break determinism required by the trial.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "The toolkit uses 'speed_min' for both min-dwell and max-time cases, while the other skill uses 'speed_max' for min-dwell; without clear mapping to Q04's 'required_min_speed_cm_min' and explicit handling of MES unit conversion, agents can output incorrect or non-auditable values.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "Q05 requires selecting best runs based on quality and efficiency using MES + defect data. Without a strict rule for deriving 'quality' and 'efficiency' only from present columns (and gating on Q1–Q4 compliance), the agent may invent weights or use unavailable fields.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-manufacturing-equipment-maintenance-RI-001/repaired_skill",
+      "method_evidence": "tasks/single-manufacturing-equipment-maintenance-RI-001/method_evidence",
+      "historical_executor_run_id": "single-manufacturing-equipment-maintenance-RI-001__attempt-002",
+      "executor_run_id": "attempt-004/task__56471cbf",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-manufacturing-equipment-maintenance-RI-001/attempts",
+      "audit": "tasks/single-manufacturing-equipment-maintenance-RI-001/audit.json"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "trial_id": "single-manufacturing-equipment-maintenance-RI-002",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "The toolkit’s thermocouple reduction rule is generic (max-metric vs min-metric) and does not give a Q02/TAL-specific “representative TC” selection procedure aligned to handbook constraints. For TAL, the representative/worst-case TC depends on what the handbook specifies (e.g., cold-spot TC) and also on whether the violation is against the minimum TAL (coldest/shortest TAL) or maximum TAL (hottest/longest TAL). As written, an implementation can incorrectly always pick the minimum TAL (or otherwise not consider both bounds), which can miss a max-TAL violation and incorrectly mark a run compliant/non-compliant.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Because Q02 output requires a single (run_id, tc_id, tal_s, status) record per run, the toolkit should specify a deterministic mapping from multi-TC TAL results to one record that correctly reflects compliance. Without an explicit rule, different agents may (a) choose a “representative” TC that is compliant while another TC violates, or (b) compute status only on the selected TC rather than the worst-case per handbook intent.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The example for selecting a maximum metric includes an invalid/undefined expression and an incorrect approach for choosing the smallest tc_id on ties, which can propagate into faulty implementations and non-deterministic selection.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The toolkit presents time_above_threshold_s with linear interpolation as the default method for TAL-like metrics, but the overall contract requires handbook-grounded definitions. The skill should explicitly instruct to confirm from the handbook whether linear interpolation at crossings is required/allowed, or otherwise document the chosen method as handbook-consistent.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-manufacturing-equipment-maintenance-RI-002/repaired_skill",
+      "method_evidence": "tasks/single-manufacturing-equipment-maintenance-RI-002/method_evidence",
+      "historical_executor_run_id": "single-manufacturing-equipment-maintenance-RI-002__attempt-003",
+      "executor_run_id": "attempt-004/task__fbede960",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-manufacturing-equipment-maintenance-RI-002/attempts",
+      "audit": "tasks/single-manufacturing-equipment-maintenance-RI-002/audit.json"
+    },
+    {
+      "task_id": "manufacturing-equipment-maintenance",
+      "trial_id": "single-manufacturing-equipment-maintenance-all",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Q02 representative thermocouple selection logic is not robust for a TAL acceptance window (min/max); it instructs selecting the minimum TAL only, which can miss violations on the high side (too-long TAL) and is not a generally correct “most representative / worst-case” rule for a bounded range.\nAn implementation following the skill can incorrectly label runs as compliant by choosing the minimum TAL TC (passing) while another TC exceeds the max TAL limit (failing), or can choose a non-representative TC when all TCs are within bounds.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The toolkit lacks explicit deliverables/task-completion guidance for producing the required output artifacts (q01.json–q05.json), despite the trial requiring file generation; this is specifically called out by the location hint.\nAgents may compute metrics correctly but fail verification due to missing file writes, wrong filenames, missing required fields, unsorted ordering, or inconsistent conservative pass/fail defaults.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Sensor tie-break example code in the toolkit is internally inconsistent/incorrect and can lead to non-deterministic or wrong tc_id selection in ties.\nTie cases can produce unstable or wrong tc_id outputs, which can break deterministic grading and can change compliance outcomes if the chosen TC differs.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Closely related guidance in reflow-machine-maintenance-guidance/SKILL.md repeats the same oversimplified “min metric for TAL” reduction rule and may perpetuate the Q02 issue if that skill is invoked instead of the toolkit.\nEven if the toolkit is fixed, another skill in the bundle can still steer implementations toward the incorrect Q02 representative TC choice.",
+          "locations": [
+            {
+              "file": "reflow-profile-compliance-toolkit/SKILL.md"
+            },
+            {
+              "file": "reflow-machine-maintenance-guidance/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-manufacturing-equipment-maintenance-all/repaired_skill",
+      "method_evidence": "tasks/single-manufacturing-equipment-maintenance-all/method_evidence",
+      "historical_executor_run_id": "single-manufacturing-equipment-maintenance-all__attempt-002",
+      "executor_run_id": "attempt-004/task__6afc21bc",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-manufacturing-equipment-maintenance-all/attempts",
+      "audit": "tasks/single-manufacturing-equipment-maintenance-all/audit.json"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "trial_id": "single-sec-financial-report-RI-001",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Both SKILL.md files show helper-script invocations as if the current working directory is inside each skill folder (e.g., `python3 scripts/...`). In many runners, execution starts from the bundle root, so these relative paths will fail unless the caller `cd`s first. The location hint explicitly flags script-call location/path convention issues in these SKILL.md files.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "`13f-analyzer/scripts/holding_analysis.py` ignores the `--quarter` argument and reads from a non-quarter path (`/root/INFOTABLE.tsv`). This will fail if the data is organized per-quarter as `/root/2025-q2/INFOTABLE.tsv` and `/root/2025-q3/INFOTABLE.tsv` (as in the task).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "`holding_analysis.py` prints only accession numbers and holding value. The task asks for top fund managers (names). The script should join against COVERPAGE for the same quarter to map accession numbers to manager names.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "The `title_class_of_stocks` list is malformed due to missing commas between multiple string literals. In Python, adjacent string literals concatenate, producing unintended values and causing the stock filter to miss many legitimate equity rows.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "`fuzzy-name-search/scripts/search_stock_cusip.py` hardcodes `/root/2025-q2/INFOTABLE.tsv` and does not accept a quarter parameter. For this trial, Palantir is requested in Q3; the tool should allow selecting the quarter (or at least default to the specified one).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "`one_fund_analysis.py` prints 'Number of stock holdings' as the number of filtered rows (not unique CUSIPs). The 13f-analyzer/SKILL.md correctly documents this as 'rows remaining after filter', but the end-task question 2 asks 'How many stocks are held', which is usually interpreted as number of stock positions (rows) or unique stocks (unique CUSIPs). The bundle guidance claims to use this field; therefore the script must reliably implement the documented semantics (currently compromised by D4).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-RI-001/repaired_skill",
+      "method_evidence": "tasks/single-sec-financial-report-RI-001/method_evidence",
+      "historical_executor_run_id": "single-sec-financial-report-RI-001__attempt-003",
+      "executor_run_id": "attempt-004/task__2b76a86c",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-sec-financial-report-RI-001/attempts",
+      "audit": "tasks/single-sec-financial-report-RI-001/audit.json"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "trial_id": "single-sec-financial-report-RI-002",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Single-quarter \"number of stock holdings\" is computed as row-count, not stock-count (unique CUSIPs), so it will mis-answer questions like \"How many stocks are held?\"\nQ2-type questions (\"How many stocks\") will be overstated when a filing has multiple rows per CUSIP (duplicated lines, multiple classes, etc.) and understates the required definition if the expected metric is unique stocks.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "Quarter-over-quarter comparison in one_fund_analysis.py is broken due to merging on a non-existent CUSIP column (CUSIP is an index after groupby).\nAny workflow relying on the helper’s `Top Buys` / `Top Sells` output (e.g., Berkshire Q2→Q3 top increases) will fail at runtime.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "Stock title-class filter list is malformed (missing commas), causing unintended string concatenation and incorrect filtering of equities.\nEquity filtering via `TITLEOFCLASS` will be incorrect, potentially dropping legitimate common-stock lines and producing empty or biased results (affecting AUM, counts, comparisons, and stock CUSIP search).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "holding_analysis.py ignores the `--quarter` argument and reads a non-quarter-scoped file path; also outputs accession numbers only, not manager names.\nCross-fund ranking for a stock in Q3 can be wrong (wrong quarter file) or fail (file not found), and cannot directly answer prompts requiring manager names (e.g., top-3 fund managers holding Palantir).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "search_stock_cusip.py is hard-coded to read 2025-q2 holdings, making it non-reusable for other quarters and inconsistent with SKILL.md guidance.\nStock CUSIP discovery may miss quarter-specific coverage and violates the intended \"search in requested quarter\" workflow; reduces robustness for tasks focused on Q3.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "13f-analyzer/SKILL.md describes single-quarter summary counts without specifying the correct counting definition (unique CUSIPs) and currently aligns with the buggy row-count behavior.\nEven if users implement custom code, they may follow the wrong counting semantics, yielding inconsistent answers with expected evaluation.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-RI-002/repaired_skill",
+      "method_evidence": "tasks/single-sec-financial-report-RI-002/method_evidence",
+      "historical_executor_run_id": "single-sec-financial-report-RI-002__attempt-003",
+      "executor_run_id": null,
+      "audit_status": "retry_cap_no_valid_result",
+      "adopted_reward": null,
+      "attempts": "tasks/single-sec-financial-report-RI-002/attempts",
+      "audit": "tasks/single-sec-financial-report-RI-002/audit.json"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "trial_id": "single-sec-financial-report-RI-003",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "13f-analyzer/scripts/one_fund_analysis.py cross-quarter merge is broken: read_one_quarter_data() returns a DataFrame indexed by CUSIP (CUSIP is not a column), but one_fund_analysis() merges with on=\"CUSIP\", causing a KeyError and preventing Top Buys/Sells computation.",
+          "locations": []
+        },
+        {
+          "prediction_id": "P002",
+          "description": "13f-analyzer/scripts/one_fund_analysis.py stock TITLEOFCLASS allowlist is malformed due to many missing commas, which concatenates multiple strings into one entry and makes the stock filter unreliable (often yielding empty/incorrect stock_infotable).",
+          "locations": []
+        },
+        {
+          "prediction_id": "P003",
+          "description": "13f-analyzer/scripts/holding_analysis.py ignores the --quarter argument when loading data (reads /root/INFOTABLE.tsv instead of /root/<quarter>/INFOTABLE.tsv), so results can be wrong or fail if that file does not exist.",
+          "locations": []
+        },
+        {
+          "prediction_id": "P004",
+          "description": "13f-analyzer/scripts/holding_analysis.py prints only accession numbers, not fund manager names, which is insufficient for tasks that require manager names (e.g., top holders list).",
+          "locations": []
+        },
+        {
+          "prediction_id": "P005",
+          "description": "fuzzy-name-search/scripts/search_stock_cusip.py hardcodes reading /root/2025-q2/INFOTABLE.tsv and cannot target Q3 data; additionally it has the same malformed TITLEOFCLASS allowlist (missing commas), reducing recall/accuracy.",
+          "locations": []
+        },
+        {
+          "prediction_id": "P006",
+          "description": "13f-analyzer/SKILL.md describes cross-quarter Top Buys workflow but does not warn about aggregation/merge details; with the script bugs above, the documented workflow cannot run as written (location hint points to this area).",
+          "locations": []
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-RI-003/repaired_skill",
+      "method_evidence": "tasks/single-sec-financial-report-RI-003/method_evidence",
+      "historical_executor_run_id": "single-sec-financial-report-RI-003__attempt-003",
+      "executor_run_id": "attempt-005/task__9ee8e6b3",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-sec-financial-report-RI-003/attempts",
+      "audit": "tasks/single-sec-financial-report-RI-003/audit.json"
+    },
+    {
+      "task_id": "sec-financial-report",
+      "trial_id": "single-sec-financial-report-all",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002",
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "Auxiliary scripts hardcode file locations and/or ignore the required quarter folder structure (/root/2025-q2, /root/2025-q3).\nQ3 analysis (and cross-quarter comparisons) will silently use the wrong data or fail to find files, breaking all four questions’ workflows.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "The list of equity-like TITLEOFCLASS strings is syntactically valid but semantically broken: many items are concatenated into single strings because commas are missing.\nEquity filtering using .isin(title_class_of_stocks) will miss most legitimate classes, causing wrong 'stock holdings' counts, wrong AUM subtotals, and degraded stock CUSIP search quality.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "The per-quarter holdings are grouped by CUSIP into a DataFrame whose CUSIP is an index; later code tries to merge on a non-existent 'CUSIP' column.\nCross-quarter comparison for Berkshire (Q3 question) will error at runtime or produce incorrect results if pandas coerces unexpectedly.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "Single-quarter 'number of stock holdings' is reported as number of rows, not number of distinct stocks (CUSIPs).\nQuestion 2 ('How many stocks are held by Renaissance?') will be incorrect because it should be distinct CUSIPs (and typically exclude duplicates/derivative lines).",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "The cross-quarter change logic is not clearly aligned to 'top 5 increased investment by dollar value increase' and has pitfalls (grouping, merge, sorting, and output format).\nQuestion 3 may return wrong top-5 CUSIPs, especially for new positions (missing in baseline) or duplicated CUSIP lines.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "AUM is printed/summed directly from VALUE without clarifying/adjusting for common 13F convention that VALUE is in $ thousands; no conversion is performed.\nQuestion 1 ('what's the AUM') can be off by 1000x depending on dataset conventions; also undermines ranking by 'share value' in Q4.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "holding_analysis.py outputs accession numbers only and does not join COVERPAGE to get manager names, which Q4 requires.\nCannot directly answer Q4 with this script; requires manual mapping or additional processing.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P008",
+          "description": "Scripts assume uppercase column names (VALUE, CUSIP, ACCESSION_NUMBER, etc.) and presence of ISAMENDMENT; dataset may use different casing or missing fields.\nBrittle across dataset variants; likely to crash or return empty results if schema differs even slightly.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P009",
+          "description": "The SKILL.md usage docs imply correct quarter-aware behavior and meaningful outputs, but current scripts violate quarter path conventions and output definitions.\nUsers following the Skill docs will get wrong data (wrong quarter), wrong counts, or runtime errors.",
+          "locations": [
+            {
+              "file": "13f-analyzer/SKILL.md"
+            },
+            {
+              "file": "13f-analyzer/scripts/holding_analysis.py"
+            },
+            {
+              "file": "13f-analyzer/scripts/one_fund_analysis.py"
+            },
+            {
+              "file": "fuzzy-name-search/SKILL.md"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_fund.py"
+            },
+            {
+              "file": "fuzzy-name-search/scripts/search_stock_cusip.py"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-sec-financial-report-all/repaired_skill",
+      "method_evidence": "tasks/single-sec-financial-report-all/method_evidence",
+      "historical_executor_run_id": "single-sec-financial-report-all__attempt-003",
+      "executor_run_id": "attempt-004/task__6efbc686",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-sec-financial-report-all/attempts",
+      "audit": "tasks/single-sec-financial-report-all/audit.json"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "trial_id": "single-video-silence-remover-RI-001",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-001"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "['Opening removal boundary can be early/late by ~smoothing_window/2 seconds, cutting into teaching content or leaving residual opening.', 'Downstream pause detection uses `--start-time` based on this boundary, compounding the offset.']",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "['False negative opening detection; pipeline may fail to remove a silent opening when the signal remains below the chosen threshold or is very quiet.']",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "['If a non-default window size is used, all reported start/end times become scaled incorrectly; removal segments become wrong and may break video cutting.']",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "[\"Misuse of the detector output, incorrect start-time passed to pause-detector, and confusing debugging when observed cuts don't match reported segments.\"]",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "['Even correct pipeline usage can systematically miss early pauses or cut content due to boundary misalignment.']",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-RI-001/repaired_skill",
+      "method_evidence": "tasks/single-video-silence-remover-RI-001/method_evidence",
+      "historical_executor_run_id": "single-video-silence-remover-RI-001__attempt-001",
+      "executor_run_id": null,
+      "audit_status": "retry_cap_no_valid_result",
+      "adopted_reward": null,
+      "attempts": "tasks/single-video-silence-remover-RI-001/attempts",
+      "audit": "tasks/single-video-silence-remover-RI-001/audit.json"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "trial_id": "single-video-silence-remover-RI-002",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-002"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "segment-combiner does not actually merge intervals; it only concatenates and sorts.\nThe task guidance and video-processor completion checks require combined removal segments to be sorted and non-overlapping (and typically merged when overlapping/adjacent). However, segment-combiner/scripts/combine_segments.py simply appends all segments and sorts; it does not clamp, de-overlap, merge overlaps, or merge near-contiguous intervals. This can yield overlapping segments, duplicated removals, and inflated total_duration_seconds.\nDownstream video-processor can produce wrong keep intervals, create invalid/negative trims, or re-include removed content; report math may be inconsistent.",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "segment-combiner trusts input 'duration' and re-emits it without recomputing.\ncombine_segments.py copies seg['duration'] verbatim. If segments are later merged/clamped, durations must be recomputed as end-start. Even without merging, some inputs may omit duration or contain inconsistent values.\ntotal_duration_seconds and per-segment duration fields can be wrong, breaking evaluation checks (duration ≈ end-start) and report consistency.",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "video-processor calculate_keep_segments is incorrect when removal segments overlap or are unsorted/degenerate.\nvideo-processor/scripts/process_video.py sets current_time = seg['end'] unconditionally. If a later segment overlaps and ends earlier than current_time, current_time moves backwards, causing the computed keep intervals to re-include content that should be removed. It also doesn't skip segments with end<=start and does not clamp to [0, total_duration].\nCreates wrong keep segments, potentially invalid ffmpeg trim ranges, or audible/video glitches around overlaps.",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "video-processor assumes every remove segment has a numeric 'duration' field and uses it for removed_duration.\nremoved_duration = sum(s['duration'] for s in remove_segments) will fail if any segment lacks duration, or will be inconsistent if duration mismatches end-start (common after any merge/clamp).\nCrashes or produces incorrect summary/reporting; violates completion check 'duration ≈ end-start'.",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "segment-combiner/SKILL.md and video-processor/SKILL.md do not define/align on an interval convention and merge contract.\nLocation hint points to '区间合并约定' and the corresponding calling/check in video-processor. Currently, segment-combiner docs only say 'Segments are sorted' and 'Compatible with video-processor', but do not specify half-open vs closed intervals, adjacency merge rules, clamping, or how overlaps are handled. video-processor completion checks require non-overlapping segments, but the implementation doesn't enforce it.\nUsers (and downstream automation) can supply segments that pass one skill but break another; increases failure probability and evaluation mismatches.",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "audio-extractor ffmpeg command places '-y' after the output filename (incorrect ffmpeg argument ordering).\naudio-extractor/scripts/extract_audio.py builds cmd ... cmd.extend([output_path, \"-y\"]). In ffmpeg, global options like -y must appear before output(s). Placing -y after output may cause ffmpeg to interpret '-y' as another output or error.\nAudio extraction can fail, blocking the entire pipeline.",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "report-generator computes removed_duration as (original - compressed) and blindly attaches segments, which can break math/segment consistency checks.\nreport-generator/scripts/generate_report.py sets removed_duration = original_duration - compressed_duration, but segments_removed may sum to a different duration (especially if segments are integer seconds while actual trims are float, or if overlaps exist). Evaluation criteria emphasize math consistency and segment validity; current approach can easily diverge from segments.\ncompression_report.json may fail consistency checks (original ≈ compressed + removed AND per-segment duration correctness).",
+          "locations": [
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-RI-002/repaired_skill",
+      "method_evidence": "tasks/single-video-silence-remover-RI-002/method_evidence",
+      "historical_executor_run_id": "single-video-silence-remover-RI-002__attempt-001",
+      "executor_run_id": "attempt-002/task__76e4f148",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-video-silence-remover-RI-002/attempts",
+      "audit": "tasks/single-video-silence-remover-RI-002/audit.json"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "trial_id": "single-video-silence-remover-RI-003",
+      "dataset": "single",
+      "condition": "leave_one_out",
+      "target_repair_ids": [
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "ffmpeg command construction places `-y` after the output filename, which makes ffmpeg treat `-y` as an output and typically fail.\nPipeline can fail at audio extraction and/or final video generation; downstream skills cannot run.",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "pause-detector’s documentation inverts how `threshold_ratio` affects aggressiveness, conflicting with the implementation and the task guidance hint.\nUsers tune the detector in the wrong direction, likely causing over-removal of teaching content or under-removal of pauses.",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "pause-detector default `threshold_ratio=0.5` is likely overly aggressive for typical lecture audio when using local-average comparison, increasing false positives.\nOver-cutting speech/teaching content; compression rate outside expected range.",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "silence-detector tuning table for `threshold_multiplier` is misleading/ambiguous relative to code behavior; higher multiplier typically yields longer detected initial silence (more aggressive removal).\nIncorrect tuning guidance can cause openings not removed (multiplier too low) or over-removal into early teaching (multiplier too high).",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P005",
+          "description": "segment-combiner does not merge/normalize overlapping or touching segments, contradicting its own notes and making downstream processing unsafe.\nOverlapping or nested segments can break video-processor keep-range computation and cause incorrect removal totals and inconsistent reports.",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P006",
+          "description": "video-processor assumes removal segments are already non-overlapping and have non-decreasing ends; it does not sanitize inputs, so overlaps/nesting can create incorrect keep segments.\nPotential ffmpeg filter errors, wrong cuts, A/V sync issues, or failure to remove intended pauses.",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P007",
+          "description": "report-generator computes removed duration as `original - compressed` while also emitting a raw segment list; without ensuring segment durations are normalized and consistent, evaluators may find mismatches.\ncompression_report.json can fail structural/value consistency checks (segment durations, sorting, overlaps, or math consistency if segments are used for validation).",
+          "locations": [
+            {
+              "file": "audio-extractor/scripts/extract_audio.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "report-generator/scripts/generate_report.py"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-RI-003/repaired_skill",
+      "method_evidence": "tasks/single-video-silence-remover-RI-003/method_evidence",
+      "historical_executor_run_id": "single-video-silence-remover-RI-003__attempt-001",
+      "executor_run_id": "attempt-002/task__909a75c6",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-video-silence-remover-RI-003/attempts",
+      "audit": "tasks/single-video-silence-remover-RI-003/audit.json"
+    },
+    {
+      "task_id": "video-silence-remover",
+      "trial_id": "single-video-silence-remover-all",
+      "dataset": "single",
+      "condition": "all_faults",
+      "target_repair_ids": [
+        "RI-001",
+        "RI-002",
+        "RI-003"
+      ],
+      "diagnoses": [
+        {
+          "prediction_id": "P001",
+          "description": "opening 去除不稳定：常见结果是 off-by-(W-1) 秒级偏移，可能切掉开头语音或保留大量无用开场。后续 pause 检测的 start_time 也会被连锁影响。",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P002",
+          "description": "用户按文档调参会反向调节，导致过度剪辑或完全检不出停顿；当能量窗口不是 1s 时，pause 的时间戳与持续时间严重不准。",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P003",
+          "description": "下游视频裁剪可能出现重复剪辑、负 keep 段、ffmpeg concat 报错；报告 removed_duration 与实际压缩不一致，导致评测失败。",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            }
+          ]
+        },
+        {
+          "prediction_id": "P004",
+          "description": "多段剪辑经常直接 ffmpeg 执行失败；或者输出时长与 segments 统计不一致，导致 report 校验失败（original ≈ compressed + removed）。",
+          "locations": [
+            {
+              "file": "silence-detector/scripts/detect_silence.py"
+            },
+            {
+              "file": "silence-detector/SKILL.md"
+            },
+            {
+              "file": "pause-detector/scripts/detect_pauses.py"
+            },
+            {
+              "file": "pause-detector/SKILL.md"
+            },
+            {
+              "file": "segment-combiner/scripts/combine_segments.py"
+            },
+            {
+              "file": "segment-combiner/SKILL.md"
+            },
+            {
+              "file": "video-processor/scripts/process_video.py"
+            },
+            {
+              "file": "video-processor/SKILL.md"
+            }
+          ]
+        }
+      ],
+      "repaired_bundle": "tasks/single-video-silence-remover-all/repaired_skill",
+      "method_evidence": "tasks/single-video-silence-remover-all/method_evidence",
+      "historical_executor_run_id": "single-video-silence-remover-all__attempt-004",
+      "executor_run_id": "attempt-005/task__927b8d7d",
+      "audit_status": "valid_failure",
+      "adopted_reward": 0.0,
+      "attempts": "tasks/single-video-silence-remover-all/attempts",
+      "audit": "tasks/single-video-silence-remover-all/audit.json"
+    }
+  ]
+}

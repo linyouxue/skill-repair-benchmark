@@ -1,0 +1,198 @@
+--- input/senior-data-engineer/SKILL.md
++++ repaired/senior-data-engineer/SKILL.md
+@@ -113,6 +113,28 @@
+ 4. Generate Flink/Spark job scaffolding with `stream_processor.py`
+ 5. Deploy and monitor with `streaming_quality_validator.py`
+ 
++#### Semantic Contract Gate for Keyed Event Aggregations (Workflow 2 requirement)
++
++Before implementing a keyed aggregation that combines **activity events** with **lifecycle/terminal events**, write down and preserve three separate predicates:
++
++1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate.
++
++2. **Completion-event predicate:** which lifecycle/terminal event(s) mark the key (e.g., userId, sessionId, jobId, orderId) as **finished**.
++   - This predicate must be sourced from the authoritative schema/specification or dataset documentation (event-type enum, state machine, format docs), **not guessed**.
++   - If multiple terminal event types exist, list them explicitly and define how to handle multiples (first terminal wins vs last terminal wins; precedence between terminal types; idempotency).
++
++3. **Output-eligibility / emission predicate:** when a result is allowed to be emitted for a key, and how to ensure it is emitted **exactly once**.
++   - Default rule (unless the task explicitly says otherwise): **emit only after the completion-event predicate is satisfied**.
++   - Keys that have contributing activity but **never reach a valid completion event must not be emitted**.
++   - Specify the finalization mechanics (e.g., state + event-time/processing-time timer, watermark advancement, window/session closure, or explicit end-of-stream signal) so output is not prematurely produced.
++
++**Result output qualification (required):** treat lifecycle completion as a hard gate for final output. Do not produce partial/ongoing aggregates for keys that have not been proven complete by the completion-event predicate.
++
++Validate all three predicates with small hand-checkable fixtures:
++- a key with qualifying activity **and** the required completion event must be emitted (and emitted exactly once);
++- a key with qualifying activity but **no** valid completion event must **not** be emitted;
++- a key with a completion event but no qualifying activity must follow the task’s defined behavior (commonly omit; sometimes emit a default such as 0)—validate against the requirements.
++
+ **Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, and real-time quality monitoring
+ 
+ 
+@@ -288,13 +310,24 @@
+ 
+ 1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate.
+ 
+-
+-
+-
+-Before declaring the job complete, validate both positive and negative semantics with small hand-checkable fixtures:
+-
+-- a key with qualifying activity and the required completion event must be emitted;
+-- compare the output key set as well as aggregate values, and investigate unexpected extra keys even when all expected keys are present.
++2. **Completion-event predicate:** which lifecycle/terminal event(s) mark the key (e.g., userId, sessionId, jobId, orderId) as **finished**.
++   - This predicate must be sourced from the authoritative schema/specification or dataset documentation (event-type enum, state machine, format docs), **not guessed**.
++   - If multiple terminal event types exist, list them explicitly and define how to handle multiples (first terminal wins vs last terminal wins; precedence between terminal types; idempotency).
++
++3. **Output-eligibility / emission predicate:** when a result is allowed to be emitted for a key, and how to ensure it is emitted **exactly once**.
++   - Default rule (unless the task explicitly says otherwise): **emit only after the completion-event predicate is satisfied**.
++   - Keys that have contributing activity but **never reach a valid completion event must not be emitted**.
++   - Specify the finalization mechanics (e.g., state + event-time/processing-time timer to wait for window/session closure, watermark advancement, or explicit end-of-stream signal) so the output is not prematurely produced.
++
++**Result output qualification (required):** treat lifecycle completion as a hard gate for final output. Do not produce partial/ongoing aggregates for keys that have not been proven complete by the completion-event predicate.
++
++Before declaring the job complete, validate all three predicates with small hand-checkable fixtures:
++
++- a key with qualifying activity **and** the required completion event must be emitted (and emitted exactly once);
++- a key with qualifying activity but **no** valid completion event must **not** be emitted;
++- a key with a completion event but no qualifying activity must follow the task’s defined behavior (commonly omit; sometimes emit a default such as 0)—validate against the requirements;
++- compare the output key set as well as aggregate values, and investigate unexpected extra keys even when all expected keys are present;
++- verify duplicate/late lifecycle events do not cause duplicate final outputs.
+ 
+ ## Python Tools
+ 
+@@ -493,9 +526,9 @@
+ - **dbt Models:** Staging, intermediate, fact tables, dimensions with SCD Type 2
+ - **SQL Patterns:** Incremental merge (upsert), deduplication, date spine, window functions
+ - **Python Pipelines:** Data quality validation class, retry decorators, error handling
+-- **Real-Time Streaming:** Apache Flink DataStream jobs (Java), Kafka Streams applications, PyFlink jobs, AWS Kinesis consumers, Docker Compose for streaming stack
++- **Real-Time Streaming:** Apache Flink DataStream jobs (Java), Kafka Streams applications, PyFlink jobs, AWS Kinesis consumers, Docker Compose for streaming stack (Kafka, Flink, Schema Registry)
+ - **Kafka Configs:** Producer/consumer properties templates, topic configurations, security configurations
+-- **Docker:** Dockerfiles for data pipelines, Docker Compose for local development including streaming stack (Kafka, Flink, Schema Registry)
++- **Docker:** Dockerfiles for data pipelines, Docker Compose for local development including streaming stack
+ - **Configuration:** dbt project config, Spark configuration, Airflow variables, streaming pipeline YAML
+ - **Testing:** pytest fixtures, integration tests, data quality tests
+ 
+--- input/skilltta-task-guidance/SKILL.md
++++ repaired/skilltta-task-guidance/SKILL.md
+@@ -0,0 +1,120 @@
++---
++name: skilltta-task-guidance
++---
++
++# SkillTTA Temporary Task-Guidance: Longest Stage (Session) per Finished Job in Flink
++
++## Goal
++Build a Flink job that:
++1) Parses **task-events** and **job-events** (gzipped CSV text lines).
++2) For each **jobId**, identifies **stages** as *bursts* of **task SUBMIT** events separated by at least **10 minutes of inactivity** (in event time).
++3) Finds, per job, the **maximum number of task SUBMIT events within any single stage**.
++4) **Outputs results only for jobs that have finished** (per job-events completion semantics).
++5) Writes one tuple per job as exactly: `(jobId,longestStageTaskCount)` (one line each; order unimportant).
++
++> Counting rule: if the “same task” is submitted multiple times (fail/evict/resubmit), **count each SUBMIT separately**.
++
++---
++
++## Key Definitions
++- **Stage**: a session of **task SUBMIT** events for a job.
++- **Session gap**: **10 minutes** of no SUBMITs for that job.
++- **Longest stage**: the stage with the maximum SUBMIT count for that job.
++- **Job finished**: determined from **job-events** by the dataset’s completion/terminal event types (see `ClusterData2011_2.md` / `format.pdf`).
++  - Workflow requirement: completion must be based on the **proper job terminal event(s)**; do not guess.
++  - Common terminal events in this dataset family: `FINISH`, and often also `KILL`/`FAIL` as terminal; use the schema docs.
++
++---
++
++## Workflow 1 — Robust Parsing + Minimal Fields
++
++### 1. Implement datatypes under `clusterdata.datatypes`
++Create two POJOs (or simple classes) expected by `clusterdata.utils.AppBase`:
++- `TaskEvent`
++  - Required fields: `long timestamp`, `long jobId`, `int eventType` (optionally `long taskIndex` if needed for debug).
++- `JobEvent`
++  - Required fields: `long timestamp`, `long jobId`, `int eventType`.
++
++### 2. Parse CSV safely (pattern: “load → filter → transform”)
++Use a `MapFunction<String, TaskEvent>` / `JobEvent` with:
++- Split by comma.
++- Handle empty fields (treat as `-1` or skip line).
++- Skip malformed lines (return `null` then `filter(Objects::nonNull)`).
++
++### 3. Timestamp unit handling
++Dataset timestamps are **microseconds**.
++- Flink event-time APIs operate on `long` and are unit-agnostic, but built-in `Time.minutes(10)` is in **milliseconds**.
++- Recommended: convert to **milliseconds** early:
++  - `eventTimeMs = timestampMicros / 1000L`
++  - Define session gap as `Time.minutes(10)` (i.e., 600,000 ms).
++
++---
++
++## Workflow 2 — Stage Detection + Completion-Gated Output (critical)
++
++### Step A: Extract and sessionize task SUBMIT events
++1) Filter task-events to **SUBMIT only** using the event-type code from docs.
++2) Assign timestamps & watermarks:
++- If input is mostly time-ordered, `forMonotonousTimestamps()` is OK.
++- Safer for traces: `forBoundedOutOfOrderness(Duration.ofMinutes(1))`.
++
++3) Key by `jobId` and define stages via **event-time session windows**:
++- `EventTimeSessionWindows.withGap(Time.minutes(10))`
++
++4) Count SUBMITs per session window:
++- Use an `AggregateFunction` (count) or `ProcessWindowFunction`.
++- Output per window: `(jobId, stageCount)`.
++
++### Step B: Reduce to maximum stage size per job
++From `(jobId, stageCount)`:
++- `keyBy(jobId)`
++- `reduce(maxBy stageCount)` or `max(1)`
++Result stream: `(jobId, maxStageCountSoFar)`.
++
++### Step C (Workflow requirement): Emit results **only after the job is finished**
++You must gate final output using **job-events**:
++1) From job-events, filter to the **job terminal/completion** event type(s) per schema docs.
++2) Key completion stream by `jobId`.
++3) Connect completion stream with the `maxStageCount` stream using a `KeyedCoProcessFunction`:
++
++State to maintain per job:
++- `ValueState<Integer> maxStage` (default 0)
++- `ValueState<Boolean> finished` (default false)
++- `ValueState<Long> finishTsMs` (optional)
++
++Logic:
++- On receiving `(jobId, maxStageCandidate)`:
++  - update `maxStage = max(maxStage, candidate)`.
++- On receiving a finish event for `jobId`:
++  - set `finished = true`, store `finishTsMs`.
++  - register an **event-time timer** at `finishTsMs + sessionGapMs`.
++    - Rationale: ensures the last session window (which closes on inactivity) has had time (in event-time) to emit.
++- On timer:
++  - if `finished == true`, emit exactly once: `(jobId, maxStage)`.
++  - optionally clear state to avoid duplicates.
++
++> Result output qualification (per Workflow 2): only jobs with a valid terminal event should produce output; avoid emitting for jobs that never finish in the provided slice.
++
++---
++
++## Output Formatting & Sink
++- Use `Tuple2<Long, Integer>` (or `Tuple2<Integer,Integer>` if jobId safely fits) so Flink’s default `toString()` prints exactly:
++  - `(jobId,maxStageCount)`
++- Write to a **single local file**:
++  - `writeAsText(output, FileSystem.WriteMode.OVERWRITE).setParallelism(1)`
++
++---
++
++## Practical Checklist (avoid common failures)
++- [ ] SUBMIT event-type codes taken from dataset docs, not assumed.
++- [ ] Job completion/terminal event-type codes taken from dataset docs (FINISH, and possibly others if specified).
++- [ ] Convert timestamps from microseconds → milliseconds (or keep microseconds consistently, but then the gap must match).
++- [ ] Session gap is exactly 10 minutes in event time.
++- [ ] Count all SUBMITs (including resubmissions).
++- [ ] Emit **one line per finished jobId**.
++- [ ] Set sink parallelism to 1 to avoid multiple part-files.
++
++---
++
++## Minimal Architecture Summary
++`task_events.gz` → parse → filter SUBMIT → watermark → session window (10m gap) → count per session → max per job → connect with `job_finish` stream → timer-based finalize → write tuples

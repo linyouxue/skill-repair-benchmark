@@ -1,0 +1,121 @@
+{
+  "diagnoses": [
+    {
+      "id": "D1",
+      "summary": "Q02 representative thermocouple selection logic is not robust for a TAL acceptance window (min/max); it instructs selecting the minimum TAL only, which can miss violations on the high side (too-long TAL) and is not a generally correct “most representative / worst-case” rule for a bounded range.",
+      "evidence": [
+        "File: reflow-profile-compliance-toolkit/SKILL.md",
+        "Section: “Deterministic sensor selection (tie-breaks)” states: “If selecting minimum metric (e.g., ‘coldest’ TAL or peak): choose (min_value, smallest_tc_id).”",
+        "This implies TAL is treated as a pure ‘minimum is worst’ metric; however the task Q02 explicitly requires checking TAL against both a required minimum and maximum from the handbook, so the worst-case TC could be either minimum TAL (risk < min) or maximum TAL (risk > max)."
+      ],
+      "impact": "An implementation following the skill can incorrectly label runs as compliant by choosing the minimum TAL TC (passing) while another TC exceeds the max TAL limit (failing), or can choose a non-representative TC when all TCs are within bounds."
+    },
+    {
+      "id": "D2",
+      "summary": "The toolkit lacks explicit deliverables/task-completion guidance for producing the required output artifacts (q01.json–q05.json), despite the trial requiring file generation; this is specifically called out by the location hint.",
+      "evidence": [
+        "File: reflow-profile-compliance-toolkit/SKILL.md",
+        "The document provides computation recipes and guardrails but does not explicitly enumerate required output files (/app/output/q01.json ... q05.json) and completion conditions (sorted keys, rounding, null rules, missing-TC handling per question).",
+        "Location hint: “reflow-profile-compliance-toolkit/SKILL.md 中交付物和任务完成条件” indicates this gap is within that file."
+      ],
+      "impact": "Agents may compute metrics correctly but fail verification due to missing file writes, wrong filenames, missing required fields, unsorted ordering, or inconsistent conservative pass/fail defaults."
+    },
+    {
+      "id": "D3",
+      "summary": "Sensor tie-break example code in the toolkit is internally inconsistent/incorrect and can lead to non-deterministic or wrong tc_id selection in ties.",
+      "evidence": [
+        "File: reflow-profile-compliance-toolkit/SKILL.md",
+        "Section: “Deterministic sensor selection (tie-breaks)” includes: `best = max(items, key=lambda x: (x.value, -lex(x.tc_id)))  # or sort then take first`",
+        "`lex` is undefined, and negating a lexicographic value is not a standard Python approach; also it contradicts the earlier prose rule “(max_value, smallest_tc_id)” because typical max() tie-breaking would pick the largest tc_id unless explicitly inverted correctly."
+      ],
+      "impact": "Tie cases can produce unstable or wrong tc_id outputs, which can break deterministic grading and can change compliance outcomes if the chosen TC differs."
+    },
+    {
+      "id": "D4",
+      "summary": "Closely related guidance in reflow-machine-maintenance-guidance/SKILL.md repeats the same oversimplified “min metric for TAL” reduction rule and may perpetuate the Q02 issue if that skill is invoked instead of the toolkit.",
+      "evidence": [
+        "File: reflow-machine-maintenance-guidance/SKILL.md",
+        "It states: “When reducing multiple thermocouples to one run-level result, if selecting minimum metric, choose (min_value, smallest_tc_id).” and lists TAL-type metrics alongside that guidance without addressing bounded-window worst-case selection."
+      ],
+      "impact": "Even if the toolkit is fixed, another skill in the bundle can still steer implementations toward the incorrect Q02 representative TC choice."
+    }
+  ],
+  "affected_files": [
+    "reflow-profile-compliance-toolkit/SKILL.md",
+    "reflow-machine-maintenance-guidance/SKILL.md"
+  ],
+  "repair_plan": [
+    {
+      "step": 1,
+      "action": "Update Q02 representative thermocouple selection guidance to be acceptance-window aware.",
+      "details": [
+        "Add an explicit rule for metrics with both min and max limits (like TAL): choose the ‘most critical’ TC with respect to the allowed window, not simply min(TAL).",
+        "Define ‘most critical’ deterministically as:",
+        "- If any TC is outside [min,max], select the TC with the largest absolute violation distance to the nearest bound (tie-break by smallest tc_id).",
+        "- Else (all within bounds), select the TC with the smallest margin to either bound: min( TAL-min_required, max_required-TAL ) (tie-break by smallest tc_id).",
+        "If only one-sided bound exists in the handbook (only min or only max), revert to selecting the worst-case side (min TAL for min-only; max TAL for max-only).",
+        "If the handbook explicitly specifies a particular TC/cold-spot sensor for acceptance, that overrides the heuristic."
+      ]
+    },
+    {
+      "step": 2,
+      "action": "Add a Deliverables & Task-Completion Conditions section to reflow-profile-compliance-toolkit/SKILL.md.",
+      "details": [
+        "Explicitly list required output paths and filenames: /app/output/q01.json ... /app/output/q05.json.",
+        "Enumerate schema requirements already implied by the trial: rounding to 2 decimals, sorting rules for arrays and dict keys, null handling, and conservative compliance behavior when requirements/measurements are missing.",
+        "Include a short per-question ‘done’ checklist (e.g., Q03: missing TC => failing)."
+      ]
+    },
+    {
+      "step": 3,
+      "action": "Fix/replace the incorrect tie-break example code in the toolkit with executable, unambiguous Python patterns.",
+      "details": [
+        "Replace the `lex(...)` example with a stable approach such as:",
+        "- For max metric with smallest tc_id tie-break: `best = max(items, key=lambda x: (x.value, -int_or_string_order(x.tc_id)))` is still risky; prefer sorting:",
+        "`best = sorted(items, key=lambda x: (-x.value, x.tc_id))[0]`",
+        "- For min metric: `best = sorted(items, key=lambda x: (x.value, x.tc_id))[0]`",
+        "Add a note: treat tc_id as string; lexical sort is the intended deterministic ordering unless handbook specifies numeric TC ids."
+      ]
+    },
+    {
+      "step": 4,
+      "action": "Mirror the window-aware TAL representative selection guidance into reflow-machine-maintenance-guidance/SKILL.md (or reference the toolkit) to prevent conflicting instructions.",
+      "details": [
+        "Add a brief subsection: ‘For windowed specs (min/max) choose most critical vs window’ and reuse the same deterministic rule/tie-break.",
+        "Keep existing guidance for purely max-limited (ramp) and min-limited (peak min) metrics unchanged."
+      ]
+    }
+  ],
+  "preservation_constraints": [
+    "Do not add or change any numeric thresholds; all limits/windows must still be sourced from handbook.pdf at runtime.",
+    "Preserve existing computation recipes (slope calculation, interpolation) except where clarifying representative-TC selection and tie-break correctness.",
+    "Preserve the existing sorting, rounding, and null/NaN guardrails; only make them more explicit in a deliverables/completion section.",
+    "Do not solve the trial questions or embed dataset-specific values in the skill text."
+  ],
+  "confidence": 0.78,
+  "_usage": {
+    "completion_tokens": 3000,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 1331,
+      "rejected_prediction_tokens": 0
+    },
+    "latency_checkpoint": {
+      "engine_tbt_ms": 17,
+      "engine_ttft_ms": 400,
+      "engine_ttlt_ms": 51366,
+      "pre_inference_ms": 144,
+      "service_tbt_ms": 17,
+      "service_ttft_ms": 926,
+      "service_ttlt_ms": 51887,
+      "user_visible_ttft_ms": 782
+    },
+    "prompt_tokens": 9250,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0
+    },
+    "total_tokens": 12250
+  }
+}

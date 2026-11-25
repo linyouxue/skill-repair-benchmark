@@ -1,0 +1,551 @@
+--- input/dialogue-graph/SKILL.md
++++ repaired/dialogue-graph/SKILL.md
+@@ -39,12 +39,28 @@
+ graph.add_node(Node(id="Choices", type="choice"))
+ ```
+ 
++If you are parsing and may encounter references before definitions (common in scripts), you can create placeholders and later upgrade them using **upsert**:
++
++```python
++# Placeholder (e.g., referenced as an edge target before the section is parsed)
++graph.upsert_node(Node(id="LaterSection", type="line", speaker="", text=""))
++
++# Later, overwrite with real content when parsed
++graph.upsert_node(Node(id="LaterSection", type="line", speaker="Narrator", text="You arrive."))
++```
++
+ ### 3. Adding Edges
+ Connect nodes (transitions).
++
++**Important:** All edge targets must exist as nodes. This includes `End`.
++If you reference `End`, you must add an `End` node (or upsert it) first.
+ 
+ ```python
+ # Simple transition
+ graph.add_edge(Edge(source="Start", target="Choices"))
++
++# If you want an End state, materialize it as a node
++graph.upsert_node(Node(id="End", type="line", speaker="", text="End"))
+ 
+ # Choice transition (with text)
+ graph.add_edge(Edge(source="Choices", target="End", text="1. Run away"))
+@@ -59,6 +75,13 @@
+ json_str = graph.to_json()
+ ```
+ 
++Export Graphviz DOT (for tasks that require a `.dot` file):
++
++```python
++dot_source = graph.to_dot()
++graph.write_dot("dialogue.dot")
++```
++
+ ### 5. Validation
+ Check for integrity.
+ 
+@@ -67,8 +90,12 @@
+ # Returns list of strings, e.g., ["Edge 'Start'->'Unk' points to missing node 'Unk'"]
+ ```
+ 
++Validation rules include:
++- Every edge source exists
++- Every edge target exists (**including `End` if referenced**)
++
+ ### 6. Visualization
+-Generate a PNG/SVG graph diagram.
++Generate a PNG/SVG/PDF graph diagram.
+ 
+ ```python
+ # Requires: pip install graphviz
+@@ -85,6 +112,8 @@
+ - **Gray edges** for regular choices
+ - **Black edges** for simple transitions
+ 
++Note: visualization reflects the actual graph contents; it does not silently add nodes like `End`.
++
+ ### 7. Loading from JSON
+ Load an existing dialogue graph.
+ 
+--- input/dialogue-graph/scripts/dialogue_graph.py
++++ repaired/dialogue-graph/scripts/dialogue_graph.py
+@@ -1,5 +1,6 @@
+ import json
+-from typing import Any
++from collections import deque
++from typing import Any, Optional
+ 
+ 
+ class Node:
+@@ -7,15 +8,11 @@
+         self.id = id
+         self.text = text
+         self.speaker = speaker
+-        self.type = type # 'line', 'choice'
++        self.type = type  # 'line', 'choice'
+ 
+     def to_dict(self) -> dict[str, Any]:
+-        return {
+-            "id": self.id,
+-            "text": self.text,
+-            "speaker": self.speaker,
+-            "type": self.type
+-        }
++        return {"id": self.id, "text": self.text, "speaker": self.speaker, "type": self.type}
++
+ 
+ class Edge:
+     def __init__(self, source: str, target: str, text: str = ""):
+@@ -24,10 +21,9 @@
+         self.text = text
+ 
+     def to_dict(self) -> dict[str, Any]:
+-        d = {"from": self.source, "to": self.target}
+-        if self.text is not None:
+-            d["text"] = self.text
+-        return d
++        # Keep schema stable: always include text
++        return {"from": self.source, "to": self.target, "text": self.text if self.text is not None else ""}
++
+ 
+ class Graph:
+     def __init__(self):
+@@ -39,134 +35,180 @@
+             raise ValueError(f"Node {node.id} already exists")
+         self.nodes[node.id] = node
+ 
++    def upsert_node(self, node: Node) -> None:
++        """Insert or update a node.
++
++        This supports the common parsing pattern of creating placeholder nodes when
++        an edge references a target before its section is parsed, then upgrading
++        the placeholder later.
++        """
++        self.nodes[node.id] = node
++
+     def add_edge(self, edge: Edge):
+         self.edges.append(edge)
+ 
+     def validate(self) -> list[str]:
+-        """Validate the graph structure."""
+-        errors = []
++        """Validate the graph structure.
++
++        Notes:
++        - All edge sources and targets must exist as nodes, including 'End' if referenced.
++        - This method does not enforce reachability; parsers/tasks may enforce that separately.
++        """
++        errors: list[str] = []
+         for edge in self.edges:
+             if edge.source not in self.nodes:
+                 errors.append(f"Edge source '{edge.source}' not found")
+-            if edge.target not in self.nodes and edge.target != "End":
+-                errors.append(f"Edge target '{edge.target}' not found")
++            if edge.target not in self.nodes:
++                if edge.target == "End":
++                    errors.append(
++                        "Edge target 'End' not found (if you reference 'End', you must add Node(id='End', ...) to the graph)"
++                    )
++                else:
++                    errors.append(f"Edge target '{edge.target}' not found")
+         return errors
+ 
+     def to_dict(self) -> dict[str, Any]:
+         return {
+             "nodes": [n.to_dict() for n in self.nodes.values()],
+-            "edges": [e.to_dict() for e in self.edges]
++            "edges": [e.to_dict() for e in self.edges],
+         }
+ 
+     def to_json(self) -> str:
+         return json.dumps(self.to_dict(), indent=2)
+ 
+-    def visualize(self, output_file: str = 'dialogue_graph', format: str = 'png') -> str:
+-        """
+-        Create a visual representation of the dialogue graph using graphviz.
+-
+-        Args:
+-            output_file: Output filename (without extension)
+-            format: Output format ('png', 'svg', 'pdf')
+-
+-        Returns:
+-            Path to the generated file
+-
+-        Requires:
+-            pip install graphviz
+-            Also requires Graphviz system binary: https://graphviz.org/download/
+-        """
+-        try:
+-            from graphviz import Digraph
+-        except ImportError as exc:
+-            raise ImportError(
+-                "graphviz package required. Install with: pip install graphviz"
+-            ) from exc
+-
+-        dot = Digraph(comment='Dialogue Graph', format=format)
+-        dot.attr(rankdir='TB', splines='ortho', nodesep='0.5', ranksep='0.8')
+-        dot.attr('node', fontname='Arial', fontsize='10')
+-        dot.attr('edge', fontname='Arial', fontsize='8')
+-
+-        # Speaker color mapping
++    @staticmethod
++    def _dot_escape(value: str) -> str:
++        # DOT labels use C-like escaping; minimally escape backslashes, quotes and newlines.
++        return (
++            value.replace("\\", "\\\\")
++            .replace('"', "\\\"")
++            .replace("\r\n", "\\n")
++            .replace("\n", "\\n")
++            .replace("\r", "\\n")
++        )
++
++    def to_dot(self) -> str:
++        """Export the graph as Graphviz DOT source.
++
++        Works without graphviz installed.
++        """
++        lines: list[str] = []
++        lines.append("digraph Dialogue {")
++        lines.append("  rankdir=TB;")
++        lines.append("  splines=ortho;")
++        lines.append("  nodesep=0.5;")
++        lines.append("  ranksep=0.8;")
++        lines.append("  node [fontname=\"Arial\", fontsize=10];")
++        lines.append("  edge [fontname=\"Arial\", fontsize=8];")
++
++        # Speaker color mapping (kept consistent with visualize())
+         colors = {
+-            'Narrator': 'lightyellow',
+-            'Guard': 'lightcoral',
+-            'Stranger': 'plum',
+-            'Merchant': 'lightgreen',
+-            'Barkeep': 'peachpuff',
+-            'Kira': 'lightcyan',
++            "Narrator": "lightyellow",
++            "Guard": "lightcoral",
++            "Stranger": "plum",
++            "Merchant": "lightgreen",
++            "Barkeep": "peachpuff",
++            "Kira": "lightcyan",
+         }
+ 
+-        # Add nodes
++        # Nodes
+         for node_id, node in self.nodes.items():
+-            text = node.text[:37] + '...' if len(node.text) > 40 else node.text
+-
+-            if node.type == 'choice':
+-                dot.node(node_id, node_id, shape='diamond', style='filled',
+-                        fillcolor='lightblue', width='1.5')
++            if node.type == "choice":
++                label = self._dot_escape(node_id)
++                lines.append(
++                    f"  \"{self._dot_escape(node_id)}\" [label=\"{label}\", shape=diamond, style=filled, fillcolor=lightblue, width=1.5];"
++                )
+             else:
++                text = node.text[:37] + "..." if len(node.text) > 40 else node.text
+                 if node.speaker and text:
+                     label = f"{node_id}\\n{node.speaker}: {text}"
+                 elif node.speaker:
+                     label = f"{node_id}\\n{node.speaker}"
+                 else:
+                     label = node_id
+-
+-                color = colors.get(node.speaker, 'white')
+-                dot.node(node_id, label, shape='box', style='filled,rounded',
+-                        fillcolor=color, width='2')
+-
+-        # Add End node
+-        dot.node('End', 'END', shape='doublecircle', style='filled',
+-                fillcolor='lightgray', width='0.8')
+-
+-        # Add edges
++                fill = colors.get(node.speaker, "white")
++                lines.append(
++                    f"  \"{self._dot_escape(node_id)}\" [label=\"{self._dot_escape(label)}\", shape=box, style=\"filled,rounded\", fillcolor=\"{fill}\", width=2];"
++                )
++
++        # Edges
+         for edge in self.edges:
+-            edge_text = edge.text[:27] + '...' if len(edge.text) > 30 else edge.text
+-
++            edge_text = edge.text[:27] + "..." if edge.text and len(edge.text) > 30 else (edge.text or "")
++            attrs: list[str] = []
+             if edge_text:
+-                if '[' in edge_text and ']' in edge_text:
+-                    # Skill check edge
+-                    dot.edge(edge.source, edge.target, label=edge_text,
+-                            color='darkblue', fontcolor='darkblue', style='bold')
++                attrs.append(f"label=\"{self._dot_escape(edge_text)}\"")
++                if "[" in edge_text and "]" in edge_text:
++                    attrs.append("color=darkblue")
++                    attrs.append("fontcolor=darkblue")
++                    attrs.append("style=bold")
+                 else:
+-                    dot.edge(edge.source, edge.target, label=edge_text,
+-                            color='gray40', fontcolor='gray40')
++                    attrs.append("color=gray40")
++                    attrs.append("fontcolor=gray40")
+             else:
+-                dot.edge(edge.source, edge.target, color='black')
+-
+-        # Render
+-        output_path = dot.render(output_file, cleanup=True)
+-        return output_path
+-
+-    @staticmethod
+-    def from_json(json_str: str) -> 'Graph':
++                attrs.append("color=black")
++
++            attr_str = ", ".join(attrs)
++            lines.append(
++                f"  \"{self._dot_escape(edge.source)}\" -> \"{self._dot_escape(edge.target)}\" [{attr_str}];"
++            )
++
++        lines.append("}")
++        return "\n".join(lines) + "\n"
++
++    def write_dot(self, path: str) -> None:
++        """Write DOT source to a file."""
++        with open(path, "w", encoding="utf-8") as f:
++            f.write(self.to_dot())
++
++    def visualize(self, output_file: str = "dialogue_graph", format: str = "png") -> str:
++        """Create a visual representation of the dialogue graph using graphviz.
++
++        This renders the same structure as `to_dot()` (visualize reflects the graph; it does
++        not inject extra nodes like 'End').
++
++        Args:
++            output_file: Output filename (without extension)
++            format: Output format ('png', 'svg', 'pdf')
++
++        Returns:
++            Path to the generated file
++
++        Requires:
++            pip install graphviz
++            Also requires Graphviz system binary: https://graphviz.org/download/
++        """
++        try:
++            from graphviz import Source
++        except ImportError as exc:
++            raise ImportError("graphviz package required. Install with: pip install graphviz") from exc
++
++        src = Source(self.to_dot(), format=format)
++        # graphviz.Source.render returns the output path
++        return src.render(filename=output_file, cleanup=True)
++
++    @staticmethod
++    def from_json(json_str: str) -> "Graph":
+         """Load a Graph from JSON string."""
+         data = json.loads(json_str)
+         return Graph.from_dict(data)
+ 
+     @staticmethod
+-    def from_dict(data: dict) -> 'Graph':
++    def from_dict(data: dict) -> "Graph":
+         """Load a Graph from a dictionary."""
+         graph = Graph()
+-        for n in data.get('nodes', []):
+-            graph.nodes[n['id']] = Node(
+-                id=n['id'],
+-                text=n.get('text', ''),
+-                speaker=n.get('speaker', ''),
+-                type=n.get('type', 'line')
++        for n in data.get("nodes", []):
++            graph.nodes[n["id"]] = Node(
++                id=n["id"],
++                text=n.get("text", ""),
++                speaker=n.get("speaker", ""),
++                type=n.get("type", "line"),
+             )
+-        for e in data.get('edges', []):
+-            graph.edges.append(Edge(
+-                source=e['from'],
+-                target=e['to'],
+-                text=e.get('text', '')
+-            ))
++        for e in data.get("edges", []):
++            graph.edges.append(Edge(source=e["from"], target=e["to"], text=e.get("text", "")))
+         return graph
+ 
+     @staticmethod
+-    def from_file(filepath: str) -> 'Graph':
++    def from_file(filepath: str) -> "Graph":
+         """Load a Graph from a JSON file."""
+-        with open(filepath, encoding='utf-8') as f:
++        with open(filepath, encoding="utf-8") as f:
+             return Graph.from_json(f.read())
+--- input/skilltta-task-guidance/SKILL.md
++++ repaired/skilltta-task-guidance/SKILL.md
+@@ -0,0 +1,170 @@
++---
++name: skilltta-task-guidance
++---
++
++# SkillTTA Task Guidance: Dialogue Script → JSON Graph (+ DOT)
++
++## Goal
++Implement a parser that converts a dialogue script text into a graph:
++
++```json
++{
++  "nodes": [{"id":"", "text":"", "speaker":"", "type":""}],
++  "edges": [{"from":"", "to":"", "text":""}]
++}
++```
++
++and also exports a Graphviz `.dot` visualization.
++
++Key constraints to satisfy:
++1. **All nodes must be reachable from the first node** (start node).
++2. **All edge targets must exist** (create missing target nodes when referenced), except there should be **no “dangling edge”**; “last node” means “node with no outgoing edges”, not “edge to missing node”.
++3. **Multiple paths can lead to a node `End`**; `End` should exist as a node when referenced.
++
++---
++
++## Input Format (Expected Patterns)
++The script is organized into **sections**:
++
++- Section header: `[SectionId]`
++- Dialogue line:
++  - `Speaker: text` optionally followed by `-> TargetSection`
++- Choice lines (numbered):
++  - `1. option text -> TargetSection`
++  - Option text may include tags like `[Lie]` or `[Attack]`.
++
++Blank lines may appear between items.
++
++---
++
++## Parsing Strategy
++### 1) Split into sections
++Scan line-by-line:
++- When encountering `^[\[](.+)[\]]$`, start a new current section.
++- Collect subsequent non-header lines as that section’s body.
++
++Store an ordered list of section ids to determine the **start node** = first section encountered.
++
++### 2) Decide node type per section
++Common practical convention for validation:
++- If a section contains any numbered choice lines (`^\d+\.`), create a **single node** of type `"choice"` with `id = section_id`.
++- Else, create a node of type `"line"` with `id = section_id`.
++
++### 3) Parse node fields
++- **Line node**:
++  - Parse first non-empty line like `Speaker: text (-> target optional)`.
++  - `speaker` = parsed speaker, else empty string.
++  - `text` = dialogue text without the `-> Target` suffix.
++
++- **Choice node**:
++  - `speaker` = `""` (or a stable sentinel like `""`).
++  - `text` = either empty or a short prompt like `"Choose:"` (keep stable; do not inject extra options into node text if edges carry option text).
++
++---
++
++## Adding Edges (Critical)
++### A) Dialogue line edges
++For a line node, if its line contains `-> Target`:
++- Add edge:
++  - `from = current_section_id`
++  - `to = Target`
++  - `text = ""` (or `null` but prefer empty string for schema stability)
++
++### B) Choice option edges
++For each numbered choice line:
++- Extract option label text and its target:
++  - Example: `3. [Lie] I'm a merchant... -> MerchantPath`
++  - Edge:
++    - `from = current_section_id`
++    - `to = MerchantPath`
++    - `text = "[Lie] I'm a merchant..."` (option text only; do not include the leading `3.`)
++
++### C) Ensure all edge targets exist
++When an edge references `to = X`:
++- If node `X` does not exist yet, **create a placeholder node** immediately.
++  - Recommended placeholder:
++    - `id = X`
++    - `type = "line"`
++    - `speaker = ""`
++    - `text = ""`
++- If later you parse a real section `[X]`, overwrite/upgrade the placeholder.
++
++This avoids invalid graphs where edges point to missing nodes.
++
++---
++
++## End Node Convention
++Treat `End` specially to satisfy “multiple paths can lead to End”:
++- If any edge target is exactly `"End"` and `[End]` is not present, create node:
++  - `id = "End"`
++  - `type = "line"`
++  - `speaker = ""`
++  - `text = "End"` (or empty; but setting text to `End` is clearer)
++- `End` typically has **no outgoing edges**.
++
++Do **not** allow edges to a non-existent end state; always materialize `End` as a node when referenced.
++
++---
++
++## Reachability Constraint
++After building nodes/edges:
++1. Identify `start_id` = first section header encountered.
++2. Run BFS/DFS from `start_id` following edges.
++3. If unreachable nodes exist:
++   - Preferred: **drop unreachable placeholder nodes** created only by bad targets (but only if they are truly unreachable).
++   - If unreachable nodes are real sections, you may either:
++     - connect them (not recommended unless spec says so), or
++     - remove them to satisfy validation.
++
++In most dialogue scripts, unreachable nodes are accidental; removing them is the safest way to satisfy constraint (1).
++
++---
++
++## Export (JSON + DOT)
++### JSON Export
++Write `/app/dialogue.json` as:
++- UTF-8
++- `indent=2`
++- Ensure output is an object with `nodes` and `edges` lists.
++
++Before writing:
++- Validate types:
++  - `nodes` is list of dicts
++  - `edges` is list of dicts
++  - Each node has `id,text,speaker,type`
++  - Each edge has `from,to,text`
++
++### DOT Export
++Write `/app/dialogue.dot` in Graphviz format:
++- Emit:
++  - `digraph Dialogue { ... }`
++  - Node labels: include speaker/text succinctly, e.g.
++    - `GateScene [label="GateScene\nGuard: Halt!...", shape=box]`
++    - `NameChoice [label="NameChoice\n(choice)", shape=diamond]`
++  - Edge labels:
++    - For choice edges: label is option text
++    - For line edges: label can be empty
++
++Remember to escape quotes and newlines in DOT labels.
++
++---
++
++## Practical Implementation Notes
++- Keep a `nodes_by_id: dict[str, dict]` to deduplicate nodes.
++- Keep `edges: list[dict]` and append in parse order.
++- When upgrading a placeholder node, preserve its `id` and overwrite `type/speaker/text` with parsed content.
++- Robust parsing:
++  - Strip whitespace.
++  - Ignore empty/comment lines.
++  - Parse arrows with a right-split on `->` to avoid breaking text containing `->` earlier.
++
++---
++
++## Minimal Validation Checklist
++Before finalizing:
++- `start_id` exists in nodes.
++- For every edge, `from` and `to` exist in nodes.
++- All nodes reachable from `start_id`.
++- `End` node exists if referenced.
++
++---

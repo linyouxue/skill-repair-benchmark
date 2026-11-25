@@ -1,0 +1,459 @@
+{
+  "entries": [
+    {
+      "id": "single-video-silence-remover-RI-001",
+      "attempt": "attempt-002",
+      "validity": "invalid_recorded_api_callback_fault_despite_actual_outputs",
+      "raw_reward_unmodified": 0.0,
+      "callback_faults": [
+        {
+          "request_index": 2,
+          "callback_status": 500,
+          "request_timestamp": "2026-11-25T12:25:31.650507",
+          "error_type": "ServiceUnavailableError"
+        }
+      ],
+      "official_verifier_summary": {
+        "tests": 9,
+        "passed": 4,
+        "failed": 5,
+        "skipped": 0,
+        "pending": 0,
+        "other": 0,
+        "start": 1795581106.5005183,
+        "stop": 1795581109.302166
+      },
+      "independent_failed_task_checks": [
+        {
+          "name": "::test_segment_detection_recall",
+          "trace": "def test_segment_detection_recall():\n        \"\"\"Test that most ground truth segments are detected (recall >= 60%).\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        gt_segments = gt[\"segments_to_remove\"]\n        detected_segments = report[\"segments_removed\"]\n    \n        # Count how many ground truth segments have a matching detection (IoU > 0.3)\n        matched = 0\n        for gt_seg in gt_segments:\n            for detected in detected_segments:\n                if segment_iou(gt_seg, detected) > 0.3:\n                    matched += 1\n                    break\n    \n        recall = matched / len(gt_segments) if gt_segments else 1.0\n>       assert recall >= 0.6, f\"Segment detection recall {recall:.1%} is below 60% ({matched}/{len(gt_segments)} segments matched)\"\nE       AssertionError: Segment detection recall 0.0% is below 60% (0/9 segments matched)\nE       assert 0.0 >= 0.6\n\n/verifier/test_outputs.py:125: AssertionError"
+        },
+        {
+          "name": "::test_segment_detection_precision",
+          "trace": "def test_segment_detection_precision():\n        \"\"\"Test that detected segments are reasonably correct (precision >= 60%).\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        gt_segments = gt[\"segments_to_remove\"]\n        detected_segments = report[\"segments_removed\"]\n    \n        # Count how many detected segments match a ground truth segment (IoU > 0.3)\n        correct = 0\n        for detected in detected_segments:\n            for gt_seg in gt_segments:\n                if segment_iou(detected, gt_seg) > 0.3:\n                    correct += 1\n                    break\n    \n        precision = correct / len(detected_segments) if detected_segments else 1.0\n>       assert precision >= 0.6, f\"Segment detection precision {precision:.1%} is below 60% ({correct}/{len(detected_segments)} detections correct)\"\nE       AssertionError: Segment detection precision 0.0% is below 60% (0/8 detections correct)\nE       assert 0.0 >= 0.6\n\n/verifier/test_outputs.py:145: AssertionError"
+        },
+        {
+          "name": "::test_total_removed_duration",
+          "trace": "def test_total_removed_duration():\n        \"\"\"Test that total removed duration is close to ground truth.\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        gt_removed = gt[\"summary\"][\"total_duration_to_remove_seconds\"]\n        detected_removed = report[\"removed_duration_seconds\"]\n    \n        # Allow 20% tolerance\n        tolerance_pct = 0.20\n        lower = gt_removed * (1 - tolerance_pct)\n        upper = gt_removed * (1 + tolerance_pct)\n    \n>       assert lower <= detected_removed <= upper, \\\n            f\"Removed duration {detected_removed}s not within 20% of ground truth {gt_removed}s (range [{lower:.0f}, {upper:.0f}])\"\nE       AssertionError: Removed duration 27.670364s not within 20% of ground truth 254s (range [203, 305])\nE       assert 203.20000000000002 <= 27.670364\n\n/verifier/test_outputs.py:161: AssertionError"
+        },
+        {
+          "name": "::test_compressed_duration",
+          "trace": "def test_compressed_duration():\n        \"\"\"Test that compressed video duration matches report and is reasonable.\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        # Check actual video matches report\n        actual_duration = get_video_duration(VIDEO_PATH)\n        reported_duration = report[\"compressed_duration_seconds\"]\n        assert abs(actual_duration - reported_duration) < 2.0, \\\n            f\"Actual duration {actual_duration}s doesn't match report {reported_duration}s\"\n    \n        # Check compressed duration is reasonable (within 20% of ground truth)\n        gt_compressed = gt[\"video\"][\"expected_compressed_duration_seconds\"]\n        tolerance_pct = 0.20\n        lower = gt_compressed * (1 - tolerance_pct)\n        upper = gt_compressed * (1 + tolerance_pct)\n    \n>       assert lower <= actual_duration <= upper, \\\n            f\"Compressed duration {actual_duration}s not within 20% of expected {gt_compressed}s\"\nE       AssertionError: Compressed duration 572.353991s not within 20% of expected 346s\nE       assert 572.353991 <= 415.2\n\n/verifier/test_outputs.py:182: AssertionError"
+        },
+        {
+          "name": "::test_audio_matches_json_segments",
+          "trace": "def test_audio_matches_json_segments():\n        \"\"\"Verify compressed video matches what JSON segments describe should be removed.\n    \n        This test reconstructs audio by removing segments specified in the JSON from\n        the original video, then compares it with the actual compressed video audio.\n        High correlation means the JSON accurately describes what was cut.\n        \"\"\"\n        report = load_report()\n        segments = sorted(report[\"segments_removed\"], key=lambda x: x[\"start\"])\n        original_video = \"/root/data/input_video.mp4\"\n        original_duration = report[\"original_duration_seconds\"]\n    \n        # Build the \"keep\" segments (inverse of removed segments)\n        keep_segments = []\n        current = 0\n        for seg in segments:\n            if seg[\"start\"] > current:\n                keep_segments.append((current, seg[\"start\"]))\n            current = seg[\"end\"]\n        if current < original_duration:\n            keep_segments.append((current, original_duration))\n    \n        assert len(keep_segments) > 0, \"No segments to keep after removing all specified segments\"\n    \n        with tempfile.TemporaryDirectory() as tmpdir:\n            # Create ffmpeg filter to reconstruct audio based on JSON segments\n            filter_parts = []\n            for i, (start, end) in enumerate(keep_segments):\n                filter_parts.append(f\"[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[a{i}]\")\n    \n            concat_inputs = \"\".join(f\"[a{i}]\" for i in range(len(keep_segments)))\n            filter_complex = \";\".join(filter_parts) + f\";{concat_inputs}concat=n={len(keep_segments)}:v=0:a=1[outa]\"\n    \n            # Reconstruct audio based on JSON segments\n            result = subprocess.run([\n                \"ffmpeg\", \"-y\", \"-i\", original_video,\n                \"-filter_complex\", filter_complex,\n                \"-map\", \"[outa]\",\n                \"-ar\", \"16000\", \"-ac\", \"1\",\n                f\"{tmpdir}/reconstructed.wav\"\n            ], capture_output=True)\n            assert result.returncode == 0, f\"Failed to reconstruct audio: {result.stderr.decode()}\"\n    \n            # Extract audio from actual compressed video\n            result = subprocess.run([\n                \"ffmpeg\", \"-y\", \"-i\", VIDEO_PATH,\n                \"-vn\", \"-ar\", \"16000\", \"-ac\", \"1\",\n                f\"{tmpdir}/compressed.wav\"\n            ], capture_output=True)\n            assert result.returncode == 0, f\"Failed to extract compressed audio: {result.stderr.decode()}\"\n    \n            # Load and compare audio waveforms\n            _, reconstructed = wavfile.read(f\"{tmpdir}/reconstructed.wav\")\n            _, compressed = wavfile.read(f\"{tmpdir}/compressed.wav\")\n    \n            # Normalize to float\n            reconstructed = reconstructed.astype(np.float32) / 32768.0\n            compressed = compressed.astype(np.float32) / 32768.0\n    \n            # Truncate to same length (may differ by a few samples due to encoding)\n            min_len = min(len(reconstructed), len(compressed))\n            reconstructed = reconstructed[:min_len]\n            compressed = compressed[:min_len]\n    \n            # Calculate Pearson correlation coefficient\n            correlation = np.corrcoef(reconstructed, compressed)[0, 1]\n    \n>           assert correlation > 0.95, \\\n                f\"Compressed audio doesn't match JSON segments: correlation={correlation:.3f} (expected > 0.95)\"\nE           AssertionError: Compressed audio doesn't match JSON segments: correlation=0.075 (expected > 0.95)\nE           assert 0.07459985487003247 > 0.95\n\n/verifier/test_outputs.py:292: AssertionError"
+        }
+      ],
+      "actual_mp4_parse": {
+        "id": "single-video-silence-remover-RI-001",
+        "attempt": "attempt-002",
+        "artifact": "/Users/king/Documents/Codex/2026-11-24/controlled55-strict-audit/rerun_artifacts/single-video-silence-remover-RI-001/attempt-002/task__1a81478a/1/root/compressed_video.mp4",
+        "bytes": 27624991,
+        "sha256": "69f3c86bc3703a69780b71715611eb4091be197127528684d40cdaca775c4994",
+        "ffprobe_command": [
+          "docker",
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--entrypoint",
+          "ffprobe",
+          "-v",
+          "/Users/king/Documents/Codex/2026-11-24/controlled55-strict-audit/rerun_artifacts/single-video-silence-remover-RI-001/attempt-002/task__1a81478a/1/root/compressed_video.mp4:/audit/input.mp4:ro",
+          "sha256:e16b4e8ad0dbabe3fa672b9e8a60392f5b72ba5d9f8d0be2d140fdbc62f65791",
+          "-v",
+          "error",
+          "-show_format",
+          "-show_streams",
+          "-of",
+          "json",
+          "/audit/input.mp4"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "output": {
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+              "profile": "High",
+              "codec_type": "video",
+              "codec_tag_string": "avc1",
+              "codec_tag": "0x31637661",
+              "width": 640,
+              "height": 360,
+              "coded_width": 640,
+              "coded_height": 360,
+              "closed_captions": 0,
+              "film_grain": 0,
+              "has_b_frames": 2,
+              "sample_aspect_ratio": "1:1",
+              "display_aspect_ratio": "16:9",
+              "pix_fmt": "yuv420p",
+              "level": 62,
+              "color_range": "tv",
+              "color_space": "bt709",
+              "color_transfer": "bt709",
+              "color_primaries": "bt709",
+              "chroma_location": "left",
+              "field_order": "progressive",
+              "refs": 1,
+              "is_avc": "true",
+              "nal_length_size": "4",
+              "id": "0x1",
+              "r_frame_rate": "30/1",
+              "avg_frame_rate": "1040690147/34689519",
+              "time_base": "1/1000000",
+              "start_pts": 0,
+              "start_time": "0.000000",
+              "duration_ts": 572297483,
+              "duration": "572.297483",
+              "bit_rate": "248300",
+              "bits_per_raw_sample": "8",
+              "nb_frames": "17169",
+              "extradata_size": 48,
+              "disposition": {
+                "default": 1,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+              },
+              "tags": {
+                "language": "und",
+                "handler_name": "VideoHandler",
+                "vendor_id": "[0][0][0][0]",
+                "encoder": "Lavc61.19.101 libx264"
+              }
+            },
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "codec_long_name": "AAC (Advanced Audio Coding)",
+              "profile": "LC",
+              "codec_type": "audio",
+              "codec_tag_string": "mp4a",
+              "codec_tag": "0x6134706d",
+              "sample_fmt": "fltp",
+              "sample_rate": "44100",
+              "channels": 2,
+              "channel_layout": "stereo",
+              "bits_per_sample": 0,
+              "initial_padding": 0,
+              "id": "0x2",
+              "r_frame_rate": "0/0",
+              "avg_frame_rate": "0/0",
+              "time_base": "1/44100",
+              "start_pts": 0,
+              "start_time": "0.000000",
+              "duration_ts": 25240811,
+              "duration": "572.353991",
+              "bit_rate": "128038",
+              "nb_frames": "24651",
+              "extradata_size": 5,
+              "disposition": {
+                "default": 1,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+              },
+              "tags": {
+                "language": "und",
+                "handler_name": "SoundHandler",
+                "vendor_id": "[0][0][0][0]"
+              }
+            }
+          ],
+          "format": {
+            "filename": "/audit/input.mp4",
+            "nb_streams": 2,
+            "nb_programs": 0,
+            "nb_stream_groups": 0,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "start_time": "0.000000",
+            "duration": "572.353991",
+            "size": "27624991",
+            "bit_rate": "386124",
+            "probe_score": 100,
+            "tags": {
+              "major_brand": "isom",
+              "minor_version": "512",
+              "compatible_brands": "isomiso2avc1mp41",
+              "encoder": "Lavf61.7.103"
+            }
+          }
+        },
+        "image_provenance": "sha256:e16b4e8ad0dbabe3fa672b9e8a60392f5b72ba5d9f8d0be2d140fdbc62f65791",
+        "trajectory_sha256_matches_snapshot": true,
+        "snapshot": "/Users/king/Library/Application Support/SkillTTA/controlled-gpt52/audits/controlled55-strict-20261124/audit-evidence/rerun_artifacts/single-video-silence-remover-RI-001/attempt-002/task__1a81478a/1/SNAPSHOT.json",
+        "note": "Read-only ffprobe of original model artifact; no creation/re-encoding/output edits."
+      },
+      "agent_execution_seconds": 390.1,
+      "acp_path": "/Users/king/Library/Application Support/SkillTTA/controlled-gpt52/audits/controlled55-strict-20261124/new-attempts/repaired/single-video-silence-remover-RI-001/attempt-002/jobs/2026-11-25__12-24-42/task__1a81478a/trajectory/acp_trajectory.jsonl",
+      "acp_sha256": "7cd58c621d156c9f909cf96c9c30139b274694959c533a9f1c090b694bffa51e",
+      "llm_path": "/Users/king/Library/Application Support/SkillTTA/controlled-gpt52/audits/controlled55-strict-20261124/new-attempts/repaired/single-video-silence-remover-RI-001/attempt-002/jobs/2026-11-25__12-24-42/task__1a81478a/trajectory/llm_trajectory.jsonl",
+      "llm_file_sha256": "163126a9c21c76a06c6dca3432b6a473879bbaf7c9bcfab30400241a64535d69",
+      "last_visible_agent_message": "Generated the required outputs in the current workspace:\n\n- `compressed_video.mp4` — opening + long pauses removed (kept teaching content).\n- `compression_report.json` — valid structure and consistent math.\n\nKey report values:\n- Original: **600.004626s**\n- Compressed: **572.353991s**\n- Removed: **27.670364s** (**4.611692%**)\n- Segments removed: **8** (including the initial opening segment)\n\nBoth files are present at `/root/compressed_video.mp4` and `/root/compression_report.json`.\n\nReasoning:\n",
+      "note": "Physically generated/readable MP4 does not cure recorded API fault. Raw0 and independent task failures are preserved but not counted as valid model failure. Callback logs are not raw HTTP packet capture. No further attempts after2-new cap.",
+      "ai_assisted_not_human": true
+    },
+    {
+      "id": "single-video-silence-remover-RI-001",
+      "attempt": "attempt-003",
+      "validity": "invalid_recorded_api_callback_fault_despite_actual_outputs",
+      "raw_reward_unmodified": 0.0,
+      "callback_faults": [
+        {
+          "request_index": 0,
+          "callback_status": 500,
+          "request_timestamp": "2026-11-25T12:32:36.694744",
+          "error_type": "ServiceUnavailableError"
+        }
+      ],
+      "official_verifier_summary": {
+        "tests": 9,
+        "passed": 5,
+        "failed": 4,
+        "skipped": 0,
+        "pending": 0,
+        "other": 0,
+        "start": 1795582090.28274,
+        "stop": 1795582093.5867727
+      },
+      "independent_failed_task_checks": [
+        {
+          "name": "::test_segment_detection_recall",
+          "trace": "def test_segment_detection_recall():\n        \"\"\"Test that most ground truth segments are detected (recall >= 60%).\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        gt_segments = gt[\"segments_to_remove\"]\n        detected_segments = report[\"segments_removed\"]\n    \n        # Count how many ground truth segments have a matching detection (IoU > 0.3)\n        matched = 0\n        for gt_seg in gt_segments:\n            for detected in detected_segments:\n                if segment_iou(gt_seg, detected) > 0.3:\n                    matched += 1\n                    break\n    \n        recall = matched / len(gt_segments) if gt_segments else 1.0\n>       assert recall >= 0.6, f\"Segment detection recall {recall:.1%} is below 60% ({matched}/{len(gt_segments)} segments matched)\"\nE       AssertionError: Segment detection recall 55.6% is below 60% (5/9 segments matched)\nE       assert 0.5555555555555556 >= 0.6\n\n/verifier/test_outputs.py:125: AssertionError"
+        },
+        {
+          "name": "::test_segment_detection_precision",
+          "trace": "def test_segment_detection_precision():\n        \"\"\"Test that detected segments are reasonably correct (precision >= 60%).\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        gt_segments = gt[\"segments_to_remove\"]\n        detected_segments = report[\"segments_removed\"]\n    \n        # Count how many detected segments match a ground truth segment (IoU > 0.3)\n        correct = 0\n        for detected in detected_segments:\n            for gt_seg in gt_segments:\n                if segment_iou(detected, gt_seg) > 0.3:\n                    correct += 1\n                    break\n    \n        precision = correct / len(detected_segments) if detected_segments else 1.0\n>       assert precision >= 0.6, f\"Segment detection precision {precision:.1%} is below 60% ({correct}/{len(detected_segments)} detections correct)\"\nE       AssertionError: Segment detection precision 38.5% is below 60% (5/13 detections correct)\nE       assert 0.38461538461538464 >= 0.6\n\n/verifier/test_outputs.py:145: AssertionError"
+        },
+        {
+          "name": "::test_total_removed_duration",
+          "trace": "def test_total_removed_duration():\n        \"\"\"Test that total removed duration is close to ground truth.\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        gt_removed = gt[\"summary\"][\"total_duration_to_remove_seconds\"]\n        detected_removed = report[\"removed_duration_seconds\"]\n    \n        # Allow 20% tolerance\n        tolerance_pct = 0.20\n        lower = gt_removed * (1 - tolerance_pct)\n        upper = gt_removed * (1 + tolerance_pct)\n    \n>       assert lower <= detected_removed <= upper, \\\n            f\"Removed duration {detected_removed}s not within 20% of ground truth {gt_removed}s (range [{lower:.0f}, {upper:.0f}])\"\nE       AssertionError: Removed duration 83.0s not within 20% of ground truth 254s (range [203, 305])\nE       assert 203.20000000000002 <= 83.0\n\n/verifier/test_outputs.py:161: AssertionError"
+        },
+        {
+          "name": "::test_compressed_duration",
+          "trace": "def test_compressed_duration():\n        \"\"\"Test that compressed video duration matches report and is reasonable.\"\"\"\n        gt = load_ground_truth()\n        report = load_report()\n    \n        # Check actual video matches report\n        actual_duration = get_video_duration(VIDEO_PATH)\n        reported_duration = report[\"compressed_duration_seconds\"]\n        assert abs(actual_duration - reported_duration) < 2.0, \\\n            f\"Actual duration {actual_duration}s doesn't match report {reported_duration}s\"\n    \n        # Check compressed duration is reasonable (within 20% of ground truth)\n        gt_compressed = gt[\"video\"][\"expected_compressed_duration_seconds\"]\n        tolerance_pct = 0.20\n        lower = gt_compressed * (1 - tolerance_pct)\n        upper = gt_compressed * (1 + tolerance_pct)\n    \n>       assert lower <= actual_duration <= upper, \\\n            f\"Compressed duration {actual_duration}s not within 20% of expected {gt_compressed}s\"\nE       AssertionError: Compressed duration 517.003991s not within 20% of expected 346s\nE       assert 517.003991 <= 415.2\n\n/verifier/test_outputs.py:182: AssertionError"
+        }
+      ],
+      "actual_mp4_parse": {
+        "id": "single-video-silence-remover-RI-001",
+        "attempt": "attempt-003",
+        "artifact": "/Users/king/Documents/Codex/2026-11-24/controlled55-strict-audit/rerun_artifacts/single-video-silence-remover-RI-001/attempt-003/task__d41a7569/1/root/compressed_video.mp4",
+        "bytes": 26437557,
+        "sha256": "43887799029cf2cc47a3d218b905d73d97cd81ff511f641cae2f0e5565c5a466",
+        "ffprobe_command": [
+          "docker",
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--entrypoint",
+          "ffprobe",
+          "-v",
+          "/Users/king/Documents/Codex/2026-11-24/controlled55-strict-audit/rerun_artifacts/single-video-silence-remover-RI-001/attempt-003/task__d41a7569/1/root/compressed_video.mp4:/audit/input.mp4:ro",
+          "sha256:f89c384801c85f7fce3148d396ef5d0679d2f7e39dcbc917b9b175526144977d",
+          "-v",
+          "error",
+          "-show_format",
+          "-show_streams",
+          "-of",
+          "json",
+          "/audit/input.mp4"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "output": {
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+              "profile": "High",
+              "codec_type": "video",
+              "codec_tag_string": "avc1",
+              "codec_tag": "0x31637661",
+              "width": 640,
+              "height": 360,
+              "coded_width": 640,
+              "coded_height": 360,
+              "closed_captions": 0,
+              "film_grain": 0,
+              "has_b_frames": 2,
+              "sample_aspect_ratio": "1:1",
+              "display_aspect_ratio": "16:9",
+              "pix_fmt": "yuv420p",
+              "level": 62,
+              "color_range": "tv",
+              "color_space": "bt709",
+              "color_transfer": "bt709",
+              "color_primaries": "bt709",
+              "chroma_location": "left",
+              "field_order": "progressive",
+              "refs": 1,
+              "is_avc": "true",
+              "nal_length_size": "4",
+              "id": "0x1",
+              "r_frame_rate": "30/1",
+              "avg_frame_rate": "1943499985/64779156",
+              "time_base": "1/1000000",
+              "start_pts": 0,
+              "start_time": "0.000000",
+              "duration_ts": 516966667,
+              "duration": "516.966667",
+              "bit_rate": "271352",
+              "bits_per_raw_sample": "8",
+              "nb_frames": "15510",
+              "extradata_size": 48,
+              "disposition": {
+                "default": 1,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+              },
+              "tags": {
+                "language": "und",
+                "handler_name": "VideoHandler",
+                "vendor_id": "[0][0][0][0]",
+                "encoder": "Lavc61.19.101 libx264"
+              }
+            },
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "codec_long_name": "AAC (Advanced Audio Coding)",
+              "profile": "LC",
+              "codec_type": "audio",
+              "codec_tag_string": "mp4a",
+              "codec_tag": "0x6134706d",
+              "sample_fmt": "fltp",
+              "sample_rate": "44100",
+              "channels": 2,
+              "channel_layout": "stereo",
+              "bits_per_sample": 0,
+              "initial_padding": 0,
+              "id": "0x2",
+              "r_frame_rate": "0/0",
+              "avg_frame_rate": "0/0",
+              "time_base": "1/44100",
+              "start_pts": 0,
+              "start_time": "0.000000",
+              "duration_ts": 22799876,
+              "duration": "517.003991",
+              "bit_rate": "127953",
+              "nb_frames": "22267",
+              "extradata_size": 5,
+              "disposition": {
+                "default": 1,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+              },
+              "tags": {
+                "language": "und",
+                "handler_name": "SoundHandler",
+                "vendor_id": "[0][0][0][0]"
+              }
+            }
+          ],
+          "format": {
+            "filename": "/audit/input.mp4",
+            "nb_streams": 2,
+            "nb_programs": 0,
+            "nb_stream_groups": 0,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "start_time": "0.000000",
+            "duration": "517.003991",
+            "size": "26437557",
+            "bit_rate": "409088",
+            "probe_score": 100,
+            "tags": {
+              "major_brand": "isom",
+              "minor_version": "512",
+              "compatible_brands": "isomiso2avc1mp41",
+              "encoder": "Lavf61.7.103"
+            }
+          }
+        },
+        "image_provenance": "sha256:f89c384801c85f7fce3148d396ef5d0679d2f7e39dcbc917b9b175526144977d",
+        "trajectory_sha256_matches_snapshot": true,
+        "snapshot": "/Users/king/Library/Application Support/SkillTTA/controlled-gpt52/audits/controlled55-strict-20261124/audit-evidence/rerun_artifacts/single-video-silence-remover-RI-001/attempt-003/task__d41a7569/1/SNAPSHOT.json",
+        "note": "Read-only ffprobe of original model artifact; no creation/re-encoding/output edits."
+      },
+      "agent_execution_seconds": 930.1,
+      "acp_path": "/Users/king/Library/Application Support/SkillTTA/controlled-gpt52/audits/controlled55-strict-20261124/new-attempts/repaired/single-video-silence-remover-RI-001/attempt-003/jobs/2026-11-25__12-31-59/task__d41a7569/trajectory/acp_trajectory.jsonl",
+      "acp_sha256": "0d27b36561db34efb38a36b88a3db413ed0ce3080d0aa1a7101ec1abae24ae04",
+      "llm_path": "/Users/king/Library/Application Support/SkillTTA/controlled-gpt52/audits/controlled55-strict-20261124/new-attempts/repaired/single-video-silence-remover-RI-001/attempt-003/jobs/2026-11-25__12-31-59/task__d41a7569/trajectory/llm_trajectory.jsonl",
+      "llm_file_sha256": "297189ba347b1789f492f3101fe45f658264f15ed0f35d274191f0b728ca620f",
+      "last_visible_agent_message": "Generated the required outputs in the current workspace:\n\n- **`/root/compressed_video.mp4`** — video with the opening and detected long pauses removed  \n- **`/root/compression_report.json`** — report matching the required schema\n\nKey stats (from `compression_report.json`):\n- Original: **600.005s**\n- Compressed: **517.004s**\n- Removed: **83.000s** (**13.833%**)\n\nRemoved segments include the opening **[0.0s, 53.0s]** plus 12 pause segments (all ≥ 2s).\n\nReasoning:\n",
+      "note": "Physically generated/readable MP4 does not cure recorded API fault. Raw0 and independent task failures are preserved but not counted as valid model failure. Callback logs are not raw HTTP packet capture. No further attempts after2-new cap.",
+      "ai_assisted_not_human": true,
+      "normal_ending_observation": "Actual ffmpeg processing event34 returns codec footer,done,exit0;35 probes durations;36 writes report;37 ffprobesvideo+audio/schema/math;38cleanup preserves required files;39readsreport before final40. No unfinished required final action. API fault independently withholds validity."
+    }
+  ]
+}

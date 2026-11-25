@@ -1,0 +1,121 @@
+{
+  "diagnoses": [
+    {
+      "id": "MBL-001",
+      "title": "Skill is not reusable: hard-coded repository-specific fixes and paths",
+      "description": "maven-build-lifecycle/SKILL.md contains a repo-specific checkpoint for \"Google Auto snapshot\" including a specific failing module path (value/src/it/functional/pom.xml) and prescriptive dependency version edits. This violates the requirement to provide reusable workflow guidance and risks effectively solving a particular end-task instance rather than guiding diagnosis.",
+      "evidence": [
+        "Section: \"Repository-specific checkpoint: AutoValue functional integration test\"",
+        "Hard-coded path: \"value/src/it/functional/pom.xml\"",
+        "Hard-coded version directives for jsr305/junit/guava/guava-testlib/truth"
+      ],
+      "impact": "Misleads on other repos/ids, reduces generality, and can cause incorrect edits or overfitting to one trial."
+    },
+    {
+      "id": "MBL-002",
+      "title": "Incorrect/over-specific file-path contract for required patch artifact",
+      "description": "The build-repair artifact contract references a fixed repo path (/home/travis/build/failed/google/auto/patch_1.diff) instead of the task-mandated generic location (/home/travis/build/failed/<repo>/<id>/patch_{i}.diff). Although it contains a parenthetical note, the primary instruction is still misleading.",
+      "evidence": [
+        "Text: \"Create at least one non-empty standard unified diff at /home/travis/build/failed/google/auto/patch_1.diff\"",
+        "Task prompt requires: \"/home/travis/build/failed/<repo>/<id>/patch_{i}.diff\""
+      ],
+      "impact": "Users may write patches to the wrong directory, causing task verification to fail even if the code change is correct."
+    },
+    {
+      "id": "MBL-003",
+      "title": "Missing/unclear toolchain selection guidance (Maven wrapper vs system Maven, Java version capture)",
+      "description": "The skill does not clearly define how to select the Maven toolchain (prefer ./mvnw if present) nor how to record Java/Maven versions as part of reproducible diagnosis. The location hint explicitly calls out toolchain selection conventions.",
+      "evidence": [
+        "No section instructing to prefer ./mvnw or to record `java -version` / `mvn -version`",
+        "Only a hard-coded `cd /home/travis/build/failed/google/auto` appears later"
+      ],
+      "impact": "Non-reproducible results and inconsistent behavior across environments; unnecessary failures due to Maven/JDK mismatch."
+    },
+    {
+      "id": "MBL-004",
+      "title": "Failure reproduction/build command conventions are underspecified and sometimes incorrect for Invoker ITs",
+      "description": "The skill emphasizes Maven Invoker integration tests but does not clearly state when to run `verify` (where Invoker typically executes) vs `test`, nor does it provide a canonical baseline command with evidence-rich flags. The included minimal diagnostic snippet is repo-specific and does not provide a general reproduction contract.",
+      "evidence": [
+        "Minimal diagnostic sequence uses `cd /home/travis/build/failed/google/auto` and only shows `sed`/`find`, not the build command",
+        "No explicit 'default build command' for projects using maven-invoker-plugin (usually bound to `verify`)"
+      ],
+      "impact": "Users may run the wrong lifecycle phase and fail to reproduce CI failures, derailing diagnosis."
+    },
+    {
+      "id": "MBL-005",
+      "title": "Numbering/formatting defect in Invoker troubleshooting steps",
+      "description": "The Invoker debug list skips from step 4 to step 6, which is a quality defect and reduces clarity.",
+      "evidence": [
+        "List: steps 1,2,3,4,6 (missing 5)"
+      ],
+      "impact": "Lower instructional quality; can confuse the intended workflow."
+    }
+  ],
+  "affected_files": [
+    "maven-build-lifecycle/SKILL.md"
+  ],
+  "repair_plan": [
+    {
+      "step": 1,
+      "change": "Add a top-level \"Toolchain selection\" section that (a) prefers Maven Wrapper (./mvnw) when present, otherwise uses system mvn, and (b) captures `java -version` and Maven version (`./mvnw -v` or `mvn -v`) as part of reproducibility notes.",
+      "rationale": "Aligns with the location hint (toolchain conventions) and makes diagnosis reproducible."
+    },
+    {
+      "step": 2,
+      "change": "Introduce explicit, reusable reproduction command conventions: default to `mvn -e test` for unit-test-only builds; use `mvn -e verify` when Invoker/failsafe/ITs are involved; recommend `-DtrimStackTrace=false` and log capture via `tee`.",
+      "rationale": "Ensures the skill defines a canonical build command and lifecycle phase choice."
+    },
+    {
+      "step": 3,
+      "change": "Replace hard-coded repository-specific checkpoint with a clearly labeled optional example section (or remove entirely). If kept, rewrite to describe the pattern (dependency drift in Invoker nested POMs) without prescribing exact versions or specific file paths, and without implying the fix for this trial.",
+      "rationale": "Preserves useful conceptual guidance while restoring reusability and avoiding end-task solution leakage."
+    },
+    {
+      "step": 4,
+      "change": "Fix the build-repair artifact contract to use placeholders consistently: `/home/travis/build/failed/<repo>/<id>/patch_{i}.diff`, and avoid any repo-specific path. Also align the diagnostic artifact path to the task requirement (`/home/travis/build/failed/failed_reasons.txt`).",
+      "rationale": "Prevents writing outputs to incorrect locations."
+    },
+    {
+      "step": 5,
+      "change": "Generalize the \"Minimal diagnostic sequence\" commands to use placeholders and include Invoker-log discovery patterns (e.g., `find . -path '*/target/it/*/build.log' -print`) plus optional flags like `-Dinvoker.streamLogs=true` when rerunning.",
+      "rationale": "Makes the snippet actionable across repos and consistent with Invoker troubleshooting."
+    },
+    {
+      "step": 6,
+      "change": "Correct the numbering error in the Invoker debug list (add missing step 5 or renumber) and do a quick pass for internal consistency (e.g., comments like \"# 3.\" in the minimal sequence).",
+      "rationale": "Improves clarity and reduces confusion."
+    }
+  ],
+  "preservation_constraints": [
+    "Do not add trial-specific dependency versions or directives that effectively implement the end-task fix.",
+    "Preserve existing general conceptual guidance about Maven Invoker nested builds and dependency drift (but rewrite to be generic).",
+    "Do not modify unrelated skills/files; restrict changes to maven-build-lifecycle/SKILL.md.",
+    "Keep the required SkillTTA workflow contract: produce failed_reasons.txt, create patch_{i}.diff in the repo/id directory, apply patches, and verify via the same build command used for reproduction."
+  ],
+  "confidence": 0.78,
+  "_usage": {
+    "completion_tokens": 3011,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 1413,
+      "rejected_prediction_tokens": 0
+    },
+    "latency_checkpoint": {
+      "engine_tbt_ms": 15,
+      "engine_ttft_ms": 298,
+      "engine_ttlt_ms": 44333,
+      "pre_inference_ms": 144,
+      "service_tbt_ms": 15,
+      "service_ttft_ms": 893,
+      "service_ttlt_ms": 44918,
+      "user_visible_ttft_ms": 749
+    },
+    "prompt_tokens": 11395,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0
+    },
+    "total_tokens": 14406
+  }
+}

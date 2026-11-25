@@ -1,0 +1,176 @@
+{
+  "diagnoses": [
+    {
+      "id": "D1-missing-deliverables-and-completion-criteria",
+      "title": "Toolkit skill lacks explicit deliverables/task-completion conditions for q01–q05 JSON artifacts",
+      "evidence": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "## Output construction guardrails\n...\n## Minimal end-to-end scaffold\n...\n# 4) Write outputs into /app/output"
+        }
+      ],
+      "impact": "An agent following only this skill can fail the trial requirement to generate five specific files (/app/output/q01.json…q05.json) with the exact schemas, rounding, and sorting rules for each question."
+    },
+    {
+      "id": "D2-handbook-not-authoritative-for-representative-tc-q02",
+      "title": "Q02 hard-codes a 'blocking invariant' representative TC rule (minimum TAL) that can override handbook instructions",
+      "evidence": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "For **Q02 run-level TAL**, the representative sensor rule is a blocking invariant: compute TAL ... then select the **global minimum TAL** across all valid TCs ... Apply this same rule regardless of whether the TAL values are below, inside, or above the handbook window."
+        }
+      ],
+      "impact": "The trial explicitly requires selecting the most representative thermocouple based on handbook details. Hard-coding min-TAL selection risks contradicting the handbook and producing noncompliant methodology."
+    },
+    {
+      "id": "D3-peak-requirement-overly-prescriptive",
+      "title": "Peak-temperature requirement is presented as 'liquidus + margin' only, but handbook may specify absolute min/max peak limits",
+      "evidence": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "### 5. Peak and margin\nRequirement:\n- `required_peak = liquidus + peak_margin`"
+        }
+      ],
+      "impact": "If the handbook specifies an absolute peak requirement (e.g., 235–245°C) rather than (or in addition to) a liquidus margin, the skill can steer the agent to compute the wrong requirement and misjudge compliance (Q3)."
+    },
+    {
+      "id": "D4-tal-threshold-computation-strict-inequality",
+      "title": "Provided TAL interpolation code uses strict '>' which may undercount TAL if handbook defines TAL as time at/above liquidus",
+      "evidence": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "if y0 > thr and y1 > thr:\n    total += (t1 - t0)\n...\ncrosses = (y0 <= thr < y1) or (y1 <= thr < y0)"
+        }
+      ],
+      "impact": "If samples sit exactly at liquidus for a duration, strict '>' excludes that dwell, biasing TAL downward and potentially causing false non-compliance in Q02."
+    },
+    {
+      "id": "D5-tie-break-guidance-ambiguous-and-example-incorrect",
+      "title": "Tie-break rules are stated, but example code is invalid/ambiguous and can lead to wrong tc_id selection on ties",
+      "evidence": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "Examples:\n\n```python\n# max metric\nbest = max(items, key=lambda x: (x.value, -lex(x.tc_id)))  # or sort then take first\n```"
+        },
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "- If selecting maximum metric (e.g., ramp): choose `(max_value, smallest_tc_id)`."
+        }
+      ],
+      "impact": "The sample code references undefined functions (lex) and an invalid negation of a lexicographic value; combined with the stated rule, it can confuse implementations and break determinism required by the trial."
+    },
+    {
+      "id": "D6-conveyor-feasibility-section-not-actionable-for-q04-schema",
+      "title": "Conveyor feasibility guidance is too generic and internally inconsistent for producing Q04's required_min_speed_cm_min / meets outputs",
+      "evidence": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "Common patterns:\n\nMinimum dwell time across effective heated length**\n- ...\n- `speed_min_cm_min = (L_eff_cm / t_min_s) * 60`\n\nMaximum time-in-oven across length**\n- ...\n- `speed_min_cm_min = (L_eff_cm / t_max_s) * 60`"
+        },
+        {
+          "file": "reflow-machine-maintenance-guidance/SKILL.md",
+          "snippet": "Given heated length L_eff_cm, minimum dwell t_min_s, speed_max_cm_min = (L_eff_cm / t_min_s) * 60."
+        }
+      ],
+      "impact": "The toolkit uses 'speed_min' for both min-dwell and max-time cases, while the other skill uses 'speed_max' for min-dwell; without clear mapping to Q04's 'required_min_speed_cm_min' and explicit handling of MES unit conversion, agents can output incorrect or non-auditable values."
+    },
+    {
+      "id": "D7-q05-selection-criteria-not-deterministic-enough",
+      "title": "Best-run selection per board_family lacks a deterministic, no-hallucination ranking recipe tied to available columns",
+      "evidence": [
+        {
+          "file": "reflow-profile-compliance-toolkit/SKILL.md",
+          "snippet": "## Minimal end-to-end scaffold\n...\n# 2) Compute per-run metrics deterministically...\n# 3) Build JSON objects...\n# 4) Write outputs..."
+        }
+      ],
+      "impact": "Q05 requires selecting best runs based on quality and efficiency using MES + defect data. Without a strict rule for deriving 'quality' and 'efficiency' only from present columns (and gating on Q1–Q4 compliance), the agent may invent weights or use unavailable fields."
+    }
+  ],
+  "affected_files": [
+    "reflow-profile-compliance-toolkit/SKILL.md",
+    "reflow-machine-maintenance-guidance/SKILL.md"
+  ],
+  "repair_plan": [
+    {
+      "step": "RP1-add-explicit-deliverables-section",
+      "changes": [
+        "In reflow-profile-compliance-toolkit/SKILL.md, add a 'Deliverables & completion conditions' section that enumerates /app/output/q01.json…q05.json, specifies one-record-per-run expectations where applicable, reiterates strict schema adherence, 2dp rounding, lexicographic sorting, and null-handling rules."
+      ]
+    },
+    {
+      "step": "RP2-make-handbook-authoritative-for-representative-tc",
+      "changes": [
+        "Replace the Q02 'blocking invariant' minimum-TAL rule with: 'Follow handbook representative TC rule; if handbook does not specify, default to conservative worst-case (minimum TAL across TCs) with deterministic tie-break (tc_id ascending)'.",
+        "Ensure parallel wording for Q01 (ramp), Q03 (peak), and any other place representative TC selection is mentioned: handbook-first, then deterministic fallback."
+      ]
+    },
+    {
+      "step": "RP3-parameterize-threshold-inclusion-for-tal",
+      "changes": [
+        "Update the TAL interpolation helper in the toolkit to support inclusive comparisons (>=) when handbook defines 'at or above liquidus'.",
+        "Document: 'Use the handbook’s exact inequality; if not stated, default to >= for TAL.'"
+      ]
+    },
+    {
+      "step": "RP4-fix-tie-break-guidance-and-remove-invalid-example",
+      "changes": [
+        "Replace the invalid example `-lex(x.tc_id)` / `lex(...)` with correct, runnable patterns (e.g., sort then take first) that work for string tc_id.",
+        "Clarify max-metric and min-metric tie-breaks precisely using lexicographic tc_id ordering and show correct code snippets for both."
+      ]
+    },
+    {
+      "step": "RP5-clarify-peak-requirement-modes",
+      "changes": [
+        "Extend the toolkit peak section to support both handbook modes: (a) absolute min/max peak temperatures and (b) liquidus + margin; instruct the agent to extract whichever the handbook states and only compute derived requirements when handbook explicitly defines the derivation.",
+        "Add guidance for missing thermocouple data: treat as failing for Q03 per task requirement."
+      ]
+    },
+    {
+      "step": "RP6-make-q04-conveyor-feasibility-actionable",
+      "changes": [
+        "Normalize conveyor-speed nomenclature across skills: define clearly what 'required_min_speed_cm_min' means for Q04 and how to compute it under different handbook rule types (explicit min speed, explicit speed window, dwell-time-based bounds).",
+        "Add explicit instruction to confirm MES speed units and convert deterministically when units are stated; otherwise set actual_speed_cm_min = null and meets = false.",
+        "Resolve the 'speed_max vs speed_min' inconsistency by mapping dwell constraints to min/max allowed speeds correctly (min dwell implies a maximum time-in-oven, therefore a minimum speed; max dwell implies a maximum speed, etc.), but only when handbook states the constraint."
+      ]
+    },
+    {
+      "step": "RP7-add-deterministic-q05-ranking-template",
+      "changes": [
+        "Add a Q05 section to the toolkit: (1) eligibility gate = compliant on Q1–Q4 and no-null required metrics, (2) primary rank = lowest defect count/rate based on existing columns in test_defects.csv, (3) secondary = highest throughput proxy available (e.g., conveyor speed) among eligible runs, (4) tie-break = run_id ascending; prohibit invented weights and require using only present columns."
+      ]
+    }
+  ],
+  "preservation_constraints": [
+    "Do not add any fabricated numeric limits; all limits/windows/margins must be extracted from handbook.pdf at runtime in the end-task.",
+    "Preserve existing robust computation guidance (sorting by time, dt<=0 handling, interpolation approach), except where corrected for inclusivity/handbook-first rules.",
+    "Keep output guardrails (2dp rounding, null for NaN/Inf, lexicographic sorting), but expand to explicitly cover q01–q05 deliverables and schemas.",
+    "Do not remove the minimal scaffold; update it to reference the new deliverables section and corrected helper functions.",
+    "Avoid introducing dependencies on external resources; all guidance must rely only on /app/data inputs."
+  ],
+  "confidence": 0.72,
+  "_usage": {
+    "completion_tokens": 3985,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 1621,
+      "rejected_prediction_tokens": 0
+    },
+    "latency_checkpoint": {
+      "engine_tbt_ms": 14,
+      "engine_ttft_ms": 229,
+      "engine_ttlt_ms": 56036,
+      "pre_inference_ms": 94,
+      "service_tbt_ms": 14,
+      "service_ttft_ms": 738,
+      "service_ttlt_ms": 56525,
+      "user_visible_ttft_ms": 644
+    },
+    "prompt_tokens": 9234,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 9088
+    },
+    "total_tokens": 13219
+  }
+}

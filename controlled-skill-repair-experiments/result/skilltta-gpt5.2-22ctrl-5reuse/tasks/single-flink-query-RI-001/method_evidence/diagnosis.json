@@ -1,0 +1,80 @@
+{
+  "diagnoses": [
+    {
+      "id": "SDE-WF2-COMPLETION-001",
+      "summary": "Workflow 2 lacks an explicit, reusable rule for how to determine and operationalize a “completion/terminal event” in keyed Flink aggregations where lifecycle events arrive independently from activity events.",
+      "details": "The skill includes a general ‘Semantic Contract Gate’ and a ‘Non-negotiable Flink Emission Gate’, but it does not clearly specify (a) that completion must be defined by an explicit terminal-event predicate sourced from the dataset/spec, (b) that finalization should be delayed until event time is safe (watermark has passed the terminal timestamp + allowed lateness), and (c) that end-of-input/boundedness is not a valid completion signal for per-key emission. This gap is directly relevant to the trial’s requirement: emit only when a job has finished in event time, not just when the stream ends.",
+      "impact": "Implementations guided by the current Workflow 2 can incorrectly emit on EOF/batch completion, emit too early (dropping late SUBMITs), or misclassify completion events, leading to incorrect aggregates and extra/missing keys."
+    },
+    {
+      "id": "SDE-WF2-NUMBERING-002",
+      "summary": "Semantic Contract Gate predicate list has a numbering/structure error that obscures the intended three-predicate contract.",
+      "details": "The section lists predicates as 1 and 3 (missing 2). The missing predicate is important for this trial: the completion criterion (which lifecycle event(s) close the key) should be explicitly captured alongside contributing-event and output-eligibility predicates.",
+      "impact": "Readers may miss the requirement to define completion precisely and separately, increasing the risk of emitting based on non-terminal lifecycle events or stream termination."
+    },
+    {
+      "id": "GUIDANCE-CONFLICT-OUTPUTZERO-003",
+      "summary": "Trial guidance suggests emitting zero for keys with no qualifying activity, which conflicts with the Senior Data Engineer skill’s ‘Non-negotiable Flink Emission Gate’.",
+      "details": "The reusable skill mandates: “Missing aggregate state means no output row, not a zero-valued row,” unless explicitly required. The temporary task guidance includes “Jobs with no submits: output (jobId,0) when terminal arrives (default to emitting 0 is safest…)”, which is not aligned with the core skill’s contract gate and can cause incorrect extra keys.",
+      "impact": "May produce spurious output rows for jobs that only have lifecycle events, violating the skill’s invariant and potentially failing evaluators that compare emitted key sets."
+    }
+  ],
+  "affected_files": [
+    "senior-data-engineer/SKILL.md",
+    "skilltta-task-guidance/SKILL.md"
+  ],
+  "repair_plan": [
+    {
+      "step": 1,
+      "file": "senior-data-engineer/SKILL.md",
+      "change": "In the ‘Semantic Contract Gate for Keyed Event Aggregations’ section, fix the predicate numbering and explicitly define all three predicates: (1) contributing-event predicate, (2) completion/terminal-event predicate, (3) output-eligibility predicate."
+    },
+    {
+      "step": 2,
+      "file": "senior-data-engineer/SKILL.md",
+      "change": "Augment Workflow 2 guidance to require event-time-safe finalization: when a terminal event arrives, record its event-time timestamp and schedule emission/finalization only after the watermark passes a safe point (terminal_ts + allowed lateness / out-of-orderness bound). Explicitly forbid treating bounded input completion (EOF) as a per-key completion signal."
+    },
+    {
+      "step": 3,
+      "file": "senior-data-engineer/SKILL.md",
+      "change": "Add a short, reusable checklist snippet under Workflow 2 for lifecycle-driven aggregates: enumerate terminal event types from the dataset spec; handle multiple terminal events deterministically (e.g., first terminal wins); ensure every emit path is dominated by the Non-negotiable Flink Emission Gate."
+    },
+    {
+      "step": 4,
+      "file": "skilltta-task-guidance/SKILL.md",
+      "change": "Remove or qualify the ‘Jobs with no submits: output (jobId,0)’ recommendation to align with the Non-negotiable Flink Emission Gate: by default, do not emit keys with no qualifying activity unless the task explicitly requires zero rows. Keep the rest of the task-specific guidance intact."
+    }
+  ],
+  "preservation_constraints": [
+    "Do not change the skill name, frontmatter metadata, licensing blocks, or unrelated sections of the senior-data-engineer skill package.",
+    "Preserve the ‘Non-negotiable Flink Emission Gate’ verbatim; only add clarifications that reinforce its dominance over all output paths.",
+    "Keep attachments and other skills (e.g., pdf/*) unchanged.",
+    "Do not add trial-specific solution code; only adjust reusable guidance and rules."
+  ],
+  "confidence": 0.74,
+  "_usage": {
+    "completion_tokens": 2146,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 1058,
+      "rejected_prediction_tokens": 0
+    },
+    "latency_checkpoint": {
+      "engine_tbt_ms": 13,
+      "engine_ttft_ms": 1053,
+      "engine_ttlt_ms": 29498,
+      "pre_inference_ms": 179,
+      "service_tbt_ms": 13,
+      "service_ttft_ms": 1616,
+      "service_ttlt_ms": 30050,
+      "user_visible_ttft_ms": 1436
+    },
+    "prompt_tokens": 29532,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0
+    },
+    "total_tokens": 31678
+  }
+}

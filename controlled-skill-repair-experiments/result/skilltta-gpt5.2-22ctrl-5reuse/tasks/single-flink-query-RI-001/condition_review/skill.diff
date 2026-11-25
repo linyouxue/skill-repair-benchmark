@@ -1,0 +1,249 @@
+--- input/senior-data-engineer/SKILL.md
++++ repaired/senior-data-engineer/SKILL.md
+@@ -137,6 +137,10 @@
+ 4. Generate Flink/Spark job scaffolding with `stream_processor.py`
+ 5. Deploy and monitor with `streaming_quality_validator.py`
+ 
++6. For lifecycle-driven keyed aggregations (activity + independent lifecycle events), **define completion explicitly in the domain contract** (see “Semantic Contract Gate…” below). Do not rely on boundedness/end-of-input as a per-key completion signal.
++7. Finalize in **event time**: when a terminal event arrives, store its event-time timestamp and schedule emission only once the **watermark** has passed a safe point (terminal_ts + allowed lateness / out-of-orderness bound). This prevents emitting too early and missing late-but-still-valid activity.
++8. Prove output is dominated by the **Non-negotiable Flink Emission Gate**: lifecycle events control *when* finalization runs; they do not create eligibility.
++
+ **Expected Output:** Streaming pipeline processing 10K+ events/sec with P99 latency < 1s, exactly-once delivery, and real-time quality monitoring
+ 
+ 
+@@ -277,7 +281,7 @@
+ 
+ **Modeling Patterns:** See [frameworks.md](references/frameworks.md) for Dimensional Modeling (Kimball), Data Vault 2.0, One Big Table (OBT), and SCD implementations.
+ 
+-**dbt Templates:** See [templates.md](references/templates.md) for complete dbt model templates including staging, intermediate, fact tables, and SCD Type 2 logic.
++**dbt Templates:** See [templates.md](references/templates.md) for complete dbt model templates including staging, intermediate, fact tables, dimensions with SCD Type 2 logic.
+ 
+ ### 4. Performance Optimization
+ 
+@@ -302,25 +306,32 @@
+ 5. **Deploy Infrastructure:** Use Docker Compose for local dev, Kubernetes for production
+ 6. **Monitor Quality:** `python scripts/streaming_quality_validator.py --lag --freshness --throughput`
+ 
+-**Streaming Patterns:** See [frameworks.md](references/frameworks.md) for stateful processing, stream joins, windowing, exactly-once semantics, and CDC patterns.
++**Streaming Patterns:** See [frameworks.md](references/frameworks.md) for stateful processing, stream joins, windowing, exactly-once semantics, event time processing, watermarks, backpressure, Apache Flink patterns, AWS Kinesis patterns, CDC for streaming
+ 
+ **Templates:** See [templates.md](references/templates.md) for Flink DataStream jobs, Kafka Streams applications, PyFlink templates, and Docker Compose configurations.
+ 
+ #### Semantic Contract Gate for Keyed Event Aggregations
+ 
+-Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve three separate predicates:
+-
+-1. **Contributing-event predicate:** which event types add observations to a window, stage, or aggregate.
+-3. **Output-eligibility predicate:** whether a key with no contributing observations is allowed to produce a result.
+-
+- Likewise, receiving a completion event does not by itself create an aggregate: do not synthesize a zero-count group for a key with no qualifying activity unless zero-valued output is explicitly required.
+-
+-For the code-level output-eligibility invariant and completion criterion, apply the top-level `Non-negotiable Flink Emission Gate`.
++Before implementing a keyed aggregation that combines activity events with lifecycle events, write down and preserve three separate predicates. Treat them as the “semantic contract” for the operator and keep them stable during refactors:
++
++1. **Contributing-event predicate:** which event types add observations to a window/stage/aggregate (e.g., `SUBMIT` only).
++2. **Completion/terminal-event predicate:** which lifecycle event(s) *close* the key in event time (e.g., `FINISH`/`FAIL`/`KILL` per the dataset spec). This must be sourced from the domain spec; do not invent terminal signals.
++3. **Output-eligibility predicate:** whether a key with **no** contributing observations is allowed to produce a result.
++
++Operationalization rules (reusable, Flink-specific):
++
++- **Completion is not end-of-input:** boundedness/EOF is not a valid per-key completion signal. A job can be “complete” in the batch sense while still requiring event-time-safe per-key finalization.
++- **Finalize only when event time is safe:** on receiving a terminal event, record `terminalTs` in keyed state and schedule emission for a time that is only reached once the watermark has passed a safe point (commonly `terminalTs + allowedLateness`, or `terminalTs + outOfOrderBound + ε`). This prevents dropping late but still-on-time contributing events.
++- **Multiple terminal events:** define deterministic behavior (e.g., “first terminal wins” = `min(terminalTs)`; or “latest terminal wins” if specified). Document the choice as part of the contract.
++- **Eligibility is controlled only by contributing activity:** receiving a completion event does not by itself create an aggregate. Do not synthesize a zero-count group for a key with no qualifying activity unless the contract explicitly requires empty aggregates.
++
++For the code-level output-eligibility invariant, apply the top-level `Non-negotiable Flink Emission Gate` verbatim. The emission gate must dominate every output path, including timer callbacks.
+ 
+ Before declaring the job complete, validate both positive and negative semantics with small hand-checkable fixtures:
+ 
+ - a key with qualifying activity and the required completion event must be emitted;
+ - a key with the required completion event but no qualifying activity must not be emitted unless the contract explicitly requires an empty aggregate;
++- late-but-allowed contributing events (arriving after terminal event processing but before the watermark-safe emit point) must still be included;
+ - compare the output key set as well as aggregate values, and investigate unexpected extra keys even when all expected keys are present.
+ 
+ ## Python Tools
+@@ -555,7 +566,6 @@
+ - **Data Lakes:** Delta Lake, Apache Iceberg, Apache Hudi
+ - **Streaming Platforms:** Apache Kafka, AWS Kinesis, Google Pub/Sub, Azure Event Hubs
+ - **Stream Processing Engines:** Apache Flink, Kafka Streams, Spark Structured Streaming
+-- **Workflow:** Airflow, Prefect, Dagster
+ 
+ ## Integration Points
+ 
+--- input/skilltta-task-guidance/SKILL.md
++++ repaired/skilltta-task-guidance/SKILL.md
+@@ -0,0 +1,174 @@
++---
++name: skilltta-task-guidance
++---
++
++# SkillTTA Temporary Task-Guidance: Flink “Longest Stage (Session) per Job”
++
++This guidance describes a robust, reusable approach to implement a Flink DataStream job that:
++
++- reads **gzipped CSV** task/job event files,
++- identifies **stages** (= session windows) of **task SUBMIT** events per job,
++- closes a stage after **10 minutes inactivity** (no SUBMIT for that job in event time),
++- once a job is **finished**, outputs `(jobId,longestStageTaskCount)`.
++
++The output order is irrelevant; correctness is per `jobId`.
++
++---
++
++## Key Definitions (translate directly into code)
++
++1. **Stage/session** (per job): consecutive `TASK_SUBMIT` events separated by gaps **< 10 minutes**.
++2. **Stage ends**: when the gap since the most recent `TASK_SUBMIT` reaches **10 minutes**.
++3. **Longest stage**: maximum number of submitted tasks in any stage for that job.
++4. **Job completion / finished**:
++   - Use the **job event stream** to detect terminal job lifecycle.
++   - Treat the job as “finished” when a **terminal job event** occurs (per the dataset spec in `ClusterData2011_2.md`). Common terminal types are typically `FINISH`, and often also `KILL`, `FAIL`, `LOST` depending on the trace definition.
++   - **Important:** do not emit purely because input ends; define a **terminal-event predicate** from the spec, and emit only once the job is finished **in event time**, i.e., after the watermark has passed a safe point beyond the terminal timestamp (terminal_ts + allowed lateness / out-of-orderness bound).
++
++---
++
++## Workflow 1 — Parse inputs (gzipped CSV) into POJOs
++
++### 1.1 Read `.csv.gz`
++- Flink can read `.gz` transparently if you use `env.readTextFile(path)` or a `FileSource` with line-based format.
++- Keep the pipeline bounded (batch-like), but still use event time.
++
++### 1.2 Implement required datatypes (`clusterdata.datatypes`)
++Implement POJO-style classes referenced by `clusterdata.utils.AppBase` (as the skeleton requires). Keep them minimal but complete:
++
++- `TaskEvent`:
++  - `long timestamp` (convert microseconds → milliseconds)
++  - `long jobId`
++  - `int eventType`
++  - (optional) other fields you may want to parse safely
++
++- `JobEvent`:
++  - `long timestamp` (micro → milli)
++  - `long jobId`
++  - `int eventType`
++
++Parsing tips (CSV robustness pattern):
++- Split with `line.split(",", -1)`.
++- Guard against malformed/empty lines.
++- Only parse the columns you need; ignore others.
++
++### 1.3 Normalize timestamps
++Dataset timestamps are **microseconds**.
++- Convert: `eventTimeMs = timestampMicros / 1000L`.
++- Compute inactivity gap: `GAP_MS = 10 * 60 * 1000L`.
++
++---
++
++## Workflow 2 — Build a unified event stream keyed by jobId
++
++### 2.1 Create a tagged union type
++Create a small internal type (e.g., `UnifiedEvent`) containing:
++- `long jobId`
++- `long tsMs`
++- `Kind kind` where `Kind ∈ {TASK_SUBMIT, JOB_TERMINAL, OTHER}`
++
++Map:
++- From `TaskEvent` → `UnifiedEvent(TASK_SUBMIT)` **only** when the task event is `SUBMIT`.
++- From `JobEvent` → `UnifiedEvent(JOB_TERMINAL)` **only** when the job event is terminal (FINISH/KILL/FAIL/etc. per spec).
++
++Union the two streams and `keyBy(jobId)`.
++
++### 2.2 Event-time and watermarks
++Assign timestamps and watermarks on the unified stream.
++- Use `WatermarkStrategy.forBoundedOutOfOrderness(Duration.ofMinutes(X))`.
++- Pick `X` conservatively (e.g., 1–5 minutes) unless the dataset docs indicate strict ordering.
++
++This enables:
++- correct session closing via event-time timers,
++- safe “emit-after-finish” via a finish-time timer.
++
++---
++
++## Workflow 3 — Sessionize SUBMITs with keyed state + timers
++
++Implement a `KeyedProcessFunction<Long, UnifiedEvent, Tuple2<Long,Integer>>`.
++
++### 3.1 State you need (per job)
++- `ValueState<Integer> currentStageCount`
++- `ValueState<Integer> maxStageCount`
++- `ValueState<Long> lastSubmitTsMs`
++- `ValueState<Long> expectedInactivityTimerTsMs`
++- `ValueState<Long> terminalJobTsMs` (nullable)
++- `ValueState<Long> expectedEmitTimerTsMs` (nullable)
++- `ValueState<Boolean> hasQualifyingActivity` (for the Non-negotiable Flink Emission Gate)
++
++### 3.2 On TASK_SUBMIT
++1. Increment `currentStageCount`.
++2. Set `hasQualifyingActivity = true` (eligibility is created only by contributing activity).
++3. Set `lastSubmitTsMs = event.tsMs`.
++4. Schedule/refresh inactivity timer at `event.tsMs + GAP_MS`:
++   - store `expectedInactivityTimerTsMs = inactivityTs`;
++   - `ctx.timerService().registerEventTimeTimer(inactivityTs)`.
++
++Because Flink can’t “cancel” event-time timers directly, always **verify** the timer timestamp in `onTimer` using `expectedInactivityTimerTsMs`.
++
++### 3.3 On inactivity timer (`onTimer`)
++If `timestamp == expectedInactivityTimerTsMs`:
++- stage ended → update max:
++  - `maxStageCount = max(maxStageCount, currentStageCount)`
++- reset stage:
++  - `currentStageCount = 0`
++  - `lastSubmitTsMs = null`
++  - `expectedInactivityTimerTsMs = null`
++
++### 3.4 On JOB_TERMINAL (job finished detection)
++Follow the completion rule hinted in the task:
++
++1. Record terminal time:
++   - `terminalJobTsMs = min(existingTerminal, event.tsMs)` (first terminal wins)
++2. Do **not** emit immediately; instead schedule an emit timer:
++   - `emitTs = terminalJobTsMs + outOfOrderAllowanceMs + 1`
++   - store `expectedEmitTimerTsMs = emitTs`
++   - register event-time timer at `emitTs`
++
++This ensures you include any late-arriving SUBMIT events that are still within watermark tolerance.
++
++### 3.5 On emit timer
++If `timestamp == expectedEmitTimerTsMs`:
++- finalize any open stage:
++  - `maxStageCount = max(maxStageCount, currentStageCount)`
++- emit **only if eligible** (Non-negotiable Flink Emission Gate):
++  - if `hasQualifyingActivity != true`, do not emit a row
++  - if `maxStageCount` is null, do not emit a row
++  - else output `Tuple2.of(jobId, maxStageCount)`
++- clear all states (job done).
++
++---
++
++## Workflow 4 — Format and write output exactly
++
++Required line format per record:
++- `(first_int,second_int)`
++
++Implementation pattern:
++- Map `Tuple2<Long,Integer>` → `"(" + f0 + "," + f1 + ")"`.
++- Use a sink that writes one line per tuple.
++
++To avoid multi-part outputs in tests, prefer:
++- `env.setParallelism(1)` **or** `sink.setParallelism(1)`.
++- `writeAsText(outputPath, FileSystem.WriteMode.OVERWRITE)`.
++
++---
++
++## Validation & Edge Cases Checklist (apply before final submission)
++
++- **Terminal events:** confirm which `job_event.event_type` values are terminal using `ClusterData2011_2.md`.
++- **Only count SUBMIT:** ignore other task event types.
++- **Resubmits counted separately:** do not deduplicate `(job, taskIndex)`.
++- **No-activity keys:** by default, do **not** emit a row for a job that has lifecycle/terminal events but no qualifying SUBMIT activity, unless the task explicitly requires zero-valued outputs.
++- **Timer correctness:** ignore stale timers by checking `expected*TimerTs`.
++- **Timestamp units:** ensure everything is consistently in milliseconds after parsing.
++
++---
++
++## Minimal mental model (portability)
++
++Think of each jobId as a mini “Counter with session breaks”:
++- SUBMIT increments the current counter and pushes an inactivity deadline.
++- When the deadline passes, seal the session and update the max.
++- When a terminal job event occurs, schedule a watermark-safe finalization time and then (if eligible) emit the max.

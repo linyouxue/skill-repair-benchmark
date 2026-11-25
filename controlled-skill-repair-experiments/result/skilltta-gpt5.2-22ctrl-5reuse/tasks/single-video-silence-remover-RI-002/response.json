@@ -1,0 +1,170 @@
+{
+  "method": "SkillTTA retrieval + temporary synthesis + diagnosis + two iterative repair rounds",
+  "diagnosis": {
+    "diagnoses": [
+      {
+        "id": "DX-SEGCOMB-001",
+        "summary": "segment-combiner does not actually merge intervals; it only concatenates and sorts.",
+        "details": "The task guidance and video-processor completion checks require combined removal segments to be sorted and non-overlapping (and typically merged when overlapping/adjacent). However, segment-combiner/scripts/combine_segments.py simply appends all segments and sorts; it does not clamp, de-overlap, merge overlaps, or merge near-contiguous intervals. This can yield overlapping segments, duplicated removals, and inflated total_duration_seconds.",
+        "impact": "Downstream video-processor can produce wrong keep intervals, create invalid/negative trims, or re-include removed content; report math may be inconsistent."
+      },
+      {
+        "id": "DX-SEGCOMB-002",
+        "summary": "segment-combiner trusts input 'duration' and re-emits it without recomputing.",
+        "details": "combine_segments.py copies seg['duration'] verbatim. If segments are later merged/clamped, durations must be recomputed as end-start. Even without merging, some inputs may omit duration or contain inconsistent values.",
+        "impact": "total_duration_seconds and per-segment duration fields can be wrong, breaking evaluation checks (duration ≈ end-start) and report consistency."
+      },
+      {
+        "id": "DX-VIDPROC-001",
+        "summary": "video-processor calculate_keep_segments is incorrect when removal segments overlap or are unsorted/degenerate.",
+        "details": "video-processor/scripts/process_video.py sets current_time = seg['end'] unconditionally. If a later segment overlaps and ends earlier than current_time, current_time moves backwards, causing the computed keep intervals to re-include content that should be removed. It also doesn't skip segments with end<=start and does not clamp to [0, total_duration].",
+        "impact": "Creates wrong keep segments, potentially invalid ffmpeg trim ranges, or audible/video glitches around overlaps."
+      },
+      {
+        "id": "DX-VIDPROC-002",
+        "summary": "video-processor assumes every remove segment has a numeric 'duration' field and uses it for removed_duration.",
+        "details": "removed_duration = sum(s['duration'] for s in remove_segments) will fail if any segment lacks duration, or will be inconsistent if duration mismatches end-start (common after any merge/clamp).",
+        "impact": "Crashes or produces incorrect summary/reporting; violates completion check 'duration ≈ end-start'."
+      },
+      {
+        "id": "DX-DOCSYNC-001",
+        "summary": "segment-combiner/SKILL.md and video-processor/SKILL.md do not define/align on an interval convention and merge contract.",
+        "details": "Location hint points to '区间合并约定' and the corresponding calling/check in video-processor. Currently, segment-combiner docs only say 'Segments are sorted' and 'Compatible with video-processor', but do not specify half-open vs closed intervals, adjacency merge rules, clamping, or how overlaps are handled. video-processor completion checks require non-overlapping segments, but the implementation doesn't enforce it.",
+        "impact": "Users (and downstream automation) can supply segments that pass one skill but break another; increases failure probability and evaluation mismatches."
+      },
+      {
+        "id": "DX-AUDIOEXT-001",
+        "summary": "audio-extractor ffmpeg command places '-y' after the output filename (incorrect ffmpeg argument ordering).",
+        "details": "audio-extractor/scripts/extract_audio.py builds cmd ... cmd.extend([output_path, \"-y\"]). In ffmpeg, global options like -y must appear before output(s). Placing -y after output may cause ffmpeg to interpret '-y' as another output or error.",
+        "impact": "Audio extraction can fail, blocking the entire pipeline."
+      },
+      {
+        "id": "DX-REPORT-001",
+        "summary": "report-generator computes removed_duration as (original - compressed) and blindly attaches segments, which can break math/segment consistency checks.",
+        "details": "report-generator/scripts/generate_report.py sets removed_duration = original_duration - compressed_duration, but segments_removed may sum to a different duration (especially if segments are integer seconds while actual trims are float, or if overlaps exist). Evaluation criteria emphasize math consistency and segment validity; current approach can easily diverge from segments.",
+        "impact": "compression_report.json may fail consistency checks (original ≈ compressed + removed AND per-segment duration correctness)."
+      }
+    ],
+    "affected_files": [
+      "segment-combiner/SKILL.md",
+      "segment-combiner/scripts/combine_segments.py",
+      "video-processor/SKILL.md",
+      "video-processor/scripts/process_video.py",
+      "audio-extractor/scripts/extract_audio.py",
+      "report-generator/scripts/generate_report.py"
+    ],
+    "repair_plan": [
+      {
+        "step": 1,
+        "action": "Define and document a single interval convention and merge contract.",
+        "changes": [
+          "Update segment-combiner/SKILL.md to specify half-open intervals [start, end), numeric seconds (float allowed), duration=end-start, normalization (clamp, drop invalid), and merge rules (overlap and near-contiguous with configurable merge_gap).",
+          "Update video-processor/SKILL.md to explicitly state it expects normalized/merged segments OR that it will normalize/merge internally, and align checks accordingly."
+        ]
+      },
+      {
+        "step": 2,
+        "action": "Implement proper normalization + merging in segment-combiner.",
+        "changes": [
+          "In segment-combiner/scripts/combine_segments.py: parse segments robustly, allow missing duration, recompute duration as end-start.",
+          "Sort, clamp (optionally if total duration is known/provided), drop end<=start, merge overlaps and segments within merge_gap, then recompute total_duration_seconds from merged segments.",
+          "Optionally add CLI args like --merge-gap and (if needed) --total-duration/--clamp-to-video to support safe clamping when used standalone."
+        ]
+      },
+      {
+        "step": 3,
+        "action": "Harden video-processor against overlapping/invalid segments even if upstream fails.",
+        "changes": [
+          "In video-processor/scripts/process_video.py: normalize/clamp segments to [0,total_duration], drop invalid, merge overlaps (reuse same logic as combiner or import shared helper).",
+          "Fix calculate_keep_segments to maintain monotonic current_time via current_time = max(current_time, seg['end']).",
+          "Compute removed_duration from sum(end-start) instead of trusting s['duration'].",
+          "Handle empty keep_segments: fall back to stream copy or re-mux (or keep full video) rather than building an invalid concat filter."
+        ]
+      },
+      {
+        "step": 4,
+        "action": "Fix audio-extractor ffmpeg invocation ordering.",
+        "changes": [
+          "Move '-y' before the output path in audio-extractor/scripts/extract_audio.py (e.g., include '-y' as a global option early in cmd).",
+          "Optionally add '-hide_banner' and '-loglevel error' for cleaner failure messages (non-functional)."
+        ]
+      },
+      {
+        "step": 5,
+        "action": "Make report-generator consistent with segment semantics and tolerant to rounding.",
+        "changes": [
+          "Load merged segments and recompute per-segment duration (end-start) defensively.",
+          "Compute removed_duration_seconds as sum of merged segment durations; compute compressed_duration_seconds as original - removed (or alternatively keep measured compressed but reconcile within tolerance and prefer segment-derived values for math consistency).",
+          "Guard against original_duration==0 and missing segments file.",
+          "Optionally add a small tolerance note or field (not required) but keep required output schema unchanged."
+        ]
+      }
+    ],
+    "preservation_constraints": [
+      "Preserve unrelated working guidance and attachments (do not delete or rewrite other skills beyond necessary integration/doc alignment).",
+      "Do not solve the end task or add trial-specific hardcoded timestamps/segments.",
+      "Keep existing CLI interfaces working where possible; if adding new optional flags (e.g., --merge-gap), default behavior must remain backward-compatible.",
+      "Maintain output JSON schemas already used across the bundle (segments arrays with start/end/duration), but ensure values are corrected and consistent.",
+      "Do not remove the existing 'Blocking terminal-result gate' text in video-processor/SKILL.md unless it directly conflicts with correctness; focus on functional defects."
+    ],
+    "confidence": 0.86,
+    "_usage": {
+      "completion_tokens": 3556,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 1708,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 16,
+        "engine_ttft_ms": 542,
+        "engine_ttlt_ms": 56279,
+        "pre_inference_ms": 107,
+        "service_tbt_ms": 16,
+        "service_ttft_ms": 990,
+        "service_ttlt_ms": 56718,
+        "user_visible_ttft_ms": 883
+      },
+      "prompt_tokens": 13089,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 16645
+    }
+  },
+  "round_summaries": [
+    {
+      "round": 1,
+      "applied_updates": [
+        "audio-extractor/scripts/extract_audio.py",
+        "report-generator/scripts/generate_report.py",
+        "segment-combiner/SKILL.md",
+        "segment-combiner/scripts/combine_segments.py",
+        "video-processor/SKILL.md",
+        "video-processor/scripts/process_video.py"
+      ],
+      "rationale": [
+        "Fixed ffmpeg global option ordering in audio-extractor (and added non-interactive/loglevel-safe defaults) to prevent extraction failures caused by placing -y after the output path.",
+        "Implemented a real interval merge/normalization contract in segment-combiner: robust input parsing, optional clamping, dropping invalid segments, merging overlaps/near-contiguous intervals, and always recomputing duration as end-start.",
+        "Hardened video-processor against overlapping/unsorted/degenerate removal segments by normalizing+merging internally, enforcing monotonic cursor advancement, and computing removed time from timestamps instead of trusting duration fields.",
+        "Updated segment-combiner and video-processor documentation to align on a single interval convention (half-open [start,end)) and to clearly state the normalization/merge behavior expected by downstream checks.",
+        "Improved report-generator to recompute per-segment durations and defensively normalize/merge provided segments while keeping the task-required report schema and ensuring duration totals are derived from actual media files (ffprobe)."
+      ]
+    },
+    {
+      "round": 2,
+      "applied_updates": [
+        "report-generator/SKILL.md",
+        "report-generator/scripts/generate_report.py"
+      ],
+      "rationale": [
+        "Fixes DX-REPORT-001 more completely: the report generator now sanitizes segments and prefers segment-derived removed duration when it is consistent with measured media durations, reducing the chance that `segments_removed` and summary math diverge.",
+        "Maintains evaluation-friendly invariants: segment durations are always recomputed as `end-start`, segments are merged and clamped, and summary fields are chosen to keep `original ≈ compressed + removed` within a small tolerance while still agreeing with measured compressed duration.",
+        "Keeps backward compatibility: CLI is unchanged except for adding optional `--tolerance-seconds`; existing invocations still work."
+      ]
+    }
+  ],
+  "audit_file": "adapter_audit.json"
+}
