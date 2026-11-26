@@ -1,0 +1,108 @@
+{
+  "method": "skillaxe",
+  "method_version": "standalone-four-dimension-controlled55-v1",
+  "repair_model": "gpt-5.2@AZUREOPENAI-default",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "trial_id": "flink-generalization-repair",
+  "diagnoses": [
+    {
+      "prediction_id": "flink-generalization-repair-1",
+      "description": "The Skill bundle lacks any Flink/Java task-specific guidance, so the agent is likely to implement the job without enforcing the output contract: only emit results for jobs that have finished (FINISH event) and compute longest stage only from task SUBMIT events for those finished jobs. This leads to 'unexpected_jobs' being emitted (jobs without FINISH and/or without SUBMIT), matching the reported delivery issue.",
+      "evidence": "The repair run feedback shows `delivery_issues: [\"unexpected_jobs:362\"]` and notes: \"实际输出包括没有 FINISH 的作业，也包括有 FINISH 但没有 Task SUBMIT 的作业\". Baseline output includes many `(jobId,0)` lines, consistent with emitting jobs that should be excluded. The supplied Skill bundle contains only `pdf` and a generic `senior-data-engineer` package; neither provides concrete Flink event-time/sessionization + job-finish gating instructions or explicit output filtering checks.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Real-Time Streaming / Apache Flink mentions (no task-output contract guidance)"
+        },
+        {
+          "file": "senior-data-engineer/references/frameworks.md",
+          "section": "Real-Time Streaming Architecture (generic windowing; no job-finish gating / output contract)"
+        },
+        {
+          "file": "senior-data-engineer/references/templates.md",
+          "section": "Apache Flink templates (generic; no dataset-specific event filtering guidance)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "flink-generalization-repair-2",
+      "description": "Instruction compliance risk: the Skill does not require an explicit 'contract checklist' step (e.g., verify which entities to output, required filters, and exclusion rules). Without this, an agent may attribute failures to code logic rather than missing required filtering, and may not add the necessary validation against job events (FINISH) before emitting output.",
+      "evidence": "The task requires: \"find the stage with the most number of tasks once the job has finished\". The observed failures are primarily contract violations (extra jobs), not stage-counting errors. The Skill bundle has no workflow step that forces checking such constraints before coding or before writing output.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/SKILL.md",
+          "section": "Key Workflows (no explicit 'output contract / exclusion rules' checkpoint)"
+        },
+        {
+          "file": "senior-data-engineer/HOW_TO_USE.md",
+          "section": "What You'll Get / Tips (no compliance checklist)"
+        }
+      ]
+    },
+    {
+      "prediction_id": "flink-generalization-repair-3",
+      "description": "Solution-path coverage gap: the Skill provides generic windowing examples but does not cover a common Flink pattern needed here—keyed event-time sessionization with an inactivity gap and then selecting the maximum session size per key, while handling end-of-stream/job completion semantics. Missing guidance increases the chance of incorrect handling of late events, watermarking, and finalization, and encourages ad-hoc outputs like defaulting to 0 for missing sessions.",
+      "evidence": "Task defines stages as SUBMIT events separated by 10 minutes of inactivity in event time. The Skill references session windows conceptually but does not instruct how to implement session windows in Java DataStream API with event-time timestamps from microseconds, nor how to join with job FINISH events to gate output. Baseline output shows many zeros, suggesting a fallback path rather than correct exclusion/aggregation.",
+      "locations": [
+        {
+          "file": "senior-data-engineer/references/frameworks.md",
+          "section": "Windowing Strategies / Session Window (Spark example; not Flink Java + job-finish gating)"
+        },
+        {
+          "file": "senior-data-engineer/references/templates.md",
+          "section": "Apache Flink DataStream Job (generic; no session window + finish gating)"
+        }
+      ]
+    }
+  ],
+  "updated_files": [
+    "senior-data-engineer/SKILL.md"
+  ],
+  "skillaxe_evaluation": {
+    "quality_impact": {
+      "score": 0.78,
+      "rationale": "Adds explicit, reusable guidance to prevent the observed primary failure mode (emitting unexpected entities) by requiring terminal-event gating and clarifying whether to omit vs default for empty entities. This directly targets the reported delivery_contract failures without prescribing task-instance constants beyond generic examples."
+    },
+    "trigger_precision": {
+      "score": 0.74,
+      "rationale": "Targets a general boundary: analytics jobs with per-entity outputs and terminal conditions. It avoids overfitting to the specific dataset by not naming Google trace fields, but still mentions common terminal events like FINISH as an example."
+    },
+    "instruction_compliance": {
+      "score": 0.81,
+      "rationale": "Improves compliance by adding a mandatory checklist step and making exclusion rules explicit, helping distinguish missing Skill guidance (contract checks) from agent non-compliance. It instructs to re-check contract before output, which was missing."
+    },
+    "solution_path_coverage": {
+      "score": 0.7,
+      "rationale": "Introduces a generic workflow for event-time sessionization plus terminal gating, covering common Flink execution paths (filter, sessionize, reduce, gate, output). It does not add code templates for every API variant, but meaningfully expands coverage for the key edge case (eligible keys with no relevant events)."
+    },
+    "overall_rationale": "The bundle lacked Flink-task execution guidance and, critically, lacked an output-contract gating pattern. The repair adds a concise, transferable checklist and workflow that would have prevented the observed 'unexpected_jobs' outputs while preserving unrelated content and avoiding task-specific solutions."
+  },
+  "transport": {
+    "id": "chatcmpl-Eo606dMTuxSNCt34g6Oq4YZwfTGmJ",
+    "usage": {
+      "completion_tokens": 3710,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "latency_checkpoint": {
+        "engine_tbt_ms": 12,
+        "engine_ttft_ms": 3967,
+        "engine_ttlt_ms": 47815,
+        "pre_inference_ms": 276,
+        "service_tbt_ms": 12,
+        "service_ttft_ms": 4407,
+        "service_ttlt_ms": 48250,
+        "user_visible_ttft_ms": 4131
+      },
+      "prompt_tokens": 129568,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 133278
+    }
+  }
+}
