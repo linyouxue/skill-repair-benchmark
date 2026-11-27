@@ -5,3 +5,9 @@ SkillHone 使用 GPT-5.2 在原题第五轮提交了三篇匿名 PDF。旧 verif
 [第五轮冻结 Skill](skillhone-gpt5.2/skills/) · [当轮提交和复算明细](skillhone-gpt5.2/evidence/train/run_01/) · [旧评分及执行记录](https://github.com/linyouxue/skill-repair-benchmark/tree/745816c178cb1bb5c0f0e9900baaf9b698b36c49/evaluation/results/SkillHone-GPT52-31Tasks-20261119/tasks/paper-anonymizer/repaired_run) · [四组泛化评测状态](../evaluation/results/README.md)
 
 用于泛化评测的是复审后选定的第 3 轮。[选版依据](skillhone-gpt5.2-round3/selection.json) · [第 3 轮完整 Skill](skillhone-gpt5.2-round3/skills/) · [五组逐次运行索引](../evaluation/results/runs.json)
+
+## WML + GPT-5.2（AIHUBMIX）
+
+训练组得分 **62/67（92.54%）**，四组泛化等权平均正确率为 **97.08%**。每组采用一条审计有效的运行记录。
+
+[训练结果、冻结 Skill 与参考验收](wml-gpt5.2-aihubmix/README.md) · [四组泛化成绩与运行证据](../evaluation/results/methods/wml-gpt5.2-aihubmix/README.md)

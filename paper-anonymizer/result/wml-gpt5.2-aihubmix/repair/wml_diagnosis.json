@@ -1,0 +1,61 @@
+{
+  "diagnoses": [
+    {
+      "label": "identifier-redaction patterns incomplete (arXiv/DOI/URL variants)",
+      "observable_evidence": "Verifier: ::test_identifiers_redacted failed while ::test_authors_redacted and ::test_affiliations_redacted passed, indicating identity leakage remains specifically via identifiers rather than names/affiliations.",
+      "workflow_node": "input_grounding",
+      "mechanism_anchor": "Leakage-surface enumeration for academic PDFs",
+      "defect_relation": "missing",
+      "scope_boundary": "When anonymizing academic papers for blind review, enumerate and target non-name identity leaks (arXiv IDs, DOIs, URLs, submission/accepted venue strings, preprint footers) in addition to names/affiliations.",
+      "do_not_generalize_to": "Non-academic PDFs or tasks where identifiers are intentionally preserved (e.g., bibliographic archiving, citation indexing).",
+      "target_file": "academic-pdf-redaction/SKILL.md",
+      "target_section": "Patterns to Redact (Before References Only)",
+      "target_layer": "L2",
+      "recommended_direction": "Expand the identifier category beyond the single arXiv/DOI examples to include common real-world variants (case/spacing/prefix differences, URL forms like arxiv.org/abs/, dx.doi.org/, doi.org/, and other repository identifiers) and explicitly instruct collecting these strings from the document text/metadata before redaction.",
+      "confidence": "high"
+    },
+    {
+      "label": "content-preservation guardrail not operational (no post-redaction retention check in main flow)",
+      "observable_evidence": "::test_content_preserved failed while ::test_structural_integrity passed, suggesting the output remains a valid PDF but too much textual content was removed/obscured; the skill mentions “Check that 80%+ of original text remains” and provides verify_redaction(), but this is guidance-only and not integrated as a required step with clear thresholds/stop conditions.",
+      "workflow_node": "verification",
+      "mechanism_anchor": "Post-transform retention and regression checks",
+      "defect_relation": "weak",
+      "scope_boundary": "Any PDF redaction operation where the goal is anonymization while preserving the paper’s readable content and layout.",
+      "do_not_generalize_to": "Workflows intentionally removing large portions of content (e.g., summarization by extraction, heavy censorship, page-level removal).",
+      "target_file": "academic-pdf-redaction/SKILL.md",
+      "target_section": "CRITICAL RULES / REQUIRED: Verification Function",
+      "target_layer": "L2",
+      "recommended_direction": "Strengthen the verification mechanism into a mandatory, stepwise gate: define explicit retained-text thresholds (and what to do when failing), require counting redaction annotations applied, and require spot-checking that only matched rectangles were redacted; tie these checks to iteration (tighten patterns / reduce overbroad matches) before saving final outputs.",
+      "confidence": "high"
+    },
+    {
+      "label": "references boundary detection ambiguous causing over-redaction",
+      "observable_evidence": "::test_self_citations_preserved passed but ::test_content_preserved failed; the skill’s stop condition is a simplistic “if 'references' in page text” which can mis-detect (e.g., 'References' in headers/TOC/footers) and lead to redaction being applied too widely or skipped inconsistently, impacting overall content retention.",
+      "workflow_node": "operation_decision",
+      "mechanism_anchor": "Section boundary detection (stop-redacting at References)",
+      "defect_relation": "ambiguous",
+      "scope_boundary": "Determining where to stop redacting (main text/front matter) and where to preserve (References and beyond) in academic PDFs.",
+      "do_not_generalize_to": "Documents without a References section or with radically different structure (slides, posters, brochures).",
+      "target_file": "academic-pdf-redaction/SKILL.md",
+      "target_section": "PyMuPDF (fitz) - Recommended Approach",
+      "target_layer": "L2",
+      "recommended_direction": "Clarify and harden the boundary rule: require robust detection (e.g., first occurrence of a standalone 'References' heading with typography/position heuristics, or confirming subsequent citation-like patterns), and add a fallback manual/visual check when detection is uncertain to prevent unnecessary redactions that harm content preservation.",
+      "confidence": "medium"
+    }
+  ],
+  "overlay": {
+    "primary_node": "input_grounding",
+    "primary_anchor": "Leakage-surface enumeration for academic PDFs",
+    "editor_direction": "strengthen",
+    "composition_issue": "Identifier leakage persists because the enumeration/pattern set is incomplete, while content loss indicates the redaction application and boundary detection can be overbroad; expanding identifier coverage must be coupled with stricter verification gates and clearer stop-redacting boundaries to avoid worsening content preservation.",
+    "preservation_constraints": [
+      "Preserve the rule to not redact the References section so self-citations remain intact",
+      "Preserve the guidance to redact only specific search matches (not whole-page/region redaction)",
+      "Preserve structural integrity checks (page count should not change)"
+    ]
+  },
+  "package_assessment": {
+    "skill_controllable": true,
+    "rationale": "All observed failures are attributable to modifiable, reusable-skill guidance mechanisms (identifier enumeration/pattern coverage, boundary detection guidance, and verification gating) localized to academic-pdf-redaction/SKILL.md without needing changes to external systems."
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "method": "workflow-localized-mechanism-learning",
+  "trial_id": "wml-paper-aihubmix-20261126",
+  "task_id": "paper-anonymizer",
+  "repair_model": "gpt-5.2@AIHUBMIX-default",
+  "provider": "Tatumass",
+  "base_url": "https://maas.tatucloud.com/deployer/coding_tatu/v1",
+  "wml_diagnosis": {
+    "diagnoses": [
+      {
+        "label": "identifier-redaction patterns incomplete (arXiv/DOI/URL variants)",
+        "observable_evidence": "Verifier: ::test_identifiers_redacted failed while ::test_authors_redacted and ::test_affiliations_redacted passed, indicating identity leakage remains specifically via identifiers rather than names/affiliations.",
+        "workflow_node": "input_grounding",
+        "mechanism_anchor": "Leakage-surface enumeration for academic PDFs",
+        "defect_relation": "missing",
+        "scope_boundary": "When anonymizing academic papers for blind review, enumerate and target non-name identity leaks (arXiv IDs, DOIs, URLs, submission/accepted venue strings, preprint footers) in addition to names/affiliations.",
+        "do_not_generalize_to": "Non-academic PDFs or tasks where identifiers are intentionally preserved (e.g., bibliographic archiving, citation indexing).",
+        "target_file": "academic-pdf-redaction/SKILL.md",
+        "target_section": "Patterns to Redact (Before References Only)",
+        "target_layer": "L2",
+        "recommended_direction": "Expand the identifier category beyond the single arXiv/DOI examples to include common real-world variants (case/spacing/prefix differences, URL forms like arxiv.org/abs/, dx.doi.org/, doi.org/, and other repository identifiers) and explicitly instruct collecting these strings from the document text/metadata before redaction.",
+        "confidence": "high"
+      },
+      {
+        "label": "content-preservation guardrail not operational (no post-redaction retention check in main flow)",
+        "observable_evidence": "::test_content_preserved failed while ::test_structural_integrity passed, suggesting the output remains a valid PDF but too much textual content was removed/obscured; the skill mentions “Check that 80%+ of original text remains” and provides verify_redaction(), but this is guidance-only and not integrated as a required step with clear thresholds/stop conditions.",
+        "workflow_node": "verification",
+        "mechanism_anchor": "Post-transform retention and regression checks",
+        "defect_relation": "weak",
+        "scope_boundary": "Any PDF redaction operation where the goal is anonymization while preserving the paper’s readable content and layout.",
+        "do_not_generalize_to": "Workflows intentionally removing large portions of content (e.g., summarization by extraction, heavy censorship, page-level removal).",
+        "target_file": "academic-pdf-redaction/SKILL.md",
+        "target_section": "CRITICAL RULES / REQUIRED: Verification Function",
+        "target_layer": "L2",
+        "recommended_direction": "Strengthen the verification mechanism into a mandatory, stepwise gate: define explicit retained-text thresholds (and what to do when failing), require counting redaction annotations applied, and require spot-checking that only matched rectangles were redacted; tie these checks to iteration (tighten patterns / reduce overbroad matches) before saving final outputs.",
+        "confidence": "high"
+      },
+      {
+        "label": "references boundary detection ambiguous causing over-redaction",
+        "observable_evidence": "::test_self_citations_preserved passed but ::test_content_preserved failed; the skill’s stop condition is a simplistic “if 'references' in page text” which can mis-detect (e.g., 'References' in headers/TOC/footers) and lead to redaction being applied too widely or skipped inconsistently, impacting overall content retention.",
+        "workflow_node": "operation_decision",
+        "mechanism_anchor": "Section boundary detection (stop-redacting at References)",
+        "defect_relation": "ambiguous",
+        "scope_boundary": "Determining where to stop redacting (main text/front matter) and where to preserve (References and beyond) in academic PDFs.",
+        "do_not_generalize_to": "Documents without a References section or with radically different structure (slides, posters, brochures).",
+        "target_file": "academic-pdf-redaction/SKILL.md",
+        "target_section": "PyMuPDF (fitz) - Recommended Approach",
+        "target_layer": "L2",
+        "recommended_direction": "Clarify and harden the boundary rule: require robust detection (e.g., first occurrence of a standalone 'References' heading with typography/position heuristics, or confirming subsequent citation-like patterns), and add a fallback manual/visual check when detection is uncertain to prevent unnecessary redactions that harm content preservation.",
+        "confidence": "medium"
+      }
+    ],
+    "overlay": {
+      "primary_node": "input_grounding",
+      "primary_anchor": "Leakage-surface enumeration for academic PDFs",
+      "editor_direction": "strengthen",
+      "composition_issue": "Identifier leakage persists because the enumeration/pattern set is incomplete, while content loss indicates the redaction application and boundary detection can be overbroad; expanding identifier coverage must be coupled with stricter verification gates and clearer stop-redacting boundaries to avoid worsening content preservation.",
+      "preservation_constraints": [
+        "Preserve the rule to not redact the References section so self-citations remain intact",
+        "Preserve the guidance to redact only specific search matches (not whole-page/region redaction)",
+        "Preserve structural integrity checks (page count should not change)"
+      ]
+    },
+    "package_assessment": {
+      "skill_controllable": true,
+      "rationale": "All observed failures are attributable to modifiable, reusable-skill guidance mechanisms (identifier enumeration/pattern coverage, boundary detection guidance, and verification gating) localized to academic-pdf-redaction/SKILL.md without needing changes to external systems."
+    }
+  },
+  "wml_repair": {
+    "edits": [
+      {
+        "path": "academic-pdf-redaction/SKILL.md",
+        "content": "---\nname: academic-pdf-redaction\ndescription: Redact text from PDF documents for blind review anonymization\n---\n\n# PDF Redaction for Blind Review\n\nRedact identifying information from academic papers for blind review.\n\n## CRITICAL RULES\n\n1. **PRESERVE References section** - Self-citations MUST remain intact\n2. **ONLY redact specific text matches** - Never redact entire pages/regions\n3. **VERIFY output** - Check that 80%+ of original text remains\n\n## Common Pitfalls to AVOID\n\n```python\n# ❌ WRONG - This removes ALL text from the page:\nfor block in page.get_text(\"blocks\"):\n    page.add_redact_annot(fitz.Rect(block[:4]))\n\n# ❌ WRONG - Drawing rectangles over text:\npage.draw_rect(fitz.Rect(0, 0, 600, 100), fill=(0,0,0))\n\n# ✅ CORRECT - Only redact specific search matches:\nfor rect in page.search_for(\"John Smith\"):\n    page.add_redact_annot(rect)\n```\n\n## Patterns to Redact (Before References Only)\n\n**IMPORTANT: Use FULL names/phrases, not partial matches!**\n- ✅ \"John Smith\" (full name)\n- ❌ \"Smith\" (partial - would incorrectly match \"Smith et al.\" citations in References)\n\nBefore you start redacting, **collect candidate identifier strings from BOTH**:\n- **Visible text** (title page/footer, first page, camera-ready footers)\n- **PDF metadata** (Title/Subject/Keywords/Creator/Producer)\n\nThen add those **exact strings** to your `patterns` list.\n\n1. **Author names** - FULL names only (e.g., \"John Smith\", not just \"Smith\")\n2. **Affiliations** - Universities, companies (e.g., \"Duke University\")\n3. **Email addresses** - Pattern: `*@*.edu`, `*@*.com`\n4. **Venue names** - Conference/workshop names (e.g., \"ICML 2024\", \"ICML Workshop\")\n5. **Repository / preprint identifiers & URLs** (COMMON LEAK SOURCE)\n   - arXiv IDs and variants:\n     - `arXiv:2401.12345` / `arXiv:2401.12345v2`\n     - `arxiv:2401.12345` (case variants)\n     - old-style: `arXiv:cs/0112017`\n     - URL forms: `https://arxiv.org/abs/2401.12345`, `http://arxiv.org/pdf/2401.12345.pdf`\n   - DOI strings and URL forms:\n     - `doi:10.1145/1234567.8901234` (case/spacing variants like `DOI: 10....`)\n     - `10.1145/1234567.8901234` (bare DOI)\n     - `https://doi.org/10.1145/1234567.8901234`\n     - `https://dx.doi.org/10.1145/1234567.8901234`\n   - Other common paper links/IDs worth scanning for (only redact if present):\n     - `openreview.net/forum?id=...` / `OpenReview`\n     - `ssrn.com/abstract=...` / `SSRN`\n     - `hal.science/...`, `zenodo.org/record/...`, `biorxiv.org/...`, `medrxiv.org/...`\n     - GitHub/project pages used as identifiers: `github.com/<org>/<repo>`, `project page:`\n6. **Submission/acceptance/availability strings** (often in footers/first page)\n   - e.g., \"Accepted at ...\", \"To appear in ...\", \"Camera-ready\", \"Preprint\", \"Under review\", \"Submitted to ...\"\n7. **Acknowledgement names** - Names in \"Acknowledgements\" section\n8. **Equal contribution footnotes** - e.g., \"Equal contribution\", \"* Equal contribution\"\n\n## PyMuPDF (fitz) - Recommended Approach\n\n```python\nimport fitz\nimport os\n\ndef _looks_like_references_heading(page: fitz.Page) -> bool:\n    \"\"\"Heuristic: detect a real References heading to stop redaction.\n\n    Avoid triggering on TOC/header/footer occurrences.\n    \"\"\"\n    # Search for the word, then apply position heuristics.\n    # References headings are typically near the top half of the page.\n    hits = page.search_for(\"References\") + page.search_for(\"REFERENCES\") + page.search_for(\"references\")\n    if not hits:\n        return False\n\n    # Keep only candidates near the top portion (typical heading area)\n    top_hits = [r for r in hits if r.y0 < page.rect.height * 0.45]\n    if not top_hits:\n        return False\n\n    # Confirm the page also contains citation-like patterns that usually follow references.\n    # (Not perfect, but reduces false positives from headers/TOC.)\n    t = page.get_text().lower()\n    has_citations = (\"et al.\" in t) or (\"[1]\" in t) or (\"[2]\" in t) or (\"doi\" in t) or (\"arxiv\" in t)\n    return has_citations\n\n\ndef redact_with_pymupdf(input_path: str, output_path: str, patterns: list[str]):\n    \"\"\"Redact specific patterns from PDF using PyMuPDF.\"\"\"\n    doc = fitz.open(input_path)\n    original_len = sum(len(p.get_text()) for p in doc)\n\n    # Find References page - stop redacting there (robust heuristic)\n    references_page = None\n    for i, page in enumerate(doc):\n        if _looks_like_references_heading(page):\n            references_page = i\n            break\n\n    # Fallback: if uncertain, do a quick visual/spot-check rather than over-redact.\n    # If your heuristic triggers on a TOC/header, you'll either redact too little or too much.\n    # When in doubt, set references_page manually after inspecting page i.\n\n    total_annots = 0\n\n    for page_num, page in enumerate(doc):\n        if references_page is not None and page_num >= references_page:\n            continue  # Skip References section\n\n        for pattern in patterns:\n            # ONLY redact exact search matches\n            rects = page.search_for(pattern)\n            for rect in rects:\n                page.add_redact_annot(rect, fill=(0, 0, 0))\n            total_annots += len(rects)\n\n        # Apply only if there is something to apply (helps avoid unintended changes)\n        if page.first_annot:\n            page.apply_redactions()\n\n    os.makedirs(os.path.dirname(output_path), exist_ok=True)\n    doc.save(output_path)\n    doc.close()\n\n    # MUST verify after saving\n    verify_redaction(input_path, output_path, expected_min_retained=0.80, min_redactions=1)\n```\n\n## REQUIRED: Verification Function\n\n**Always run this after ANY redaction to catch errors early. Treat failures as a hard stop and iterate (tighten patterns / reduce overbroad matches) before producing final outputs.**\n\n```python\nimport fitz\n\ndef verify_redaction(original_path, output_path, *, expected_min_retained=0.80, min_redactions=1):\n    \"\"\"Verify redaction didn't corrupt the PDF and didn't over-remove content.\n\n    Gate conditions:\n    - Page count unchanged\n    - Retained text ratio >= expected_min_retained\n    - Some redactions were actually applied (guards against missing identifier patterns)\n    \"\"\"\n    orig = fitz.open(original_path)\n    redc = fitz.open(output_path)\n\n    orig_len = sum(len(p.get_text()) for p in orig)\n    redc_len = sum(len(p.get_text()) for p in redc)\n\n    # Count redaction annotations (best-effort): look for redact annots in output.\n    # If your pipeline applies redactions (burns them in), annots may be gone; in that case,\n    # rely on your own count during redaction (recommended) and set min_redactions accordingly.\n    redact_annots = 0\n    for page in redc:\n        annot = page.first_annot\n        while annot:\n            if str(annot.type[1]).lower() == \"redact\":\n                redact_annots += 1\n            annot = annot.next\n\n    print(f\"Original: {len(orig)} pages, {orig_len} chars\")\n    print(f\"Redacted: {len(redc)} pages, {redc_len} chars\")\n    if orig_len > 0:\n        print(f\"Retained: {redc_len/orig_len:.1%}\")\n    print(f\"Redaction annots present (may be 0 after apply): {redact_annots}\")\n\n    # DEFENSIVE CHECKS - fail fast if something went wrong\n    if len(redc) != len(orig):\n        raise ValueError(f\"Page count changed: {len(orig)} -> {len(redc)}\")\n    if redc_len < 1000:\n        raise ValueError(f\"PDF corrupted: only {redc_len} chars remain!\")\n    if orig_len > 0 and (redc_len / orig_len) < expected_min_retained:\n        raise ValueError(\n            f\"Too much removed: kept only {redc_len/orig_len:.0%} (min {expected_min_retained:.0%}). \"\n            \"Fix by removing overly broad patterns and ensuring you only redact exact matches on non-References pages. \"\n            \"Also re-check your References boundary detection.\"\n        )\n\n    # Under-redaction guardrail: ensure you actually targeted something.\n    # If redact_annots is 0 because redactions were already applied (burned in), ensure you also\n    # track and assert a nonzero count in your redaction loop.\n    if redact_annots == 0 and min_redactions > 0:\n        print(\"WARNING: No redact annotations detected in output. If you used apply_redactions(), this can be normal.\")\n        print(\"         Ensure your redaction loop counted >= min_redactions matches; otherwise identifiers may remain.\")\n\n    orig.close()\n    redc.close()\n    print(\"✓ Verification passed\")\n```\n"
+      }
+    ],
+    "repair_audit": {
+      "target_node": "input_grounding",
+      "target_anchor": "Leakage-surface enumeration for academic PDFs",
+      "target_layer": "L2",
+      "edit_kind": "Expand identifier leakage patterns + harden References boundary detection and make verification a stricter gate (threshold + iteration guidance) within existing academic redaction skill",
+      "boundedness": "Positive: only updates academic-pdf-redaction/SKILL.md in the specified sections to (1) broaden identifier variants (arXiv/DOI/URL/repository IDs) and (2) reduce over-redaction via clearer References boundary heuristics and (3) strengthen verification gating/stop conditions. Negative: does not change other skill bundles/files, does not alter non-academic guidance, does not introduce task-specific patterns/strings, and preserves the rule to skip References and only redact specific matches.",
+      "verification_plan": "Downstream should re-run the provided test suite: identifiers should now be captured via expanded patterns/collection guidance (fix ::test_identifiers_redacted). Content retention should improve because redaction stops at a more robust References boundary and verification enforces >=80% retained with actionable iteration guidance (fix ::test_content_preserved) while maintaining page-count integrity (keep ::test_structural_integrity) and preserving self-citations by skipping References (keep ::test_self_citations_preserved).",
+      "no_edit_reason": ""
+    }
+  },
+  "changed_files": [
+    "academic-pdf-redaction/SKILL.md"
+  ]
+}
